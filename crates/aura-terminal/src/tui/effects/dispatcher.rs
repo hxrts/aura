@@ -4,7 +4,7 @@
 
 use crate::tui::commands::{CommandCapability, IrcCommand};
 
-use super::bridge::EffectCommand;
+use super::command_parser::EffectCommand;
 
 /// Error that can occur during command dispatch
 #[derive(Debug, Clone, PartialEq)]

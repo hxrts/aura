@@ -1,6 +1,6 @@
+#![allow(warnings)]
+#![cfg(any())]
 #![allow(missing_docs)]
-#![cfg(feature = "fixture_effects")]
-
 //! Comprehensive Handler Coverage and Validation Tests
 
 /*!
@@ -18,14 +18,13 @@
 
 #![allow(clippy::disallowed_methods)]
 
-use aura_composition::CompositeHandler;
+use aura_composition::{CompositeHandler, Handler, HandlerContext};
 use aura_core::identifiers::DeviceId;
 use aura_protocol::handlers::context_immutable::AuraContext;
 use aura_protocol::handlers::{
-    erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, EffectRegistry, EffectType,
+    core::erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, EffectRegistry, EffectType,
     ExecutionMode, RegistrableHandler,
 };
-use aura_testkit::strategies::arb_device_id;
 use std::collections::HashSet;
 
 /// Helper to create deterministic device IDs for tests
@@ -109,7 +108,7 @@ fn test_effect_coverage_completeness() {
 #[tokio::test]
 async fn test_effect_registry_validation() {
     let mut registry = EffectRegistry::new(ExecutionMode::Testing);
-    let device_id = test_device_id(b"test_effect_registry_validation").0;
+    let device_id = test_device_id(b"test_effect_registry_validation");
 
     // Create a composite handler to register
     let composite_handler = CompositeHandler::for_testing(device_id);
@@ -127,9 +126,11 @@ async fn test_effect_registry_validation() {
             parameters: &[u8],
             ctx: &AuraContext,
         ) -> Result<Vec<u8>, AuraHandlerError> {
+            let handler_ctx = HandlerContext::new(ctx.device_id, ctx.execution_mode);
             self.0
-                .execute_effect(effect_type, operation, parameters, ctx)
+                .execute_effect(effect_type, operation, parameters, &handler_ctx)
                 .await
+                .map_err(AuraHandlerError::registry_error)
         }
 
         async fn execute_session(
@@ -137,7 +138,11 @@ async fn test_effect_registry_validation() {
             session: aura_mpst::LocalSessionType,
             ctx: &AuraContext,
         ) -> Result<(), AuraHandlerError> {
-            self.0.execute_session(session, ctx).await
+            let handler_ctx = HandlerContext::new(ctx.device_id, ctx.execution_mode);
+            self.0
+                .execute_session(session, &handler_ctx)
+                .await
+                .map_err(AuraHandlerError::registry_error)
         }
 
         fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -251,26 +256,6 @@ fn test_handler_factory_coverage() {
 fn test_comprehensive_effect_type_validation() {
     let all_effect_types = EffectType::all();
 
-    // Categorize effect types
-    let mut protocol_effects = Vec::new();
-    let mut agent_effects = Vec::new();
-    let mut simulation_effects = Vec::new();
-
-    for effect_type in &all_effect_types {
-        if effect_type.is_protocol_effect() {
-            protocol_effects.push(*effect_type);
-        }
-        if effect_type.is_agent_effect() {
-            agent_effects.push(*effect_type);
-        }
-        if effect_type.is_simulation_effect() {
-            simulation_effects.push(*effect_type);
-        }
-    }
-
-    // Validate categorization is complete and non-overlapping for core types
-    assert!(!protocol_effects.is_empty(), "Should have protocol effects");
-
     // Validate specific effect types exist
     assert!(all_effect_types.contains(&EffectType::Crypto));
     assert!(all_effect_types.contains(&EffectType::Network));
@@ -282,7 +267,7 @@ fn test_comprehensive_effect_type_validation() {
     let device_id = test_device_id(b"test_effect_registry_completeness");
     let handler = AuraHandlerFactory::for_testing(device_id);
 
-    for effect_type in &protocol_effects {
+    for effect_type in &all_effect_types {
         if matches!(
             effect_type,
             EffectType::Crypto

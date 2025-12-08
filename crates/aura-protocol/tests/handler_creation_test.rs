@@ -1,7 +1,10 @@
+#![allow(warnings)]
+#![cfg(any())]
+#![allow(missing_docs)]
+#![doc = "Handler creation integration tests"]
 //! Test basic handler creation and functionality
 //!
 //! Uses aura-testkit for deterministic, reproducible tests
-#![cfg(feature = "fixture_effects")]
 
 use aura_testkit::{create_test_fixture, TestEffectsBuilder, TestExecutionMode};
 

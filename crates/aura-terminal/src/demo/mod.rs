@@ -26,12 +26,13 @@
 //! - `hints`: Demo mode hints and invite code generation
 
 pub mod hints;
+pub mod signal_coordinator;
 pub mod simulator;
 
 pub use hints::DemoHints;
+pub use signal_coordinator::DemoSignalCoordinator;
 pub use simulator::DemoSimulator;
 
-use async_trait::async_trait;
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 use std::collections::HashSet;
@@ -46,7 +47,7 @@ use aura_simulator::{ComposedSimulationEnvironment, SimulationEffectComposer};
 use std::str::FromStr;
 
 use crate::ids;
-use crate::tui::effects::{AuraEvent, Bridge, EffectCommand, EventFilter, EventSubscription};
+use crate::tui::effects::{AuraEvent, EffectCommand, EventFilter, EventSubscription};
 
 /// High-level demo progression phases used by the simulator integration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -775,40 +776,44 @@ pub struct SimulatedBridge {
     recovery_state: Arc<Mutex<RecoverySessionState>>,
 }
 
-#[async_trait]
-impl Bridge for SimulatedBridge {
-    fn subscribe(&self, filter: EventFilter) -> EventSubscription {
+impl SimulatedBridge {
+    /// Subscribe to events matching a filter
+    pub fn subscribe(&self, filter: EventFilter) -> EventSubscription {
         EventSubscription::new(self.tui_event_tx.subscribe(), filter)
     }
 
-    fn subscribe_all(&self) -> EventSubscription {
+    /// Subscribe to all events
+    pub fn subscribe_all(&self) -> EventSubscription {
         self.subscribe(EventFilter::all())
     }
 
-    fn emit(&self, event: AuraEvent) {
+    /// Emit an event to TUI subscribers
+    pub fn emit(&self, event: AuraEvent) {
         let _ = self.tui_event_tx.send(event);
     }
 
-    async fn dispatch(&self, command: EffectCommand) -> Result<(), String> {
+    /// Dispatch a command (routes to agents and processes responses)
+    pub async fn dispatch(&self, command: EffectCommand) -> Result<(), String> {
         self.route_command(&command).await;
         self.process_responses().await;
         Ok(())
     }
 
-    async fn dispatch_and_wait(&self, command: EffectCommand) -> Result<(), String> {
+    /// Dispatch a command and wait for completion
+    pub async fn dispatch_and_wait(&self, command: EffectCommand) -> Result<(), String> {
         self.dispatch(command).await
     }
 
-    async fn is_connected(&self) -> bool {
+    /// Check if connected (always true for simulation)
+    pub async fn is_connected(&self) -> bool {
         true
     }
 
-    async fn last_error(&self) -> Option<String> {
+    /// Get last error (none for simulation)
+    pub async fn last_error(&self) -> Option<String> {
         None
     }
-}
 
-impl SimulatedBridge {
     /// Create a new simulated bridge
     pub fn new(
         bob_authority: AuthorityId,
@@ -1018,6 +1023,25 @@ impl SimulatedBridge {
     pub async fn reset_recovery_state(&self) {
         let mut state = self.recovery_state.lock().await;
         state.approved_guardians.clear();
+    }
+
+    /// Take the response receiver for external consumption
+    ///
+    /// This is used by DemoSignalCoordinator to receive agent responses
+    /// directly instead of going through process_responses().
+    /// Can only be called once - returns None after first call.
+    pub async fn take_response_receiver(
+        &self,
+    ) -> Option<mpsc::UnboundedReceiver<(AuthorityId, AgentResponse)>> {
+        // We need to swap out the receiver with a dummy one
+        // This is a one-time operation
+        let mut rx_guard = self.response_rx.lock().await;
+
+        // Create a new dummy channel just to get a receiver
+        let (_, dummy_rx) = mpsc::unbounded_channel();
+
+        // Swap the receivers
+        Some(std::mem::replace(&mut *rx_guard, dummy_rx))
     }
 
     /// Notify agents of phase change

@@ -5,11 +5,16 @@
 //! ## Reactive Signal Subscription
 //!
 //! When `AppCoreContext` is available, this screen subscribes to block state
-//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
+//!
+//! Uses `aura_app::signal_defs::BLOCK_SIGNAL` with `ReactiveEffects::subscribe()`.
 
 use iocraft::prelude::*;
 use std::sync::{Arc, RwLock};
+
+use aura_app::signal_defs::BLOCK_SIGNAL;
+use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::{ContactSelectModal, ContactSelectState, MessageInput};
 use crate::tui::hooks::AppCoreContext;
@@ -291,6 +296,7 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     });
 
     // Subscribe to block signal updates if AppCoreContext is available
+    // Uses the unified ReactiveEffects system from aura-core
     if let Some(ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_block_name = reactive_block_name.clone();
@@ -298,33 +304,29 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
             let mut reactive_budget = reactive_budget.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                use futures_signals::signal::SignalExt;
-
-                let signal = {
+                // Get a subscription to the block signal via ReactiveEffects
+                let mut stream = {
                     let core = app_core.read().await;
-                    core.block_signal()
+                    core.subscribe(&*BLOCK_SIGNAL)
                 };
 
-                signal
-                    .for_each(|block_state| {
-                        // Use the block id as a proxy for "my_id" since we don't have access to identity
-                        let my_id = &block_state.id;
+                // Subscribe to signal updates - runs until component unmounts
+                while let Ok(block_state) = stream.recv().await {
+                    // Use the block id as a proxy for "my_id" since we don't have access to identity
+                    let my_id = &block_state.id;
 
-                        let residents: Vec<Resident> = block_state
-                            .residents
-                            .iter()
-                            .map(|r| convert_resident(r, my_id))
-                            .collect();
+                    let residents: Vec<Resident> = block_state
+                        .residents
+                        .iter()
+                        .map(|r| convert_resident(r, my_id))
+                        .collect();
 
-                        let budget =
-                            convert_budget(&block_state.storage, block_state.resident_count);
+                    let budget = convert_budget(&block_state.storage, block_state.resident_count);
 
-                        reactive_block_name.set(block_state.name.clone());
-                        reactive_residents.set(residents);
-                        reactive_budget.set(budget);
-                        async {}
-                    })
-                    .await;
+                    reactive_block_name.set(block_state.name.clone());
+                    reactive_residents.set(residents);
+                    reactive_budget.set(budget);
+                }
             }
         });
     }
@@ -413,7 +415,10 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
             // Handle other key events
             match event {
                 TerminalEvent::Key(KeyEvent {
-                    code, modifiers, kind, ..
+                    code,
+                    modifiers,
+                    kind,
+                    ..
                 }) if kind != KeyEventKind::Release => {
                     if is_invite_modal_visible {
                         // Invite modal key handling

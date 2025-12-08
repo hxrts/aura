@@ -11,8 +11,6 @@
 //!
 //! These tests verify structural correctness rather than full reactive integration.
 
-mod tui_helpers;
-
 use aura_terminal::tui::components::{
     AccountSetupState, ChatCreateState, ContactSelectState, InvitationCodeState,
     InvitationCreateState, InvitationImportState, TextInputState,
@@ -456,7 +454,7 @@ fn test_update_petname_command() {
 #[test]
 fn test_screen_enum_coverage() {
     // Verify all screens are accessible
-    let screens = vec![
+    let screens = [
         Screen::Block,
         Screen::Chat,
         Screen::Contacts,
@@ -483,7 +481,7 @@ fn test_screen_enum_coverage() {
 /// Test invitation type enum
 #[test]
 fn test_invitation_type_enum() {
-    let types = vec![
+    let types = [
         InvitationType::Contact,
         InvitationType::Guardian,
         InvitationType::Channel,
@@ -611,7 +609,12 @@ fn test_e2e_flow_logical() {
     // Step 9: Update Petname
     println!("Step 9: Update Contact Petname");
     let mut petname_state = TextInputState::new();
-    petname_state.show("Edit Petname", "Bob", "Enter name", Some("bob_id".to_string()));
+    petname_state.show(
+        "Edit Petname",
+        "Bob",
+        "Enter name",
+        Some("bob_id".to_string()),
+    );
     petname_state.pop_char(); // Remove 'b'
     petname_state.pop_char(); // Remove 'o'
     petname_state.pop_char(); // Remove 'B'
@@ -627,9 +630,7 @@ fn test_e2e_flow_logical() {
 
     // Step 10: Block Invite
     println!("Step 10: Block Invite");
-    let contacts = vec![
-        Contact::new("charlie_id", "Charlie").with_status(ContactStatus::Active),
-    ];
+    let contacts = vec![Contact::new("charlie_id", "Charlie").with_status(ContactStatus::Active)];
     let mut select_state = ContactSelectState::new();
     select_state.show("Invite to Block", contacts);
     let selected_id = select_state.get_selected_id().unwrap();

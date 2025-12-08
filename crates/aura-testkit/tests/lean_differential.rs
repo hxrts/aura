@@ -4,10 +4,12 @@
 //! Lean models to ensure they produce identical results.
 //!
 //! Run with: `just test-differential`
-//! Or: `cargo test -p aura-testkit --test lean_differential`
+//! Or: `cargo test -p aura-testkit --test lean_differential --features lean`
 //!
 //! Note: These tests require the Lean oracle to be built first:
 //! `just lean-oracle-build` or `cd verification/lean && lake build`
+
+#![cfg(feature = "lean")]
 
 use aura_testkit::verification::lean_oracle::{
     ComparePolicy, Fact, LeanOracle, LeanOracleResult, Ordering, TimeStamp,
@@ -69,10 +71,7 @@ fn test_merge_commutative() -> LeanOracleResult<()> {
 
     // Test with a few concrete cases
     let cases = vec![
-        (
-            vec![Fact { id: 1 }, Fact { id: 2 }],
-            vec![Fact { id: 3 }],
-        ),
+        (vec![Fact { id: 1 }, Fact { id: 2 }], vec![Fact { id: 3 }]),
         (vec![], vec![Fact { id: 1 }]),
         (
             vec![Fact { id: 1 }, Fact { id: 2 }],
@@ -173,12 +172,12 @@ fn test_flow_charge_matches_rust() -> LeanOracleResult<()> {
     let oracle = LeanOracle::new()?;
 
     let test_cases = vec![
-        (100, 30), // Normal charge
+        (100, 30),  // Normal charge
         (100, 100), // Exact charge
-        (100, 0),  // Zero charge
-        (10, 30),  // Insufficient budget
-        (0, 0),    // Zero budget, zero cost
-        (0, 1),    // Zero budget, non-zero cost
+        (100, 0),   // Zero charge
+        (10, 30),   // Insufficient budget
+        (0, 0),     // Zero budget, zero cost
+        (0, 1),     // Zero budget, non-zero cost
     ];
 
     for (budget, cost) in test_cases {

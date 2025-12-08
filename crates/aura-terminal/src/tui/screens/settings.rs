@@ -297,7 +297,8 @@ pub fn SettingsScreen(
                         NavKey::Up => {
                             if current_focus == TwoPanelFocus::List {
                                 section.set(section.get().prev());
-                            } else if section.get() == SettingsSection::Devices && device_count > 0 {
+                            } else if section.get() == SettingsSection::Devices && device_count > 0
+                            {
                                 let idx = device_index.get();
                                 if idx > 0 {
                                     device_index.set(idx - 1);
@@ -307,7 +308,8 @@ pub fn SettingsScreen(
                         NavKey::Down => {
                             if current_focus == TwoPanelFocus::List {
                                 section.set(section.get().next());
-                            } else if section.get() == SettingsSection::Devices && device_count > 0 {
+                            } else if section.get() == SettingsSection::Devices && device_count > 0
+                            {
                                 let idx = device_index.get();
                                 if idx + 1 < device_count {
                                     device_index.set(idx + 1);
@@ -321,21 +323,21 @@ pub fn SettingsScreen(
 
             // Handle other keys
             match event {
-                TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                    KeyCode::Char(' ') => {
-                        if panel_focus.get() == TwoPanelFocus::Detail
-                            && section.get() == SettingsSection::Mfa
-                        {
-                            let new_policy = mfa_policy.get().next();
-                            mfa_policy.set(new_policy);
-                            // Dispatch callback with new require_mfa value
-                            if let Some(ref callback) = on_update_mfa {
-                                callback(new_policy.requires_mfa());
-                            }
+                TerminalEvent::Key(KeyEvent {
+                    code: KeyCode::Char(' '),
+                    ..
+                }) => {
+                    if panel_focus.get() == TwoPanelFocus::Detail
+                        && section.get() == SettingsSection::Mfa
+                    {
+                        let new_policy = mfa_policy.get().next();
+                        mfa_policy.set(new_policy);
+                        // Dispatch callback with new require_mfa value
+                        if let Some(ref callback) = on_update_mfa {
+                            callback(new_policy.requires_mfa());
                         }
                     }
-                    _ => {}
-                },
+                }
                 _ => {}
             }
         }

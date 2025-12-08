@@ -43,6 +43,7 @@
 
 pub mod anti_entropy;
 pub mod epochs;
+pub mod fact_sync;
 pub mod journal;
 pub mod ota;
 pub mod receipts;
@@ -75,3 +76,5 @@ pub use epochs::{
     EpochCommit, EpochConfig, EpochConfirmation, EpochRotation, EpochRotationCoordinator,
     EpochRotationProposal, RotationStatus,
 };
+
+pub use fact_sync::{FactSyncConfig, FactSyncProtocol, FactSyncResult, FactSyncStats};

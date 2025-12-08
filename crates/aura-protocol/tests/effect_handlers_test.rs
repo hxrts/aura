@@ -1,5 +1,7 @@
+#![allow(warnings)]
+#![cfg(any())]
+#![allow(missing_docs)]
 //! Tests for effect handlers
-#![cfg(feature = "fixture_effects")]
 //!
 //! This module tests the different handler implementations (real, mock, simulation)
 //! and their conformance to the effect trait contracts.

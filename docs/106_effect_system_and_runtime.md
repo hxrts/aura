@@ -126,7 +126,261 @@ This structure defines the effect context. The context flows through all effect 
 
 Context propagation uses scoped execution. A task local stores the current context. Nested tasks inherit the context. This ensures consistent behavior across async boundaries.
 
-## 4. Lifecycle Management
+## 4. ReactiveEffects and Signal-Based State Management
+
+The `ReactiveEffects` trait provides type-safe, signal-based state management for UI and inter-component communication. It enables FRP (Functional Reactive Programming) patterns where state changes automatically propagate to subscribers.
+
+### 4.1 Signal<T> Type
+
+Signals are phantom-typed identifiers that reference reactive state:
+
+```rust
+pub struct Signal<T> {
+    id: SignalId,
+    _phantom: PhantomData<T>,
+}
+
+// Define application signals
+pub static CHAT_SIGNAL: LazyLock<Signal<ChatState>> =
+    LazyLock::new(|| Signal::new("app:chat"));
+pub static CONNECTION_STATUS_SIGNAL: LazyLock<Signal<ConnectionStatus>> =
+    LazyLock::new(|| Signal::new("app:connection_status"));
+```
+
+The phantom type `T` ensures type safety at compile time. The `SignalId` is a string identifier used for runtime signal lookup.
+
+### 4.2 ReactiveEffects Trait
+
+The trait defines four core operations:
+
+```rust
+#[async_trait]
+pub trait ReactiveEffects: Send + Sync {
+    /// Read the current value of a signal
+    async fn read<T>(&self, signal: &Signal<T>) -> Result<T, ReactiveError>
+    where T: Clone + Send + Sync + 'static;
+
+    /// Emit a new value to a signal
+    async fn emit<T>(&self, signal: &Signal<T>, value: T) -> Result<(), ReactiveError>
+    where T: Clone + Send + Sync + 'static;
+
+    /// Subscribe to signal changes
+    fn subscribe<T>(&self, signal: &Signal<T>) -> SignalStream<T>
+    where T: Clone + Send + Sync + 'static;
+
+    /// Register a new signal with an initial value
+    async fn register<T>(&self, signal: &Signal<T>, initial: T) -> Result<(), ReactiveError>
+    where T: Clone + Send + Sync + 'static;
+}
+```
+
+### 4.3 Usage Pattern
+
+The typical usage pattern follows Intent → Signal → UI:
+
+```rust
+// 1. Register signals on startup (in AppCore::init_signals)
+app.register(&*CHAT_SIGNAL, ChatState::default()).await?;
+
+// 2. UI reads current state
+let chat = app.read(&*CHAT_SIGNAL).await?;
+
+// 3. Intent handler updates state after processing
+let mut state = app.read(&*CHAT_SIGNAL).await?;
+state.messages.push(new_message);
+app.emit(&*CHAT_SIGNAL, state).await?;
+
+// 4. UI automatically receives updates via subscription
+let mut stream = app.subscribe(&*CHAT_SIGNAL);
+while let Ok(state) = stream.recv().await {
+    render_chat_view(&state);
+}
+```
+
+### 4.4 Implementation
+
+The `ReactiveHandler` in `aura-effects` implements `ReactiveEffects` using a `SignalGraph`:
+
+- **SignalGraph**: Manages signal storage, type-erased values, and broadcast channels
+- **AnyValue**: Type-erased wrapper using `Arc<dyn Any>` for runtime type storage
+- **Broadcast Channels**: Each signal has a `broadcast::Sender<AnyValue>` for notifying subscribers
+
+The handler is thread-safe via `Arc` and `RwLock`. Multiple handlers can share the same underlying graph.
+
+### 4.5 Error Handling
+
+`ReactiveError` covers common failure modes:
+
+```rust
+pub enum ReactiveError {
+    SignalNotFound { id: String },
+    TypeMismatch { id: String, expected: String, actual: String },
+    SubscriptionClosed { id: String },
+    Internal { reason: String },
+}
+```
+
+Signal operations return `Result<T, ReactiveError>` for explicit error handling.
+
+## 5. QueryEffects and Unified Handler
+
+The `QueryEffects` trait provides typed Datalog queries with capability-based authorization. Combined with `ReactiveEffects`, it enables query-bound signals that automatically update when underlying facts change.
+
+### 5.1 Query Trait
+
+Queries implement the `Query` trait which defines typed access to journal facts:
+
+```rust
+pub trait Query: Send + Sync + Clone + 'static {
+    type Result: Clone + Send + Sync + Default + 'static;
+
+    /// Convert query to Datalog program
+    fn to_datalog(&self) -> DatalogProgram;
+
+    /// Required capabilities for this query
+    fn required_capabilities(&self) -> Vec<QueryCapability>;
+
+    /// Fact predicates this query depends on (for invalidation)
+    fn dependencies(&self) -> Vec<FactPredicate>;
+
+    /// Parse Datalog bindings into typed result
+    fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError>;
+
+    /// Unique ID for this query instance
+    fn query_id(&self) -> String;
+}
+```
+
+### 5.2 QueryEffects Trait
+
+The trait defines query operations with authorization:
+
+```rust
+#[async_trait]
+pub trait QueryEffects: Send + Sync {
+    /// Execute a typed query
+    async fn query<Q: Query>(&self, query: &Q) -> Result<Q::Result, QueryError>;
+
+    /// Execute raw Datalog program
+    async fn query_raw(&self, program: &DatalogProgram) -> Result<DatalogBindings, QueryError>;
+
+    /// Subscribe to query results (live updates)
+    fn subscribe<Q: Query>(&self, query: &Q) -> QuerySubscription<Q::Result>;
+
+    /// Check authorization capabilities
+    async fn check_capabilities(&self, caps: &[QueryCapability]) -> Result<(), QueryError>;
+
+    /// Invalidate queries affected by fact changes
+    async fn invalidate(&self, predicate: &FactPredicate);
+}
+```
+
+### 5.3 BoundSignal<Q>
+
+A `BoundSignal` pairs a signal with its source query:
+
+```rust
+pub struct BoundSignal<Q: Query> {
+    signal: Signal<Q::Result>,
+    query: Q,
+}
+
+impl<Q: Query> BoundSignal<Q> {
+    /// Register with a reactive handler
+    pub async fn register<R: ReactiveEffects>(&self, handler: &R) -> Result<(), ReactiveError> {
+        handler.register_query(&self.signal, self.query.clone()).await
+    }
+
+    /// Get fact dependencies for invalidation
+    pub fn dependencies(&self) -> Vec<FactPredicate> {
+        self.query.dependencies()
+    }
+}
+```
+
+### 5.4 UnifiedHandler
+
+The `UnifiedHandler` composes Query + Reactive effects into a single cohesive handler:
+
+```rust
+pub struct UnifiedHandler {
+    query: QueryHandler,
+    reactive: Arc<ReactiveHandler>,
+    capability_context: Option<Vec<u8>>,
+}
+
+impl UnifiedHandler {
+    /// Commit a fact and invalidate affected queries
+    pub async fn commit_fact(&self, predicate: &str, args: Vec<String>) {
+        self.query.add_fact(predicate, args).await;
+        let fact_pred = FactPredicate::new(predicate);
+        self.query.invalidate(&fact_pred).await;
+    }
+
+    /// Execute authorized query
+    pub async fn query<Q: Query>(&self, query: &Q) -> Result<Q::Result, QueryError> {
+        if self.capability_context.is_some() {
+            self.query.check_capabilities(&query.required_capabilities()).await?;
+        }
+        self.query.query(query).await
+    }
+}
+```
+
+### 5.5 Query-Signal Integration
+
+The architecture enables automatic signal updates when facts change:
+
+```
+Intent → Fact Commit → FactPredicate → Query Invalidation → Signal Emit → UI Update
+```
+
+Application signals are bound to queries at initialization:
+
+```rust
+// In signal_defs.rs
+pub static CHAT_SIGNAL: LazyLock<Signal<ChatState>> =
+    LazyLock::new(|| Signal::new("app:chat"));
+
+// Bind signal to query
+pub async fn register_app_signals_with_queries<R: ReactiveEffects>(
+    handler: &R,
+) -> Result<(), ReactiveError> {
+    handler.register_query(&*CHAT_SIGNAL, ChatQuery::default()).await?;
+    handler.register_query(&*INVITATIONS_SIGNAL, InvitationsQuery::default()).await?;
+    // ...
+    Ok(())
+}
+```
+
+When facts are committed, the commit path emits to signals:
+
+```rust
+// In AppCore
+pub async fn commit_pending_facts_and_emit(&mut self) -> Result<usize, IntentError> {
+    let count = self.commit_pending_facts();
+    let snapshot = self.views.snapshot();
+
+    // Emit to reactive signals for subscribers
+    let _ = self.reactive.emit(&*CHAT_SIGNAL, snapshot.chat.clone()).await;
+    let _ = self.reactive.emit(&*INVITATIONS_SIGNAL, snapshot.invitations.clone()).await;
+    // ...
+    Ok(count)
+}
+```
+
+This enables TUI screens to subscribe and automatically receive updates:
+
+```rust
+// In terminal screen
+let mut stream = app_core.subscribe(&*INVITATIONS_SIGNAL);
+while let Ok(state) = stream.recv().await {
+    // Automatically update UI when facts change
+    render_invitations(&state);
+}
+```
+
+## 6. Lifecycle Management
 
 Aura defines a lifecycle manager for initialization and shutdown. Each handler may perform startup tasks. Each handler may also perform cleanup on shutdown.
 
@@ -143,7 +397,7 @@ This type defines the lifecycle manager. It tracks registered components. It pro
 
 Lifecycle phases include initialization, ready, shutting down, and shutdown. Health checks monitor handler availability.
 
-## 5. Layers and Crates
+## 7. Layers and Crates
 
 The effect system spans several crates. Each crate defines a specific role in the architecture. These crates maintain strict dependency boundaries.
 
@@ -157,7 +411,7 @@ The effect system spans several crates. Each crate defines a specific role in th
 
 `aura-simulator` provides deterministic execution. It implements simulated time, simulated networking, and controlled failure injection.
 
-## 6. Testing and Simulation
+## 8. Testing and Simulation
 
 The effect system supports deterministic testing. Mock handlers implement predictable behavior. A simulated runtime provides control over time and network behavior. The simulator exposes primitives to inject delays or failures.
 
@@ -172,7 +426,7 @@ let system = TestRuntime::new()
 
 This snippet creates a test runtime. The runtime uses mock handlers for all effects. It provides deterministic time and network control.
 
-## 7. Performance Considerations
+## 9. Performance Considerations
 
 Aura includes several performance optimizations. Parallel initialization reduces startup time. Caching handlers reduce repeated computation. Buffer pools reduce memory allocation.
 
@@ -186,7 +440,7 @@ let builder = EffectSystemBuilder::new()
 
 This snippet shows parallel initialization of handlers. Parallel initialization increases startup throughput.
 
-## 8. Guard Chain and Leakage Integration
+## 10. Guard Chain and Leakage Integration
 
 The effect runtime enforces the guard-chain sequencing defined in [Authorization](109_authorization.md) and the leakage contract from [Privacy and Information Flow](003_information_flow_contract.md) using pure guard evaluation plus asynchronous interpretation. Each projected choreography message expands to:
 
@@ -196,7 +450,7 @@ The effect runtime enforces the guard-chain sequencing defined in [Authorization
 
 Handlers that implement `LeakageEffects` must surface both production-grade implementations (wired into the agent runtime) and deterministic versions for the simulator so privacy tests can assert leakage bounds. Because the executor orchestrates snapshots, pure evaluation, and interpretation explicitly, no transport observable can occur unless the preceding guards succeed, preserving the semantics laid out in the theoretical model.
 
-### 8.1 GuardSnapshot
+### 10.1 GuardSnapshot
 
 The runtime prepares a `GuardSnapshot` immediately before entering the guard chain. It contains every stable datum a guard may inspect while remaining read-only.
 
@@ -212,7 +466,7 @@ pub struct GuardSnapshot {
 
 Guards evaluate synchronously against this snapshot and the incoming request. They cannot mutate state or perform I/O. That keeps guard evaluation deterministic, replayable, and WASM-compatible.
 
-### 8.2 EffectCommands
+### 10.2 EffectCommands
 
 Guards do not execute side effects directly. Instead, they return `EffectCommand` items for the interpreter to run. Each command is a minimal, domain-agnostic description of work such as charging budgets or appending facts:
 
@@ -229,7 +483,7 @@ pub enum EffectCommand {
 
 This vocabulary keeps the guard interface simple: commands describe *what* happened, not *how*. Interpreters can batch, cache, or reorder commands so long as the semantics remain intact.
 
-### 8.3 EffectInterpreter
+### 10.3 EffectInterpreter
 
 The `EffectInterpreter` trait encapsulates the async execution of commands. Production runtimes hook it to `aura-effects` handlers, while the simulator or tests hook deterministic interpreters that record events instead of hitting the network.
 
@@ -242,11 +496,11 @@ pub trait EffectInterpreter {
 
 `ProductionEffectInterpreter` performs real I/O (storage, transport, journal) and keeps connection to the handler registry. `SimulationEffectInterpreter` records deterministic `SimulationEvent`s, consumes simulated time, and replays guard commands during tests. Borrowed or mock interpreters simplify protocol-level unit testing.
 
-### 8.4 Why This Matters
+### 10.4 Why This Matters
 
 Pure guard evaluation over `GuardSnapshot` avoids blocking sync/async bridges, prevents WASM deadlocks, and ensures simulation/production share identical logic. Effects become algebraic data, making them observable, testable, and replayable across deterministic runs. This design lets the guard chain enforce authorization, flow budgets, leakage budgets, and journal coupling without leaking implementation details into protocol handlers.
 
-## 9. Handler Service Pattern
+## 11. Handler Service Pattern
 
 The runtime exposes domain handlers as services through `AuraAgent`. Each handler becomes a service with a public API. Services share `AuraEffectSystem`, `AuthorityContext`, and `HandlerContext`.
 
@@ -261,7 +515,7 @@ impl AuraAgent {
 
 This code shows the service accessor pattern. Each service provides domain-specific operations while delegating to the shared effect system for execution.
 
-### 9.1 Service Registry
+### 11.1 Service Registry
 
 The `ServiceRegistry` initializes all services during agent startup. It holds references to each service and manages their lifecycle.
 
@@ -276,7 +530,7 @@ pub struct ServiceRegistry {
 
 Services register with the `LifecycleManager` for initialization and shutdown coordination. The lifecycle manager executes initialization in dependency order and shutdown in reverse order.
 
-### 9.2 Guard Chain Integration
+### 11.2 Guard Chain Integration
 
 All service operations use the guard chain pattern. Requests flow through capability, flow budget, and journal coupling guards before reaching the handler.
 
@@ -289,11 +543,11 @@ Request → CapGuard → FlowGuard → JournalCoupler → Handler → Response
 
 This diagram shows the request flow through the guard chain. The guard chain enforces authorization, budgets, and journaling for every operation. See [System Architecture](001_system_architecture.md) for guard chain details.
 
-## 10. Session Management and Choreography Execution
+## 12. Session Management and Choreography Execution
 
 The effect system provides the framework for managing the lifecycle of distributed protocols. Choreographies define the logic of a protocol. A session represents a single, stateful execution of that choreography. The runtime uses the effect system to create, manage, and execute these sessions.
 
-### 10.1 The Session Management Interface
+### 12.1 The Session Management Interface
 
 The abstract interface for all session-related operations is the `SessionManagementEffects` trait defined in `aura-core`. This trait provides the API for creating sessions, joining them, sending and receiving messages, and querying their status.
 
@@ -315,7 +569,7 @@ pub trait SessionManagementEffects: Send + Sync {
 
 This trait abstracts session management into an effect. The application logic remains decoupled from the underlying implementation such as in-memory or persistent session state.
 
-### 10.2 Session Handlers and State
+### 12.2 Session Handlers and State
 
 Concrete implementations of `SessionManagementEffects`, such as the `MemorySessionHandler` in `aura-protocol`, act as the engine for the session system. This handler maintains the state of all active sessions.
 
@@ -323,7 +577,7 @@ Each session has a `SessionId` for unique identification. It has a `SessionStatu
 
 The creation and lifecycle of sessions are themselves managed as a choreographic protocol. The `SessionLifecycleChoreography` in `aura-protocol` ensures consistency across all participants.
 
-### 10.3 Execution Flow
+### 12.3 Execution Flow
 
 The relationship between the runtime, effects, sessions, and choreographies follows a defined sequence.
 
@@ -335,11 +589,11 @@ The relationship between the runtime, effects, sessions, and choreographies foll
 
 The session system is a generic, stateful executor. A choreography is the specific, verifiable script that the executor runs.
 
-## 11. Fact Registry Integration
+## 13. Fact Registry Integration
 
 The `FactRegistry` provides domain-specific fact type registration and reduction for the reactive scheduling system. It is integrated into the effect system via the `AuraEffectSystem` rather than being constructed separately.
 
-### 11.1 Architecture
+### 13.1 Architecture
 
 The `FactRegistry` lives in `aura-journal` and allows domain crates to register their fact types along with custom reducers. The registry is built during effect system initialization. It is made accessible through the effect system.
 
@@ -357,7 +611,7 @@ impl AuraEffectSystem {
 
 This code shows how `AuraEffectSystem` holds the registry. The `fact_registry()` method provides access to registered reducers.
 
-### 11.2 Fact Registration
+### 13.2 Fact Registration
 
 Domain crates register their fact types during effect system assembly. Each domain provides a type ID and a reducer function.
 
@@ -371,13 +625,13 @@ registry.register(
 
 This code shows how `aura-chat` registers its fact type. Registered domains include Chat for message threading, Invitation for device invitations, Contact for relationship management, and Moderation for block/mute facts.
 
-### 11.3 Reactive Scheduling
+### 13.3 Reactive Scheduling
 
 The `ReactiveScheduler` in `aura-agent` uses the `FactRegistry` to process domain facts. When facts arrive, the scheduler looks up the registered reducer for the domain. It applies the reducer to compute derived state. It then notifies reactive subscribers of state changes.
 
 Production code obtains the registry via `effect_system.fact_registry()`. Tests may use `build_fact_registry()` for isolation.
 
-### 11.4 Handler-Level Access
+### 13.4 Handler-Level Access
 
 The `JournalHandler` holds an optional `FactRegistry` reference. This enables fact reduction during journal operations.
 
@@ -396,17 +650,17 @@ impl JournalHandler {
 
 This code shows the handler-level integration. Journal operations can trigger domain-specific reductions when facts are committed.
 
-### 11.5 Design Rationale
+### 13.5 Design Rationale
 
 The registry is integrated at the effect system level, not the trait level. This avoids changes to the `JournalEffects` trait. Different runtime configurations can use different registries. Tests can construct isolated registries without the full effect system. Registry assembly stays in Layer 6 (runtime), not Layer 1 (core).
 
 Protocol-level facts (Guardian, Recovery, Consensus, AMP) use the built-in reduction pipeline in `aura-journal/src/reduction.rs`. They do not require registry registration.
 
-## 12. AppCore: Unified Frontend Interface
+## 14. AppCore: Unified Frontend Interface
 
 The `AppCore` in `aura-app` provides a unified interface for all frontend platforms. It wraps the `AuraAgent` and provides a clean API that hides the complexity of the effect system from UI code.
 
-### 12.1 Architecture
+### 14.1 Architecture
 
 AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and the agent runtime:
 
@@ -437,7 +691,7 @@ AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and the agent runti
 
 Frontends import only from `aura-app`, never from `aura-agent` directly. This maintains proper layer boundaries.
 
-### 12.2 Construction Modes
+### 14.2 Construction Modes
 
 AppCore supports two construction modes for different use cases:
 
@@ -456,7 +710,7 @@ let app = AppCore::with_agent(config, agent)?;
 
 Demo mode enables offline development and testing. Production mode provides full effect system capabilities.
 
-### 12.3 Push-Based Reactive Flow
+### 14.3 Push-Based Reactive Flow
 
 All state changes flow through the reactive pipeline:
 
@@ -472,7 +726,7 @@ Remote Sync ────┘                                      ↓
 
 Services emit facts, they never directly mutate ViewState. UI subscribes to signals using `signal.for_each()`. This preserves push semantics and avoids polling.
 
-### 12.4 Accessing the Agent
+### 14.4 Accessing the Agent
 
 When AppCore has an agent, it provides access to the full effect system:
 
@@ -493,7 +747,7 @@ if app.has_agent() {
 
 The effect system uses `Arc<RwLock<AuraEffectSystem>>` to safely share state across async tasks.
 
-### 12.5 Re-exports
+### 14.5 Re-exports
 
 `aura-app` re-exports types from `aura-agent` so frontends don't need direct dependencies:
 
@@ -508,12 +762,12 @@ pub use aura_agent::{SyncManagerConfig, SyncServiceManager, ...};
 pub use aura_agent::reactive::{Dynamic, FactSource, ReactiveScheduler, ...};
 ```
 
-## 13. Service Pattern for Domain Crates
+## 15. Service Pattern for Domain Crates
 
 Domain crates (Layer 5) define stateless handlers that take effect references per-call.
 The agent layer (Layer 6) wraps these with services that manage RwLock access.
 
-### 13.1 Handler Layer (Domain Crates)
+### 15.1 Handler Layer (Domain Crates)
 
 Handlers in `aura-chat`, `aura-invitation`, etc. are stateless and take `&E` per method:
 
@@ -540,7 +794,7 @@ impl ChatHandler {
 }
 ```
 
-### 13.2 Service Layer (Agent)
+### 15.2 Service Layer (Agent)
 
 Services in `aura-agent` wrap handlers with RwLock management:
 
@@ -574,7 +828,7 @@ impl ChatService {
 }
 ```
 
-### 13.3 Agent API
+### 15.3 Agent API
 
 The agent exposes services through clean accessor methods:
 
@@ -592,7 +846,7 @@ impl AuraAgent {
 }
 ```
 
-### 13.4 Benefits
+### 15.4 Benefits
 
 This pattern keeps domain crates:
 
@@ -606,7 +860,7 @@ The agent layer provides:
 - **Error normalization**: Convert domain errors to `AgentError`
 - **Lazy initialization**: Some services initialize on first use
 
-### 13.5 When to Use
+### 15.5 When to Use
 
 | Scenario | Location |
 |----------|----------|
@@ -614,6 +868,6 @@ The agent layer provides:
 | RwLock wrapper service | `aura-agent/src/handlers/*_service.rs` |
 | Agent API accessor | `aura-agent/src/core/api.rs` |
 
-## 14. Summary
+## 16. Summary
 
 The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems as services accessible through `AuraAgent`. Domain crates define stateless handlers that take effect references per-call, while the agent layer wraps these with services that manage RwLock access. `AppCore` wraps the agent to provide a unified, platform-agnostic interface for all frontends. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior.

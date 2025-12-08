@@ -13,7 +13,9 @@ use crate::tui::effects::EffectCommand;
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::screens::block::{BlockInviteCallback, BlockNavCallback, BlockSendCallback};
 use crate::tui::screens::chat::{ChannelSelectCallback, CreateChannelCallback, SendCallback};
-use crate::tui::screens::contacts::{StartChatCallback, ToggleGuardianCallback, UpdatePetnameCallback};
+use crate::tui::screens::contacts::{
+    StartChatCallback, ToggleGuardianCallback, UpdatePetnameCallback,
+};
 use crate::tui::screens::invitations::{
     CreateInvitationCallback, ExportInvitationCallback, ImportInvitationCallback,
     InvitationCallback,
@@ -81,18 +83,12 @@ pub struct StatusBarProps {
 
 /// Format a timestamp as relative time (e.g., "2m ago", "1h ago")
 fn format_relative_time(ts_ms: u64) -> String {
-    // Simple implementation - just show minutes/hours ago
-    // TODO: In production, use actual current time comparison
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
-    if now_ms < ts_ms {
-        return "just now".to_string();
-    }
-
-    let elapsed_ms = now_ms - ts_ms;
+    let elapsed_ms = now_ms.saturating_sub(ts_ms);
     let elapsed_secs = elapsed_ms / 1000;
 
     if elapsed_secs < 60 {
@@ -341,9 +337,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("s", "Start recovery"),
             KeyHint::new("h/l", "Tab"),
         ],
-        Screen::Help => vec![
-            KeyHint::new("↑↓", "Navigate"),
-        ],
+        Screen::Help => vec![KeyHint::new("↑↓", "Navigate")],
     };
 
     hooks.use_terminal_events({
@@ -662,8 +656,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
 
     // CreateInvitationCallback for creating new invitations
     let ctx_for_create = ctx_arc.clone();
-    let on_create_invitation: CreateInvitationCallback =
-        Arc::new(move |invitation_type: String, message: Option<String>, ttl_secs: Option<u64>| {
+    let on_create_invitation: CreateInvitationCallback = Arc::new(
+        move |invitation_type: String, message: Option<String>, ttl_secs: Option<u64>| {
             let ctx = ctx_for_create.clone();
             let cmd = EffectCommand::CreateInvitation {
                 invitation_type,
@@ -675,20 +669,15 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     eprintln!("Failed to create invitation: {}", e);
                 }
             });
-        });
+        },
+    );
 
     // ExportInvitationCallback for exporting invitation codes
     let ctx_for_export = ctx_arc.clone();
-    let on_export_invitation: ExportInvitationCallback =
-        Arc::new(move |invitation_id: String| {
-            let ctx = ctx_for_export.clone();
-            let cmd = EffectCommand::ExportInvitation { invitation_id };
-            tokio::spawn(async move {
-                if let Err(e) = ctx.dispatch(cmd).await {
-                    eprintln!("Failed to export invitation: {}", e);
-                }
-            });
-        });
+    let on_export_invitation: ExportInvitationCallback = Arc::new(move |invitation_id: String| {
+        let ctx = ctx_for_export.clone();
+        Box::pin(async move { ctx.export_invitation_code(&invitation_id).await })
+    });
 
     // ImportInvitationCallback for importing invitation codes
     let ctx_for_import = ctx_arc.clone();

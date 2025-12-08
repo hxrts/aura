@@ -562,6 +562,7 @@ Infrastructure effects are truly foundational capabilities that every Aura syste
 - `ConfigurationEffects`: Configuration file parsing
 - `ConsoleEffects`: Terminal input/output
 - `LeakageEffects`: Cross-cutting metadata leakage tracking (composable infrastructure)
+- `ReactiveEffects`: Type-safe signal-based state management for UI and inter-component communication
 
 **Implementation Location**: These traits have stateless handlers in `aura-effects` that delegate to OS services.
 
@@ -877,6 +878,62 @@ The project includes an automated architectural compliance checker to enforce th
 - Invariants documentation schema validation
 
 The checker reports violations that must be fixed and warnings for review. Run it before submitting changes to ensure architectural compliance.
+
+## Feature Flags
+
+Aura uses a minimal set of deliberate feature flags organized into three tiers.
+
+### Tier 1: Workspace-Wide Features
+
+| Feature | Crate | Purpose |
+|---------|-------|---------|
+| `simulation` | `aura-core`, `aura-effects` | Enables simulation/testing effect traits and handlers. Required by `aura-simulator`, `aura-quint`, `aura-testkit`. |
+| `proptest` | `aura-core` | Property-based testing support via the proptest crate. |
+
+### Tier 2: Platform Features (aura-app)
+
+| Feature | Purpose |
+|---------|---------|
+| `native` | Rust consumers (aura-terminal, tests). Enables futures-signals API. |
+| `ios` | iOS via UniFFI → Swift bindings. |
+| `android` | Android via UniFFI → Kotlin bindings. |
+| `wasm` | Web via wasm-bindgen → JavaScript/TypeScript. |
+| `web-dominator` | Pure Rust WASM apps using futures-signals + dominator. |
+
+**Development features**: `instrumented` (tracing), `debug-serialize` (JSON debug output), `host` (binding stub).
+
+### Tier 3: Crate-Specific Features
+
+| Crate | Feature | Purpose |
+|-------|---------|---------|
+| `aura-terminal` | `terminal` | TUI mode (default). |
+| `aura-terminal` | `development` | Includes simulator, testkit, debug features. |
+| `aura-testkit` | `full-effect-system` | Optional aura-agent integration for higher-layer tests. |
+| `aura-testkit` | `lean` | Lean oracle for differential testing against formal models. |
+| `aura-agent` | `dev-console` | Optional development console server. |
+| `aura-agent` | `real-android-keystore` | Real Android Keystore implementation. |
+| `aura-mpst` | `debug` | Choreography debugging output. |
+| `aura-macros` | `proc-macro` | Proc-macro compilation (default). |
+
+### Feature Usage Examples
+
+```bash
+# Standard development (default features)
+cargo build
+
+# With simulation support
+cargo build -p aura-core --features simulation
+
+# Terminal with development tools
+cargo build -p aura-terminal --features development
+
+# Lean differential testing (requires Lean toolchain)
+just lean-oracle-build
+cargo test -p aura-testkit --features lean --test lean_differential
+
+# iOS build
+cargo build -p aura-app --features ios
+```
 
 ## Effect System and Impure Function Guidelines
 

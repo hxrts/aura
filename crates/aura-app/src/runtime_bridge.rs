@@ -160,6 +160,16 @@ pub trait RuntimeBridge: Send + Sync {
     ) -> Result<ThresholdSignature, IntentError>;
 
     // =========================================================================
+    // Invitation Operations
+    // =========================================================================
+
+    /// Export an invitation code for sharing
+    ///
+    /// Returns a shareable code that another user can use to establish
+    /// a connection with this authority.
+    async fn export_invitation(&self, invitation_id: &str) -> Result<String, IntentError>;
+
+    // =========================================================================
     // Authentication
     // =========================================================================
 
@@ -256,6 +266,12 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<ThresholdSignature, IntentError> {
         Err(IntentError::no_agent(
             "Threshold signing not available in offline mode",
+        ))
+    }
+
+    async fn export_invitation(&self, _invitation_id: &str) -> Result<String, IntentError> {
+        Err(IntentError::no_agent(
+            "Invitation export not available in offline mode",
         ))
     }
 

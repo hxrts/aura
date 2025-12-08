@@ -13,6 +13,11 @@ categories = ["development-tools"]
 [lints]
 workspace = true
 
+[features]
+default = []
+# Enable simulation effect handlers (requires aura-core/simulation)
+simulation = ["aura-core/simulation"]
+
 [dependencies]
 # Core traits (interface layer)
 aura-core = { path = "../aura-core" }
@@ -63,6 +68,3 @@ fastrand = "2.1"
 [dev-dependencies]
 # tokio-test = { workspace = true } # removed - unused
 tempfile = { workspace = true }
-
-[features]
-default = []

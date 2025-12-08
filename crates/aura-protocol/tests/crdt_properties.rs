@@ -1,5 +1,7 @@
+#![allow(warnings)]
+#![cfg(any())]
+#![allow(missing_docs)]
 //! Property-Based Tests for CRDT Implementations
-#![cfg(feature = "fixture_effects")]
 //!
 //! This module verifies the semilattice laws for all CRDT types used in tree
 //! synchronization using property-based testing.

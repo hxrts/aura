@@ -23,7 +23,7 @@ required-features = ["terminal"]
 default = ["terminal"]
 terminal = []
 
-# Development mode with extra debugging
+# Development mode with simulator, testkit, and debugging
 development = [
     "terminal",
     "aura-app/debug-serialize",
@@ -31,9 +31,6 @@ development = [
     "dep:aura-simulator",
     "dep:aura-testkit",
 ]
-
-# Demo mode with simulator
-demo = []
 
 [dependencies]
 # Headless app core with native (signals) API
@@ -94,3 +91,7 @@ aura-macros = { path = "../aura-macros" }
 tempfile = { workspace = true }
 insta = "1.34"  # Snapshot testing for TUI render tests
 futures = "0.3"  # For mock terminal testing with streams
+
+# PTY-based integration testing
+expectrl = "0.7"  # Terminal automation (like expect)
+escargot = "0.5"  # Build binary for integration tests

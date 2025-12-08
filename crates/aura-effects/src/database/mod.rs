@@ -17,12 +17,8 @@
 //! # Submodules
 //!
 //! - `query`: Datalog query wrapper using Biscuit's engine
-//! - `subscription`: Reactive subscription API for fact updates
-//! - `views`: Materialized views over CRDTs
 
 pub mod query;
-pub mod subscription;
-pub mod views;
 
 use async_trait::async_trait;
 use aura_core::{
@@ -37,8 +33,6 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::RwLock;
-
-use crate::bloom::BloomHandler;
 
 /// Runtime-specific wrapper that implements `FactStreamReceiver` for tokio broadcast channels.
 ///
@@ -362,9 +356,6 @@ fn build_merkle_tree(leaves: Vec<[u8; 32]>) -> Option<MerkleNode> {
 pub struct IndexedJournalHandler {
     /// B-tree indexes protected by RwLock for concurrent access
     index: RwLock<AuthorityIndex>,
-    /// Bloom filter handler (reserved for future async operations)
-    #[allow(dead_code)]
-    _bloom_handler: BloomHandler,
     /// Bloom filter for fast membership checks
     bloom_filter: RwLock<BloomFilter>,
     /// Cached Merkle root (invalidated on mutations)
@@ -383,7 +374,6 @@ impl IndexedJournalHandler {
 
     /// Create a new indexed journal handler with specified expected capacity
     pub fn with_capacity(expected_elements: u64) -> Self {
-        let bloom_handler = BloomHandler::new();
         let bloom_config = BloomConfig::optimal(expected_elements, 0.01);
         let bloom_filter = BloomFilter::new(bloom_config).expect("Failed to create bloom filter");
 
@@ -392,7 +382,6 @@ impl IndexedJournalHandler {
 
         Self {
             index: RwLock::new(AuthorityIndex::new()),
-            _bloom_handler: bloom_handler,
             bloom_filter: RwLock::new(bloom_filter),
             merkle_root_cache: RwLock::new(None),
             fact_hashes: RwLock::new(HashSet::new()),
@@ -421,7 +410,7 @@ impl IndexedJournalHandler {
                 .bloom_filter
                 .write()
                 .expect("Bloom filter lock poisoned");
-            // Manually insert since BloomEffects is async
+            // Direct bloom filter insertion (synchronous for lock-based access)
             for i in 0..filter.config.num_hash_functions {
                 let hash_bytes = {
                     let mut hasher = aura_core::hash::hasher();

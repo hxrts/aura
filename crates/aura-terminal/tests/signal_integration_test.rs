@@ -1,0 +1,231 @@
+#![allow(clippy::expect_used)]
+//! # Signal Integration Tests
+//!
+//! Tests for the unified signal-based reactive architecture.
+//! Verifies that read/emit operations work correctly with AppCore.
+//!
+//! Note: Subscription-based tests are excluded due to a timing race condition
+//! in the subscribe implementation that spawns an async task before returning.
+//! The subscription may not be fully established before emit is called.
+
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use aura_app::signal_defs::{
+    ConnectionStatus, SyncStatus, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, RECOVERY_SIGNAL,
+    SYNC_STATUS_SIGNAL,
+};
+use aura_app::views::{Message, RecoveryProcess, RecoveryProcessStatus};
+use aura_app::{AppConfig, AppCore};
+use aura_core::effects::reactive::ReactiveEffects;
+
+/// Helper to create a test AppCore with signals initialized
+async fn test_app_core() -> Arc<RwLock<AppCore>> {
+    let core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
+    core.init_signals().await.expect("Failed to init signals");
+    Arc::new(RwLock::new(core))
+}
+
+#[tokio::test]
+async fn test_signal_read_write_roundtrip() {
+    let app_core = test_app_core().await;
+    let core = app_core.read().await;
+
+    // Read initial connection status
+    let initial = core.read(&*CONNECTION_STATUS_SIGNAL).await.unwrap();
+    assert!(matches!(initial, ConnectionStatus::Offline));
+
+    // Emit new status
+    core.emit(&*CONNECTION_STATUS_SIGNAL, ConnectionStatus::Connecting)
+        .await
+        .unwrap();
+
+    // Read updated status
+    let updated = core.read(&*CONNECTION_STATUS_SIGNAL).await.unwrap();
+    assert!(matches!(updated, ConnectionStatus::Connecting));
+}
+
+#[tokio::test]
+async fn test_sync_status_signal() {
+    let app_core = test_app_core().await;
+    let core = app_core.read().await;
+
+    // Read initial sync status
+    let initial = core.read(&*SYNC_STATUS_SIGNAL).await.unwrap();
+    assert!(matches!(initial, SyncStatus::Idle));
+
+    // Emit syncing status
+    core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Syncing { progress: 50 })
+        .await
+        .unwrap();
+
+    // Read updated status
+    let updated = core.read(&*SYNC_STATUS_SIGNAL).await.unwrap();
+    assert!(matches!(updated, SyncStatus::Syncing { progress: 50 }));
+
+    // Emit synced status
+    core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Synced)
+        .await
+        .unwrap();
+
+    // Read final status
+    let final_state = core.read(&*SYNC_STATUS_SIGNAL).await.unwrap();
+    assert!(matches!(final_state, SyncStatus::Synced));
+}
+
+#[tokio::test]
+async fn test_chat_signal_state_updates() {
+    let app_core = test_app_core().await;
+    let core = app_core.read().await;
+
+    // Read initial chat state
+    let initial = core.read(&*CHAT_SIGNAL).await.unwrap();
+    assert!(initial.messages.is_empty());
+
+    // Create updated state with a message
+    let mut updated_state = initial.clone();
+    updated_state.messages.push(Message {
+        id: "msg-1".to_string(),
+        channel_id: "general".to_string(),
+        sender_id: "alice".to_string(),
+        sender_name: "Alice".to_string(),
+        content: "Hello, world!".to_string(),
+        timestamp: 1234567890,
+        is_own: false,
+        is_read: false,
+        reply_to: None,
+    });
+
+    // Emit updated state
+    core.emit(&*CHAT_SIGNAL, updated_state).await.unwrap();
+
+    // Read and verify
+    let read_state = core.read(&*CHAT_SIGNAL).await.unwrap();
+    assert_eq!(read_state.messages.len(), 1);
+    assert_eq!(read_state.messages[0].content, "Hello, world!");
+}
+
+#[tokio::test]
+async fn test_recovery_signal_state_updates() {
+    let app_core = test_app_core().await;
+    let core = app_core.read().await;
+
+    // Read initial recovery state
+    let initial = core.read(&*RECOVERY_SIGNAL).await.unwrap();
+    assert!(initial.active_recovery.is_none());
+
+    // Create recovery state with active session
+    let mut updated_state = initial.clone();
+    updated_state.active_recovery = Some(RecoveryProcess {
+        id: "recovery-123".to_string(),
+        account_id: "account-456".to_string(),
+        status: RecoveryProcessStatus::WaitingForApprovals,
+        approvals_received: 0,
+        approvals_required: 2,
+        approved_by: vec![],
+        approvals: vec![],
+        initiated_at: 1234567890,
+        expires_at: None,
+        progress: 0,
+    });
+
+    // Emit updated state
+    core.emit(&*RECOVERY_SIGNAL, updated_state).await.unwrap();
+
+    // Read and verify
+    let read_state = core.read(&*RECOVERY_SIGNAL).await.unwrap();
+    assert!(read_state.active_recovery.is_some());
+    let active = read_state.active_recovery.unwrap();
+    assert_eq!(active.id, "recovery-123");
+    assert_eq!(active.approvals_required, 2);
+}
+
+#[tokio::test]
+async fn test_signal_concurrent_access() {
+    let app_core = test_app_core().await;
+
+    // Spawn multiple tasks that read/write signals concurrently
+    let handles: Vec<_> = (0..10)
+        .map(|i| {
+            let app_core = app_core.clone();
+            tokio::spawn(async move {
+                let core = app_core.read().await;
+
+                // Each task emits a different progress value
+                core.emit(
+                    &*SYNC_STATUS_SIGNAL,
+                    SyncStatus::Syncing { progress: i * 10 },
+                )
+                .await
+                .unwrap();
+
+                // And reads the current state
+                let _ = core.read(&*SYNC_STATUS_SIGNAL).await.unwrap();
+            })
+        })
+        .collect();
+
+    // Wait for all tasks to complete
+    for handle in handles {
+        handle.await.unwrap();
+    }
+
+    // Final read should succeed (value will be one of the emitted values)
+    let core = app_core.read().await;
+    let final_state = core.read(&*SYNC_STATUS_SIGNAL).await.unwrap();
+    // Just verify we can read without panic
+    if let SyncStatus::Syncing { progress } = final_state {
+        assert!(progress <= 90);
+    }
+}
+
+#[tokio::test]
+async fn test_connection_status_transitions() {
+    let app_core = test_app_core().await;
+    let core = app_core.read().await;
+
+    // Test all connection status transitions
+    let statuses = [
+        ConnectionStatus::Offline,
+        ConnectionStatus::Connecting,
+        ConnectionStatus::Online { peer_count: 1 },
+        ConnectionStatus::Online { peer_count: 5 },
+        ConnectionStatus::Offline,
+    ];
+
+    for status in statuses {
+        core.emit(&*CONNECTION_STATUS_SIGNAL, status.clone())
+            .await
+            .unwrap();
+        let read = core.read(&*CONNECTION_STATUS_SIGNAL).await.unwrap();
+        assert_eq!(read, status);
+    }
+}
+
+#[tokio::test]
+async fn test_chat_message_accumulation() {
+    let app_core = test_app_core().await;
+    let core = app_core.read().await;
+
+    // Add multiple messages
+    for i in 0..5 {
+        let mut state = core.read(&*CHAT_SIGNAL).await.unwrap();
+        state.messages.push(Message {
+            id: format!("msg-{}", i),
+            channel_id: "general".to_string(),
+            sender_id: format!("user-{}", i % 3),
+            sender_name: format!("User{}", i % 3),
+            content: format!("Message number {}", i),
+            timestamp: 1234567890 + i as u64,
+            is_own: i % 2 == 0,
+            is_read: true,
+            reply_to: None,
+        });
+        core.emit(&*CHAT_SIGNAL, state).await.unwrap();
+    }
+
+    // Verify all messages were accumulated
+    let final_state = core.read(&*CHAT_SIGNAL).await.unwrap();
+    assert_eq!(final_state.messages.len(), 5);
+    assert_eq!(final_state.messages[4].content, "Message number 4");
+}

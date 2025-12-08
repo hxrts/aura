@@ -1450,7 +1450,7 @@ lean-oracle-build: lean-init
 # Run differential tests against Lean oracle
 test-differential: lean-oracle-build
     @echo "Running differential tests against Lean oracle..."
-    cargo test -p aura-testkit --test lean_differential -- --ignored --nocapture
+    cargo test -p aura-testkit --features lean --test lean_differential -- --ignored --nocapture
 
 # Run Lean verification (build and check for errors)
 # Usage: just lean-check [jobs]

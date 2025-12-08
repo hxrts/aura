@@ -31,9 +31,9 @@ mod toast;
 pub use account_setup::{AccountSetupModal, AccountSetupState};
 pub use card::{CardFooter, CardHeader, CardStyle, SimpleCard};
 pub use chat_create_modal::{ChatCreateModal, ChatCreateState, CreateChatCallback};
-pub use demo_hint::{DemoHintBar, DemoInviteCodes};
 pub use command_palette::{CommandItem, CommandPalette, PaletteCommand};
 pub use contact_select_modal::{ContactSelectModal, ContactSelectState};
+pub use demo_hint::{DemoHintBar, DemoInviteCodes};
 pub use discovered_peers::{
     DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, InvitePeerCallback,
 };
@@ -43,9 +43,7 @@ pub use invitation_code_modal::{InvitationCodeModal, InvitationCodeState};
 pub use invitation_create_modal::{
     CancelCallback, CreateInvitationCallback, InvitationCreateModal, InvitationCreateState,
 };
-pub use invitation_import_modal::{
-    ImportCallback, InvitationImportModal, InvitationImportState,
-};
+pub use invitation_import_modal::{ImportCallback, InvitationImportModal, InvitationImportState};
 pub use key_hints::KeyHintsBar;
 pub use list::{navigate_list, List, ListEntry, ListItem, ListNavigation};
 pub use message_bubble::{CompactMessage, MessageBubble, MessageGroupHeader, SystemMessage};

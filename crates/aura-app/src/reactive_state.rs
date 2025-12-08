@@ -1,64 +1,16 @@
-//! # Signal Utilities for Reactive TUI
+//! # Signal Utilities for Reactive State
 //!
-//! This module provides helper types, traits, and utilities for working with
-//! futures-signals in the Aura TUI architecture.
-//!
-//! ## Overview
-//!
-//! We use futures-signals to provide fine-grained reactivity for view state:
-//! - `Mutable<T>` for single values
-//! - `MutableVec<T>` for collections
-//! - Derived signals for computed state
-//!
-//! ## Usage Patterns
-//!
-//! ### Pattern 1: Simple Mutable State
-//!
-//! ```ignore
-//! use futures_signals::signal::{Mutable, SignalExt};
-//!
-//! let count = Mutable::new(0);
-//! count.set(5); // Automatically notifies subscribers
-//! let value = count.get(); // Read current value
-//! ```
-//!
-//! ### Pattern 2: Derived State
-//!
-//! ```ignore
-//! use futures_signals::signal::{Mutable, SignalExt};
-//!
-//! let count = Mutable::new(0);
-//! let doubled = count.signal().map(|n| n * 2);
-//! // doubled automatically updates when count changes
-//! ```
-//!
-//! ### Pattern 3: Collection Signals
-//!
-//! ```ignore
-//! use futures_signals::signal_vec::{MutableVec, SignalVecExt};
-//!
-//! let items = MutableVec::new();
-//! items.lock_mut().push_cloned("item1");
-//!
-//! let count = items.signal_vec_cloned()
-//!     .to_signal_map(|items| items.len());
-//! // count updates when items are added/removed
-//! ```
+//! This module provides helper types for working with futures-signals
+//! in an ergonomic way.
 
 use futures_signals::signal::{Mutable, Signal};
 use futures_signals::signal_vec::{MutableVec, SignalVec, SignalVecExt};
 
-// Note: Extension traits removed due to trait bound complexity.
-// Use direct methods on Mutable<T> and MutableVec<T> instead,
-// or use the helper types ReactiveState<T> and ReactiveVec<T> below.
-
-/// Wrapper type for view state that provides both direct access and signal exposure.
+/// Wrapper type for reactive state that provides both direct access and signal exposure.
 ///
-/// This bridges the gap between our delta-based updates (which need direct mutation)
-/// and signal-based rendering (which needs reactive subscriptions).
+/// This bridges the gap between imperative updates and signal-based rendering.
 #[derive(Clone)]
 pub struct ReactiveState<T: Clone> {
-    /// The mutable state backing this reactive value
     state: Mutable<T>,
 }
 
@@ -106,12 +58,11 @@ impl<T: Clone> ReactiveState<T> {
 /// Wrapper for reactive collections that provides both mutation and signal exposure
 #[derive(Clone)]
 pub struct ReactiveVec<T: Clone> {
-    /// The mutable vec backing this reactive collection
     items: MutableVec<T>,
 }
 
 impl<T: Clone> ReactiveVec<T> {
-    /// Create new reactive vec with initial items
+    /// Create new reactive vec
     pub fn new() -> Self {
         Self {
             items: MutableVec::new(),
@@ -142,11 +93,7 @@ impl<T: Clone> ReactiveVec<T> {
 
     /// Replace all items with a new vec
     pub fn replace(&self, new_items: Vec<T>) {
-        let mut lock = self.items.lock_mut();
-        lock.clear();
-        for item in new_items {
-            lock.push_cloned(item);
-        }
+        self.items.lock_mut().replace_cloned(new_items);
     }
 
     /// Update an item at a specific index
@@ -155,7 +102,6 @@ impl<T: Clone> ReactiveVec<T> {
         F: FnOnce(&mut T),
     {
         let mut lock = self.items.lock_mut();
-        // Get a copy of all items, update the one at index, then replace
         let mut items: Vec<T> = lock.to_vec();
         if let Some(item) = items.get_mut(index) {
             f(item);
@@ -205,9 +151,6 @@ impl<T: Clone> Default for ReactiveVec<T> {
         Self::new()
     }
 }
-
-// Note: combine_signals removed - futures-signals doesn't have map_ref! macro.
-// For combining signals, manually sample them or use separate subscriptions.
 
 #[cfg(test)]
 mod tests {

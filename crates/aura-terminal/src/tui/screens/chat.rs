@@ -5,16 +5,21 @@
 //! ## Reactive Signal Subscription
 //!
 //! When `AppCoreContext` is available, this screen subscribes to chat state
-//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
+//!
+//! Uses `aura_app::signal_defs::CHAT_SIGNAL` with `ReactiveEffects::subscribe()`.
 
 use iocraft::prelude::*;
 
 use std::sync::{Arc, RwLock};
 
+use aura_app::signal_defs::CHAT_SIGNAL;
+use aura_core::effects::reactive::ReactiveEffects;
+
 use crate::tui::components::{ChatCreateModal, ChatCreateState, MessageBubble, MessageInput};
-use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
 use crate::tui::hooks::AppCoreContext;
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Channel, Message};
 
@@ -208,54 +213,48 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     });
 
     // Subscribe to chat signal updates if AppCoreContext is available
+    // Uses the unified ReactiveEffects system from aura-core
     if let Some(ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_channels = reactive_channels.clone();
             let mut reactive_messages = reactive_messages.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                use futures_signals::signal::SignalExt;
-
-                // Get the signal from AppCore
-                // Note: This requires a brief lock to get the signal, then releases it
-                let signal = {
+                // Get a subscription to the chat signal via ReactiveEffects
+                let mut stream = {
                     let core = app_core.read().await;
-                    core.chat_signal()
+                    core.subscribe(&*CHAT_SIGNAL)
                 };
 
                 // Subscribe to signal updates - this runs indefinitely until component unmounts
-                signal
-                    .for_each(|chat_state| {
-                        // Convert aura-app ChatState to TUI types
-                        let channels: Vec<Channel> = chat_state
-                            .channels
-                            .iter()
-                            .map(|c| {
-                                Channel::new(&c.id, &c.name)
-                                    .with_unread(c.unread_count as usize)
-                                    .selected(Some(c.id.clone()) == chat_state.selected_channel_id)
-                            })
-                            .collect();
+                while let Ok(chat_state) = stream.recv().await {
+                    // Convert aura-app ChatState to TUI types
+                    let channels: Vec<Channel> = chat_state
+                        .channels
+                        .iter()
+                        .map(|c| {
+                            Channel::new(&c.id, &c.name)
+                                .with_unread(c.unread_count as usize)
+                                .selected(Some(c.id.clone()) == chat_state.selected_channel_id)
+                        })
+                        .collect();
 
-                        let messages: Vec<Message> = chat_state
-                            .messages
-                            .iter()
-                            .map(|m| {
-                                // Convert timestamp from u64 ms to human-readable string
-                                let ts_str = format_timestamp(m.timestamp);
-                                Message::new(&m.id, &m.sender_name, &m.content)
-                                    .with_timestamp(ts_str)
-                                    .own(m.is_own)
-                            })
-                            .collect();
+                    let messages: Vec<Message> = chat_state
+                        .messages
+                        .iter()
+                        .map(|m| {
+                            // Convert timestamp from u64 ms to human-readable string
+                            let ts_str = format_timestamp(m.timestamp);
+                            Message::new(&m.id, &m.sender_name, &m.content)
+                                .with_timestamp(ts_str)
+                                .own(m.is_own)
+                        })
+                        .collect();
 
-                        // Update reactive state - this triggers re-render
-                        reactive_channels.set(channels);
-                        reactive_messages.set(messages);
-
-                        async {}
-                    })
-                    .await;
+                    // Update reactive state - this triggers re-render
+                    reactive_channels.set(channels);
+                    reactive_messages.set(messages);
+                }
             }
         });
     }
@@ -278,7 +277,10 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
 
     // Input text state - use Arc<RwLock> for thread-safe sharing
     // Use use_state to persist across renders
-    let input_text: SharedText = hooks.use_state(|| Arc::new(RwLock::new(String::new()))).read().clone();
+    let input_text: SharedText = hooks
+        .use_state(|| Arc::new(RwLock::new(String::new())))
+        .read()
+        .clone();
     let input_text_for_handler = input_text.clone();
 
     // Version counter to trigger rerenders when input changes
@@ -466,14 +468,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                             // 'i' enters insert mode
                             KeyCode::Char('i') => {
                                 focus.set(ChatFocus::Input);
-                                return;
                             }
                             // 'n' opens new channel modal
                             KeyCode::Char('n') => {
                                 let mut state = create_modal_state.read().clone();
                                 state.show();
                                 create_modal_state.set(state);
-                                return;
                             }
                             _ => {}
                         }

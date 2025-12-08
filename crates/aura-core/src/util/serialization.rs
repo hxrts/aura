@@ -114,25 +114,6 @@ impl<T> VersionedMessage<T> {
     }
 }
 
-/// Optional JSON export for debugging (feature-gated)
-///
-/// Provides JSON serialization utilities for debugging purposes only.
-/// These functions are not intended for wire protocol use.
-#[cfg(feature = "json-debug")]
-pub mod json_debug {
-    use super::*;
-
-    /// Serialize to JSON for debugging (not for wire protocol)
-    pub fn to_json_pretty<T: Serialize>(value: &T) -> serde_json::Result<String> {
-        serde_json::to_string_pretty(value)
-    }
-
-    /// Serialize to JSON for debugging (not for wire protocol)
-    pub fn to_json<T: Serialize>(value: &T) -> serde_json::Result<String> {
-        serde_json::to_string(value)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

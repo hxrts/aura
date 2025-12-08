@@ -270,10 +270,13 @@ impl EffectSystemBuilder {
         // Create choreography adapter
         let choreography_adapter = ChoreographyAdapter::new(authority_id);
 
-        // Create optional sync service manager
-        let sync_manager = self
-            .sync_config
-            .map(super::services::SyncServiceManager::new);
+        // Create optional sync service manager with indexed journal for Merkle verification
+        let sync_manager = self.sync_config.map(|sync_config| {
+            super::services::SyncServiceManager::with_indexed_journal(
+                sync_config,
+                effect_system.indexed_journal().clone(),
+            )
+        });
 
         // Create optional rendezvous manager
         let rendezvous_manager = self.rendezvous_config.map(|rendezvous_config| {

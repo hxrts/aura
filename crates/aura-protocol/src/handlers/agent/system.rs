@@ -674,7 +674,7 @@ impl ConfigurationEffects for AgentEffectSystemHandler {
     }
 }
 
-#[cfg(all(test, feature = "fixture_effects"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use aura_macros::aura_test;

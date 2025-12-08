@@ -5,11 +5,16 @@
 //! ## Reactive Signal Subscription
 //!
 //! When `AppCoreContext` is available, this screen subscribes to neighborhood state
-//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
+//!
+//! Uses `aura_app::signal_defs::NEIGHBORHOOD_SIGNAL` with `ReactiveEffects::subscribe()`.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+
+use aura_app::signal_defs::NEIGHBORHOOD_SIGNAL;
+use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::navigation::{is_nav_key_press, navigate_grid, NavThrottle};
@@ -267,6 +272,7 @@ pub fn NeighborhoodScreen(
     let reactive_depth = hooks.use_state(|| props.depth);
 
     // Subscribe to neighborhood signal updates if AppCoreContext is available
+    // Uses the unified ReactiveEffects system from aura-core
     if let Some(ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_neighborhood_name = reactive_neighborhood_name.clone();
@@ -274,35 +280,32 @@ pub fn NeighborhoodScreen(
             let mut reactive_depth = reactive_depth.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                use futures_signals::signal::SignalExt;
-
-                let signal = {
+                // Get a subscription to the neighborhood signal via ReactiveEffects
+                let mut stream = {
                     let core = app_core.read().await;
-                    core.neighborhood_signal()
+                    core.subscribe(&*NEIGHBORHOOD_SIGNAL)
                 };
 
-                signal
-                    .for_each(|neighborhood_state| {
-                        let home_id = &neighborhood_state.home_block_id;
+                // Subscribe to signal updates - runs until component unmounts
+                while let Ok(neighborhood_state) = stream.recv().await {
+                    let home_id = &neighborhood_state.home_block_id;
 
-                        let blocks: Vec<BlockSummary> = neighborhood_state
-                            .neighbors
-                            .iter()
-                            .map(|n| convert_neighbor_block(n, home_id))
-                            .collect();
+                    let blocks: Vec<BlockSummary> = neighborhood_state
+                        .neighbors
+                        .iter()
+                        .map(|n| convert_neighbor_block(n, home_id))
+                        .collect();
 
-                        let depth = neighborhood_state
-                            .position
-                            .as_ref()
-                            .map(|p| convert_traversal_depth(p.depth))
-                            .unwrap_or(TraversalDepth::Interior);
+                    let depth = neighborhood_state
+                        .position
+                        .as_ref()
+                        .map(|p| convert_traversal_depth(p.depth))
+                        .unwrap_or(TraversalDepth::Interior);
 
-                        reactive_neighborhood_name.set(neighborhood_state.home_block_name.clone());
-                        reactive_blocks.set(blocks);
-                        reactive_depth.set(depth);
-                        async {}
-                    })
-                    .await;
+                    reactive_neighborhood_name.set(neighborhood_state.home_block_name.clone());
+                    reactive_blocks.set(blocks);
+                    reactive_depth.set(depth);
+                }
             }
         });
     }

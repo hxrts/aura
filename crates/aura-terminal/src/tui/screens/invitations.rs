@@ -5,19 +5,23 @@
 //! ## Reactive Signal Subscription
 //!
 //! When `AppCoreContext` is available, this screen subscribes to invitations state
-//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
+//!
+//! Uses `aura_app::signal_defs::INVITATIONS_SIGNAL` with `ReactiveEffects::subscribe()`.
 
 use iocraft::prelude::*;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
+
+use aura_app::signal_defs::INVITATIONS_SIGNAL;
+use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::{
     EmptyState, InvitationCodeModal, InvitationCodeState, InvitationCreateModal,
     InvitationCreateState, InvitationImportModal, InvitationImportState,
 };
-use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle, TwoPanelFocus};
-use crate::tui::effects::{AuraEvent, EventFilter};
 use crate::tui::hooks::AppCoreContext;
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle, TwoPanelFocus};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
     format_timestamp, Invitation, InvitationDirection, InvitationFilter, InvitationStatus,
@@ -30,8 +34,10 @@ pub type InvitationCallback = Arc<dyn Fn(String) + Send + Sync>;
 /// Callback type for creating new invitations (invitation_type, message, ttl_secs)
 pub type CreateInvitationCallback = Arc<dyn Fn(String, Option<String>, Option<u64>) + Send + Sync>;
 
-/// Callback type for exporting invitation code (invitation_id) -> returns code via state update
-pub type ExportInvitationCallback = Arc<dyn Fn(String) + Send + Sync>;
+/// Callback type for exporting invitation code (invitation_id) -> returns code string
+pub type ExportInvitationCallback = Arc<
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> + Send + Sync,
+>;
 
 /// Callback type for importing invitation code (code) -> triggers import flow
 pub type ImportInvitationCallback = Arc<dyn Fn(String) + Send + Sync>;
@@ -386,70 +392,38 @@ pub fn InvitationsScreen(
     let import_modal_state = hooks.use_state(InvitationImportState::new);
 
     // Subscribe to invitations signal updates if AppCoreContext is available
+    // Uses the unified ReactiveEffects system from aura-core
     if let Some(ref ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_invitations = reactive_invitations.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                use futures_signals::signal::SignalExt;
-
-                let signal = {
+                // Get a subscription to the invitations signal via ReactiveEffects
+                let mut stream = {
                     let core = app_core.read().await;
-                    core.invitations_signal()
+                    core.subscribe(&*INVITATIONS_SIGNAL)
                 };
 
-                signal
-                    .for_each(|invitations_state| {
-                        // Combine all invitations from pending, sent, and history
-                        let all_invitations: Vec<Invitation> = invitations_state
-                            .pending
-                            .iter()
-                            .chain(invitations_state.sent.iter())
-                            .chain(invitations_state.history.iter())
-                            .map(convert_invitation)
-                            .collect();
+                // Subscribe to signal updates - runs until component unmounts
+                while let Ok(invitations_state) = stream.recv().await {
+                    // Combine all invitations from pending, sent, and history
+                    let all_invitations: Vec<Invitation> = invitations_state
+                        .pending
+                        .iter()
+                        .chain(invitations_state.sent.iter())
+                        .chain(invitations_state.history.iter())
+                        .map(convert_invitation)
+                        .collect();
 
-                        reactive_invitations.set(all_invitations);
-                        async {}
-                    })
-                    .await;
-            }
-        });
-    }
-
-    // Subscribe to invitation events to show code modal when export completes
-    if let Some(ref ctx) = app_ctx {
-        hooks.use_future({
-            let mut code_modal_state = code_modal_state.clone();
-            let io_context = ctx.io_context.clone();
-            async move {
-                // Subscribe to invitation events only
-                let filter = EventFilter {
-                    invitation: true,
-                    ..Default::default()
-                };
-                let mut subscription = io_context.subscribe(filter);
-
-                // Process events
-                while let Some(event) = subscription.recv().await {
-                    if let AuraEvent::InvitationCodeExported {
-                        invitation_id,
-                        code,
-                    } = event
-                    {
-                        // Show the code modal with the exported code
-                        let mut state = code_modal_state.read().clone();
-                        state.show(
-                            invitation_id,
-                            "Invitation".to_string(), // Generic type for now
-                            code,
-                        );
-                        code_modal_state.set(state);
-                    }
+                    reactive_invitations.set(all_invitations);
                 }
             }
         });
     }
+
+    // Invitation code export completion is handled through the
+    // OperationalHandler's direct response (OpResponse::InvitationCode), and
+    // the export callback updates the code modal state directly.
 
     // Use reactive state for rendering
     let all_invitations = reactive_invitations.read().clone();
@@ -505,7 +479,8 @@ pub fn InvitationsScreen(
             let create_modal_visible = create_modal_state.read().visible;
             let code_modal_visible = code_modal_state.read().visible;
             let import_modal_visible = import_modal_state.read().visible;
-            let any_modal_visible = create_modal_visible || code_modal_visible || import_modal_visible;
+            let any_modal_visible =
+                create_modal_visible || code_modal_visible || import_modal_visible;
 
             // Handle navigation keys first (only when no modal is visible)
             if !any_modal_visible {
@@ -655,11 +630,33 @@ pub fn InvitationsScreen(
                             }
                             KeyCode::Char('e') => {
                                 // Export selected invitation code
-                                if let Some(ref callback) = on_export {
+                                if let Some(callback) = on_export.clone() {
                                     if let Some(inv) = filtered_for_handler.get(selected.get()) {
-                                        // Only export sent invitations
                                         if inv.direction == InvitationDirection::Outbound {
-                                            callback(inv.id.clone());
+                                            let invitation_id = inv.id.clone();
+                                            let invitation_type =
+                                                inv.invitation_type.label().to_string();
+                                            let mut code_modal_state = code_modal_state.clone();
+                                            tokio::spawn(async move {
+                                                match callback(invitation_id.clone()).await {
+                                                    Ok(code) => {
+                                                        let mut state =
+                                                            code_modal_state.read().clone();
+                                                        state.show(
+                                                            invitation_id,
+                                                            invitation_type,
+                                                            code,
+                                                        );
+                                                        code_modal_state.set(state);
+                                                    }
+                                                    Err(err) => {
+                                                        tracing::warn!(
+                                                            "Failed to export invitation code: {}",
+                                                            err
+                                                        );
+                                                    }
+                                                }
+                                            });
                                         }
                                     }
                                 }

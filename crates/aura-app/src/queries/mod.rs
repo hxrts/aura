@@ -8,42 +8,29 @@
 //! - Intents (write) → Journal → Facts
 //! - Queries (read) → Journal → Views
 //!
-//! Each query type implements the `Query` trait, which provides:
-//! - `to_datalog()` - Convert to Datalog rules
-//! - `parse_results()` - Parse Datalog output to typed results
+//! Each query type implements the `aura_core::Query` trait, which provides:
+//! - `to_datalog()` - Convert to Datalog program
+//! - `required_capabilities()` - Biscuit capabilities needed
+//! - `dependencies()` - Fact predicates for invalidation tracking
+//! - `parse()` - Parse Datalog output to typed results
+//!
+//! ## Query-Signal Integration
+//!
+//! Queries integrate with the reactive system via `ReactiveEffects::register_query()`.
+//! When facts matching a query's `dependencies()` change, the query is automatically
+//! re-evaluated and the bound signal is updated.
+//!
+//! The `BoundSignal<Q>` type pairs a signal with its source query, enabling
+//! automatic invalidation tracking and re-evaluation.
 
+mod bound_signal;
 mod types;
 
+pub use bound_signal::*;
 pub use types::*;
 
-use serde::{Deserialize, Serialize};
-
-/// A Datalog rule representation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatalogRule {
-    /// Rule head (conclusion)
-    pub head: String,
-    /// Rule body (conditions)
-    pub body: Vec<String>,
-}
-
-/// A variable binding from Datalog evaluation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Binding {
-    /// Variable name
-    pub name: String,
-    /// Bound value (as string for FFI safety)
-    pub value: String,
-}
-
-/// Trait for typed queries that compile to Datalog
-pub trait Query: Sized {
-    /// The result type of this query
-    type Result;
-
-    /// Convert this query to Datalog rules
-    fn to_datalog(&self) -> Vec<DatalogRule>;
-
-    /// Parse Datalog results to the typed result
-    fn parse_results(bindings: Vec<Vec<Binding>>) -> Self::Result;
-}
+// Re-export core query types for convenience
+pub use aura_core::query::{
+    DatalogBindings, DatalogFact, DatalogProgram, DatalogRow, DatalogRule, DatalogValue,
+    FactPredicate, Query, QueryCapability, QueryParseError,
+};

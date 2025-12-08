@@ -1,34 +1,26 @@
-//! Bloom Filter Effects Trait Definitions
+//! Bloom Filter Data Structures
 //!
-//! This module defines trait interfaces for Bloom filter operations used in
-//! efficient set membership testing and data synchronization. Bloom filters
-//! provide space-efficient probabilistic data structures for anti-entropy protocols.
+//! Provides space-efficient probabilistic data structures for membership testing
+//! and set reconciliation in synchronization protocols.
 //!
-//! # Effect Classification
+//! # Contents
 //!
-//! - **Category**: Infrastructure Effect
-//! - **Implementation**: `aura-effects` (Layer 3)
-//! - **Usage**: Bloom filter operations for sync protocols, set reconciliation
+//! - `BloomFilter`: Probabilistic set membership data structure
+//! - `BloomConfig`: Configuration for false positive rate and capacity
+//! - `BloomError`: Error type alias for bloom operations
 //!
-//! This is an infrastructure effect providing pure mathematical Bloom filter
-//! operations with no Aura-specific semantics. Could be implemented as pure
-//! functions in `aura-core` or as stateless handlers in `aura-effects`.
+//! # Usage
 //!
-//! ## Use Cases
+//! Used by `IndexedJournalEffects::get_bloom_filter()` for efficient sync.
+//! Operations are performed synchronously via inline implementations.
 //!
-//! - OpLog digest computation for sync protocols
-//! - Efficient set difference calculation
-//! - Membership testing with controlled false positive rates
-//! - Privacy-preserving sync (metadata minimization)
-//!
-//! ## Security Properties
+//! # Security Properties
 //!
 //! - No false negatives (if element is in set, filter will detect it)
 //! - Controlled false positive rate (configurable)
 //! - No direct access to original data through filter
 
 use crate::AuraError;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 /// Bloom filter operation error
@@ -161,142 +153,6 @@ impl BloomFilter {
         self.element_count > self.config.expected_elements * 2
             || self.current_false_positive_rate() > self.config.false_positive_rate * 2.0
     }
-}
-
-/// Bloom filter effects interface
-///
-/// This trait defines operations for creating and using Bloom filters for
-/// efficient set membership testing and synchronization protocols.
-///
-/// # Implementation Notes
-///
-/// - Production: Hardware-optimized implementations with SIMD instructions
-/// - Testing: Simple bit manipulation for deterministic results
-/// - Simulation: Configurable false positive injection for testing edge cases
-///
-/// # Stability: EXPERIMENTAL
-/// This API is under development and may change in future versions.
-#[async_trait]
-pub trait BloomEffects: Send + Sync {
-    /// Create a new empty Bloom filter
-    ///
-    /// Creates a Bloom filter optimized for the given parameters.
-    ///
-    /// # Parameters
-    /// - `config`: Configuration specifying filter parameters
-    ///
-    /// # Returns
-    /// A new empty Bloom filter ready for element insertion
-    async fn create_bloom_filter(&self, config: BloomConfig) -> Result<BloomFilter, BloomError>;
-
-    /// Insert an element into a Bloom filter
-    ///
-    /// Adds an element to the filter by setting the appropriate bits.
-    /// This operation is idempotent - inserting the same element multiple times
-    /// has no additional effect.
-    ///
-    /// # Parameters
-    /// - `filter`: Mutable reference to the Bloom filter
-    /// - `element`: Element data to insert
-    ///
-    /// # Returns
-    /// Updated filter with the element added
-    async fn bloom_insert(
-        &self,
-        filter: &mut BloomFilter,
-        element: &[u8],
-    ) -> Result<(), BloomError>;
-
-    /// Test if an element might be in the Bloom filter
-    ///
-    /// Tests for set membership. Returns:
-    /// - `true`: Element might be in the set (could be false positive)
-    /// - `false`: Element is definitely not in the set (no false negatives)
-    ///
-    /// # Parameters
-    /// - `filter`: Bloom filter to test against
-    /// - `element`: Element data to test
-    ///
-    /// # Returns
-    /// `true` if element might be present, `false` if definitely absent
-    async fn bloom_contains(
-        &self,
-        filter: &BloomFilter,
-        element: &[u8],
-    ) -> Result<bool, BloomError>;
-
-    /// Compute the union of two Bloom filters
-    ///
-    /// Creates a new filter containing the union of elements from both filters.
-    /// The resulting filter may have a higher false positive rate.
-    ///
-    /// # Parameters
-    /// - `filter1`: First Bloom filter
-    /// - `filter2`: Second Bloom filter (must have same configuration)
-    ///
-    /// # Returns
-    /// New filter containing union of both input filters
-    async fn bloom_union(
-        &self,
-        filter1: &BloomFilter,
-        filter2: &BloomFilter,
-    ) -> Result<BloomFilter, BloomError>;
-
-    /// Estimate the number of elements in a Bloom filter
-    ///
-    /// Estimates the number of distinct elements that have been inserted
-    /// based on the number of set bits in the filter.
-    ///
-    /// # Parameters
-    /// - `filter`: Bloom filter to analyze
-    ///
-    /// # Returns
-    /// Estimated number of elements in the filter
-    async fn bloom_estimate_count(&self, filter: &BloomFilter) -> Result<u64, BloomError>;
-
-    /// Create a Bloom filter from a set of elements
-    ///
-    /// Convenience method to create and populate a filter in one operation.
-    ///
-    /// # Parameters
-    /// - `elements`: Elements to insert into the filter
-    /// - `config`: Configuration for the filter
-    ///
-    /// # Returns
-    /// New filter containing all the specified elements
-    async fn bloom_from_elements(
-        &self,
-        elements: &[Vec<u8>],
-        config: BloomConfig,
-    ) -> Result<BloomFilter, BloomError>;
-
-    /// Serialize a Bloom filter to bytes
-    ///
-    /// Converts a Bloom filter to a compact byte representation for network transmission.
-    ///
-    /// # Parameters
-    /// - `filter`: Bloom filter to serialize
-    ///
-    /// # Returns
-    /// Serialized filter data
-    async fn bloom_serialize(&self, filter: &BloomFilter) -> Result<Vec<u8>, BloomError>;
-
-    /// Deserialize a Bloom filter from bytes
-    ///
-    /// Reconstructs a Bloom filter from serialized data.
-    ///
-    /// # Parameters
-    /// - `data`: Serialized filter data
-    ///
-    /// # Returns
-    /// Reconstructed Bloom filter
-    async fn bloom_deserialize(&self, data: &[u8]) -> Result<BloomFilter, BloomError>;
-
-    /// Check if this implementation supports hardware acceleration
-    fn supports_hardware_acceleration(&self) -> bool;
-
-    /// Get implementation capabilities
-    fn get_bloom_capabilities(&self) -> Vec<String>;
 }
 
 /// Helper functions for common Bloom filter operations

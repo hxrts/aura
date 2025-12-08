@@ -13,13 +13,19 @@
 //! ```
 
 use super::{Intent, IntentError, StateSnapshot};
-use crate::runtime_bridge::RuntimeBridge;
+use crate::runtime_bridge::{RuntimeBridge, SyncStatus as RuntimeSyncStatus};
 use crate::views::ViewState;
 
+use async_trait::async_trait;
+use aura_core::effects::reactive::{
+    ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
+};
 use aura_core::identifiers::AuthorityId;
+use aura_core::query::{FactPredicate, Query};
 use aura_core::time::TimeStamp;
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::AccountId;
+use aura_effects::ReactiveHandler;
 use aura_journal::{Journal, JournalFact};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -122,6 +128,13 @@ pub struct AppCore {
     /// - No network operations available
     runtime: Option<Arc<dyn RuntimeBridge>>,
 
+    /// Reactive effect handler for FRP-style state management.
+    ///
+    /// This handler implements ReactiveEffects and manages the signal graph
+    /// for reactive state updates. Use `init_signals()` to register application
+    /// signals before using reactive operations.
+    reactive: ReactiveHandler,
+
     /// Observer registry for callback-based subscriptions (UniFFI/mobile)
     #[cfg(feature = "callbacks")]
     observer_registry: crate::bridge::callback::ObserverRegistry,
@@ -141,6 +154,9 @@ impl AppCore {
         // Store journal path for persistence
         let journal_path = config.journal_path.map(std::path::PathBuf::from);
 
+        // Create reactive handler for FRP-style state management
+        let reactive = ReactiveHandler::new();
+
         Ok(Self {
             authority: None,
             account_id,
@@ -150,6 +166,7 @@ impl AppCore {
             next_subscription_id: 1,
             journal_path,
             runtime: None,
+            reactive,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
         })
@@ -197,6 +214,9 @@ impl AppCore {
     ) -> Result<Self, IntentError> {
         let journal = Journal::new_with_group_key_bytes(account_id, group_key_bytes);
 
+        // Create reactive handler for FRP-style state management
+        let reactive = ReactiveHandler::new();
+
         Ok(Self {
             authority: Some(authority),
             account_id,
@@ -206,6 +226,7 @@ impl AppCore {
             next_subscription_id: 1,
             journal_path: None,
             runtime: None,
+            reactive,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
         })
@@ -254,6 +275,38 @@ impl AppCore {
     /// Returns `false` for demo/offline mode (created with `new()`).
     pub fn has_runtime(&self) -> bool {
         self.runtime.is_some()
+    }
+
+    // ==================== Reactive Effects ====================
+
+    /// Get a reference to the reactive handler.
+    ///
+    /// This provides direct access to the underlying ReactiveHandler for
+    /// advanced reactive operations.
+    pub fn reactive(&self) -> &ReactiveHandler {
+        &self.reactive
+    }
+
+    /// Initialize all application signals with default values.
+    ///
+    /// This must be called before using reactive operations (read, emit, subscribe).
+    /// Typically called once during app startup.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let app = AppCore::new(config)?;
+    /// app.init_signals().await?;
+    ///
+    /// // Now reactive operations work
+    /// let chat = app.read(&CHAT_SIGNAL).await?;
+    /// ```
+    pub async fn init_signals(&self) -> Result<(), IntentError> {
+        crate::signal_defs::register_app_signals(&self.reactive)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to initialize signals: {}", e))
+            })
     }
 
     // ==================== Threshold Signing Operations ====================
@@ -484,6 +537,9 @@ impl AppCore {
     /// 3. Applies the deltas to ViewState
     /// 4. Clears the pending facts
     ///
+    /// Note: This is the synchronous version. Use `commit_pending_facts_and_emit()`
+    /// for async signal emission to reactive subscribers.
+    ///
     /// Returns the number of facts committed.
     pub fn commit_pending_facts(&mut self) -> usize {
         use crate::core::reducer::reduce_fact;
@@ -512,6 +568,56 @@ impl AppCore {
         }
 
         count
+    }
+
+    /// Commit pending facts, apply to ViewState, and emit to reactive signals.
+    ///
+    /// This is the preferred async method for reactive applications. It:
+    /// 1. Commits pending facts to ViewState
+    /// 2. Emits updated state to reactive signals (ChatState, RecoveryState, etc.)
+    /// 3. Invalidates queries affected by fact predicates
+    ///
+    /// Returns the number of facts committed.
+    pub async fn commit_pending_facts_and_emit(&mut self) -> Result<usize, IntentError> {
+        use crate::signal_defs::{
+            CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL,
+        };
+
+        // Commit facts synchronously first
+        let count = self.commit_pending_facts();
+
+        if count == 0 {
+            return Ok(0);
+        }
+
+        // Get current state snapshot
+        let snapshot = self.views.snapshot();
+
+        // Emit to reactive signals for subscribers
+        // These emit calls notify any TUI screens subscribed to these signals
+        // Errors are silently ignored as signal emission is best-effort
+        let _ = self
+            .reactive
+            .emit(&*CHAT_SIGNAL, snapshot.chat.clone())
+            .await;
+        let _ = self
+            .reactive
+            .emit(&*RECOVERY_SIGNAL, snapshot.recovery.clone())
+            .await;
+        let _ = self
+            .reactive
+            .emit(&*INVITATIONS_SIGNAL, snapshot.invitations.clone())
+            .await;
+        let _ = self
+            .reactive
+            .emit(&*CONTACTS_SIGNAL, snapshot.contacts.clone())
+            .await;
+        let _ = self
+            .reactive
+            .emit(&*NEIGHBORHOOD_SIGNAL, snapshot.neighborhood.clone())
+            .await;
+
+        Ok(count)
     }
 
     /// Commit pending facts and persist to storage.
@@ -956,6 +1062,14 @@ impl AppCore {
         false
     }
 
+    /// Get current sync status from the runtime (if available)
+    pub async fn sync_status(&self) -> Option<RuntimeSyncStatus> {
+        if let Some(runtime) = &self.runtime {
+            return Some(runtime.get_sync_status().await);
+        }
+        None
+    }
+
     /// Get the list of known sync peers
     ///
     /// Returns device IDs of peers configured for sync.
@@ -990,6 +1104,41 @@ impl AppCore {
         false
     }
 
+    /// Trigger a sync operation with connected peers
+    ///
+    /// This delegates to the runtime's sync service. If no runtime is configured
+    /// (demo/offline mode), returns an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `IntentError::NoAgent` if no runtime is configured or sync
+    /// service is not available.
+    pub async fn trigger_sync(&self) -> Result<(), IntentError> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| IntentError::no_agent("trigger_sync requires a runtime"))?;
+
+        runtime.trigger_sync().await
+    }
+
+    /// Export an invitation code for sharing
+    ///
+    /// Generates a shareable code that another user can use to establish
+    /// a connection. Delegates to the runtime's invitation service.
+    ///
+    /// # Errors
+    ///
+    /// Returns `IntentError::NoAgent` if no runtime is configured.
+    pub async fn export_invitation(&self, invitation_id: &str) -> Result<String, IntentError> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| IntentError::no_agent("export_invitation requires a runtime"))?;
+
+        runtime.export_invitation(invitation_id).await
+    }
+
     // Note: Invitation, Recovery, and Authentication service operations
     // have been removed from AppCore. Frontends that need these should
     // access the agent services directly via:
@@ -1009,6 +1158,75 @@ impl AppCore {
         false
     }
 }
+
+// =============================================================================
+// ReactiveEffects Implementation
+// =============================================================================
+// AppCore implements ReactiveEffects by delegating to its internal ReactiveHandler.
+// This enables FRP-style state management through the algebraic effect system.
+
+#[async_trait]
+impl ReactiveEffects for AppCore {
+    async fn read<T>(&self, signal: &Signal<T>) -> Result<T, ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.reactive.read(signal).await
+    }
+
+    async fn emit<T>(&self, signal: &Signal<T>, value: T) -> Result<(), ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.reactive.emit(signal, value).await
+    }
+
+    fn subscribe<T>(&self, signal: &Signal<T>) -> SignalStream<T>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.reactive.subscribe(signal)
+    }
+
+    async fn register<T>(&self, signal: &Signal<T>, initial: T) -> Result<(), ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.reactive.register(signal, initial).await
+    }
+
+    fn is_registered(&self, signal_id: &SignalId) -> bool {
+        self.reactive.is_registered(signal_id)
+    }
+
+    async fn register_query<Q: Query>(
+        &self,
+        signal: &Signal<Q::Result>,
+        query: Q,
+    ) -> Result<(), ReactiveError> {
+        self.reactive.register_query(signal, query).await
+    }
+
+    fn query_dependencies(&self, signal_id: &SignalId) -> Option<Vec<FactPredicate>> {
+        self.reactive.query_dependencies(signal_id)
+    }
+
+    async fn invalidate_queries(&self, changed: &FactPredicate) {
+        self.reactive.invalidate_queries(changed).await
+    }
+}
+
+// =============================================================================
+// IntentEffects Implementation
+// =============================================================================
+// Note: IntentEffects implementation is planned but deferred until AppCore
+// uses interior mutability. The trait method `dispatch(&self)` conflicts with
+// the existing `dispatch(&mut self)` method. When we refactor AppCore to use
+// RwLock/Mutex internally, we can implement IntentEffects properly.
+//
+// For now, use AppCore::dispatch() directly for intent dispatch.
+// The IntentMetadata trait is implemented on Intent (in intent.rs) for
+// authorization level checking.
 
 #[cfg(test)]
 mod tests {

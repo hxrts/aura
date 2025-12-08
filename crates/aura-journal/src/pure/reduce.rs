@@ -29,7 +29,7 @@
 //! scenarios where we can serialize inputs/outputs to JSON.
 
 use crate::fact::Journal;
-use crate::reduction::{self, RelationalState, ReductionNamespaceError};
+use crate::reduction::{self, ReductionNamespaceError, RelationalState};
 use aura_core::authority::AuthorityState;
 
 /// Pure authority reduction function.
@@ -76,9 +76,9 @@ pub fn context_reduce(journal: &Journal) -> Result<RelationalState, ReductionNam
 mod tests {
     use super::*;
     use crate::fact::{Fact, FactContent, JournalNamespace, SnapshotFact};
+    use aura_core::identifiers::AuthorityId;
     use aura_core::time::{OrderTime, TimeStamp};
     use aura_core::Hash32;
-    use aura_core::identifiers::AuthorityId;
 
     fn make_authority_journal(seed: u8) -> Journal {
         let auth_id = AuthorityId::new_from_entropy([seed; 32]);

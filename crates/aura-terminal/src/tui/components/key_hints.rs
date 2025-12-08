@@ -75,7 +75,7 @@ pub fn KeyHintsBar(props: &KeyHintsBarProps) -> impl Into<AnyElement<'static>> {
         .collect();
 
     // Build global hints (always in this fixed order)
-    let global_hints = vec![
+    let global_hints = [
         KeyHint::new("Tab", "Next"),
         KeyHint::new("S-Tab", "Prev"),
         KeyHint::new("1-8", "Screen"),

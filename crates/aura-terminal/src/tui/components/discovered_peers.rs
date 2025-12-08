@@ -285,10 +285,8 @@ mod tests {
 
     #[test]
     fn test_peer_truncated_id() {
-        let peer = DiscoveredPeerInfo::new(
-            "0123456789abcdef0123456789abcdef",
-            "192.168.1.100:8080",
-        );
+        let peer =
+            DiscoveredPeerInfo::new("0123456789abcdef0123456789abcdef", "192.168.1.100:8080");
 
         // Should show first 8 and last 4 chars
         assert_eq!(peer.display_label(), "01234567...cdef");

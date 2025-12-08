@@ -5,15 +5,20 @@
 //! ## Reactive Signal Subscription
 //!
 //! When `AppCoreContext` is available, this screen subscribes to recovery state
-//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
+//!
+//! Uses `aura_app::signal_defs::RECOVERY_SIGNAL` with `ReactiveEffects::subscribe()`.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use aura_app::signal_defs::RECOVERY_SIGNAL;
+use aura_core::effects::reactive::ReactiveEffects;
+
 use crate::tui::components::EmptyState;
-use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
 use crate::tui::hooks::AppCoreContext;
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
 use crate::tui::theme::{Icons, Spacing, Theme};
 use crate::tui::types::{
     Guardian, GuardianApproval, GuardianStatus, RecoveryState, RecoveryStatus, RecoveryTab,
@@ -352,6 +357,7 @@ pub fn RecoveryScreen(
     });
 
     // Subscribe to recovery signal updates if AppCoreContext is available
+    // Uses the unified ReactiveEffects system from aura-core
     if let Some(ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_guardians = reactive_guardians.clone();
@@ -360,33 +366,30 @@ pub fn RecoveryScreen(
             let mut reactive_recovery_status = reactive_recovery_status.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                use futures_signals::signal::SignalExt;
-
-                let signal = {
+                // Get a subscription to the recovery signal via ReactiveEffects
+                let mut stream = {
                     let core = app_core.read().await;
-                    core.recovery_signal()
+                    core.subscribe(&*RECOVERY_SIGNAL)
                 };
 
-                signal
-                    .for_each(|recovery_state| {
-                        // Convert guardians
-                        let guardians: Vec<Guardian> = recovery_state
-                            .guardians
-                            .iter()
-                            .map(convert_guardian)
-                            .collect();
+                // Subscribe to signal updates - runs until component unmounts
+                while let Ok(recovery_state) = stream.recv().await {
+                    // Convert guardians
+                    let guardians: Vec<Guardian> = recovery_state
+                        .guardians
+                        .iter()
+                        .map(convert_guardian)
+                        .collect();
 
-                        // Convert recovery status
-                        let status =
-                            convert_recovery_status(&recovery_state, &recovery_state.guardians);
+                    // Convert recovery status
+                    let status =
+                        convert_recovery_status(&recovery_state, &recovery_state.guardians);
 
-                        reactive_guardians.set(guardians);
-                        reactive_threshold_required.set(recovery_state.threshold);
-                        reactive_threshold_total.set(recovery_state.guardian_count);
-                        reactive_recovery_status.set(status);
-                        async {}
-                    })
-                    .await;
+                    reactive_guardians.set(guardians);
+                    reactive_threshold_required.set(recovery_state.threshold);
+                    reactive_threshold_total.set(recovery_state.guardian_count);
+                    reactive_recovery_status.set(status);
+                }
             }
         });
     }

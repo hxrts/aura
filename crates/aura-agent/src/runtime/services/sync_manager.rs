@@ -3,9 +3,11 @@
 //! Wraps `aura_sync::SyncService` for integration with the agent runtime.
 //! Provides lifecycle management and configuration for automatic background sync.
 
+use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::{PhysicalTimeEffects, TimeEffects};
 use aura_core::DeviceId;
 use aura_sync::services::{Service, SyncService, SyncServiceConfig};
+use aura_sync::verification::{MerkleVerifier, VerificationResult};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -91,6 +93,9 @@ pub struct SyncServiceManager {
 
     /// Handle to background sync task (if auto-sync enabled)
     background_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+
+    /// Optional Merkle verifier for fact sync (requires indexed journal)
+    merkle_verifier: Option<Arc<MerkleVerifier>>,
 }
 
 impl SyncServiceManager {
@@ -102,6 +107,25 @@ impl SyncServiceManager {
             state: Arc::new(RwLock::new(SyncManagerState::Stopped)),
             peers: Arc::new(RwLock::new(config.initial_peers)),
             background_task: Arc::new(RwLock::new(None)),
+            merkle_verifier: None,
+        }
+    }
+
+    /// Create a new sync service manager with indexed journal for Merkle verification
+    ///
+    /// This enables fact sync with cryptographic verification of facts using
+    /// Merkle trees and Bloom filters from the indexed journal.
+    pub fn with_indexed_journal(
+        config: SyncManagerConfig,
+        indexed_journal: Arc<dyn IndexedJournalEffects + Send + Sync>,
+    ) -> Self {
+        Self {
+            service: Arc::new(RwLock::new(None)),
+            config: config.clone(),
+            state: Arc::new(RwLock::new(SyncManagerState::Stopped)),
+            peers: Arc::new(RwLock::new(config.initial_peers)),
+            background_task: Arc::new(RwLock::new(None)),
+            merkle_verifier: Some(Arc::new(MerkleVerifier::new(indexed_journal))),
         }
     }
 
@@ -250,6 +274,62 @@ impl SyncServiceManager {
     pub fn config(&self) -> &SyncManagerConfig {
         &self.config
     }
+
+    // =========================================================================
+    // Merkle Verification Methods
+    // =========================================================================
+
+    /// Check if Merkle verification is available
+    ///
+    /// Returns `true` if the manager was created with an indexed journal,
+    /// enabling cryptographic fact verification.
+    pub fn has_merkle_verification(&self) -> bool {
+        self.merkle_verifier.is_some()
+    }
+
+    /// Get the local Merkle root for exchange with peers
+    ///
+    /// Returns `None` if Merkle verification is not enabled (no indexed journal).
+    /// The root represents the current state of the local fact journal and can
+    /// be compared with remote roots to determine if synchronization is needed.
+    pub async fn local_merkle_root(&self) -> Option<[u8; 32]> {
+        if let Some(ref verifier) = self.merkle_verifier {
+            verifier.local_merkle_root().await.ok()
+        } else {
+            None
+        }
+    }
+
+    /// Verify incoming facts against the local Merkle tree
+    ///
+    /// Returns `None` if Merkle verification is not enabled.
+    /// Otherwise returns the verification result containing:
+    /// - `verified`: Facts that passed verification
+    /// - `rejected`: Facts that failed verification with reasons
+    /// - `merkle_root`: Current local Merkle root after verification
+    pub async fn verify_facts(
+        &self,
+        facts: Vec<IndexedFact>,
+        claimed_root: [u8; 32],
+    ) -> Option<VerificationResult> {
+        if let Some(ref verifier) = self.merkle_verifier {
+            verifier
+                .verify_incoming_facts(facts, claimed_root)
+                .await
+                .ok()
+        } else {
+            None
+        }
+    }
+
+    /// Get the internal Merkle verifier reference
+    ///
+    /// Returns `None` if Merkle verification is not enabled.
+    /// Use this for direct access to verification operations like
+    /// `compare_roots()` or `local_bloom_filter()`.
+    pub fn merkle_verifier(&self) -> Option<&Arc<MerkleVerifier>> {
+        self.merkle_verifier.as_ref()
+    }
 }
 
 impl Default for SyncServiceManager {
@@ -261,7 +341,92 @@ impl Default for SyncServiceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use aura_core::domain::journal::FactValue;
+    use aura_core::effects::indexed::{FactId, FactStreamReceiver, IndexStats};
+    use aura_core::effects::{BloomConfig, BloomFilter};
+    use aura_core::AuthorityId;
     use aura_effects::time::PhysicalTimeHandler;
+    use std::sync::Mutex;
+
+    /// Mock indexed journal for testing
+    struct MockIndexedJournal {
+        root: Mutex<[u8; 32]>,
+        facts: Mutex<Vec<IndexedFact>>,
+    }
+
+    impl MockIndexedJournal {
+        fn new(root: [u8; 32]) -> Self {
+            Self {
+                root: Mutex::new(root),
+                facts: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl IndexedJournalEffects for MockIndexedJournal {
+        fn watch_facts(&self) -> Box<dyn FactStreamReceiver> {
+            panic!("Not implemented for mock")
+        }
+
+        async fn facts_by_predicate(
+            &self,
+            _predicate: &str,
+        ) -> Result<Vec<IndexedFact>, aura_core::AuraError> {
+            Ok(Vec::new())
+        }
+
+        async fn facts_by_authority(
+            &self,
+            _authority: &AuthorityId,
+        ) -> Result<Vec<IndexedFact>, aura_core::AuraError> {
+            Ok(Vec::new())
+        }
+
+        async fn facts_in_range(
+            &self,
+            _start: aura_core::time::TimeStamp,
+            _end: aura_core::time::TimeStamp,
+        ) -> Result<Vec<IndexedFact>, aura_core::AuraError> {
+            Ok(Vec::new())
+        }
+
+        async fn all_facts(&self) -> Result<Vec<IndexedFact>, aura_core::AuraError> {
+            Ok(self.facts.lock().unwrap().clone())
+        }
+
+        fn might_contain(&self, _predicate: &str, _value: &FactValue) -> bool {
+            false
+        }
+
+        async fn merkle_root(&self) -> Result<[u8; 32], aura_core::AuraError> {
+            Ok(*self.root.lock().unwrap())
+        }
+
+        async fn verify_fact_inclusion(
+            &self,
+            fact: &IndexedFact,
+        ) -> Result<bool, aura_core::AuraError> {
+            let facts = self.facts.lock().unwrap();
+            Ok(facts.iter().any(|f| f.id == fact.id))
+        }
+
+        async fn get_bloom_filter(&self) -> Result<BloomFilter, aura_core::AuraError> {
+            BloomFilter::new(BloomConfig::for_sync(100))
+        }
+
+        async fn index_stats(&self) -> Result<IndexStats, aura_core::AuraError> {
+            let facts = self.facts.lock().unwrap();
+            Ok(IndexStats {
+                fact_count: facts.len() as u64,
+                predicate_count: 1,
+                authority_count: 1,
+                bloom_fp_rate: 0.01,
+                merkle_depth: 10,
+            })
+        }
+    }
 
     #[tokio::test]
     async fn test_sync_manager_creation() {
@@ -331,5 +496,58 @@ mod tests {
         assert!(health.is_some());
 
         manager.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_sync_manager_without_merkle_verification() {
+        let manager = SyncServiceManager::new(SyncManagerConfig::for_testing());
+
+        // Manager without indexed journal should not have Merkle verification
+        assert!(!manager.has_merkle_verification());
+        assert!(manager.local_merkle_root().await.is_none());
+        assert!(manager.verify_facts(vec![], [0u8; 32]).await.is_none());
+        assert!(manager.merkle_verifier().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_sync_manager_with_merkle_verification() {
+        let root = [42u8; 32];
+        let journal = Arc::new(MockIndexedJournal::new(root));
+        let manager =
+            SyncServiceManager::with_indexed_journal(SyncManagerConfig::for_testing(), journal);
+
+        // Manager with indexed journal should have Merkle verification
+        assert!(manager.has_merkle_verification());
+        assert!(manager.merkle_verifier().is_some());
+
+        // Should return local Merkle root
+        let local_root = manager.local_merkle_root().await;
+        assert_eq!(local_root, Some(root));
+    }
+
+    #[tokio::test]
+    async fn test_sync_manager_verify_facts() {
+        let root = [42u8; 32];
+        let journal = Arc::new(MockIndexedJournal::new(root));
+        let manager =
+            SyncServiceManager::with_indexed_journal(SyncManagerConfig::for_testing(), journal);
+
+        // Create test fact
+        let fact = IndexedFact {
+            id: FactId(1),
+            predicate: "test".to_string(),
+            value: FactValue::String("test_value".to_string()),
+            authority: None,
+            timestamp: None,
+        };
+
+        // Verify facts returns a result
+        let result = manager.verify_facts(vec![fact], root).await;
+        assert!(result.is_some());
+
+        let result = result.unwrap();
+        // New fact should be accepted for merge
+        assert_eq!(result.verified.len(), 1);
+        assert!(result.rejected.is_empty());
     }
 }

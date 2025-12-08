@@ -32,7 +32,12 @@ use std::sync::Arc;
 use aura_app::AppCore;
 use tokio::sync::RwLock;
 
-use crate::tui::effects::{AuraEvent, EffectBridge, EffectCommand, EventFilter, EventSubscription};
+use aura_app::signal_defs::{
+    ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, ERROR_SIGNAL, SYNC_STATUS_SIGNAL,
+};
+use aura_core::effects::reactive::ReactiveEffects;
+
+use crate::tui::effects::{command_to_intent, EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::hooks::{
     BlockSnapshot, ChatSnapshot, ContactsSnapshot, GuardiansSnapshot, InvitationsSnapshot,
     NeighborhoodSnapshot, RecoverySnapshot,
@@ -62,8 +67,8 @@ use crate::tui::types::{
 /// initial rendering.
 #[derive(Clone)]
 pub struct IoContext {
-    /// Effect bridge for command dispatch
-    bridge: Arc<EffectBridge>,
+    /// Operational handler for non-journaled commands (Ping, sync, etc.)
+    operational: Arc<OperationalHandler>,
 
     /// AppCore for intent-based state management
     /// This is the portable application core from aura-app
@@ -80,33 +85,16 @@ pub struct IoContext {
 }
 
 impl IoContext {
-    /// Create a new IoContext with an effect bridge (demo mode with default AppCore)
+    /// Create a new IoContext with AppCore
     ///
-    /// Creates an AppCore without an agent, which provides:
+    /// This is the primary constructor. AppCore provides:
     /// - Full ViewState signal infrastructure
-    /// - Local-only intent dispatch
-    /// - No network/sync capabilities
-    ///
-    /// Note: The provided bridge should be created with `EffectBridge::with_app_core()`
-    /// to ensure signal-based state updates work correctly.
-    pub fn new(bridge: EffectBridge, app_core: Arc<RwLock<AppCore>>) -> Self {
+    /// - Intent-based state management
+    /// - Reactive signal subscriptions for screens
+    pub fn new(app_core: Arc<RwLock<AppCore>>) -> Self {
+        let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
-            bridge: Arc::new(bridge),
-            app_core,
-            has_existing_account: true, // Default to true for backwards compatibility
-            #[cfg(feature = "development")]
-            demo_hints: None,
-        }
-    }
-
-    /// Create a new IoContext with AppCore integration
-    ///
-    /// This is the production constructor that enables the full intent-based
-    /// state management flow from aura-app. The bridge should be created with
-    /// `EffectBridge::with_app_core()` to enable signal-based state updates.
-    pub fn with_app_core(bridge: EffectBridge, app_core: Arc<RwLock<AppCore>>) -> Self {
-        Self {
-            bridge: Arc::new(bridge),
+            operational,
             app_core,
             has_existing_account: true, // Default to true for backwards compatibility
             #[cfg(feature = "development")]
@@ -118,13 +106,10 @@ impl IoContext {
     ///
     /// Use this constructor when you need to control whether the account setup
     /// modal should be shown. Pass `has_existing_account: false` to show the modal.
-    pub fn with_account_status(
-        bridge: EffectBridge,
-        app_core: Arc<RwLock<AppCore>>,
-        has_existing_account: bool,
-    ) -> Self {
+    pub fn with_account_status(app_core: Arc<RwLock<AppCore>>, has_existing_account: bool) -> Self {
+        let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
-            bridge: Arc::new(bridge),
+            operational,
             app_core,
             has_existing_account,
             #[cfg(feature = "development")]
@@ -138,13 +123,13 @@ impl IoContext {
     /// and pre-generated invite codes for Alice and Charlie.
     #[cfg(feature = "development")]
     pub fn with_demo_hints(
-        bridge: EffectBridge,
         app_core: Arc<RwLock<AppCore>>,
         hints: crate::demo::DemoHints,
         has_existing_account: bool,
     ) -> Self {
+        let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
-            bridge: Arc::new(bridge),
+            operational,
             app_core,
             has_existing_account,
             demo_hints: Some(hints),
@@ -199,22 +184,20 @@ impl IoContext {
         String::new()
     }
 
-    /// Create with default bridge configuration (demo mode with AppCore)
+    /// Create with default configuration (demo mode with AppCore)
     ///
     /// Creates an AppCore without an agent, which provides:
     /// - Full ViewState signal infrastructure
     /// - Local-only intent dispatch
     /// - No network/sync capabilities
-    ///
-    /// The bridge is automatically configured with the AppCore for signal-based updates.
     #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
     pub fn with_defaults() -> Self {
         let app_core =
             AppCore::new(aura_app::AppConfig::default()).expect("Failed to create default AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
-        let bridge = EffectBridge::with_app_core(app_core.clone());
+        let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
-            bridge: Arc::new(bridge),
+            operational,
             app_core,
             has_existing_account: true, // Defaults assume account exists
             #[cfg(feature = "development")]
@@ -285,19 +268,7 @@ impl IoContext {
     pub fn snapshot_guardians(&self) -> GuardiansSnapshot {
         if let Some(snapshot) = self.app_core_snapshot() {
             GuardiansSnapshot {
-                guardians: snapshot
-                    .recovery
-                    .guardians
-                    .iter()
-                    .map(|g| crate::tui::reactive::queries::Guardian {
-                        authority_id: g.id.clone(),
-                        name: g.name.clone(),
-                        status: convert_guardian_status(&g.status),
-                        added_at: g.added_at,
-                        last_seen: g.last_seen,
-                        share_index: None,
-                    })
-                    .collect(),
+                guardians: snapshot.recovery.guardians.clone(),
                 threshold: Some(crate::tui::reactive::views::ThresholdConfig {
                     threshold: snapshot.recovery.threshold,
                     total: snapshot.recovery.guardian_count,
@@ -326,7 +297,7 @@ impl IoContext {
             };
 
             return RecoverySnapshot {
-                status: convert_recovery_status(&snapshot.recovery),
+                status: snapshot.recovery.clone(),
                 progress_percent,
                 is_in_progress,
             };
@@ -345,7 +316,7 @@ impl IoContext {
                 .iter()
                 .chain(snapshot.invitations.sent.iter())
                 .chain(snapshot.invitations.history.iter())
-                .map(|i| convert_invitation(i))
+                .cloned()
                 .collect();
             let pending_count = snapshot.invitations.pending_count as usize;
             return InvitationsSnapshot {
@@ -556,15 +527,90 @@ impl IoContext {
     }
 
     // ─── Effect Dispatch ────────────────────────────────────────────────────
+    //
+    // Dispatch strategy:
+    // 1. If command maps to an Intent → dispatch through AppCore (journaled)
+    // 2. If command is operational (no Intent) → dispatch through OperationalHandler
+    //
+    // All commands are handled by one of these two paths. The unified approach
+    // enables intent-based state management with signals for UI updates.
 
     /// Dispatch a command (fire and forget)
+    ///
+    /// Dispatch strategy:
+    /// 1. If command maps to an Intent → dispatch through AppCore (journaled)
+    /// 2. If command is operational → dispatch through OperationalHandler
     pub async fn dispatch(&self, command: EffectCommand) -> Result<(), String> {
-        self.bridge.dispatch(command).await
+        // Try to map command to intent for unified dispatch
+        if let Some(intent) = command_to_intent(&command) {
+            // Dispatch through AppCore (journaled operation)
+            let mut core = self.app_core.write().await;
+            match core.dispatch(intent) {
+                Ok(_fact_id) => {
+                    // Successfully dispatched - state will be updated via signals
+                    Ok(())
+                }
+                Err(e) => Err(format!("Intent dispatch failed: {}", e)),
+            }
+        } else if let Some(result) = self.operational.execute(&command).await {
+            // Handle operational command
+            result.map(|_| ()).map_err(|e| e.to_string())
+        } else {
+            // Unknown command - log warning and return error
+            tracing::warn!(
+                "Unknown command not handled by Intent or Operational: {:?}",
+                command
+            );
+            Err(format!("Unknown command: {:?}", command))
+        }
+    }
+
+    /// Export an invitation code and return the generated code
+    pub async fn export_invitation_code(&self, invitation_id: &str) -> Result<String, String> {
+        match self
+            .operational
+            .execute(&EffectCommand::ExportInvitation {
+                invitation_id: invitation_id.to_string(),
+            })
+            .await
+        {
+            Some(Ok(OpResponse::InvitationCode { code, .. })) => Ok(code),
+            Some(Ok(other)) => Err(format!("Unexpected response: {:?}", other)),
+            Some(Err(err)) => Err(err.to_string()),
+            None => Err("ExportInvitation not handled".to_string()),
+        }
     }
 
     /// Dispatch a command and wait for completion
+    ///
+    /// Dispatch strategy:
+    /// 1. If command maps to an Intent → dispatch through AppCore (journaled)
+    /// 2. If command is operational → dispatch through OperationalHandler
     pub async fn dispatch_and_wait(&self, command: EffectCommand) -> Result<(), String> {
-        self.bridge.dispatch_and_wait(command).await
+        // Try to map command to intent for unified dispatch
+        if let Some(intent) = command_to_intent(&command) {
+            // Dispatch through AppCore (journaled operation)
+            let mut core = self.app_core.write().await;
+            match core.dispatch(intent) {
+                Ok(_fact_id) => {
+                    // Successfully dispatched - state will be updated via signals
+                    // For "wait" semantics, we could poll signals for confirmation
+                    // but for now this is equivalent to regular dispatch
+                    Ok(())
+                }
+                Err(e) => Err(format!("Intent dispatch failed: {}", e)),
+            }
+        } else if let Some(result) = self.operational.execute(&command).await {
+            // Handle operational command
+            result.map(|_| ()).map_err(|e| e.to_string())
+        } else {
+            // Unknown command - log warning and return error
+            tracing::warn!(
+                "Unknown command not handled by Intent or Operational: {:?}",
+                command
+            );
+            Err(format!("Unknown command: {:?}", command))
+        }
     }
 
     /// Send a message to a channel
@@ -609,50 +655,76 @@ impl IoContext {
         .await
     }
 
-    // ─── Event Subscription ─────────────────────────────────────────────────
-
-    /// Subscribe to events with a filter
-    pub fn subscribe(&self, filter: EventFilter) -> EventSubscription {
-        self.bridge.subscribe(filter)
-    }
-
-    /// Subscribe to all events
-    pub fn subscribe_all(&self) -> EventSubscription {
-        self.bridge.subscribe_all()
-    }
-
-    /// Emit an event (for testing)
-    pub fn emit(&self, event: AuraEvent) {
-        self.bridge.emit(event);
-    }
-
-    // ─── Connection Status ──────────────────────────────────────────────────
+    // ─── Connection Status (via Signals) ───────────────────────────────────
 
     /// Check if connected to the effect system
+    ///
+    /// Reads from the CONNECTION_STATUS_SIGNAL to determine connection state.
     pub async fn is_connected(&self) -> bool {
-        self.bridge.is_connected().await
+        if let Ok(core) = self.app_core.try_read() {
+            if let Ok(status) = core.read(&*CONNECTION_STATUS_SIGNAL).await {
+                return matches!(status, ConnectionStatus::Online { .. });
+            }
+        }
+        false
     }
 
     /// Get last error if any
+    ///
+    /// Reads from the ERROR_SIGNAL to get the most recent error.
     pub async fn last_error(&self) -> Option<String> {
-        self.bridge.last_error().await
+        if let Ok(core) = self.app_core.try_read() {
+            if let Ok(error) = core.read(&*ERROR_SIGNAL).await {
+                return error.map(|e| e.message);
+            }
+        }
+        None
     }
 
-    // ─── Sync Status ───────────────────────────────────────────────────────
+    // ─── Sync Status (via Signals) ─────────────────────────────────────────
 
     /// Check if a sync operation is currently in progress
+    ///
+    /// Reads from the SYNC_STATUS_SIGNAL to determine sync state.
     pub async fn is_syncing(&self) -> bool {
-        self.bridge.is_syncing().await
+        if let Ok(core) = self.app_core.try_read() {
+            if let Ok(status) = core.read(&*SYNC_STATUS_SIGNAL).await {
+                return matches!(status, SyncStatus::Syncing { .. });
+            }
+        }
+        false
     }
 
     /// Get the timestamp of the last successful sync (ms since epoch)
     pub async fn last_sync_time(&self) -> Option<u64> {
-        self.bridge.last_sync_time().await
+        if let Ok(core) = self.app_core.try_read() {
+            if let Some(status) = core.sync_status().await {
+                if let Some(ts) = status.last_sync_ms {
+                    return Some(ts);
+                }
+            }
+        }
+
+        None
     }
 
     /// Get the number of known peers for sync operations
     pub async fn known_peers_count(&self) -> usize {
-        self.bridge.known_peers_count().await
+        if let Ok(core) = self.app_core.try_read() {
+            if let Some(status) = core.sync_status().await {
+                if status.connected_peers > 0 {
+                    return status.connected_peers;
+                }
+            }
+
+            if let Ok(conn_status) = core.read(&*CONNECTION_STATUS_SIGNAL).await {
+                if let ConnectionStatus::Online { peer_count } = conn_status {
+                    return peer_count;
+                }
+            }
+        }
+
+        0
     }
 }
 
@@ -661,135 +733,6 @@ impl Default for IoContext {
         Self::with_defaults()
     }
 }
-
-// =============================================================================
-// Conversion Helpers (aura-app → TUI types)
-// =============================================================================
-
-/// Convert aura-app GuardianStatus to TUI GuardianStatus
-fn convert_guardian_status(
-    status: &aura_app::views::recovery::GuardianStatus,
-) -> crate::tui::reactive::queries::GuardianStatus {
-    match status {
-        aura_app::views::recovery::GuardianStatus::Active => {
-            crate::tui::reactive::queries::GuardianStatus::Active
-        }
-        aura_app::views::recovery::GuardianStatus::Pending => {
-            crate::tui::reactive::queries::GuardianStatus::Pending
-        }
-        aura_app::views::recovery::GuardianStatus::Offline => {
-            crate::tui::reactive::queries::GuardianStatus::Offline
-        }
-        aura_app::views::recovery::GuardianStatus::Revoked => {
-            crate::tui::reactive::queries::GuardianStatus::Removed
-        }
-    }
-}
-
-/// Convert aura-app RecoveryState to TUI RecoveryStatus
-fn convert_recovery_status(
-    recovery: &aura_app::RecoveryState,
-) -> crate::tui::reactive::queries::RecoveryStatus {
-    use crate::tui::reactive::queries::{GuardianApproval, RecoveryState, RecoveryStatus};
-
-    // Derive state from active_recovery process status
-    let state = if let Some(process) = &recovery.active_recovery {
-        match process.status {
-            aura_app::views::recovery::RecoveryProcessStatus::Idle => RecoveryState::None,
-            aura_app::views::recovery::RecoveryProcessStatus::Initiated => RecoveryState::Initiated,
-            aura_app::views::recovery::RecoveryProcessStatus::WaitingForApprovals => {
-                RecoveryState::Initiated
-            }
-            aura_app::views::recovery::RecoveryProcessStatus::Approved => {
-                RecoveryState::ThresholdMet
-            }
-            aura_app::views::recovery::RecoveryProcessStatus::Completed => RecoveryState::Completed,
-            aura_app::views::recovery::RecoveryProcessStatus::Failed => RecoveryState::Failed,
-        }
-    } else {
-        RecoveryState::None
-    };
-
-    // Convert guardian approvals if there's an active recovery process
-    let approvals: Vec<GuardianApproval> = if let Some(process) = &recovery.active_recovery {
-        process
-            .approved_by
-            .iter()
-            .map(|guardian_id| GuardianApproval {
-                guardian_id: guardian_id.clone(),
-                guardian_name: String::new(), // Name not stored in approval
-                approved: true,
-                timestamp: Some(process.initiated_at),
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    RecoveryStatus {
-        session_id: recovery.active_recovery.as_ref().map(|p| p.id.clone()),
-        state,
-        approvals_received: recovery
-            .active_recovery
-            .as_ref()
-            .map(|p| p.approvals_received)
-            .unwrap_or(0),
-        threshold: recovery.threshold,
-        total_guardians: recovery.guardian_count,
-        approvals,
-        started_at: recovery.active_recovery.as_ref().map(|p| p.initiated_at),
-        expires_at: recovery.active_recovery.as_ref().and_then(|p| p.expires_at),
-        error: None,
-    }
-}
-
-/// Convert aura-app Invitation to TUI Invitation
-fn convert_invitation(
-    invitation: &aura_app::views::invitations::Invitation,
-) -> crate::tui::reactive::queries::Invitation {
-    use crate::tui::reactive::queries::{InvitationDirection, InvitationStatus, InvitationType};
-
-    let direction = match invitation.direction {
-        aura_app::views::invitations::InvitationDirection::Sent => InvitationDirection::Outbound,
-        aura_app::views::invitations::InvitationDirection::Received => InvitationDirection::Inbound,
-    };
-
-    let status = match invitation.status {
-        aura_app::views::invitations::InvitationStatus::Pending => InvitationStatus::Pending,
-        aura_app::views::invitations::InvitationStatus::Accepted => InvitationStatus::Accepted,
-        aura_app::views::invitations::InvitationStatus::Rejected => InvitationStatus::Declined,
-        aura_app::views::invitations::InvitationStatus::Expired => InvitationStatus::Expired,
-        aura_app::views::invitations::InvitationStatus::Revoked => InvitationStatus::Cancelled,
-    };
-
-    let invitation_type = match invitation.invitation_type {
-        aura_app::views::invitations::InvitationType::Guardian => InvitationType::Guardian,
-        aura_app::views::invitations::InvitationType::Chat => InvitationType::Channel,
-        aura_app::views::invitations::InvitationType::Block => InvitationType::Channel,
-    };
-
-    // Determine other party based on direction
-    let (other_party_id, other_party_name) = match direction {
-        InvitationDirection::Outbound => (
-            invitation.to_id.clone().unwrap_or_default(),
-            invitation.to_name.clone().unwrap_or_default(),
-        ),
-        InvitationDirection::Inbound => (invitation.from_id.clone(), invitation.from_name.clone()),
-    };
-
-    crate::tui::reactive::queries::Invitation {
-        id: invitation.id.clone(),
-        direction,
-        other_party_id,
-        other_party_name,
-        invitation_type,
-        status,
-        created_at: invitation.created_at,
-        expires_at: invitation.expires_at,
-        message: invitation.message.clone(),
-    }
-}
-
 /// Trait for iocraft props that need context access
 ///
 /// Implement this to enable context injection into components.
@@ -824,5 +767,16 @@ mod tests {
         // Dispatch should succeed (command is processed)
         let result = ctx.dispatch(EffectCommand::Ping).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_export_invitation_code_returns_code() {
+        let ctx = IoContext::with_defaults();
+        let code = ctx
+            .export_invitation_code("inv-123")
+            .await
+            .expect("expected code");
+
+        assert!(code.contains("AURA-"));
     }
 }

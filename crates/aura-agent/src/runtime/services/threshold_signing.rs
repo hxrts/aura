@@ -215,7 +215,10 @@ impl ThresholdSigningService {
 #[async_trait]
 impl ThresholdSigningEffects for ThresholdSigningService {
     async fn bootstrap_authority(&self, authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
-        tracing::info!(?authority, "Bootstrapping authority with 1-of-1 Ed25519 keys");
+        tracing::info!(
+            ?authority,
+            "Bootstrapping authority with 1-of-1 Ed25519 keys"
+        );
 
         let effects = self.effects.read().await;
 

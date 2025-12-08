@@ -9,8 +9,8 @@ description = "Core Quint formal verification integration for Aura - Layer 3: Im
 
 [dependencies]
 # Core dependencies
-aura-core = { path = "../aura-core" }
-aura-effects = { path = "../aura-effects" }
+aura-core = { path = "../aura-core", features = ["simulation"] }
+aura-effects = { path = "../aura-effects", features = ["simulation"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

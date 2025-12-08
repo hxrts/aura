@@ -12,9 +12,6 @@ workspace = true
 
 [features]
 default = []
-testing = []
-fixture_effects = []
-consensus_frost_full = []  # Enable full FROST threshold signing in consensus choreography
 
 [dependencies]
 # Workspace crates

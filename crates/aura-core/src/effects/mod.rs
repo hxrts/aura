@@ -49,7 +49,6 @@ pub mod availability; // Data availability within replication units
 pub mod biometric;
 pub mod bloom;
 pub mod capability;
-pub mod chaos;
 pub mod choreographic; // Multi-party protocol coordination
 pub mod console;
 pub mod crypto;
@@ -58,25 +57,35 @@ pub mod flow; // Flow budget management
 pub mod guard; // Pure guard evaluation with effect commands
 pub mod guardian; // Guardian relational coordination
 pub mod indexed; // Indexed journal lookups (B-tree, Bloom, Merkle)
+pub mod intent; // Intent dispatch effects
 pub mod journal;
 pub mod leakage; // Privacy leakage tracking
 pub mod ledger; // Event sourcing and audit trails
 pub mod network;
-pub mod quint;
+pub mod query; // Datalog query effects (bridges Journal + Biscuit + Reactive)
 pub mod random;
+pub mod reactive; // FRP as algebraic effects
 pub mod relay; // Relay selection for message forwarding
 pub mod reliability;
 pub mod secure;
-pub mod simulation;
 pub mod storage;
 pub mod supertraits;
 pub mod sync; // Anti-entropy synchronization
 pub mod system;
-pub mod testing;
 pub mod threshold; // Unified threshold signing
 pub mod time;
 pub mod transport;
 pub mod tree; // Commitment tree operations
+
+// Simulation/testing effect traits (feature-gated)
+#[cfg(feature = "simulation")]
+pub mod chaos;
+#[cfg(feature = "simulation")]
+pub mod quint;
+#[cfg(feature = "simulation")]
+pub mod simulation;
+#[cfg(feature = "simulation")]
+pub mod testing;
 
 // Re-export core effect traits
 pub use agent::{
@@ -99,12 +108,13 @@ pub use biometric::{
     BiometricError, BiometricSecurityLevel, BiometricStatistics, BiometricType,
     BiometricVerificationResult,
 };
-pub use bloom::{BloomConfig, BloomEffects, BloomError, BloomFilter};
+pub use bloom::{BloomConfig, BloomError, BloomFilter};
 pub use capability::{
     CapabilityConfig, CapabilityEffects, CapabilityError, CapabilityStatistics,
     CapabilityTokenFormat, CapabilityTokenInfo, CapabilityTokenRequest,
     CapabilityVerificationResult, TokenStatus, VerificationLevel,
 };
+#[cfg(feature = "simulation")]
 pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
@@ -114,6 +124,9 @@ pub use flood::{
 pub use flow::{FlowBudgetEffects, FlowHint};
 pub use guardian::{GuardianAcceptInput, GuardianEffects, GuardianRequestInput};
 pub use indexed::{FactId, IndexStats, IndexedFact, IndexedJournalEffects};
+pub use intent::{
+    AuthorizationLevel, IntentDispatchError, IntentEffects, IntentMetadata, SimpleIntentEffects,
+};
 pub use journal::JournalEffects;
 pub use leakage::{
     LeakageBudget, LeakageChoreographyExt, LeakageEffects, LeakageEvent, ObserverClass,
@@ -121,6 +134,8 @@ pub use leakage::{
 #[allow(deprecated)]
 // Migration utilities removed - middleware transition complete
 pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
+pub use query::{QueryEffects, QueryError, QuerySubscription};
+#[cfg(feature = "simulation")]
 pub use quint::{
     // Generative simulation types
     ActionDescriptor,
@@ -144,6 +159,9 @@ pub use quint::{
     VerificationResult,
 };
 pub use random::RandomEffects;
+pub use reactive::{
+    ReactiveDeriveEffects, ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
+};
 pub use relay::{RelayCandidate, RelayContext, RelayError, RelayRelationship, RelaySelector};
 pub use reliability::{
     // Unified retry types
@@ -163,6 +181,7 @@ pub use reliability::{
 pub use secure::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
 };
+#[cfg(feature = "simulation")]
 pub use simulation::{
     ByzantineFault, CheckpointId, ComputationFault, ExportFormat, FaultInjectionConfig,
     FaultInjectionEffects, FaultType, NetworkFault, OperationStats, ScenarioId, ScenarioState,
@@ -175,6 +194,7 @@ pub use supertraits::{
     SnapshotEffects, TreeEffects,
 };
 pub use system::{SystemEffects, SystemError};
+#[cfg(feature = "simulation")]
 pub use testing::{TestingEffects, TestingError};
 pub use time::{
     LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeComparison, TimeEffects,
@@ -194,7 +214,7 @@ pub use guard::{
     JournalEntry, MetadataView, SimulationEvent,
 };
 pub use ledger::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
-pub use sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError, SyncMetrics};
+pub use sync::SyncMetrics;
 pub use threshold::{PublicKeyPackage, ThresholdSigningEffects, ThresholdSigningError};
 pub use tree::{Cut, Partial, ProposalId, Snapshot, TreeOperationEffects};
 
@@ -261,6 +281,10 @@ pub enum EffectType {
     Console,
     /// Random number generation
     Random,
+    /// Reactive state management (FRP signals)
+    Reactive,
+    /// Intent dispatch (user action processing)
+    Intent,
     /// Effect API operations (transaction log, state)
     EffectApi,
     /// Journal operations (event log, snapshots)
@@ -294,6 +318,9 @@ pub enum EffectType {
     PropertyChecking,
     /// Chaos coordination for resilience testing
     ChaosCoordination,
+
+    /// Datalog query execution and subscriptions
+    Query,
 }
 
 impl std::fmt::Display for EffectType {
@@ -305,6 +332,8 @@ impl std::fmt::Display for EffectType {
             Self::Time => write!(f, "time"),
             Self::Console => write!(f, "console"),
             Self::Random => write!(f, "random"),
+            Self::Reactive => write!(f, "reactive"),
+            Self::Intent => write!(f, "intent"),
             Self::EffectApi => write!(f, "effect_api"),
             Self::Journal => write!(f, "journal"),
             Self::Tree => write!(f, "tree"),
@@ -319,6 +348,7 @@ impl std::fmt::Display for EffectType {
             Self::StateInspection => write!(f, "state_inspection"),
             Self::PropertyChecking => write!(f, "property_checking"),
             Self::ChaosCoordination => write!(f, "chaos_coordination"),
+            Self::Query => write!(f, "query"),
         }
     }
 }
@@ -333,6 +363,8 @@ impl EffectType {
             Self::Time,
             Self::Console,
             Self::Random,
+            Self::Reactive,
+            Self::Intent,
             Self::EffectApi,
             Self::Journal,
             Self::Tree,
@@ -347,6 +379,7 @@ impl EffectType {
             Self::StateInspection,
             Self::PropertyChecking,
             Self::ChaosCoordination,
+            Self::Query,
         ]
     }
 }

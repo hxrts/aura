@@ -14,12 +14,15 @@ default = []
 # Enable full effect system from aura-agent (Layer 6)
 # Only enable this feature in crates that are Layer 5+ or integration tests
 full-effect-system = ["dep:aura-agent"]
+# Enable Lean oracle for differential testing against formally verified models
+# Requires Lean toolchain and `just lean-oracle-build` to be run first
+lean = []
 
 [dependencies]
 # Workspace crates - Layer 8 testkit provides test utilities
 # Note: aura-protocol removed (was unused, and would create circular dependency)
-aura-core = { path = "../aura-core" }
-aura-effects = { path = "../aura-effects" }
+aura-core = { path = "../aura-core", features = ["simulation"] }
+aura-effects = { path = "../aura-effects", features = ["simulation"] }
 aura-mpst = { path = "../aura-mpst" }
 aura-journal = { path = "../aura-journal" }
 aura-social = { path = "../aura-social" }

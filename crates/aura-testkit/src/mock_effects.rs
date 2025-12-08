@@ -491,8 +491,8 @@ impl CryptoEffects for MockEffects {
     ) -> Result<bool, aura_core::effects::crypto::CryptoError> {
         match mode {
             SigningMode::SingleSigner => {
-                let package =
-                    SingleSignerPublicKeyPackage::from_bytes(public_key_package).map_err(|e| {
+                let package = SingleSignerPublicKeyPackage::from_bytes(public_key_package)
+                    .map_err(|e| {
                         aura_core::AuraError::invalid(format!(
                             "Invalid single-signer public key package: {}",
                             e

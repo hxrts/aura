@@ -45,8 +45,8 @@ pub use screens::*;
 pub use theme::{Spacing, Theme};
 pub use types::*;
 
-// Re-export effect bridge types
-pub use effects::{AuraEvent, BridgeConfig, EffectBridge, EffectCommand, EventFilter};
+// Re-export effect types
+pub use effects::{AuraEvent, EffectCommand, EventFilter};
 
 // Re-export commands types
 pub use commands::{
@@ -68,7 +68,7 @@ pub use local_store::{derive_key_material, TuiLocalStore};
 pub use reactive::{
     ChannelType, ChannelsQuery, GuardianApproval, GuardianStatus, GuardiansQuery,
     InvitationDirection, InvitationStatus, InvitationType, InvitationsQuery, MessagesQuery,
-    RecoveryQuery, RecoveryState, TuiQuery,
+    RecoveryQuery, RecoveryState,
 };
 
 // Re-export navigation types

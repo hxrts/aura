@@ -60,8 +60,6 @@
 
 // NOTE: AuthorizationEffects moved to aura-wot (domain crate) per Layer 2 pattern
 pub mod biometric;
-pub mod bloom;
-pub mod configuration;
 pub mod console;
 pub mod context;
 /// Cryptographic effect handlers for signing, verification, and key derivation
@@ -69,10 +67,17 @@ pub mod crypto;
 /// Indexed journal handler with B-tree indexes, Bloom filters, and Merkle trees
 pub mod database;
 // NOTE: JournalEffects moved to aura-journal (domain crate) per Layer 2 pattern
+/// Unified effect handler composing Authorization, Journal, Query, and Reactive effects
+pub mod effect_handler;
 pub mod guard_interpreter;
-pub mod leakage_handler;
+pub mod leakage;
+/// Query effect handler for typed Datalog queries
+pub mod query;
 pub mod random;
+/// Reactive effect handlers (FRP as algebraic effects)
+pub mod reactive;
 pub mod secure;
+#[cfg(feature = "simulation")]
 pub mod simulation;
 pub mod storage;
 // sync_bridge removed - replaced by pure guard evaluation (ADR-014)
@@ -83,27 +88,20 @@ pub mod transport;
 // Re-export production handlers only - mock handlers moved to aura-testkit
 // NOTE: WotAuthorizationHandler moved to aura-wot per Layer 2 pattern
 pub use biometric::FallbackBiometricHandler;
-pub use bloom::BloomHandler;
-pub use database::query::{
-    AuraQuery, FactTerm, QueryError, QueryResult, ScopedQuery, ScopedQueryError, ScopedQueryResult,
-};
-pub use database::{IndexedJournalHandler, IndexedJournalWrapper};
-// Subscription API (Phase 3)
-pub use database::subscription::{
-    DatabaseSubscriptionEffects, FactDelta, FactFilter, FactStream, FromQueryResult, QueryScope,
-    SubscribableJournalHandler, SubscriptionError, SubscriptionFact,
-};
-// Materialized Views (Phase 3)
-pub use configuration::RealConfigurationHandler;
 pub use console::RealConsoleHandler;
 pub use context::{ExecutionContext, StandardContextHandler};
 pub use crypto::RealCryptoHandler;
-pub use database::views::{FactReducible, MaterializedView};
+pub use database::query::{AuraQuery, FactTerm, QueryError, QueryResult};
+pub use database::{IndexedJournalHandler, IndexedJournalWrapper};
 // NOTE: JournalHandler moved to aura-journal per Layer 2 pattern
+pub use effect_handler::UnifiedHandler;
 pub use guard_interpreter::ProductionEffectInterpreter;
-pub use leakage_handler::ProductionLeakageHandler;
+pub use leakage::ProductionLeakageHandler;
+pub use query::QueryHandler;
 pub use random::RealRandomHandler;
+pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
 pub use secure::RealSecureStorageHandler;
+#[cfg(feature = "simulation")]
 pub use simulation::FallbackSimulationHandler;
 pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler};
 // ProductionSyncExecutor removed - replaced by ProductionEffectInterpreter (ADR-014)

@@ -26,9 +26,7 @@ pub use ed25519::{
 pub use hpke::{HpkeKeyPair, HpkePrivateKey, HpkePublicKey};
 
 // Single-signer types (for 1-of-1 scenarios)
-pub use single_signer::{
-    SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage,
-};
+pub use single_signer::{SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage};
 
 /// Alias for Merkle proof re-export.
 pub type MerkleProof = SimpleMerkleProof;

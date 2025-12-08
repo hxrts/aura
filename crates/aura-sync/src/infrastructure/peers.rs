@@ -31,7 +31,7 @@
 //! }
 //! ```
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -606,26 +606,6 @@ impl PeerManager {
                 format!("Failed to load root public key: {}", e),
             )
         })
-    }
-
-    /// Legacy method for backward compatibility - use update_peer_token instead
-    #[deprecated(note = "Use update_peer_token with Biscuit tokens")]
-    pub fn update_peer_capabilities(
-        &mut self,
-        device_id: DeviceId,
-        capabilities: HashSet<String>,
-    ) -> SyncResult<()> {
-        let peer = self
-            .peers
-            .get_mut(&device_id)
-            .ok_or_else(|| sync_peer_error("update", "Peer not found"))?;
-
-        // Legacy capability checking
-        peer.metadata.has_sync_capability =
-            capabilities.contains("sync_journal") || capabilities.contains("sync_state");
-
-        // Note: capabilities are no longer stored, use Biscuit tokens instead
-        Ok(())
     }
 
     /// Get peer information

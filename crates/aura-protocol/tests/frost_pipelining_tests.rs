@@ -2,7 +2,9 @@
 //!
 //! Note: This test suite is currently disabled because the frost_pipelining,
 //! witness_state, and choreography modules are not yet implemented.
-#![cfg(any())] // Disable all tests in this file
+#![allow(warnings)]
+#![cfg(any())]
+#![allow(missing_docs)]
 //!
 //! Tests the single-RTT consensus optimization including:
 //! - Steady-state 1-RTT operation

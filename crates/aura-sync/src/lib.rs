@@ -1,7 +1,6 @@
 //! # Aura Sync - Layer 5: Feature/Protocol Implementation
 //!
-//! This crate provides complete end-to-end synchronization protocol implementations
-//! for the Aura threshold identity platform.
+//! This crate provides complete end-to-end synchronization protocol implementations.
 //!
 //! ## Purpose
 //!
@@ -149,6 +148,12 @@ pub mod protocols;
 /// All services implement the unified Service trait.
 pub mod services;
 
+/// Verification module for Merkle-based fact verification
+///
+/// This module provides cryptographic verification of facts during synchronization
+/// using Merkle trees and Bloom filters from the IndexedJournalEffects.
+pub mod verification;
+
 // Re-export core types for convenience
 pub use core::{
     MetricsCollector, SessionManager, SessionResult, SessionState, SyncConfig, SyncError,
@@ -160,6 +165,9 @@ pub use protocols::{WriterFence, WriterFenceGuard};
 
 // Services re-exports
 pub use services::maintenance;
+
+// Verification re-exports
+pub use verification::{MerkleComparison, MerkleVerifier, VerificationResult, VerificationStats};
 
 // =============================================================================
 // Integration Documentation
@@ -186,77 +194,3 @@ pub use aura_core::{AuraError, AuraResult, SessionId};
 // Note: Other layer dependencies are imported as needed but not re-exported
 // to maintain clean API boundaries and avoid dependency pollution.
 // Users should import from the appropriate layer crates directly.
-
-// =============================================================================
-// Cleanup History
-// =============================================================================
-//
-// This section documents legacy code removed during the Phase 1-5 refactoring.
-// All code has been migrated to the unified architecture.
-//
-// Removed in Phase 2:
-// - cache.rs → infrastructure/cache.rs
-// - peer_discovery.rs → infrastructure/peers.rs
-//
-// Removed in Phase 3:
-// - journal_sync.rs → protocols/journal.rs
-// - ota.rs → protocols/ota.rs
-// - receipt_verification.rs → protocols/receipts.rs
-// - choreography/ directory → protocols/
-//
-// Removed in Phase 4:
-// - sync_service.rs → services/sync.rs
-//
-// =============================================================================
-// Migration Notes
-// =============================================================================
-
-// # Refactoring Complete ✅
-//
-// The aura-sync crate has successfully completed a comprehensive 5-phase
-// refactoring to implement Aura's 8-layer architecture with zero legacy code.
-//
-// ## Phase 1: Foundation ✅ COMPLETE
-// - [x] Unified error hierarchy (`core::errors`)
-// - [x] Common message framework (`core::messages`)
-// - [x] Shared configuration (`core::config`)
-// - [x] Unified metrics (`core::metrics`)
-// - [x] Session management (`core::session`)
-// - [x] Integration documentation
-//
-// ## Phase 2: Infrastructure ✅ COMPLETE
-// - [x] Peer management with capability-based filtering (`infrastructure::peers`)
-// - [x] Retry logic with exponential backoff (`infrastructure::retry`)
-// - [x] Cache management with epoch tracking (`infrastructure::cache`)
-// - [x] Connection pooling (`infrastructure::connections`)
-// - [x] Rate limiting with flow budgets (`infrastructure::rate_limit`)
-//
-// ## Phase 3: Protocol Migration ✅ COMPLETE
-// - [x] Anti-entropy protocol (`protocols::anti_entropy`)
-// - [x] Journal synchronization (`protocols::journal`)
-// - [x] Snapshot coordination (`protocols::snapshots`)
-// - [x] OTA upgrade protocol (`protocols::ota`)
-// - [x] Receipt verification (`protocols::receipts`)
-//
-// ## Phase 4: Service Layer ✅ COMPLETE
-// - [x] Unified Service trait interface (`services::Service`)
-// - [x] Sync service with builder pattern (`services::SyncService`)
-// - [x] Maintenance service (`services::MaintenanceService`)
-// - [x] Health monitoring and lifecycle management
-//
-// ## Phase 5: Integration & Testing ✅ COMPLETE
-// - [x] Clean, minimal public API in `lib.rs`
-// - [x] ALL legacy code removed
-// - [x] Documentation updated
-// - [x] Migration history documented
-//
-// ## Architecture
-//
-// The crate now follows a clean 4-module structure:
-// - **`core/`**: Foundation (errors, messages, config, metrics, sessions)
-// - **`infrastructure/`**: Utilities (peers, retry, cache, connections, rate limiting)
-// - **`protocols/`**: Protocol implementations (anti-entropy, journal, snapshots, OTA, receipts)
-// - **`services/`**: High-level services (sync, maintenance)
-//
-// All modules follow Layer 5 patterns with effect-based interfaces, enabling
-// composition, testing, and integration across the Aura ecosystem.

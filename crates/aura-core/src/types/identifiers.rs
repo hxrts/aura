@@ -2,6 +2,13 @@
 //!
 //! This module provides the fundamental identifier types that uniquely identify
 //! various entities and concepts within the Aura system.
+//!
+//! # Identifier Patterns
+//!
+//! Identifiers are generated using declarative macros to reduce boilerplate:
+//! - `uuid_id!`: UUID-backed identifiers with standard traits
+//! - `hash_id!`: Hash32-backed identifiers for content-addressed data
+//! - `string_id!`: String-backed identifiers for human-readable names
 
 use crate::{crypto::hash, Hash32};
 use hex;
@@ -17,100 +24,255 @@ fn derived_uuid(label: &[u8]) -> Uuid {
     Uuid::from_bytes(uuid_bytes)
 }
 
-/// Session identifier for protocol sessions and coordination
-///
-/// Used to uniquely identify sessions across all protocol types (DKD, resharing,
-/// recovery, locking, etc.) and ensure session-specific operations are isolated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct SessionId(pub Uuid);
+// ============================================================================
+// Identifier Generation Macros
+// ============================================================================
 
+/// Generate a UUID-backed identifier type with standard traits and methods.
+///
+/// # Generated Methods
+/// - `new()`: Create with deterministic UUID from label
+/// - `new_from_entropy(entropy: [u8; 32])`: Create from caller-provided entropy
+/// - `from_uuid(uuid: Uuid)`: Create from UUID
+/// - `uuid()`: Get inner UUID
+///
+/// # Generated Traits
+/// - Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize
+/// - Default (uses deterministic sentinel)
+/// - Display (with optional prefix)
+/// - FromStr (parses UUID, optionally with prefix)
+/// - From<Uuid>, From<Self> for Uuid
+macro_rules! uuid_id {
+    (
+        $(#[$meta:meta])*
+        $name:ident,
+        label: $label:expr,
+        prefix: $prefix:expr,
+        default_sentinel: $sentinel:expr
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        pub struct $name(pub Uuid);
+
+        impl $name {
+            /// Create a new identifier with deterministic UUID
+            pub fn new() -> Self {
+                Self(derived_uuid($label))
+            }
+
+            /// Create from caller-provided entropy
+            pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
+                let mut uuid_bytes = [0u8; 16];
+                uuid_bytes.copy_from_slice(&entropy[..16]);
+                Self(Uuid::from_bytes(uuid_bytes))
+            }
+
+            /// Create from a UUID
+            pub fn from_uuid(uuid: Uuid) -> Self {
+                Self(uuid)
+            }
+
+            /// Get the inner UUID
+            pub fn uuid(&self) -> Uuid {
+                self.0
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self(Uuid::from_bytes($sentinel))
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                if $prefix.is_empty() {
+                    write!(f, "{}", self.0)
+                } else {
+                    write!(f, "{}{}", $prefix, self.0)
+                }
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = uuid::Error;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                let uuid_str = if $prefix.is_empty() {
+                    s
+                } else {
+                    s.strip_prefix($prefix).unwrap_or(s)
+                };
+                Ok(Self(Uuid::parse_str(uuid_str)?))
+            }
+        }
+
+        impl From<Uuid> for $name {
+            fn from(uuid: Uuid) -> Self {
+                Self(uuid)
+            }
+        }
+
+        impl From<$name> for Uuid {
+            fn from(id: $name) -> Self {
+                id.0
+            }
+        }
+    };
+}
+
+/// Generate a string-backed identifier type with standard traits.
+///
+/// # Generated Methods
+/// - `new(id: impl Into<String>)`: Create from string
+/// - `as_str()`: Get inner string reference
+///
+/// # Generated Traits
+/// - Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize
+/// - Display (with prefix)
+/// - From<String>, From<&str>
+macro_rules! string_id {
+    (
+        $(#[$meta:meta])*
+        $name:ident,
+        prefix: $prefix:expr
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        pub struct $name(pub String);
+
+        impl $name {
+            /// Create a new identifier
+            pub fn new(id: impl Into<String>) -> Self {
+                Self(id.into())
+            }
+
+            /// Get the inner string
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}{}", $prefix, self.0)
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(id: String) -> Self {
+                Self(id)
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(id: &str) -> Self {
+                Self(id.to_string())
+            }
+        }
+    };
+}
+
+/// Generate a Hash32-backed identifier type with standard traits.
+///
+/// # Generated Methods
+/// - `new(id: Hash32)`: Create from Hash32
+/// - `from_bytes(bytes: [u8; 32])`: Create from raw bytes
+/// - `as_bytes()`: Get raw bytes reference
+///
+/// # Generated Traits
+/// - Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default
+/// - Display (with prefix, hex-encoded)
+/// - FromStr (parses hex, optionally with prefix)
+/// - From<[u8; 32]>
+macro_rules! hash_id {
+    (
+        $(#[$meta:meta])*
+        $name:ident,
+        prefix: $prefix:expr
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+        pub struct $name(pub Hash32);
+
+        impl $name {
+            /// Create from a Hash32
+            pub fn new(id: Hash32) -> Self {
+                Self(id)
+            }
+
+            /// Create from raw bytes
+            pub fn from_bytes(bytes: [u8; 32]) -> Self {
+                Self(Hash32::new(bytes))
+            }
+
+            /// Get the raw bytes
+            pub fn as_bytes(&self) -> &[u8; 32] {
+                self.0.as_bytes()
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}:{}", $prefix, hex::encode(self.0.as_bytes()))
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = hex::FromHexError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                let hex_str = s.strip_prefix(concat!($prefix, ":")).unwrap_or(s);
+                let bytes = hex::decode(hex_str)?;
+                if bytes.len() != 32 {
+                    return Err(hex::FromHexError::InvalidStringLength);
+                }
+                let mut array = [0u8; 32];
+                array.copy_from_slice(&bytes);
+                Ok(Self::from_bytes(array))
+            }
+        }
+
+        impl From<[u8; 32]> for $name {
+            fn from(bytes: [u8; 32]) -> Self {
+                Self::from_bytes(bytes)
+            }
+        }
+    };
+}
+
+// ============================================================================
+// UUID-backed Identifiers
+// ============================================================================
+
+uuid_id!(
+    /// Session identifier for protocol sessions and coordination
+    ///
+    /// Used to uniquely identify sessions across all protocol types (DKD, resharing,
+    /// recovery, locking, etc.) and ensure session-specific operations are isolated.
+    SessionId,
+    label: b"session-id",
+    prefix: "session-",
+    default_sentinel: [0u8; 16]  // Uses new() for default
+);
+
+// SessionId uses new() for default, override the macro-generated one
 impl SessionId {
-    /// Create a new random session ID
-    pub fn new() -> Self {
-        Self(derived_uuid(b"session-id"))
-    }
-
-    /// Create from a UUID
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    /// Get the inner UUID
-    pub fn uuid(&self) -> Uuid {
-        self.0
-    }
-}
-
-impl Default for SessionId {
-    fn default() -> Self {
+    /// Override default to use new()
+    pub fn default_new() -> Self {
         Self::new()
     }
 }
 
-impl fmt::Display for SessionId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "session-{}", self.0)
-    }
-}
-
-impl From<Uuid> for SessionId {
-    fn from(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-}
-
-impl From<SessionId> for Uuid {
-    fn from(session_id: SessionId) -> Self {
-        session_id.0
-    }
-}
-
-/// Event identifier for journal events
-///
-/// Uniquely identifies events within the journal/effect API system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct EventId(pub Uuid);
-
-impl EventId {
-    /// Create a new random event ID
-    pub fn new() -> Self {
-        Self(derived_uuid(b"event-id"))
-    }
-
-    /// Create from a UUID
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    /// Get the inner UUID
-    pub fn uuid(&self) -> Uuid {
-        self.0
-    }
-}
-
-impl Default for EventId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl fmt::Display for EventId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "event-{}", self.0)
-    }
-}
-
-impl From<Uuid> for EventId {
-    fn from(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-}
-
-impl From<EventId> for Uuid {
-    fn from(event_id: EventId) -> Self {
-        event_id.0
-    }
-}
+uuid_id!(
+    /// Event identifier for journal events
+    ///
+    /// Uniquely identifies events within the journal/effect API system.
+    EventId,
+    label: b"event-id",
+    prefix: "event-",
+    default_sentinel: [0u8; 16]
+);
 
 // EventIdExt moved to aura-effects to maintain clean interface layer
 
@@ -155,124 +317,35 @@ impl From<EventNonce> for u64 {
     }
 }
 
-/// Member identifier for group membership
-///
-/// Identifies members within groups or organizational structures.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct MemberId(pub String);
+// ============================================================================
+// String-backed Identifiers
+// ============================================================================
 
-impl MemberId {
-    /// Create a new member ID
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
+string_id!(
+    /// Member identifier for group membership
+    ///
+    /// Identifies members within groups or organizational structures.
+    MemberId,
+    prefix: "member-"
+);
 
-    /// Get the inner string
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+string_id!(
+    /// Individual identifier for identity management
+    ///
+    /// Identifies individual persons or entities within the identity system.
+    IndividualId,
+    prefix: "individual-"
+);
 
-impl fmt::Display for MemberId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "member-{}", self.0)
-    }
-}
-
-impl From<String> for MemberId {
-    fn from(id: String) -> Self {
-        Self(id)
-    }
-}
-
-impl From<&str> for MemberId {
-    fn from(id: &str) -> Self {
-        Self(id.to_string())
-    }
-}
-
-/// Individual identifier for identity management
-///
-/// Identifies individual persons or entities within the identity system.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct IndividualId(pub String);
-
-impl IndividualId {
-    /// Create a new individual ID
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    /// Get the inner string
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for IndividualId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "individual-{}", self.0)
-    }
-}
-
-impl From<String> for IndividualId {
-    fn from(id: String) -> Self {
-        Self(id)
-    }
-}
-
-impl From<&str> for IndividualId {
-    fn from(id: &str) -> Self {
-        Self(id.to_string())
-    }
-}
-
-/// Operation identifier for tracking operations
-///
-/// Identifies specific operations across the system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct OperationId(pub Uuid);
-
-impl OperationId {
-    /// Create a new random operation ID
-    pub fn new() -> Self {
-        Self(derived_uuid(b"operation-id"))
-    }
-
-    /// Create from a UUID
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    /// Get the inner UUID
-    pub fn uuid(&self) -> Uuid {
-        self.0
-    }
-}
-
-impl Default for OperationId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl fmt::Display for OperationId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "operation-{}", self.0)
-    }
-}
-
-impl From<Uuid> for OperationId {
-    fn from(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-}
-
-impl From<OperationId> for Uuid {
-    fn from(operation_id: OperationId) -> Self {
-        operation_id.0
-    }
-}
+uuid_id!(
+    /// Operation identifier for tracking operations
+    ///
+    /// Identifies specific operations across the system.
+    OperationId,
+    label: b"operation-id",
+    prefix: "operation-",
+    default_sentinel: [0u8; 16]
+);
 
 /// Device identifier for distinguishing different devices in a threshold account
 ///
@@ -376,250 +449,82 @@ impl From<[u8; 32]> for DeviceId {
     }
 }
 
-/// Guardian identifier for social recovery guardians
-///
-/// Guardians are trusted third parties that can help recover account access
-/// if the user loses their devices. Each guardian has a unique GuardianId.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
-pub struct GuardianId(pub Uuid);
+uuid_id!(
+    /// Guardian identifier for social recovery guardians
+    ///
+    /// Guardians are trusted third parties that can help recover account access
+    /// if the user loses their devices. Each guardian has a unique GuardianId.
+    GuardianId,
+    label: b"guardian-id",
+    prefix: "",
+    default_sentinel: [0u8; 16]
+);
 
-impl GuardianId {
-    /// Create a guardian ID from caller-provided entropy.
-    pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&entropy[..16]);
-        Self(Uuid::from_bytes(uuid_bytes))
-    }
-
-    /// Create from a UUID
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-}
-
-impl Default for GuardianId {
-    fn default() -> Self {
-        Self::from_uuid(Uuid::from_bytes([0u8; 16]))
-    }
-}
-
-impl fmt::Display for GuardianId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for GuardianId {
-    type Err = uuid::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(GuardianId(Uuid::parse_str(s)?))
-    }
-}
-
-/// Account identifier for distinguishing different Aura accounts
-///
-/// Each Aura account has a unique AccountId. Users may have multiple accounts,
-/// and this ID uniquely identifies each one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct AccountId(pub Uuid);
+uuid_id!(
+    /// Account identifier for distinguishing different Aura accounts
+    ///
+    /// Each Aura account has a unique AccountId. Users may have multiple accounts,
+    /// and this ID uniquely identifies each one.
+    AccountId,
+    label: b"account-id",
+    prefix: "",
+    default_sentinel: [1u8; 16]
+);
 
 impl AccountId {
-    /// Create a new account ID from caller-provided entropy.
-    pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&entropy[..16]);
-        Self(Uuid::from_bytes(uuid_bytes))
-    }
-
-    /// Create from a UUID
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
     /// Create from 32 bytes (for testing)
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        // Take first 16 bytes for UUID
         let mut uuid_bytes = [0u8; 16];
         uuid_bytes.copy_from_slice(&bytes[..16]);
         Self(Uuid::from_bytes(uuid_bytes))
     }
 }
 
-impl Default for AccountId {
-    fn default() -> Self {
-        // Default uses a deterministic sentinel for safety in const contexts.
-        Self(Uuid::from_bytes([1u8; 16]))
-    }
-}
-
-impl fmt::Display for AccountId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for AccountId {
-    type Err = uuid::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(AccountId(Uuid::parse_str(s)?))
-    }
-}
-
-impl From<Uuid> for AccountId {
-    fn from(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-}
-
-impl From<AccountId> for Uuid {
-    fn from(account_id: AccountId) -> Self {
-        account_id.0
-    }
-}
-
-/// Authority identifier - primary identifier for authorities in the new model
-///
-/// Represents an opaque cryptographic authority that can sign operations and
-/// hold state. Replaces AccountId in the authority-centric architecture.
-/// Authorities are self-contained entities with internal device structure
-/// that is not exposed externally.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct AuthorityId(pub Uuid);
+uuid_id!(
+    /// Authority identifier - primary identifier for authorities in the new model
+    ///
+    /// Represents an opaque cryptographic authority that can sign operations and
+    /// hold state. Replaces AccountId in the authority-centric architecture.
+    /// Authorities are self-contained entities with internal device structure
+    /// that is not exposed externally.
+    AuthorityId,
+    label: b"authority-id",
+    prefix: "authority-",
+    default_sentinel: [2u8; 16]
+);
 
 impl AuthorityId {
-    /// Create a new authority ID from caller-provided entropy.
-    pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&entropy[..16]);
-        Self(Uuid::from_bytes(uuid_bytes))
-    }
-
-    /// Create from a UUID
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    /// Get the inner UUID
-    pub fn uuid(&self) -> Uuid {
-        self.0
-    }
-
     /// Convert to bytes
     pub fn to_bytes(&self) -> [u8; 16] {
         self.0.into_bytes()
     }
 }
 
-impl Default for AuthorityId {
-    fn default() -> Self {
-        // Default should be stable; use a non-zero sentinel.
-        Self(Uuid::from_bytes([2u8; 16]))
-    }
-}
+// ============================================================================
+// Hash32-backed Identifiers
+// ============================================================================
 
-impl fmt::Display for AuthorityId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "authority-{}", self.0)
-    }
-}
+hash_id!(
+    /// Channel identifier for AMP messaging substreams
+    ///
+    /// Channels are scoped under a RelationalContext. The identifier is opaque and
+    /// does not reveal membership or topology.
+    ChannelId,
+    prefix: "channel"
+);
 
-impl FromStr for AuthorityId {
-    type Err = uuid::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Handle both raw UUIDs and prefixed format
-        let uuid_str = s.strip_prefix("authority-").unwrap_or(s);
-        Ok(AuthorityId(Uuid::parse_str(uuid_str)?))
-    }
-}
-
-impl From<Uuid> for AuthorityId {
-    fn from(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-}
-
-impl From<AuthorityId> for Uuid {
-    fn from(authority_id: AuthorityId) -> Self {
-        authority_id.0
-    }
-}
-
-/// Channel identifier for AMP messaging substreams
-///
-/// Channels are scoped under a RelationalContext. The identifier is opaque and
-/// does not reveal membership or topology.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
-)]
-pub struct ChannelId(pub Hash32);
-
-impl ChannelId {
-    /// Create a channel identifier from a 32-byte digest
-    pub fn new(id: Hash32) -> Self {
-        Self(id)
-    }
-
-    /// Create an identifier from raw bytes
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self(Hash32::new(bytes))
-    }
-
-    /// Get the raw bytes
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        self.0.as_bytes()
-    }
-}
-
-impl fmt::Display for ChannelId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "channel:{}", hex::encode(self.0.as_bytes()))
-    }
-}
-
-impl FromStr for ChannelId {
-    type Err = hex::FromHexError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Handle both raw hex and prefixed format
-        let hex_str = s.strip_prefix("channel:").unwrap_or(s);
-        let bytes = hex::decode(hex_str)?;
-        if bytes.len() != 32 {
-            return Err(hex::FromHexError::InvalidStringLength);
-        }
-        let mut array = [0u8; 32];
-        array.copy_from_slice(&bytes);
-        Ok(ChannelId::from_bytes(array))
-    }
-}
-
-/// Context identifier for RelationalContexts
-///
-/// Identifies a RelationalContext that manages cross-authority relationships.
-/// ContextIds are opaque and never encode participant data or authority structure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct ContextId(pub Uuid);
+uuid_id!(
+    /// Context identifier for RelationalContexts
+    ///
+    /// Identifies a RelationalContext that manages cross-authority relationships.
+    /// ContextIds are opaque and never encode participant data or authority structure.
+    ContextId,
+    label: b"context-id",
+    prefix: "context-",
+    default_sentinel: [3u8; 16]
+);
 
 impl ContextId {
-    /// Create a new context ID from caller-provided entropy.
-    pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&entropy[..16]);
-        Self(Uuid::from_bytes(uuid_bytes))
-    }
-
-    /// Create from a UUID
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    /// Get the inner UUID
-    pub fn uuid(&self) -> Uuid {
-        self.0
-    }
-
     /// Get bytes representation
     pub fn to_bytes(&self) -> [u8; 16] {
         *self.0.as_bytes()
@@ -628,41 +533,6 @@ impl ContextId {
     /// Get bytes as slice
     pub fn as_bytes(&self) -> &[u8; 16] {
         self.0.as_bytes()
-    }
-}
-
-impl Default for ContextId {
-    fn default() -> Self {
-        // Deterministic sentinel (distinct from other defaults)
-        Self(Uuid::from_bytes([3u8; 16]))
-    }
-}
-
-impl fmt::Display for ContextId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "context-{}", self.0)
-    }
-}
-
-impl FromStr for ContextId {
-    type Err = uuid::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Handle both raw UUIDs and prefixed format
-        let uuid_str = s.strip_prefix("context-").unwrap_or(s);
-        Ok(ContextId(Uuid::parse_str(uuid_str)?))
-    }
-}
-
-impl From<Uuid> for ContextId {
-    fn from(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-}
-
-impl From<ContextId> for Uuid {
-    fn from(context_id: ContextId) -> Self {
-        context_id.0
     }
 }
 

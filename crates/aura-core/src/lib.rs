@@ -73,6 +73,8 @@ pub mod effects;
 pub mod errors;
 /// Core message envelopes and versioning
 pub mod messages;
+/// Query trait and Datalog types for unified query execution
+pub mod query;
 /// Reactive primitives for TUI and database subscriptions
 pub mod reactive;
 /// Relational domain types for cross-authority coordination
@@ -172,7 +174,6 @@ pub use effects::{
     AuthorizationEffects,
     // Reliability types (unified retry implementation)
     BackoffStrategy,
-    ChaosEffects,
     // Supertraits for common effect combinations
     ChoreographyEffects,
     ConsoleEffects,
@@ -193,6 +194,10 @@ pub use effects::{
     MinimalEffects,
     OrderClockEffects,
     PhysicalTimeEffects,
+    // Query effects for Datalog execution
+    QueryEffects,
+    QueryError,
+    QuerySubscription,
     RandomEffects,
     RateLimit,
     // Rate limiting types (unified rate limiting implementation)
@@ -207,12 +212,22 @@ pub use effects::{
     RetryResult,
     SigningEffects,
     SnapshotEffects,
-    TestingEffects,
     // Unified threshold signing effects
     ThresholdSigningEffects,
     TimeEffects,
     TreeEffects,
     WakeCondition,
+};
+
+// Simulation/testing effect interfaces (feature-gated)
+#[cfg(feature = "simulation")]
+pub use effects::{ChaosEffects, TestingEffects};
+
+// Query trait and Datalog types
+#[doc = "unstable: Query interface is under active development"]
+pub use query::{
+    DatalogBindings, DatalogFact, DatalogProgram, DatalogRow, DatalogRule, DatalogValue,
+    FactPredicate, Query, QueryCapability, QueryParseError,
 };
 
 // Cryptographic utilities

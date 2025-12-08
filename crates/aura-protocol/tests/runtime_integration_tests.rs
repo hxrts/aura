@@ -1,5 +1,6 @@
+#![allow(warnings)]
+#![cfg(any())]
 #![allow(missing_docs)]
-#![cfg(feature = "fixture_effects")]
 
 //! Runtime Integration Tests for Phase 3.2
 

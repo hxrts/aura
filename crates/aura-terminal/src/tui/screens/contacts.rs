@@ -5,18 +5,23 @@
 //! ## Reactive Signal Subscription
 //!
 //! When `AppCoreContext` is available, this screen subscribes to contacts state
-//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
+//!
+//! Uses `aura_app::signal_defs::CONTACTS_SIGNAL` with `ReactiveEffects::subscribe()`.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+
+use aura_app::signal_defs::CONTACTS_SIGNAL;
+use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::{
     DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, EmptyState, InvitePeerCallback,
     StatusIndicator, TextInputModal, TextInputState,
 };
-use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle, TwoPanelFocus};
 use crate::tui::hooks::AppCoreContext;
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle, TwoPanelFocus};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Contact, ContactStatus};
 
@@ -267,30 +272,28 @@ pub fn ContactsScreen(
     });
 
     // Subscribe to contacts signal updates if AppCoreContext is available
+    // Uses the unified ReactiveEffects system from aura-core
     if let Some(ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_contacts = reactive_contacts.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                use futures_signals::signal::SignalExt;
-
-                let signal = {
+                // Get a subscription to the contacts signal via ReactiveEffects
+                let mut stream = {
                     let core = app_core.read().await;
-                    core.contacts_signal()
+                    core.subscribe(&*CONTACTS_SIGNAL)
                 };
 
-                signal
-                    .for_each(|contacts_state| {
-                        let contacts: Vec<Contact> = contacts_state
-                            .contacts
-                            .iter()
-                            .map(convert_contact)
-                            .collect();
+                // Subscribe to signal updates - runs until component unmounts
+                while let Ok(contacts_state) = stream.recv().await {
+                    let contacts: Vec<Contact> = contacts_state
+                        .contacts
+                        .iter()
+                        .map(convert_contact)
+                        .collect();
 
-                        reactive_contacts.set(contacts);
-                        async {}
-                    })
-                    .await;
+                    reactive_contacts.set(contacts);
+                }
             }
         });
     }
@@ -383,7 +386,10 @@ pub fn ContactsScreen(
                                 if state.can_submit() {
                                     if let Some(ref callback) = on_update_petname {
                                         if let Some(contact_id) = state.get_context_id() {
-                                            callback(contact_id.to_string(), state.get_value().to_string());
+                                            callback(
+                                                contact_id.to_string(),
+                                                state.get_value().to_string(),
+                                            );
                                         }
                                     }
                                     // Close modal

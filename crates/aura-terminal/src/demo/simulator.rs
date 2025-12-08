@@ -59,8 +59,7 @@ impl DemoSimulator {
         // Get Bob's context ID for guardian bindings (same derivation as TUI)
         let bob_context_entropy =
             aura_core::hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
-        let bob_context =
-            aura_core::identifiers::ContextId::new_from_entropy(bob_context_entropy);
+        let bob_context = aura_core::identifiers::ContextId::new_from_entropy(bob_context_entropy);
 
         // Create the bridge that routes events
         let (bridge, response_tx) = SimulatedBridge::new(bob_authority, None);
@@ -106,6 +105,20 @@ impl DemoSimulator {
     /// Get the bridge for connecting to the TUI
     pub fn bridge(&self) -> Arc<SimulatedBridge> {
         self.bridge.clone()
+    }
+
+    /// Take the response receiver for use by DemoSignalCoordinator
+    ///
+    /// This transfers ownership of the response receiver from the bridge
+    /// to the caller (typically DemoSignalCoordinator). After this call,
+    /// the bridge's process_responses() method will no longer receive
+    /// agent responses - they will go directly to the coordinator.
+    ///
+    /// Can only be called once - returns None after first call.
+    pub async fn take_response_receiver(
+        &self,
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<(AuthorityId, super::AgentResponse)>> {
+        self.bridge.take_response_receiver().await
     }
 
     /// Start the simulated agents and event loop

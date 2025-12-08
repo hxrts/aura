@@ -95,6 +95,8 @@
 // UniFFI scaffolding (when building for mobile)
 // =============================================================================
 
+#![allow(unpredictable_function_pointer_comparisons)]
+
 #[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();
 
@@ -123,10 +125,11 @@ pub mod bridge;
 pub mod core;
 pub mod queries;
 pub mod runtime_bridge;
+pub mod signal_defs;
 pub mod views;
 
 #[cfg(feature = "signals")]
-pub mod signals;
+pub mod reactive_state;
 
 pub mod platform;
 
@@ -154,7 +157,19 @@ pub use crate::views::{
 pub use crate::bridge::callback::StateObserver;
 
 #[cfg(feature = "signals")]
-pub use crate::signals::{ReactiveState, ReactiveVec};
+pub use crate::reactive_state::{ReactiveState, ReactiveVec};
+
+// Re-export signal definitions for convenience
+// Note: SyncStatus and ConnectionStatus are signal-specific types in signal_defs module.
+// The runtime_bridge::SyncStatus is different (runtime status).
+pub use crate::signal_defs::{
+    register_app_signals, AppError, BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL,
+    CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
+    NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL, SYNC_STATUS_SIGNAL, UNREAD_COUNT_SIGNAL,
+};
+// For signal-specific types, use the full path:
+// - signal_defs::ConnectionStatus (signal value type)
+// - signal_defs::SyncStatus (signal value type - different from runtime_bridge::SyncStatus)
 
 // Re-export commonly used types from aura-core
 pub use aura_core::identifiers::{AuthorityId, ContextId};

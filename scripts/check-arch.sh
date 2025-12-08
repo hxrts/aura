@@ -173,8 +173,8 @@ TEST_ALLOWLIST="crates/aura-testkit/|/tests/|/examples/|benches/"
 # Rendezvous LAN discovery (UDP sockets are platform-specific and intentionally live here)
 LAN_DISCOVERY_ALLOWLIST="crates/aura-rendezvous/src/lan_discovery.rs"
 
-# Simulator handlers (Layer 6) - simulation-specific impurity
-SIMULATOR_ALLOWLIST="crates/aura-simulator/src/handlers/"
+# Simulator (Layer 6/8) - simulation-specific impurity and test infrastructure (handlers, quint ITF loading)
+SIMULATOR_ALLOWLIST="crates/aura-simulator/src/"
 
 # Runtime assembly (Layer 6) - where effects are composed with real impls
 RUNTIME_ALLOWLIST="crates/aura-agent/src/runtime/"
@@ -241,7 +241,8 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_LAYERS" = true ]; then
   # aura-core should only define traits/types (no impl of Effects)
   # Exclude: trait definitions, blanket impls (impl<...), and doc comments
   # Blanket impls include: extension traits and Arc<T> wrappers (both allowed exceptions per docs/999)
-  if grep -R "impl.*Effects" crates/aura-core/src 2>/dev/null | grep -v "trait" | grep -v "impl<" | grep -v ":///" >/dev/null; then
+  # Use word boundary \bimpl\b to avoid false positives like "SimpleIntentEffects"
+  if grep -RE "\bimpl\b.*Effects" crates/aura-core/src 2>/dev/null | grep -v "trait" | grep -v "impl<" | grep -v ":///" >/dev/null; then
     violation "aura-core contains effect implementations (should be interface-only)"
   else
     info "aura-core: interface-only (no effect impls)"
@@ -290,9 +291,11 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     info "Infra effect traits defined only in aura-core"
   fi
 
-  # aura-effects should stay stateless
-  if grep -R "Arc<Mutex\|Arc<RwLock\|Rc<RefCell" crates/aura-effects/src 2>/dev/null | grep -v "test" >/dev/null; then
+  # aura-effects should stay stateless (except allowed infra caches: reactive signal registry, query fact cache)
+  stateful_matches=$(grep -R "Arc<Mutex\|Arc<RwLock\|Rc<RefCell" crates/aura-effects/src 2>/dev/null | grep -v "test" | grep -v "reactive/handler.rs" | grep -v "query/handler.rs" || true)
+  if [ -n "$stateful_matches" ]; then
     violation "aura-effects contains stateful constructs (should be stateless handlers)"
+    echo "$stateful_matches"
   fi
 
   # Guard for mocks in aura-effects
@@ -347,6 +350,9 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   # Layer 6 (runtime) and Layer 7 (UI) are allowed to use tokio directly
   # Note: aura-wot/storage_authorization.rs uses tokio::sync::RwLock for AuthorizedStorageHandler
   # which is a handler wrapper that should eventually move to aura-composition (tracked technical debt)
+  # Note: aura-core/effects/reactive.rs uses tokio::sync::broadcast for SignalStream<T> which is
+  # part of the ReactiveEffects trait API. This should be abstracted to a runtime-agnostic stream
+  # trait in the future (tracked technical debt: abstract SignalStreamReceiver trait)
   filtered_runtime=$(echo "$runtime_hits" \
     | grep -v "crates/aura-effects/" \
     | grep -v "crates/aura-agent/" \
@@ -356,6 +362,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-testkit/" \
     | grep -v "$LAN_DISCOVERY_ALLOWLIST" \
     | grep -v "crates/aura-wot/src/storage_authorization.rs" \
+    | grep -v "crates/aura-core/src/effects/reactive.rs" \
     | grep -v "#\\[tokio::test\\]" \
     | grep -v "#\\[async_std::test\\]" \
     | grep -v "#\\[tokio::main\\]" \
@@ -369,7 +376,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   # Strict flag for direct wall-clock/random usage outside allowed areas
   impure_pattern="SystemTime::now|Instant::now|thread_rng\\(|rand::thread_rng|chrono::Utc::now|chrono::Local::now|rand::rngs::OsRng|rand::random"
   impure_hits=$(rg --no-heading "$impure_pattern" crates -g "*.rs" || true)
-  # Allowlist: effect handlers, testkit, simulator, agent runtime, terminal UI, tests
+  # Allowlist: effect handlers, testkit, simulator, agent runtime, terminal UI, tests, benches
   # Terminal UI is allowed to use direct system time for UI measurements/metrics that don't affect protocol behavior
   # Note: Lines ending with .unwrap() or containing #[tokio::test] are likely test code
   filtered_impure=$(echo "$impure_hits" \
@@ -379,6 +386,8 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-agent/src/runtime/" \
     | grep -v "crates/aura-terminal/" \
     | grep -v "$LAN_DISCOVERY_ALLOWLIST" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" \
     | grep -v "tests/performance_regression.rs" \
     | grep -v "///" \
     | grep -v "//!" \

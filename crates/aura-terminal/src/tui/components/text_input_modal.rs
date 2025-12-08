@@ -192,7 +192,13 @@ impl TextInputState {
     }
 
     /// Show the modal with initial configuration
-    pub fn show(&mut self, title: &str, initial_value: &str, placeholder: &str, context_id: Option<String>) {
+    pub fn show(
+        &mut self,
+        title: &str,
+        initial_value: &str,
+        placeholder: &str,
+        context_id: Option<String>,
+    ) {
         self.visible = true;
         self.title = title.to_string();
         self.value = initial_value.to_string();
@@ -264,7 +270,12 @@ mod tests {
         assert!(state.value.is_empty());
         assert!(!state.can_submit());
 
-        state.show("Edit Petname", "Alice", "Enter name...", Some("contact-123".to_string()));
+        state.show(
+            "Edit Petname",
+            "Alice",
+            "Enter name...",
+            Some("contact-123".to_string()),
+        );
         assert!(state.visible);
         assert_eq!(state.value, "Alice");
         assert_eq!(state.title, "Edit Petname");

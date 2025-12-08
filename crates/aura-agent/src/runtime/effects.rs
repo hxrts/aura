@@ -20,6 +20,7 @@ use aura_core::{
 };
 use aura_effects::{
     crypto::RealCryptoHandler,
+    database::IndexedJournalHandler,
     secure::RealSecureStorageHandler,
     storage::FilesystemStorageHandler,
     time::{LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler},
@@ -118,8 +119,7 @@ pub struct AuraEffectSystem {
     order_clock: OrderClockHandler,
     authorization_handler:
         aura_wot::effects::WotAuthorizationHandler<aura_effects::crypto::RealCryptoHandler>,
-    leakage_handler:
-        aura_effects::leakage_handler::ProductionLeakageHandler<FilesystemStorageHandler>,
+    leakage_handler: aura_effects::leakage::ProductionLeakageHandler<FilesystemStorageHandler>,
     journal_policy: Option<(biscuit_auth::Biscuit, aura_wot::BiscuitAuthorizationBridge)>,
     journal_verifying_key: Option<Vec<u8>>,
     authority_id: AuthorityId,
@@ -131,6 +131,8 @@ pub struct AuraEffectSystem {
     fact_registry: Arc<FactRegistry>,
     /// Secure storage for cryptographic key material (FROST keys, device keys)
     secure_storage_handler: RealSecureStorageHandler,
+    /// Indexed journal handler for efficient fact lookups (B-tree, Bloom, Merkle)
+    indexed_journal: Arc<IndexedJournalHandler>,
     /// Test mode flag to bypass authorization guards
     test_mode: bool,
 }
@@ -186,7 +188,7 @@ impl AuraEffectSystem {
         let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
         let leakage_storage =
             FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
-        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
+        let leakage_handler = aura_effects::leakage::ProductionLeakageHandler::with_storage(
             Arc::new(leakage_storage),
         );
         let oplog = Arc::new(RwLock::new(Vec::new()));
@@ -196,6 +198,8 @@ impl AuraEffectSystem {
         let transport_inbox = Arc::new(RwLock::new(Vec::new()));
         let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
         let secure_storage_handler = RealSecureStorageHandler::default();
+        // Create indexed journal with capacity for 100k facts
+        let indexed_journal = Arc::new(IndexedJournalHandler::with_capacity(100_000));
 
         Self {
             config,
@@ -218,6 +222,7 @@ impl AuraEffectSystem {
             transport_stats,
             fact_registry: Arc::new(build_fact_registry()),
             secure_storage_handler,
+            indexed_journal,
             test_mode,
         }
     }
@@ -292,6 +297,14 @@ impl AuraEffectSystem {
     /// Get the fact registry for domain-specific fact reduction.
     pub fn fact_registry(&self) -> &FactRegistry {
         &self.fact_registry
+    }
+
+    /// Get the indexed journal handler for efficient fact lookups.
+    ///
+    /// Provides O(log n) B-tree indexed lookups, O(1) Bloom filter membership tests,
+    /// and Merkle tree integrity verification.
+    pub fn indexed_journal(&self) -> &Arc<IndexedJournalHandler> {
+        &self.indexed_journal
     }
 
     /// Build a permissive Biscuit policy/bridge pair for journal enforcement.
@@ -1118,8 +1131,10 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             .await?;
 
         // Store public key package
-        let pub_location =
-            SecureStorageLocation::new(&format!("{}_public", key_prefix), format!("{}/0", authority));
+        let pub_location = SecureStorageLocation::new(
+            format!("{}_public", key_prefix),
+            format!("{}/0", authority),
+        );
         self.secure_storage_handler
             .secure_store(&pub_location, &signing_keys.public_key_package, &caps)
             .await?;
@@ -1285,8 +1300,25 @@ impl JournalEffects for AuraEffectSystem {
         self.journal_handler().get_journal().await
     }
 
-    async fn persist_journal(&self, _journal: &Journal) -> Result<(), AuraError> {
-        self.journal_handler().persist_journal(_journal).await
+    async fn persist_journal(&self, journal: &Journal) -> Result<(), AuraError> {
+        // Persist the journal to storage
+        self.journal_handler().persist_journal(journal).await?;
+
+        // Index all facts for efficient lookup (B-tree, Bloom filter, Merkle tree)
+        let timestamp = aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
+            ts_ms: self.time_handler.physical_time_now_ms(),
+            uncertainty: None,
+        });
+        for (predicate, value) in journal.facts.iter() {
+            self.indexed_journal.add_fact(
+                predicate.clone(),
+                value.clone(),
+                Some(self.authority_id),
+                Some(timestamp.clone()),
+            );
+        }
+
+        Ok(())
     }
 
     async fn get_flow_budget(
@@ -1319,6 +1351,64 @@ impl JournalEffects for AuraEffectSystem {
         self.journal_handler()
             .charge_flow_budget(_context, _peer, _cost)
             .await
+    }
+}
+
+// Implementation of IndexedJournalEffects - provides B-tree indexes, Bloom filters, Merkle trees
+#[async_trait]
+impl IndexedJournalEffects for AuraEffectSystem {
+    fn watch_facts(&self) -> Box<dyn indexed::FactStreamReceiver> {
+        self.indexed_journal.watch_facts()
+    }
+
+    async fn facts_by_predicate(
+        &self,
+        predicate: &str,
+    ) -> Result<Vec<indexed::IndexedFact>, AuraError> {
+        self.indexed_journal.facts_by_predicate(predicate).await
+    }
+
+    async fn facts_by_authority(
+        &self,
+        authority: &AuthorityId,
+    ) -> Result<Vec<indexed::IndexedFact>, AuraError> {
+        self.indexed_journal.facts_by_authority(authority).await
+    }
+
+    async fn facts_in_range(
+        &self,
+        start: aura_core::time::TimeStamp,
+        end: aura_core::time::TimeStamp,
+    ) -> Result<Vec<indexed::IndexedFact>, AuraError> {
+        self.indexed_journal.facts_in_range(start, end).await
+    }
+
+    async fn all_facts(&self) -> Result<Vec<indexed::IndexedFact>, AuraError> {
+        self.indexed_journal.all_facts().await
+    }
+
+    fn might_contain(
+        &self,
+        predicate: &str,
+        value: &aura_core::domain::journal::FactValue,
+    ) -> bool {
+        self.indexed_journal.might_contain(predicate, value)
+    }
+
+    async fn merkle_root(&self) -> Result<[u8; 32], AuraError> {
+        self.indexed_journal.merkle_root().await
+    }
+
+    async fn verify_fact_inclusion(&self, fact: &indexed::IndexedFact) -> Result<bool, AuraError> {
+        self.indexed_journal.verify_fact_inclusion(fact).await
+    }
+
+    async fn get_bloom_filter(&self) -> Result<BloomFilter, AuraError> {
+        self.indexed_journal.get_bloom_filter().await
+    }
+
+    async fn index_stats(&self) -> Result<indexed::IndexStats, AuraError> {
+        self.indexed_journal.index_stats().await
     }
 }
 

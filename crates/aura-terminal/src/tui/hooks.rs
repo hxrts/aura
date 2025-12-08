@@ -1,39 +1,48 @@
 //! # Custom Hooks for iocraft
 //!
-//! Bridges futures-signals reactive state with iocraft's component system.
+//! Bridges reactive state with iocraft's component system using the unified
+//! `ReactiveEffects` system from aura-core.
 //!
 //! ## Overview
 //!
-//! These hooks allow iocraft components to subscribe to futures-signals
+//! These hooks allow iocraft components to subscribe to application signals
 //! and automatically re-render when data changes.
 //!
 //! ## Push-Based Signal Subscription
 //!
 //! iocraft's `use_future` hook enables true push-based reactive updates by
-//! spawning async tasks that subscribe to futures-signals. When a signal emits
-//! a new value, the task updates iocraft's `State<T>`, which triggers a re-render.
+//! spawning async tasks that subscribe to `ReactiveEffects` signals. When a
+//! signal emits a new value, the task updates iocraft's `State<T>`, which
+//! triggers a re-render.
 //!
 //! ```ignore
-//! use futures_signals::signal::SignalExt;
 //! use iocraft::prelude::*;
+//! use aura_app::signal_defs::CHAT_SIGNAL;
+//! use aura_core::effects::reactive::ReactiveEffects;
 //!
 //! #[component]
 //! fn ChatScreen(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
 //!     // Get AppCore from context
-//!     let app_core = hooks.use_context::<AppCoreContext>();
+//!     let ctx = hooks.use_context::<AppCoreContext>();
 //!
 //!     // Initialize state from current value
-//!     let chat_state = hooks.use_state(|| app_core.snapshot().chat);
+//!     let chat_state = hooks.use_state(|| Default::default());
 //!
 //!     // Subscribe to signal updates via use_future
 //!     hooks.use_future({
 //!         let mut chat_state = chat_state.clone();
-//!         let signal = app_core.chat_signal();
+//!         let app_core = ctx.app_core.clone();
 //!         async move {
-//!             signal.for_each(|new_value| {
+//!             // Get subscription via ReactiveEffects
+//!             let mut stream = {
+//!                 let core = app_core.read().await;
+//!                 core.subscribe(&*CHAT_SIGNAL)
+//!             };
+//!
+//!             // Process updates until component unmounts
+//!             while let Ok(new_value) = stream.recv().await {
 //!                 chat_state.set(new_value);
-//!                 async {}
-//!             }).await;
+//!             }
 //!         }
 //!     });
 //!
@@ -50,11 +59,10 @@
 
 use std::sync::Arc;
 
-use aura_app::AppCore;
+use aura_app::{AppCore, ReactiveState, ReactiveVec};
 use tokio::sync::RwLock;
 
 use crate::tui::context::IoContext;
-use crate::tui::reactive::signals::{ReactiveState, ReactiveVec};
 
 // =============================================================================
 // AppCore Context for iocraft
@@ -63,34 +71,35 @@ use crate::tui::reactive::signals::{ReactiveState, ReactiveVec};
 /// Context type for sharing AppCore with iocraft components.
 ///
 /// This enables components to access AppCore via `hooks.use_context::<AppCoreContext>()`.
-/// Components can then use `use_future` to subscribe to signals for reactive updates.
+/// Components can then use `use_future` to subscribe to signals for reactive updates
+/// via the unified `ReactiveEffects` system.
 ///
 /// ## Example
 ///
 /// ```ignore
 /// use crate::tui::hooks::AppCoreContext;
+/// use aura_app::signal_defs::CHAT_SIGNAL;
+/// use aura_core::effects::reactive::ReactiveEffects;
 ///
 /// #[component]
 /// fn MyComponent(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
 ///     let ctx = hooks.use_context::<AppCoreContext>();
 ///
 ///     // Initialize state from current value
-///     let messages = hooks.use_state(|| ctx.snapshot().chat.messages.clone());
+///     let messages = hooks.use_state(|| Vec::new());
 ///
-///     // Subscribe to signal updates
+///     // Subscribe to signal updates via ReactiveEffects
 ///     hooks.use_future({
 ///         let mut messages = messages.clone();
 ///         let app_core = ctx.app_core.clone();
 ///         async move {
-///             use futures_signals::signal::SignalExt;
-///             let signal = {
+///             let mut stream = {
 ///                 let core = app_core.read().await;
-///                 core.chat_signal()
+///                 core.subscribe(&*CHAT_SIGNAL)
 ///             };
-///             signal.for_each(|state| {
+///             while let Ok(state) = stream.recv().await {
 ///                 messages.set(state.messages.clone());
-///                 async {}
-///             }).await;
+///             }
 ///         }
 ///     });
 ///
@@ -189,11 +198,11 @@ pub trait HasReactiveData {
 #[derive(Debug, Clone)]
 pub struct ChatSnapshot {
     /// Current channels list
-    pub channels: Vec<crate::tui::reactive::queries::Channel>,
+    pub channels: Vec<aura_app::views::chat::Channel>,
     /// Currently selected channel ID
     pub selected_channel: Option<String>,
     /// Messages for the selected channel
-    pub messages: Vec<crate::tui::reactive::queries::Message>,
+    pub messages: Vec<aura_app::views::chat::Message>,
 }
 
 impl Default for ChatSnapshot {
@@ -210,7 +219,7 @@ impl Default for ChatSnapshot {
 #[derive(Debug, Clone)]
 pub struct GuardiansSnapshot {
     /// Guardian list
-    pub guardians: Vec<crate::tui::reactive::queries::Guardian>,
+    pub guardians: Vec<aura_app::views::recovery::Guardian>,
     /// Threshold configuration
     pub threshold: Option<crate::tui::reactive::views::ThresholdConfig>,
 }
@@ -227,8 +236,8 @@ impl Default for GuardiansSnapshot {
 /// Snapshot of recovery-related data for rendering
 #[derive(Debug, Clone)]
 pub struct RecoverySnapshot {
-    /// Recovery status
-    pub status: crate::tui::reactive::queries::RecoveryStatus,
+    /// Recovery state
+    pub status: aura_app::views::recovery::RecoveryState,
     /// Progress percentage (0-100)
     pub progress_percent: u32,
     /// Whether recovery is in progress
@@ -238,7 +247,7 @@ pub struct RecoverySnapshot {
 impl Default for RecoverySnapshot {
     fn default() -> Self {
         Self {
-            status: crate::tui::reactive::queries::RecoveryStatus::default(),
+            status: aura_app::views::recovery::RecoveryState::default(),
             progress_percent: 0,
             is_in_progress: false,
         }
@@ -249,7 +258,7 @@ impl Default for RecoverySnapshot {
 #[derive(Debug, Clone)]
 pub struct InvitationsSnapshot {
     /// All invitations
-    pub invitations: Vec<crate::tui::reactive::queries::Invitation>,
+    pub invitations: Vec<aura_app::views::invitations::Invitation>,
     /// Count of pending invitations
     pub pending_count: usize,
 }

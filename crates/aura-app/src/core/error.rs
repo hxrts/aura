@@ -1,5 +1,6 @@
 //! # Error Types for Intent Dispatch
 
+use aura_core::effects::intent::IntentDispatchError;
 use thiserror::Error;
 
 /// Errors that can occur when dispatching an intent
@@ -117,6 +118,28 @@ impl IntentError {
     pub fn service_error(reason: impl Into<String>) -> Self {
         Self::ServiceError {
             reason: reason.into(),
+        }
+    }
+}
+
+// =============================================================================
+// From<IntentDispatchError> Implementation
+// =============================================================================
+// This enables IntentError to be used with the IntentEffects trait from aura-core.
+
+impl From<IntentDispatchError> for IntentError {
+    fn from(err: IntentDispatchError) -> Self {
+        match err {
+            IntentDispatchError::Unauthorized { reason } => Self::Unauthorized { reason },
+            IntentDispatchError::ValidationFailed { reason } => Self::ValidationFailed { reason },
+            IntentDispatchError::FlowBudgetExceeded { reason } => Self::Unauthorized {
+                reason: format!("Flow budget exceeded: {}", reason),
+            },
+            IntentDispatchError::JournalError { reason } => Self::JournalError { reason },
+            IntentDispatchError::ReactiveError { reason } => Self::InternalError {
+                reason: format!("Reactive error: {}", reason),
+            },
+            IntentDispatchError::InternalError { reason } => Self::InternalError { reason },
         }
     }
 }

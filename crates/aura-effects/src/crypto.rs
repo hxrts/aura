@@ -370,11 +370,7 @@ impl CryptoEffects for RealCryptoHandler {
             })
         } else if threshold >= 2 {
             // Threshold: use FROST
-            tracing::debug!(
-                threshold,
-                max_signers,
-                "Generating FROST threshold keys"
-            );
+            tracing::debug!(threshold, max_signers, "Generating FROST threshold keys");
 
             let frost_result = self.frost_generate_keys(threshold, max_signers).await?;
 
@@ -441,8 +437,8 @@ impl CryptoEffects for RealCryptoHandler {
         match mode {
             SigningMode::SingleSigner => {
                 // Deserialize and verify with Ed25519
-                let package =
-                    SingleSignerPublicKeyPackage::from_bytes(public_key_package).map_err(|e| {
+                let package = SingleSignerPublicKeyPackage::from_bytes(public_key_package)
+                    .map_err(|e| {
                         CryptoError::invalid(format!(
                             "Invalid single-signer public key package: {}",
                             e
@@ -1132,8 +1128,9 @@ mod single_signer_tests {
         assert!(!keys.public_key_package.is_empty());
 
         // Verify the key package can be deserialized
-        let key_pkg =
-            aura_core::crypto::single_signer::SingleSignerKeyPackage::from_bytes(&keys.key_packages[0]);
+        let key_pkg = aura_core::crypto::single_signer::SingleSignerKeyPackage::from_bytes(
+            &keys.key_packages[0],
+        );
         assert!(key_pkg.is_ok(), "Key package should deserialize");
         let key_pkg = key_pkg.unwrap();
         assert_eq!(key_pkg.signing_key().len(), 32);
@@ -1241,7 +1238,10 @@ mod single_signer_tests {
             .await;
 
         assert!(valid.is_ok(), "verify_signature should not error");
-        assert!(!valid.unwrap(), "Signature should be invalid for wrong message");
+        assert!(
+            !valid.unwrap(),
+            "Signature should be invalid for wrong message"
+        );
     }
 
     #[tokio::test]
@@ -1255,7 +1255,10 @@ mod single_signer_tests {
             .sign_with_key(message, &keys.key_packages[0], SigningMode::Threshold)
             .await;
 
-        assert!(result.is_err(), "Threshold signing via sign_with_key should fail");
+        assert!(
+            result.is_err(),
+            "Threshold signing via sign_with_key should fail"
+        );
     }
 
     #[tokio::test]

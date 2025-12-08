@@ -9,6 +9,7 @@
 //! Intent → Authorize (Biscuit) → Journal → Reduce → View → Sync
 //! ```
 
+use aura_core::effects::intent::{AuthorizationLevel, IntentMetadata};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::TimeStamp;
 use aura_journal::JournalFact;
@@ -1112,5 +1113,98 @@ impl Intent {
                 | Self::GetStatus { .. }
                 | Self::GetVersion
         )
+    }
+
+    /// Get the authorization level required for this intent
+    pub fn authorization_level(&self) -> AuthorizationLevel {
+        match self {
+            // Navigation and queries are public
+            Self::NavigateTo { .. }
+            | Self::GoBack
+            | Self::ShowAuthority { .. }
+            | Self::ListAuthorities
+            | Self::InspectContext { .. }
+            | Self::ShowReceipts { .. }
+            | Self::InspectAmpChannel { .. }
+            | Self::GetOtaStatus
+            | Self::ListUpgradeProposals
+            | Self::GetUpgradeStats
+            | Self::GetStatus { .. }
+            | Self::GetVersion => AuthorizationLevel::Public,
+
+            // Most user operations need basic authorization
+            Self::SendMessage { .. }
+            | Self::CreateChannel { .. }
+            | Self::MarkAsRead { .. }
+            | Self::EditMessage { .. }
+            | Self::DeleteMessage { .. }
+            | Self::JoinChannel { .. }
+            | Self::LeaveChannel { .. }
+            | Self::UpdateChannel { .. }
+            | Self::CreateInvitation { .. }
+            | Self::AcceptInvitation { .. }
+            | Self::RejectInvitation { .. }
+            | Self::RevokeInvitation { .. }
+            | Self::SetPetname { .. }
+            | Self::RemoveContact { .. }
+            | Self::CreateBlock { .. }
+            | Self::SetBlockName { .. }
+            | Self::SetBlockTopic { .. } => AuthorizationLevel::Basic,
+
+            // Recovery and moderation are sensitive
+            Self::InitiateRecovery
+            | Self::ApproveRecovery { .. }
+            | Self::RejectRecovery { .. }
+            | Self::CompleteRecovery { .. }
+            | Self::SetGuardianThreshold { .. }
+            | Self::ToggleGuardian { .. }
+            | Self::BanUser { .. }
+            | Self::UnbanUser { .. }
+            | Self::MuteUser { .. }
+            | Self::UnmuteUser { .. }
+            | Self::KickUser { .. }
+            | Self::InviteMember { .. }
+            | Self::RemoveMember { .. }
+            | Self::InviteToBlock { .. }
+            | Self::PinMessage { .. }
+            | Self::UnpinMessage { .. }
+            | Self::UpdateBlockStorage { .. } => AuthorizationLevel::Sensitive,
+
+            // Admin operations require elevated privileges
+            Self::ReplaceAdmin { .. }
+            | Self::ProposeSnapshot
+            | Self::CreateAuthority { .. }
+            | Self::AddDevice { .. }
+            | Self::RemoveDevice { .. }
+            | Self::UpdateThreshold { .. }
+            | Self::CreateAccount { .. }
+            | Self::BumpChannelEpoch { .. }
+            | Self::CheckpointChannel { .. }
+            | Self::ProposeUpgrade { .. }
+            | Self::SetOtaPolicy { .. }
+            | Self::OptInUpgrade { .. }
+            | Self::StartNode { .. }
+            | Self::RunThreshold { .. }
+            | Self::InitAccount { .. } => AuthorizationLevel::Admin,
+        }
+    }
+}
+
+// =============================================================================
+// IntentMetadata Implementation
+// =============================================================================
+// This allows Intent to be used with the IntentEffects trait from aura-core.
+
+impl IntentMetadata for Intent {
+    fn description(&self) -> &str {
+        Intent::description(self)
+    }
+
+    fn should_journal(&self) -> bool {
+        Intent::should_journal(self)
+    }
+
+    fn authorization_level(&self) -> AuthorizationLevel {
+        Intent::authorization_level(self)
     }
 }

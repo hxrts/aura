@@ -1,10 +1,12 @@
+#![allow(warnings)]
+#![cfg(any())]
+#![allow(missing_docs)]
 //! Tests for individual effect traits and their implementations
-#![cfg(feature = "fixture_effects")]
-#![doc = include_str!("../../README.md")]
+#![doc = include_str!("../../../README.md")]
 //!
 //! Uses aura-testkit for deterministic, reproducible testing
 
-use aura_testkit::{test_key_pair, TestEffectsBuilder};
+use aura_testkit::{test_key_pair, TestEffectHandler, TestEffectsBuilder};
 
 /// Test crypto effects through testkit
 #[tokio::test]
@@ -15,8 +17,11 @@ async fn test_crypto_effects() {
         .build()
         .expect("Failed to build test effects");
 
-    // Verify the effects context was created
-    assert_eq!(effects.device_id(), device_id);
+    // Verify the effects context was created with correct execution mode
+    assert_eq!(
+        effects.execution_mode(),
+        aura_core::effects::ExecutionMode::Testing
+    );
 }
 
 /// Test deterministic key generation

@@ -253,17 +253,6 @@ pub struct CacheStatistics {
 }
 
 // =============================================================================
-// Legacy Compatibility
-// =============================================================================
-
-/// Legacy type alias for migration
-///
-/// This maintains backwards compatibility with existing code that uses
-/// `CacheEpochFloors`. New code should use `CacheEpochTracker`.
-#[deprecated(note = "Use CacheEpochTracker instead")]
-pub type CacheEpochFloors = CacheEpochTracker;
-
-// =============================================================================
 // Tests
 // =============================================================================
 

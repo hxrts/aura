@@ -4,9 +4,21 @@
 //! These use owned types (String, Vec) for compatibility with iocraft's 'static lifetime requirements.
 
 // Re-export source types for adapters
-use aura_app::{Channel as AppChannel, Message as AppMessage};
+use aura_app::views::{
+    chat::{Channel as AppChannel, Message as AppMessage},
+    contacts::Contact as AppContact,
+    invitations::{
+        Invitation as AppInvitation, InvitationDirection as AppInvitationDirection,
+        InvitationStatus as AppInvitationStatus, InvitationType as AppInvitationType,
+    },
+    recovery::{
+        Guardian as AppGuardian, GuardianStatus as AppGuardianStatus,
+        RecoveryApproval as AppRecoveryApproval, RecoveryProcess as AppRecoveryProcess,
+        RecoveryProcessStatus as AppRecoveryProcessStatus, RecoveryState as AppRecoveryState,
+    },
+};
 
-use crate::tui::reactive::{queries, views};
+use crate::tui::reactive::views;
 
 /// A chat channel
 #[derive(Clone, Debug, Default)]
@@ -279,44 +291,53 @@ impl Invitation {
     }
 }
 
-impl From<queries::InvitationDirection> for InvitationDirection {
-    fn from(d: queries::InvitationDirection) -> Self {
+impl From<AppInvitationDirection> for InvitationDirection {
+    fn from(d: AppInvitationDirection) -> Self {
         match d {
-            queries::InvitationDirection::Outbound => Self::Outbound,
-            queries::InvitationDirection::Inbound => Self::Inbound,
+            AppInvitationDirection::Sent => Self::Outbound,
+            AppInvitationDirection::Received => Self::Inbound,
         }
     }
 }
 
-impl From<queries::InvitationStatus> for InvitationStatus {
-    fn from(s: queries::InvitationStatus) -> Self {
+impl From<AppInvitationStatus> for InvitationStatus {
+    fn from(s: AppInvitationStatus) -> Self {
         match s {
-            queries::InvitationStatus::Pending => Self::Pending,
-            queries::InvitationStatus::Accepted => Self::Accepted,
-            queries::InvitationStatus::Declined => Self::Declined,
-            queries::InvitationStatus::Expired => Self::Expired,
-            queries::InvitationStatus::Cancelled => Self::Cancelled,
+            AppInvitationStatus::Pending => Self::Pending,
+            AppInvitationStatus::Accepted => Self::Accepted,
+            AppInvitationStatus::Rejected => Self::Declined,
+            AppInvitationStatus::Expired => Self::Expired,
+            AppInvitationStatus::Revoked => Self::Cancelled,
         }
     }
 }
 
-impl From<queries::InvitationType> for InvitationType {
-    fn from(t: queries::InvitationType) -> Self {
+impl From<AppInvitationType> for InvitationType {
+    fn from(t: AppInvitationType) -> Self {
         match t {
-            queries::InvitationType::Guardian => Self::Guardian,
-            queries::InvitationType::Channel => Self::Channel,
-            queries::InvitationType::Contact => Self::Contact,
+            AppInvitationType::Guardian => Self::Guardian,
+            AppInvitationType::Chat => Self::Channel,
+            AppInvitationType::Block => Self::Contact, // Block invitations → Contact in TUI
         }
     }
 }
 
-impl From<&queries::Invitation> for Invitation {
-    fn from(inv: &queries::Invitation) -> Self {
+impl From<&AppInvitation> for Invitation {
+    fn from(inv: &AppInvitation) -> Self {
+        // For direction-aware display names
+        let (other_party_id, other_party_name) = match inv.direction {
+            AppInvitationDirection::Sent => (
+                inv.to_id.clone().unwrap_or_default(),
+                inv.to_name.clone().unwrap_or_default(),
+            ),
+            AppInvitationDirection::Received => (inv.from_id.clone(), inv.from_name.clone()),
+        };
+
         Self {
             id: inv.id.clone(),
             direction: inv.direction.into(),
-            other_party_id: inv.other_party_id.clone(),
-            other_party_name: inv.other_party_name.clone(),
+            other_party_id,
+            other_party_name,
             invitation_type: inv.invitation_type.into(),
             status: inv.status.into(),
             created_at: inv.created_at,
@@ -516,25 +537,24 @@ pub struct Guardian {
     pub has_share: bool,
 }
 
-impl From<queries::GuardianStatus> for GuardianStatus {
-    fn from(status: queries::GuardianStatus) -> Self {
+impl From<AppGuardianStatus> for GuardianStatus {
+    fn from(status: AppGuardianStatus) -> Self {
         match status {
-            queries::GuardianStatus::Active => Self::Active,
-            queries::GuardianStatus::Pending => Self::Pending,
-            queries::GuardianStatus::Offline => Self::Offline,
-            queries::GuardianStatus::Declined => Self::Declined,
-            queries::GuardianStatus::Removed => Self::Removed,
+            AppGuardianStatus::Active => Self::Active,
+            AppGuardianStatus::Pending => Self::Pending,
+            AppGuardianStatus::Offline => Self::Offline,
+            AppGuardianStatus::Revoked => Self::Removed, // Map Revoked to Removed for TUI
         }
     }
 }
 
-impl From<&queries::Guardian> for Guardian {
-    fn from(g: &queries::Guardian) -> Self {
+impl From<&AppGuardian> for Guardian {
+    fn from(g: &AppGuardian) -> Self {
         Self {
-            id: g.authority_id.clone(),
+            id: g.id.clone(),
             name: g.name.clone(),
             status: g.status.into(),
-            has_share: g.share_index.is_some(),
+            has_share: true, // In the unified model, guardians always have shares
         }
     }
 }
@@ -603,36 +623,57 @@ pub struct RecoveryStatus {
     pub approvals: Vec<GuardianApproval>,
 }
 
-impl From<queries::RecoveryState> for RecoveryState {
-    fn from(state: queries::RecoveryState) -> Self {
-        match state {
-            queries::RecoveryState::None => Self::None,
-            queries::RecoveryState::Initiated => Self::Initiated,
-            queries::RecoveryState::ThresholdMet => Self::ThresholdMet,
-            queries::RecoveryState::InProgress => Self::InProgress,
-            queries::RecoveryState::Completed => Self::Completed,
-            queries::RecoveryState::Failed => Self::Failed,
-            queries::RecoveryState::Cancelled => Self::Cancelled,
+impl From<AppRecoveryProcessStatus> for RecoveryState {
+    fn from(status: AppRecoveryProcessStatus) -> Self {
+        match status {
+            AppRecoveryProcessStatus::Idle => Self::None,
+            AppRecoveryProcessStatus::Initiated => Self::Initiated,
+            AppRecoveryProcessStatus::WaitingForApprovals => Self::Initiated, // Still waiting
+            AppRecoveryProcessStatus::Approved => Self::ThresholdMet,
+            AppRecoveryProcessStatus::Completed => Self::Completed,
+            AppRecoveryProcessStatus::Failed => Self::Failed,
         }
     }
 }
 
-impl From<&queries::GuardianApproval> for GuardianApproval {
-    fn from(a: &queries::GuardianApproval) -> Self {
+impl From<&AppRecoveryApproval> for GuardianApproval {
+    fn from(a: &AppRecoveryApproval) -> Self {
         Self {
-            guardian_name: a.guardian_name.clone(),
-            approved: a.approved,
+            guardian_name: a.guardian_id.clone(), // Will be resolved to name by UI
+            approved: true,                       // If there's an approval record, it's approved
         }
     }
 }
 
-impl From<&queries::RecoveryStatus> for RecoveryStatus {
-    fn from(rs: &queries::RecoveryStatus) -> Self {
+impl From<&AppRecoveryState> for RecoveryStatus {
+    fn from(rs: &AppRecoveryState) -> Self {
+        // Determine state from active_recovery if present
+        let (state, approvals_received, threshold, approvals) = match &rs.active_recovery {
+            Some(process) => (
+                process.status.into(),
+                process.approvals_received,
+                process.approvals_required,
+                process.approvals.iter().map(|a| a.into()).collect(),
+            ),
+            None => (RecoveryState::None, 0, rs.threshold, Vec::new()),
+        };
+
         Self {
-            state: rs.state.into(),
-            approvals_received: rs.approvals_received,
-            threshold: rs.threshold,
-            approvals: rs.approvals.iter().map(|a| a.into()).collect(),
+            state,
+            approvals_received,
+            threshold,
+            approvals,
+        }
+    }
+}
+
+impl From<&AppRecoveryProcess> for RecoveryStatus {
+    fn from(p: &AppRecoveryProcess) -> Self {
+        Self {
+            state: p.status.into(),
+            approvals_received: p.approvals_received,
+            threshold: p.approvals_required,
+            approvals: p.approvals.iter().map(|a| a.into()).collect(),
         }
     }
 }
@@ -821,7 +862,27 @@ impl BlockSummary {
 }
 
 // =============================================================================
-// Adapters from views:: types
+// Adapters from aura_app types
+// =============================================================================
+
+impl From<&AppContact> for Contact {
+    fn from(c: &AppContact) -> Self {
+        Self {
+            id: c.id.clone(),
+            petname: c.petname.clone(),
+            suggested_name: c.suggested_name.clone(),
+            status: if c.is_online {
+                ContactStatus::Active
+            } else {
+                ContactStatus::Pending
+            },
+            is_guardian: c.is_guardian,
+        }
+    }
+}
+
+// =============================================================================
+// Adapters from views:: types (legacy - will be removed)
 // =============================================================================
 
 impl From<&views::Contact> for Contact {

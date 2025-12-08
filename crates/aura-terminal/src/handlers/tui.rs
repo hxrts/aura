@@ -2,8 +2,8 @@
 //!
 //! Handler for launching the TUI (Terminal User Interface).
 //!
-//! The TUI code is IDENTICAL for production and demo modes. The only difference
-//! is the backend:
+//! The TUI code is identical for production and demo modes.
+//! The only difference is the backend:
 //! - Production: Uses `build_production()` for real network/storage
 //! - Demo: Uses `build_simulation_async()` for simulated effects
 
@@ -24,14 +24,8 @@ use tokio::sync::RwLock;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
-use crate::demo::DemoSimulator;
-use crate::tui::{
-    context::IoContext,
-    effects::EffectBridge,
-    screens::run_app_with_context,
-};
-#[cfg(feature = "development")]
-use crate::tui::effects::EventFilter;
+use crate::demo::{DemoSignalCoordinator, DemoSimulator};
+use crate::tui::{context::IoContext, screens::run_app_with_context};
 
 /// Whether the TUI is running in demo or production mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +50,10 @@ struct AccountConfig {
 /// Account loading result
 pub enum AccountLoadResult {
     /// Account loaded from existing file
-    Loaded { authority: AuthorityId, context: ContextId },
+    Loaded {
+        authority: AuthorityId,
+        context: ContextId,
+    },
     /// No account exists - need to show setup modal
     NotFound,
 }
@@ -97,7 +94,10 @@ fn try_load_account(base_path: &Path) -> Result<AccountLoadResult, AuraError> {
     let context_id = ContextId::new_from_entropy(context_bytes);
 
     println!("Loaded existing account from {}", account_path.display());
-    Ok(AccountLoadResult::Loaded { authority: authority_id, context: context_id })
+    Ok(AccountLoadResult::Loaded {
+        authority: authority_id,
+        context: context_id,
+    })
 }
 
 /// Create placeholder authority/context IDs for pre-account-setup state
@@ -106,10 +106,16 @@ fn try_load_account(base_path: &Path) -> Result<AccountLoadResult, AuraError> {
 /// the account hasn't been set up yet (via `has_account()` check).
 fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
     // Use placeholder prefix so we can detect this is not a real account
-    let authority_entropy =
-        aura_core::hash::hash(format!("{}authority:{}", PLACEHOLDER_AUTHORITY_PREFIX, device_id_str).as_bytes());
-    let context_entropy =
-        aura_core::hash::hash(format!("{}context:{}", PLACEHOLDER_AUTHORITY_PREFIX, device_id_str).as_bytes());
+    let authority_entropy = aura_core::hash::hash(
+        format!(
+            "{}authority:{}",
+            PLACEHOLDER_AUTHORITY_PREFIX, device_id_str
+        )
+        .as_bytes(),
+    );
+    let context_entropy = aura_core::hash::hash(
+        format!("{}context:{}", PLACEHOLDER_AUTHORITY_PREFIX, device_id_str).as_bytes(),
+    );
 
     let authority_id = AuthorityId::new_from_entropy(authority_entropy);
     let context_id = ContextId::new_from_entropy(context_entropy);
@@ -130,8 +136,7 @@ pub fn create_account(
     // This ensures the same device_id always creates the same account
     let authority_entropy =
         aura_core::hash::hash(format!("authority:{}", device_id_str).as_bytes());
-    let context_entropy =
-        aura_core::hash::hash(format!("context:{}", device_id_str).as_bytes());
+    let context_entropy = aura_core::hash::hash(format!("context:{}", device_id_str).as_bytes());
 
     let authority_id = AuthorityId::new_from_entropy(authority_entropy);
     let context_id = ContextId::new_from_entropy(context_entropy);
@@ -148,14 +153,12 @@ pub fn create_account(
 
     // Ensure directory exists
     if let Some(parent) = account_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            AuraError::internal(format!("Failed to create data directory: {}", e))
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AuraError::internal(format!("Failed to create data directory: {}", e)))?;
     }
 
-    let content = serde_json::to_string_pretty(&config).map_err(|e| {
-        AuraError::internal(format!("Failed to serialize account config: {}", e))
-    })?;
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
 
     std::fs::write(&account_path, content)
         .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
@@ -197,7 +200,12 @@ pub async fn handle_tui(args: &TuiArgs) -> Result<()> {
     }
 
     let data_dir = args.data_dir.clone().or_else(|| env::var("AURA_PATH").ok());
-    handle_tui_launch(data_dir.as_deref(), args.device_id.as_deref(), TuiMode::Production).await
+    handle_tui_launch(
+        data_dir.as_deref(),
+        args.device_id.as_deref(),
+        TuiMode::Production,
+    )
+    .await
 }
 
 /// Launch the TUI with the specified mode
@@ -265,14 +273,12 @@ async fn handle_tui_launch(
 
     // Build agent using appropriate builder method based on mode
     let agent = match mode {
-        TuiMode::Production => {
-            AgentBuilder::new()
-                .with_config(agent_config)
-                .with_authority(authority_id)
-                .build_production(&effect_ctx)
-                .await
-                .map_err(|e| AuraError::internal(format!("Failed to create agent: {}", e)))?
-        }
+        TuiMode::Production => AgentBuilder::new()
+            .with_config(agent_config)
+            .with_authority(authority_id)
+            .build_production(&effect_ctx)
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to create agent: {}", e)))?,
         TuiMode::Demo { seed } => {
             println!("Using simulation agent with seed: {}", seed);
             AgentBuilder::new()
@@ -280,7 +286,9 @@ async fn handle_tui_launch(
                 .with_authority(authority_id)
                 .build_simulation_async(seed, &effect_ctx)
                 .await
-                .map_err(|e| AuraError::internal(format!("Failed to create simulation agent: {}", e)))?
+                .map_err(|e| {
+                    AuraError::internal(format!("Failed to create simulation agent: {}", e))
+                })?
         }
     };
 
@@ -312,19 +320,27 @@ async fn handle_tui_launch(
 
     let app_core = Arc::new(RwLock::new(app_core));
 
-    println!("AppCore initialized (with runtime bridge)");
+    // Initialize reactive signals for the unified effect system
+    // This registers all application signals (CHAT_SIGNAL, RECOVERY_SIGNAL, etc.)
+    // with the ReactiveHandler so screens can subscribe to state changes
+    {
+        let core = app_core.write().await;
+        if let Err(e) = core.init_signals().await {
+            eprintln!(
+                "Warning: Failed to initialize signals: {} - reactive updates may not work",
+                e
+            );
+        }
+    }
 
-    // Create effect bridge for TUI with agent and AppCore integration
-    // Agent provides effect system access (dependency inversion pattern)
-    // AppCore provides intent-based state management
-    let bridge = EffectBridge::with_agent_and_app_core(agent, app_core.clone());
+    println!("AppCore initialized (with runtime bridge and reactive signals)");
 
     // In demo mode, start the simulator with Alice and Charlie peer agents
-    // This must happen BEFORE creating IoContext so we can subscribe to bridge events
+    // DemoSignalCoordinator handles bidirectional event routing via signals
     #[cfg(feature = "development")]
-    let (mut simulator, _event_forwarder_handle): (
+    let (mut simulator, _coordinator_handles): (
         Option<DemoSimulator>,
-        Option<tokio::task::JoinHandle<()>>,
+        Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)>,
     ) = match mode {
         TuiMode::Demo { seed } => {
             println!("Starting demo simulator...");
@@ -342,87 +358,27 @@ async fn handle_tui_launch(
             println!("Charlie online: {}", charlie_id);
             println!("Peers connected: {}", sim.peer_count());
 
-            // Subscribe to bridge events before moving bridge into IoContext
-            // This allows us to forward TUI events to the simulator
-            let mut tui_subscription = bridge.subscribe(EventFilter::all());
-
-            // Get Bob's authority and context IDs for event routing
-            let bob_authority = authority_id;
-            let bob_context = context_id;
-
-            // Get the simulator's bridge for bidirectional event routing
+            // Get the simulator's bridge and response receiver for signal coordinator
             let sim_bridge = sim.bridge();
+            let response_rx = sim
+                .take_response_receiver()
+                .await
+                .ok_or_else(|| AuraError::internal("Response receiver already taken"))?;
 
-            // Task 1: Forward TUI events (Bob's actions) to simulator (Alice/Charlie)
-            // This converts AuraEvent → AgentEvent and sends to Alice/Charlie
-            let sim_bridge_tx = sim_bridge.clone();
-            let handle = tokio::spawn(async move {
-                while let Some(event) = tui_subscription.recv().await {
-                    // Convert relevant TUI events to AgentEvents
-                    match &event {
-                        crate::tui::effects::AuraEvent::RecoveryStarted { session_id } => {
-                            // Bob started recovery - notify Alice/Charlie
-                            tracing::info!(
-                                "Demo: Bob started recovery session {}",
-                                session_id
-                            );
-                            // Convert to AgentEvent and send to simulator
-                            // Use the same context_id that Alice/Charlie are guardians for
-                            let agent_event = crate::demo::AgentEvent::RecoveryRequested {
-                                account: bob_authority,
-                                session_id: session_id.clone(),
-                                context_id: bob_context,
-                            };
-                            sim_bridge_tx.send_agent_event(agent_event);
-                        }
-                        crate::tui::effects::AuraEvent::MessageReceived {
-                            channel, content, from, ..
-                        } => {
-                            // Only forward messages from Bob to Alice/Charlie
-                            // Skip messages that Alice/Charlie sent back
-                            if from == &bob_authority.to_string() {
-                                let agent_event = crate::demo::AgentEvent::MessageReceived {
-                                    from: bob_authority,
-                                    channel: channel.clone(),
-                                    content: content.clone(),
-                                };
-                                sim_bridge_tx.send_agent_event(agent_event);
-                            }
-                        }
-                        _ => {
-                            // Log other events for debugging
-                            tracing::debug!(
-                                "Demo: TUI event (not forwarded): {:?}",
-                                event
-                            );
-                        }
-                    }
-                }
-            });
+            // Create DemoSignalCoordinator - handles bidirectional event routing via signals
+            // This replaces the manual AuraEvent forwarding with signal subscriptions
+            let coordinator = Arc::new(DemoSignalCoordinator::new(
+                app_core.clone(),
+                authority_id, // Bob's authority
+                sim_bridge,
+                response_rx,
+            ));
 
-            // Task 2: Forward simulator events (Alice/Charlie responses) to Bob's TUI
-            // This routes AuraEvents from SimulatedBridge to Bob's EffectBridge
-            let mut sim_tui_rx = sim_bridge.subscribe_tui_events();
-            let bob_event_tx = bridge.event_sender();
-            let _response_forwarder_handle = tokio::spawn(async move {
-                loop {
-                    match sim_tui_rx.recv().await {
-                        Ok(event) => {
-                            tracing::debug!("Demo: Forwarding simulator event to Bob's TUI: {:?}", event);
-                            let _ = bob_event_tx.send(event);
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!("Demo: Missed {} events from simulator", n);
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                            tracing::info!("Demo: Simulator event channel closed");
-                            break;
-                        }
-                    }
-                }
-            });
+            // Start coordinator tasks
+            let handles = coordinator.start();
+            println!("Demo signal coordinator started");
 
-            (Some(sim), Some(handle))
+            (Some(sim), Some(handles))
         }
         TuiMode::Production => (None, None),
     };
@@ -437,13 +393,15 @@ async fn handle_tui_launch(
             println!("Demo hints available:");
             println!("  Alice invite code: {}", hints.alice_invite_code);
             println!("  Charlie invite code: {}", hints.charlie_invite_code);
-            IoContext::with_demo_hints(bridge, app_core, hints, has_existing_account)
+            IoContext::with_demo_hints(app_core, hints, has_existing_account)
         }
-        TuiMode::Production => IoContext::with_account_status(bridge, app_core, has_existing_account),
+        TuiMode::Production => {
+            IoContext::with_account_status(app_core.clone(), has_existing_account)
+        }
     };
 
     #[cfg(not(feature = "development"))]
-    let ctx = IoContext::with_account_status(bridge, app_core, has_existing_account);
+    let ctx = IoContext::with_account_status(app_core.clone(), has_existing_account);
 
     // Without development feature, demo mode just shows a warning
     #[cfg(not(feature = "development"))]

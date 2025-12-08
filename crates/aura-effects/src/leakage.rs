@@ -1,4 +1,4 @@
-//! Layer 3: Leakage Effect Handlers - Production Only
+//! Layer 3: Leakage Effect Handlers
 //!
 //! Stateless single-party implementation of LeakageEffects from aura-core (Layer 1).
 //! This handler provides production leakage tracking by composing StorageEffects.

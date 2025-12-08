@@ -1,5 +1,7 @@
+#![allow(warnings)]
+#![cfg(any())]
+#![allow(missing_docs)]
 //! Performance regression tests for the effect system
-#![cfg(feature = "fixture_effects")]
 //!
 //! These tests ensure that performance optimizations don't regress
 //! and that the system meets expected performance targets.

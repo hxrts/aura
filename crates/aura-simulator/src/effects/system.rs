@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use aura_core::{
     crypto::single_signer::SigningMode,
     effects::{
-        crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext, SigningKeyGenResult},
+        crypto::{
+            FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext, SigningKeyGenResult,
+        },
         *,
     },
     identifiers::DeviceId,

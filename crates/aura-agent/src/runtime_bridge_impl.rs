@@ -214,6 +214,23 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     // =========================================================================
+    // Invitation Operations
+    // =========================================================================
+
+    async fn export_invitation(&self, invitation_id: &str) -> Result<String, IntentError> {
+        // Get the invitation service from the agent
+        let invitation_service = self.agent.invitations().await.map_err(|e| {
+            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+        })?;
+
+        // Export the invitation code
+        invitation_service
+            .export_code(invitation_id)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to export invitation: {}", e)))
+    }
+
+    // =========================================================================
     // Authentication
     // =========================================================================
 

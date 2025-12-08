@@ -37,7 +37,7 @@ web-js = ["wasm"]
 web-dominator = ["wasm", "signals", "dep:dominator"]
 
 # =============================================================================
-# API Style Features
+# API Style Features (internal - use platform features above)
 # =============================================================================
 
 # Enable futures-signals based reactivity
@@ -47,9 +47,6 @@ signals = ["dep:futures-signals"]
 # Enable callback-based reactivity (StateObserver trait)
 # Used by: ios, android, web-js
 callbacks = []
-
-# Enable both (for testing or hybrid scenarios)
-full = ["signals", "callbacks"]
 
 # =============================================================================
 # FFI Features
@@ -65,13 +62,10 @@ wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:web-sys"]
 # Development Features
 # =============================================================================
 
-# Enable test utilities and mocks
-testutils = []
-
 # Enable tracing/logging instrumentation
 instrumented = ["dep:tracing"]
 
-# Serialize intents/state for debugging (now always available via serde_json)
+# Serialize intents/state for debugging
 debug-serialize = []
 
 # Host binding stub for downstream integrations (iOS/Swift, etc.)
@@ -92,6 +86,7 @@ required-features = ["host"]
 [dependencies]
 # Core Aura crates
 aura-core = { path = "../aura-core" }
+aura-effects = { path = "../aura-effects" }
 aura-journal = { path = "../aura-journal" }
 
 # Always required

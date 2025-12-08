@@ -72,7 +72,7 @@ pub fn timestamp_sort_compare(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::{OrderTime, PhysicalTime, LogicalTime, VectorClock};
+    use crate::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
 
     // ==========================================================
     // Reflexivity tests (compare_refl in Lean)
@@ -105,13 +105,31 @@ mod tests {
 
     #[test]
     fn test_transitive_physical() {
-        let a = TimeStamp::PhysicalClock(PhysicalTime { ts_ms: 100, uncertainty: None });
-        let b = TimeStamp::PhysicalClock(PhysicalTime { ts_ms: 200, uncertainty: None });
-        let c = TimeStamp::PhysicalClock(PhysicalTime { ts_ms: 300, uncertainty: None });
+        let a = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 100,
+            uncertainty: None,
+        });
+        let b = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 200,
+            uncertainty: None,
+        });
+        let c = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 300,
+            uncertainty: None,
+        });
 
-        assert_eq!(timestamp_compare(&a, &b, OrderingPolicy::Native), TimeOrdering::Before);
-        assert_eq!(timestamp_compare(&b, &c, OrderingPolicy::Native), TimeOrdering::Before);
-        assert_eq!(timestamp_compare(&a, &c, OrderingPolicy::Native), TimeOrdering::Before);
+        assert_eq!(
+            timestamp_compare(&a, &b, OrderingPolicy::Native),
+            TimeOrdering::Before
+        );
+        assert_eq!(
+            timestamp_compare(&b, &c, OrderingPolicy::Native),
+            TimeOrdering::Before
+        );
+        assert_eq!(
+            timestamp_compare(&a, &c, OrderingPolicy::Native),
+            TimeOrdering::Before
+        );
     }
 
     #[test]
@@ -120,9 +138,18 @@ mod tests {
         let b = TimeStamp::OrderClock(OrderTime([2u8; 32]));
         let c = TimeStamp::OrderClock(OrderTime([3u8; 32]));
 
-        assert_eq!(timestamp_compare(&a, &b, OrderingPolicy::Native), TimeOrdering::Before);
-        assert_eq!(timestamp_compare(&b, &c, OrderingPolicy::Native), TimeOrdering::Before);
-        assert_eq!(timestamp_compare(&a, &c, OrderingPolicy::Native), TimeOrdering::Before);
+        assert_eq!(
+            timestamp_compare(&a, &b, OrderingPolicy::Native),
+            TimeOrdering::Before
+        );
+        assert_eq!(
+            timestamp_compare(&b, &c, OrderingPolicy::Native),
+            TimeOrdering::Before
+        );
+        assert_eq!(
+            timestamp_compare(&a, &c, OrderingPolicy::Native),
+            TimeOrdering::Before
+        );
     }
 
     // ==========================================================
@@ -131,7 +158,10 @@ mod tests {
 
     #[test]
     fn test_cross_domain_incomparable() {
-        let physical = TimeStamp::PhysicalClock(PhysicalTime { ts_ms: 1000, uncertainty: None });
+        let physical = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1000,
+            uncertainty: None,
+        });
         let order = TimeStamp::OrderClock(OrderTime([1u8; 32]));
 
         assert_eq!(
@@ -156,8 +186,14 @@ mod tests {
         let mut v2 = VectorClock::new();
         v2.insert(device2, 1);
 
-        let t1 = TimeStamp::LogicalClock(LogicalTime { vector: v1, lamport: 1 });
-        let t2 = TimeStamp::LogicalClock(LogicalTime { vector: v2, lamport: 1 });
+        let t1 = TimeStamp::LogicalClock(LogicalTime {
+            vector: v1,
+            lamport: 1,
+        });
+        let t2 = TimeStamp::LogicalClock(LogicalTime {
+            vector: v2,
+            lamport: 1,
+        });
 
         // Native policy returns Incomparable for concurrent vector clocks
         assert_eq!(

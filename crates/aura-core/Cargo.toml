@@ -65,11 +65,11 @@ proptest = { workspace = true, optional = true }
 
 
 [features]
+default = []
 # Enable proptest integration for property testing
 proptest = ["dep:proptest"]
-# Enable JSON debug output for development
-json-debug = []
-default = []
+# Enable simulation/testing effect traits (used by aura-simulator, aura-quint, aura-testkit)
+simulation = []
 
 [dev-dependencies]
 # For testing

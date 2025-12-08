@@ -49,11 +49,7 @@ pub fn ListItem(props: &ListItemProps) -> impl Into<AnyElement<'static>> {
         Theme::LIST_TEXT_MUTED
     };
 
-    let icon_color = if props.selected {
-        Theme::SECONDARY
-    } else {
-        Theme::SECONDARY
-    };
+    let icon_color = Theme::SECONDARY;
 
     let label = props.label.clone();
     let description = props.description.clone();

@@ -49,61 +49,6 @@ impl AntiEntropyHandler {
         &self.config
     }
 
-    /// Main anti-entropy synchronization routine
-    ///
-    /// Algorithm:
-    /// 1. Get digest of local OpLog
-    /// 2. Exchange digests with peer
-    /// 3. Compute set difference (ops we have but peer doesn't)
-    /// 4. Compute set difference (ops peer has but we don't)
-    /// 5. Push missing ops to peer
-    /// 6. Pull missing ops from peer
-    /// 7. Verify and merge received ops
-    async fn sync_with_peer_impl(&self, peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
-        // Step 1: Get local digest
-        let local_digest = self.get_oplog_digest().await?;
-
-        // Step 2: Request remote digest
-        tracing::warn!(
-            "sync_with_peer_impl: Cannot use guard chain without effect system parameter"
-        );
-        let remote_digest = self.request_digest_from_peer(peer_id).await?;
-
-        // Step 3: Compute differences
-        let ops_to_push = self
-            .compute_ops_to_push(&local_digest, &remote_digest)
-            .await?;
-        let cids_to_pull = self.compute_cids_to_pull(&local_digest, &remote_digest);
-
-        // Step 4: Push our ops to peer
-        if !ops_to_push.is_empty() {
-            // Note: This now requires an effect system parameter to use guard chain
-            tracing::warn!(
-                "sync_with_peer_impl: Cannot use guard chain without effect system parameter"
-            );
-            self.push_op_to_peers(ops_to_push[0].clone(), vec![peer_id])
-                .await?;
-        }
-
-        // Track applied operations count
-        let mut applied = 0;
-
-        // Step 5: Pull missing ops from peer
-        if !cids_to_pull.is_empty() {
-            // Note: This now requires an effect system parameter to use guard chain
-            tracing::warn!(
-                "sync_with_peer_impl: Cannot use guard chain without effect system parameter"
-            );
-            let missing_ops = self.request_ops_from_peer(peer_id, cids_to_pull).await?;
-            applied = missing_ops.len();
-
-            // Step 6: Verify and merge
-            self.merge_remote_ops(missing_ops).await?;
-        }
-
-        Ok(SyncMetrics::with_applied(applied))
-    }
-
     /// Request digest from peer using guard chain with proper effect system
     ///
     /// This method enforces the guard chain predicate:
@@ -154,28 +99,6 @@ impl AntiEntropyHandler {
         Ok(BloomDigest {
             cids: BTreeSet::new(),
         })
-    }
-
-    /// Legacy: Request digest from peer without guard chain (deprecated)
-    #[deprecated(note = "Use request_digest_from_peer_guarded with effect system instead")]
-    async fn request_digest_from_peer_with_guard_chain(
-        &self,
-        peer_id: Uuid,
-    ) -> Result<BloomDigest, SyncError> {
-        tracing::warn!(
-            "SECURITY: Digest request for peer {:?} bypasses guard chain - no effect system available",
-            peer_id
-        );
-        // Return empty to indicate no actual sync can happen without guard chain
-        Ok(BloomDigest {
-            cids: BTreeSet::new(),
-        })
-    }
-
-    /// Legacy digest request (deprecated)
-    async fn request_digest_from_peer(&self, peer_id: Uuid) -> Result<BloomDigest, SyncError> {
-        self.request_digest_from_peer_with_guard_chain(peer_id)
-            .await
     }
 
     /// Compute which ops we should push to peer
@@ -242,8 +165,18 @@ impl AntiEntropyHandler {
 
 #[async_trait]
 impl SyncEffects for AntiEntropyHandler {
+    /// Sync with peer requires guard chain - returns error from trait impl.
+    ///
+    /// Use `sync_with_peer_guarded()` with an effect system for production sync.
     async fn sync_with_peer(&self, peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
-        self.sync_with_peer_impl(peer_id).await
+        tracing::warn!(
+            peer = ?peer_id,
+            "sync_with_peer called without effect system - use sync_with_peer_guarded() instead"
+        );
+        Err(SyncError::GuardChainFailure(
+            "sync_with_peer requires guard chain - use sync_with_peer_guarded() with effect system"
+                .to_string(),
+        ))
     }
 
     async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
@@ -264,13 +197,22 @@ impl SyncEffects for AntiEntropyHandler {
         self.compute_ops_to_push(&local_digest, remote_digest).await
     }
 
+    /// Request ops from peer requires guard chain - returns error from trait impl.
+    ///
+    /// Use `request_ops_from_peer_guarded()` with an effect system for production.
     async fn request_ops_from_peer(
         &self,
         peer_id: Uuid,
-        cids: Vec<Hash32>,
+        _cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        self.request_ops_from_peer_with_guard_chain_impl(peer_id, cids)
-            .await
+        tracing::warn!(
+            peer = ?peer_id,
+            "request_ops_from_peer called without effect system - use request_ops_from_peer_guarded()"
+        );
+        Err(SyncError::GuardChainFailure(
+            "request_ops_from_peer requires guard chain - use request_ops_from_peer_guarded()"
+                .to_string(),
+        ))
     }
 
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
@@ -286,14 +228,21 @@ impl SyncEffects for AntiEntropyHandler {
         Ok(())
     }
 
+    /// Announce op requires guard chain - returns error from trait impl.
+    ///
+    /// Use `announce_new_op_guarded()` with an effect system for production.
     async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
-        // Legacy path - prefer the guard chain version for production use
-        tracing::debug!("Announcing new op: {:?} (INSECURE)", cid);
-        Ok(())
+        tracing::warn!(
+            cid = ?cid,
+            "announce_new_op called without effect system - use announce_new_op_guarded()"
+        );
+        Err(SyncError::GuardChainFailure(
+            "announce_new_op requires guard chain - use announce_new_op_guarded()".to_string(),
+        ))
     }
 
     async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
-        // Local oplog lookup - network request pending transport layer integration
+        // Local oplog lookup - no network request needed
         let oplog = self.oplog.read().await;
         oplog
             .iter()
@@ -302,13 +251,18 @@ impl SyncEffects for AntiEntropyHandler {
             .ok_or(SyncError::OperationNotFound)
     }
 
-    async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
+    /// Push op to peers requires guard chain - returns error from trait impl.
+    ///
+    /// Use `push_op_to_peers_guarded()` with an effect system for production.
+    async fn push_op_to_peers(&self, op: AttestedOp, _peers: Vec<Uuid>) -> Result<(), SyncError> {
         let cid = Hash32::from(op.op.parent_commitment);
         tracing::warn!(
-            "push_op_to_peers currently bypasses guard chain; transport integration pending"
+            cid = ?cid,
+            "push_op_to_peers called without effect system - use push_op_to_peers_guarded()"
         );
-        tracing::debug!("Pushing op {:?} to peers: {:?} (no-op)", cid, peers);
-        Ok(())
+        Err(SyncError::GuardChainFailure(
+            "push_op_to_peers requires guard chain - use push_op_to_peers_guarded()".to_string(),
+        ))
     }
 
     async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
@@ -386,26 +340,6 @@ impl AntiEntropyHandler {
         Ok(ops_result)
     }
 
-    /// Legacy: Request ops without guard chain (deprecated)
-    #[deprecated(note = "Use request_ops_from_peer_guarded with effect system instead")]
-    async fn request_ops_from_peer_with_guard_chain_impl(
-        &self,
-        peer_id: Uuid,
-        cids: Vec<Hash32>,
-    ) -> Result<Vec<AttestedOp>, SyncError> {
-        tracing::warn!(
-            "SECURITY: Ops request from peer {:?} bypasses guard chain - no effect system available",
-            peer_id
-        );
-        // Return local ops but log security warning
-        let oplog = self.oplog.read().await;
-        Ok(oplog
-            .iter()
-            .filter(|op| cids.contains(&Hash32::from(op.op.parent_commitment)))
-            .cloned()
-            .collect())
-    }
-
     /// Announce new operation to all peers with guard chain enforcement
     ///
     /// Evaluates guard chain for each peer:
@@ -467,21 +401,6 @@ impl AntiEntropyHandler {
                 failed_count = failed_peers.len(),
                 total_peers = peers.len(),
                 "Some peer announcements failed guard chain evaluation"
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Legacy: Announce op without guard chain (deprecated)
-    #[deprecated(note = "Use announce_new_op_guarded with effect system instead")]
-    async fn announce_new_op_with_guard_chain_impl(&self, cid: Hash32) -> Result<(), SyncError> {
-        let peers = self.peers.read().await;
-        for &peer_uuid in peers.iter() {
-            tracing::warn!(
-                "SECURITY: Announcement of op {:?} to peer {:?} bypasses guard chain",
-                cid,
-                peer_uuid
             );
         }
 
@@ -598,35 +517,6 @@ impl AntiEntropyHandler {
             self.merge_remote_ops(missing_ops).await?;
         }
 
-        Ok(())
-    }
-
-    #[allow(deprecated)]
-    async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
-        self.announce_new_op_with_guard_chain_impl(cid).await
-    }
-
-    async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
-        // In real implementation: transport.request(peer_id, OpRequest { cid }).await
-        let oplog = self.oplog.read().await;
-
-        oplog
-            .iter()
-            .find(|op| Hash32::from(op.op.parent_commitment) == cid)
-            .cloned()
-            .ok_or(SyncError::OperationNotFound)
-    }
-
-    #[deprecated(note = "Use push_op_to_peers_guarded with effect system instead")]
-    async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
-        let cid = Hash32::from(op.op.parent_commitment);
-        tracing::warn!(
-            "SECURITY: push_op_to_peers called without effect system - guard chain bypassed for op {:?}",
-            cid
-        );
-        for peer in peers {
-            tracing::debug!("Pushing op to peer: {:?} (INSECURE)", peer);
-        }
         Ok(())
     }
 }

@@ -730,7 +730,8 @@ impl UnifiedHandlerBridgeFactory {
     }
 }
 
-#[cfg(all(test, feature = "fixture_effects"))]
+#[cfg(any())]
+#[cfg(test)]
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;

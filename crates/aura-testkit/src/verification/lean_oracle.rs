@@ -336,10 +336,7 @@ mod tests {
     fn test_journal_merge() {
         let oracle = LeanOracle::new().expect("Failed to create oracle");
         let result = oracle
-            .verify_merge(
-                vec![Fact { id: 1 }, Fact { id: 2 }],
-                vec![Fact { id: 3 }],
-            )
+            .verify_merge(vec![Fact { id: 1 }, Fact { id: 2 }], vec![Fact { id: 3 }])
             .expect("Failed to merge");
         assert_eq!(result.count, 3);
     }

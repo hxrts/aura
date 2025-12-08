@@ -4,6 +4,8 @@
 //! including capability soundness, privacy contracts, and protocol correctness.
 
 pub mod capability_soundness;
+
+#[cfg(feature = "lean")]
 pub mod lean_oracle;
 
 pub use capability_soundness::{
@@ -11,6 +13,7 @@ pub use capability_soundness::{
     SoundnessVerificationResult, VerificationConfig,
 };
 
+#[cfg(feature = "lean")]
 pub use lean_oracle::{
     ComparePolicy, Fact, FlowChargeInput, FlowChargeResult, JournalMergeInput, JournalMergeResult,
     JournalReduceInput, JournalReduceResult, LeanOracle, LeanOracleError, LeanOracleResult,

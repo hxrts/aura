@@ -110,6 +110,8 @@ fn generate_invite_code(name: &str, seed: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     #[test]
@@ -147,7 +149,8 @@ mod tests {
             .decode(parts[2].as_bytes())
             .expect("Should be valid base64");
         let json_str = String::from_utf8(decoded).expect("Should be valid UTF-8");
-        let data: serde_json::Value = serde_json::from_str(&json_str).expect("Should be valid JSON");
+        let data: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Should be valid JSON");
 
         // Verify ShareableInvitation structure
         assert_eq!(data["version"], 1);

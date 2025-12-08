@@ -73,9 +73,9 @@ pub fn journal_join_assign(j1: &mut Journal, j2: &Journal) {
 mod tests {
     use super::*;
     use crate::fact::{Fact, FactContent, JournalNamespace, SnapshotFact};
+    use aura_core::identifiers::AuthorityId;
     use aura_core::time::{OrderTime, TimeStamp};
     use aura_core::Hash32;
-    use aura_core::identifiers::AuthorityId;
 
     fn make_journal(authority_seed: u8) -> Journal {
         let auth_id = AuthorityId::new_from_entropy([authority_seed; 32]);
