@@ -6,7 +6,8 @@ use crate::core::{AgentConfig, AgentResult};
 use crate::fact_registry::build_fact_registry;
 use async_trait::async_trait;
 use aura_composition::CompositeHandlerAdapter;
-use aura_core::effects::crypto::FrostSigningPackage;
+use aura_core::crypto::single_signer::SigningMode;
+use aura_core::effects::crypto::{FrostSigningPackage, SigningKeyGenResult};
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
@@ -858,6 +859,39 @@ impl CryptoEffects for AuraEffectSystem {
             .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
             .await
     }
+
+    async fn generate_signing_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError> {
+        self.crypto_handler
+            .generate_signing_keys(threshold, max_signers)
+            .await
+    }
+
+    async fn sign_with_key(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto_handler
+            .sign_with_key(message, key_package, mode)
+            .await
+    }
+
+    async fn verify_signature(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<bool, CryptoError> {
+        self.crypto_handler
+            .verify_signature(message, signature, public_key_package, mode)
+            .await
+    }
 }
 
 // Implementation of NetworkEffects
@@ -1064,28 +1098,33 @@ impl SecureStorageEffects for AuraEffectSystem {
 #[async_trait]
 impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
     async fn bootstrap_authority(&self, authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
-        // Generate 1-of-1 FROST keys
-        let frost_keys = self.crypto_handler.frost_generate_keys(1, 1).await?;
+        // Generate 1-of-1 signing keys (uses Ed25519 for single-signer mode)
+        let signing_keys = self.crypto_handler.generate_signing_keys(1, 1).await?;
 
         // Store key package in secure storage
+        // Location varies by mode: signing_keys/ for Ed25519, frost_keys/ for FROST
+        let key_prefix = match signing_keys.mode {
+            SigningMode::SingleSigner => "signing_keys",
+            SigningMode::Threshold => "frost_keys",
+        };
         let location = SecureStorageLocation::with_sub_key(
-            "frost_keys",
+            key_prefix,
             format!("{}/0", authority), // epoch 0
             "1",                        // signer index 1
         );
         let caps = vec![SecureStorageCapability::Write];
         self.secure_storage_handler
-            .secure_store(&location, &frost_keys.key_packages[0], &caps)
+            .secure_store(&location, &signing_keys.key_packages[0], &caps)
             .await?;
 
         // Store public key package
         let pub_location =
-            SecureStorageLocation::new("frost_public_keys", format!("{}/0", authority));
+            SecureStorageLocation::new(&format!("{}_public", key_prefix), format!("{}/0", authority));
         self.secure_storage_handler
-            .secure_store(&pub_location, &frost_keys.public_key_package, &caps)
+            .secure_store(&pub_location, &signing_keys.public_key_package, &caps)
             .await?;
 
-        Ok(frost_keys.public_key_package)
+        Ok(signing_keys.public_key_package)
     }
 
     async fn sign(

@@ -333,6 +333,134 @@ impl CryptoEffects for RealCryptoHandler {
         Ok(verifying_key.verify(message, &signature).is_ok())
     }
 
+    async fn generate_signing_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<aura_core::effects::crypto::SigningKeyGenResult, CryptoError> {
+        use aura_core::crypto::single_signer::{
+            SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage,
+        };
+        use aura_core::effects::crypto::SigningKeyGenResult;
+
+        // Validate basic constraints
+        if threshold == 0 {
+            return Err(CryptoError::invalid("Threshold must be at least 1"));
+        }
+        if threshold > max_signers {
+            return Err(CryptoError::invalid(format!(
+                "Threshold ({}) cannot exceed max_signers ({})",
+                threshold, max_signers
+            )));
+        }
+
+        if threshold == 1 && max_signers == 1 {
+            // Single-signer: use standard Ed25519
+            tracing::debug!("Generating single-signer Ed25519 keys");
+
+            let (signing_key, verifying_key) = self.ed25519_generate_keypair().await?;
+
+            let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key.clone());
+            let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
+
+            Ok(SigningKeyGenResult {
+                key_packages: vec![key_package.to_bytes()],
+                public_key_package: public_package.to_bytes(),
+                mode: SigningMode::SingleSigner,
+            })
+        } else if threshold >= 2 {
+            // Threshold: use FROST
+            tracing::debug!(
+                threshold,
+                max_signers,
+                "Generating FROST threshold keys"
+            );
+
+            let frost_result = self.frost_generate_keys(threshold, max_signers).await?;
+
+            Ok(SigningKeyGenResult {
+                key_packages: frost_result.key_packages,
+                public_key_package: frost_result.public_key_package,
+                mode: SigningMode::Threshold,
+            })
+        } else {
+            // threshold == 1 but max_signers > 1 is not supported
+            // (doesn't make sense: 1-of-n threshold signing isn't useful)
+            Err(CryptoError::invalid(format!(
+                "Invalid configuration: threshold=1 requires max_signers=1. \
+                 For threshold signing, use threshold >= 2. Got {}-of-{}",
+                threshold, max_signers
+            )))
+        }
+    }
+
+    async fn sign_with_key(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: aura_core::effects::crypto::SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        use aura_core::crypto::single_signer::{SigningMode, SingleSignerKeyPackage};
+
+        match mode {
+            SigningMode::SingleSigner => {
+                // Deserialize and sign with Ed25519
+                let package = SingleSignerKeyPackage::from_bytes(key_package).map_err(|e| {
+                    CryptoError::invalid(format!("Invalid single-signer key package: {}", e))
+                })?;
+
+                self.ed25519_sign(message, package.signing_key()).await
+            }
+            SigningMode::Threshold => {
+                // Threshold signing requires the full FROST protocol flow:
+                // 1. frost_generate_nonces()
+                // 2. frost_create_signing_package()
+                // 3. frost_sign_share()
+                // 4. frost_aggregate_signatures()
+                //
+                // This method is for simple single-shot signing, so threshold
+                // mode is not supported here.
+                Err(CryptoError::invalid(
+                    "Threshold signing requires the full FROST protocol flow. \
+                     Use frost_generate_nonces(), frost_create_signing_package(), \
+                     frost_sign_share(), and frost_aggregate_signatures() instead.",
+                ))
+            }
+        }
+    }
+
+    async fn verify_signature(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key_package: &[u8],
+        mode: aura_core::effects::crypto::SigningMode,
+    ) -> Result<bool, CryptoError> {
+        use aura_core::crypto::single_signer::{SigningMode, SingleSignerPublicKeyPackage};
+
+        match mode {
+            SigningMode::SingleSigner => {
+                // Deserialize and verify with Ed25519
+                let package =
+                    SingleSignerPublicKeyPackage::from_bytes(public_key_package).map_err(|e| {
+                        CryptoError::invalid(format!(
+                            "Invalid single-signer public key package: {}",
+                            e
+                        ))
+                    })?;
+
+                self.ed25519_verify(message, signature, package.verifying_key())
+                    .await
+            }
+            SigningMode::Threshold => {
+                // For threshold signatures, we need to extract the group verifying key
+                // from the FROST PublicKeyPackage and verify
+                self.frost_verify(message, signature, public_key_package)
+                    .await
+            }
+        }
+    }
+
     async fn frost_generate_keys(
         &self,
         threshold: u16,
@@ -342,8 +470,26 @@ impl CryptoEffects for RealCryptoHandler {
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
+        // FROST requires threshold >= 2. For 1-of-1 configurations, use generate_signing_keys()
+        // which will automatically use Ed25519 single-signer mode.
+        if threshold < 2 {
+            return Err(CryptoError::invalid(format!(
+                "FROST requires threshold >= 2 (got {}). \
+                 For single-signer (1-of-1), use generate_signing_keys(1, 1) instead, \
+                 which will use Ed25519 directly.",
+                threshold
+            )));
+        }
+
+        if threshold > max_signers {
+            return Err(CryptoError::invalid(format!(
+                "Threshold ({}) cannot exceed max_signers ({})",
+                threshold, max_signers
+            )));
+        }
+
         let mut attempt: u8 = 0;
-        let mut generation_result = loop {
+        let generation_result = loop {
             let attempt_seed = match self.seed {
                 Some(mut seed) => {
                     seed[0] = seed[0].wrapping_add(attempt);
@@ -380,44 +526,6 @@ impl CryptoEffects for RealCryptoHandler {
                 }
             }
         };
-
-        // Fallback: if generation keeps failing (should be extremely rare), use a deterministic
-        // 1-of-1 key package and fan it out to the expected signer count so tests keep running.
-        if let Err(e) = generation_result {
-            tracing::error!(
-                "FROST key generation failed after retries: {}. Falling back to deterministic single-signer package for testing.",
-                e
-            );
-            let fallback_seed = [0x42u8; 32];
-            let rng = ChaCha20Rng::from_seed(fallback_seed);
-            let (fallback_shares, fallback_public) =
-                frost::keys::generate_with_dealer(1, 1, frost::keys::IdentifierList::Default, rng)
-                    .map_err(|err| {
-                        CryptoError::invalid(format!(
-                            "Fallback FROST key generation failed: {} (original error: {})",
-                            err, e
-                        ))
-                    })?;
-
-            let fallback_pkg = fallback_shares
-                .values()
-                .next()
-                .ok_or_else(|| CryptoError::invalid("Fallback FROST package missing"))?
-                .clone();
-
-            let mut duplicated = std::collections::BTreeMap::new();
-            for idx in 1..=max_signers {
-                let identifier = frost::Identifier::try_from(idx).map_err(|err| {
-                    CryptoError::invalid(format!(
-                        "Invalid identifier {} during fallback: {}",
-                        idx, err
-                    ))
-                })?;
-                duplicated.insert(identifier, fallback_pkg.clone());
-            }
-
-            generation_result = Ok((duplicated, fallback_public));
-        }
 
         let (secret_shares, public_key_package) = generation_result
             .map_err(|e| CryptoError::invalid(format!("FROST key generation failed: {e}")))?;
@@ -1002,5 +1110,165 @@ mod frost_tests {
         // Verify they match
         assert_eq!(key_package.identifier(), deserialized.identifier());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod single_signer_tests {
+    use super::*;
+    use aura_core::crypto::single_signer::SigningMode;
+
+    #[tokio::test]
+    async fn test_generate_signing_keys_single_signer() {
+        // Test 1-of-1 configuration routes to Ed25519
+        let crypto = RealCryptoHandler::new();
+        let result = crypto.generate_signing_keys(1, 1).await;
+
+        assert!(result.is_ok(), "generate_signing_keys(1, 1) should succeed");
+        let keys = result.unwrap();
+
+        assert_eq!(keys.mode, SigningMode::SingleSigner);
+        assert_eq!(keys.key_packages.len(), 1);
+        assert!(!keys.public_key_package.is_empty());
+
+        // Verify the key package can be deserialized
+        let key_pkg =
+            aura_core::crypto::single_signer::SingleSignerKeyPackage::from_bytes(&keys.key_packages[0]);
+        assert!(key_pkg.is_ok(), "Key package should deserialize");
+        let key_pkg = key_pkg.unwrap();
+        assert_eq!(key_pkg.signing_key().len(), 32);
+        assert_eq!(key_pkg.verifying_key().len(), 32);
+    }
+
+    #[tokio::test]
+    async fn test_generate_signing_keys_threshold() {
+        // Test threshold configurations route to FROST
+        let crypto = RealCryptoHandler::new();
+        let result = crypto.generate_signing_keys(2, 3).await;
+
+        assert!(result.is_ok(), "generate_signing_keys(2, 3) should succeed");
+        let keys = result.unwrap();
+
+        assert_eq!(keys.mode, SigningMode::Threshold);
+        assert_eq!(keys.key_packages.len(), 3);
+        assert!(!keys.public_key_package.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_generate_signing_keys_invalid_params() {
+        // Test invalid configurations
+        let crypto = RealCryptoHandler::new();
+
+        // Threshold 0 should fail
+        let result = crypto.generate_signing_keys(0, 1).await;
+        assert!(result.is_err(), "threshold 0 should fail");
+
+        // max_signers 0 should fail
+        let result = crypto.generate_signing_keys(1, 0).await;
+        assert!(result.is_err(), "max_signers 0 should fail");
+
+        // threshold > max_signers should fail
+        let result = crypto.generate_signing_keys(3, 2).await;
+        assert!(result.is_err(), "threshold > max_signers should fail");
+
+        // 1-of-N where N > 1 should fail (would require threshold signing)
+        let result = crypto.generate_signing_keys(1, 3).await;
+        assert!(result.is_err(), "1-of-3 should fail (not supported)");
+    }
+
+    #[tokio::test]
+    async fn test_sign_with_key_single_signer() {
+        // Test signing with single-signer mode
+        let crypto = RealCryptoHandler::new();
+        let keys = crypto.generate_signing_keys(1, 1).await.unwrap();
+
+        let message = b"test message for single signer";
+        let signature = crypto
+            .sign_with_key(message, &keys.key_packages[0], SigningMode::SingleSigner)
+            .await;
+
+        assert!(signature.is_ok(), "sign_with_key should succeed");
+        let sig = signature.unwrap();
+        assert_eq!(sig.len(), 64, "Ed25519 signature should be 64 bytes");
+    }
+
+    #[tokio::test]
+    async fn test_verify_signature_single_signer() {
+        // Test full sign-verify cycle with single-signer mode
+        let crypto = RealCryptoHandler::new();
+        let keys = crypto.generate_signing_keys(1, 1).await.unwrap();
+
+        let message = b"test message for verification";
+        let signature = crypto
+            .sign_with_key(message, &keys.key_packages[0], SigningMode::SingleSigner)
+            .await
+            .unwrap();
+
+        let valid = crypto
+            .verify_signature(
+                message,
+                &signature,
+                &keys.public_key_package,
+                SigningMode::SingleSigner,
+            )
+            .await;
+
+        assert!(valid.is_ok(), "verify_signature should succeed");
+        assert!(valid.unwrap(), "Signature should be valid");
+    }
+
+    #[tokio::test]
+    async fn test_verify_signature_wrong_message() {
+        // Test that verification fails with wrong message
+        let crypto = RealCryptoHandler::new();
+        let keys = crypto.generate_signing_keys(1, 1).await.unwrap();
+
+        let message = b"original message";
+        let wrong_message = b"different message";
+
+        let signature = crypto
+            .sign_with_key(message, &keys.key_packages[0], SigningMode::SingleSigner)
+            .await
+            .unwrap();
+
+        let valid = crypto
+            .verify_signature(
+                wrong_message,
+                &signature,
+                &keys.public_key_package,
+                SigningMode::SingleSigner,
+            )
+            .await;
+
+        assert!(valid.is_ok(), "verify_signature should not error");
+        assert!(!valid.unwrap(), "Signature should be invalid for wrong message");
+    }
+
+    #[tokio::test]
+    async fn test_sign_with_key_threshold_mode_fails() {
+        // Test that sign_with_key with Threshold mode fails (requires full FROST flow)
+        let crypto = RealCryptoHandler::new();
+        let keys = crypto.generate_signing_keys(2, 3).await.unwrap();
+
+        let message = b"test message";
+        let result = crypto
+            .sign_with_key(message, &keys.key_packages[0], SigningMode::Threshold)
+            .await;
+
+        assert!(result.is_err(), "Threshold signing via sign_with_key should fail");
+    }
+
+    #[tokio::test]
+    async fn test_frost_generate_keys_rejects_single_signer() {
+        // Test that frost_generate_keys(1, 1) now returns an error
+        let crypto = RealCryptoHandler::new();
+        let result = crypto.frost_generate_keys(1, 1).await;
+
+        assert!(result.is_err(), "frost_generate_keys(1, 1) should fail");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("threshold") || err.to_string().contains("single"),
+            "Error message should mention threshold requirement"
+        );
     }
 }

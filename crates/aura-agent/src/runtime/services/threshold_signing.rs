@@ -21,6 +21,7 @@
 
 use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
+use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::{
     CryptoEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
 };
@@ -44,6 +45,8 @@ pub struct SigningContextState {
     pub epoch: u64,
     /// Public key package (cached for verification)
     pub public_key_package: Vec<u8>,
+    /// Signing mode (single-signer Ed25519 or FROST threshold)
+    pub mode: SigningMode,
 }
 
 /// Unified service for all threshold signing operations
@@ -78,14 +81,59 @@ impl ThresholdSigningService {
         }
     }
 
-    /// Sign operation for single-device (threshold=1)
-    async fn sign_solo(
+    /// Sign operation for single-device using Ed25519 (SigningMode::SingleSigner)
+    ///
+    /// This is the fast path for 1-of-1 configurations that uses direct Ed25519
+    /// signing without any FROST protocol overhead.
+    async fn sign_solo_ed25519(
         &self,
         authority: &AuthorityId,
         message: &[u8],
         state: &SigningContextState,
     ) -> Result<ThresholdSignature, AuraError> {
-        tracing::debug!(?authority, "Signing with single-device fast path");
+        tracing::debug!(?authority, "Signing with Ed25519 single-signer");
+
+        // Load key package from secure storage
+        // Location: signing_keys/<authority>/<epoch>/1
+        let location = SecureStorageLocation::with_sub_key(
+            "signing_keys",
+            format!("{}/{}", authority, state.epoch),
+            "1",
+        );
+
+        let effects = self.effects.read().await;
+
+        let key_package = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to load key package: {}", e)))?;
+
+        // Direct Ed25519 signing (no FROST overhead)
+        let signature = effects
+            .sign_with_key(message, &key_package, SigningMode::SingleSigner)
+            .await
+            .map_err(|e| AuraError::internal(format!("Ed25519 signing failed: {}", e)))?;
+
+        tracing::info!(?authority, "Ed25519 single-signer signing complete");
+
+        Ok(ThresholdSignature::single_signer(
+            signature,
+            state.public_key_package.clone(),
+            state.epoch,
+        ))
+    }
+
+    /// Sign operation for single-device using legacy FROST (threshold=1)
+    ///
+    /// This path is kept for backward compatibility with existing keys.
+    /// New 1-of-1 configurations use `sign_solo_ed25519` instead.
+    async fn sign_solo_frost(
+        &self,
+        authority: &AuthorityId,
+        message: &[u8],
+        state: &SigningContextState,
+    ) -> Result<ThresholdSignature, AuraError> {
+        tracing::debug!(?authority, "Signing with FROST single-device path (legacy)");
 
         // Load key package from secure storage
         // Location: frost_keys/<authority>/<epoch>/<signer_index>
@@ -132,7 +180,7 @@ impl ThresholdSigningService {
             .await
             .map_err(|e| AuraError::internal(format!("Signature aggregation failed: {}", e)))?;
 
-        tracing::info!(?authority, "Single-device signing complete");
+        tracing::info!(?authority, "FROST single-device signing complete");
 
         Ok(ThresholdSignature::single_signer(
             signature,
@@ -146,31 +194,47 @@ impl ThresholdSigningService {
         serde_json::to_vec(operation)
             .map_err(|e| AuraError::internal(format!("Failed to serialize operation: {}", e)))
     }
+
+    /// Route single-device signing based on mode
+    ///
+    /// - SingleSigner mode: Use Ed25519 (fast path for new 1-of-1 accounts)
+    /// - Threshold mode with threshold=1: Use FROST (legacy 1-of-1 accounts)
+    async fn sign_solo(
+        &self,
+        authority: &AuthorityId,
+        message: &[u8],
+        state: &SigningContextState,
+    ) -> Result<ThresholdSignature, AuraError> {
+        match state.mode {
+            SigningMode::SingleSigner => self.sign_solo_ed25519(authority, message, state).await,
+            SigningMode::Threshold => self.sign_solo_frost(authority, message, state).await,
+        }
+    }
 }
 
 #[async_trait]
 impl ThresholdSigningEffects for ThresholdSigningService {
     async fn bootstrap_authority(&self, authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
-        tracing::info!(?authority, "Bootstrapping authority with 1-of-1 keys");
+        tracing::info!(?authority, "Bootstrapping authority with 1-of-1 Ed25519 keys");
 
         let effects = self.effects.read().await;
 
-        // Generate 1-of-1 FROST keys
-        let frost_keys = effects
-            .frost_generate_keys(1, 1)
+        // Generate 1-of-1 signing keys (will use Ed25519 single-signer mode)
+        let key_result = effects
+            .generate_signing_keys(1, 1)
             .await
-            .map_err(|e| AuraError::internal(format!("FROST key generation failed: {}", e)))?;
+            .map_err(|e| AuraError::internal(format!("Key generation failed: {}", e)))?;
 
-        if frost_keys.key_packages.is_empty() {
+        if key_result.key_packages.is_empty() {
             return Err(AuraError::internal(
-                "FROST key generation returned no key packages",
+                "Key generation returned no key packages",
             ));
         }
 
         // Store key package in secure storage
-        // Location: frost_keys/<authority>/<epoch>/<signer_index>
+        // Location: signing_keys/<authority>/<epoch>/1
         let location = SecureStorageLocation::with_sub_key(
-            "frost_keys",
+            "signing_keys",
             format!("{}/0", authority), // epoch 0
             "1",                        // signer index 1
         );
@@ -178,7 +242,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         effects
             .secure_store(
                 &location,
-                &frost_keys.key_packages[0],
+                &key_result.key_packages[0],
                 &[
                     SecureStorageCapability::Read,
                     SecureStorageCapability::Write,
@@ -196,15 +260,20 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             config,
             my_signer_index: Some(1),
             epoch: 0,
-            public_key_package: frost_keys.public_key_package.clone(),
+            public_key_package: key_result.public_key_package.clone(),
+            mode: key_result.mode,
         };
 
         // Store in memory cache
         self.contexts.write().await.insert(*authority, state);
 
-        tracing::info!(?authority, "Authority bootstrapped with 1-of-1 threshold");
+        tracing::info!(
+            ?authority,
+            mode = %key_result.mode,
+            "Authority bootstrapped with 1-of-1 signing keys"
+        );
 
-        Ok(frost_keys.public_key_package)
+        Ok(key_result.public_key_package)
     }
 
     async fn sign(&self, context: SigningContext) -> Result<ThresholdSignature, AuraError> {

@@ -577,6 +577,37 @@ mod tests {
                 *b = 0;
             }
         }
+
+        async fn generate_signing_keys(
+            &self,
+            _threshold: u16,
+            _max_signers: u16,
+        ) -> Result<aura_core::effects::crypto::SigningKeyGenResult, aura_core::AuraError> {
+            Ok(aura_core::effects::crypto::SigningKeyGenResult {
+                key_packages: vec![vec![0u8; 32]],
+                public_key_package: vec![0u8; 32],
+                mode: aura_core::crypto::single_signer::SigningMode::SingleSigner,
+            })
+        }
+
+        async fn sign_with_key(
+            &self,
+            _message: &[u8],
+            _key_package: &[u8],
+            _mode: aura_core::crypto::single_signer::SigningMode,
+        ) -> Result<Vec<u8>, aura_core::AuraError> {
+            Ok(vec![0u8; 64])
+        }
+
+        async fn verify_signature(
+            &self,
+            _message: &[u8],
+            _signature: &[u8],
+            _public_key_package: &[u8],
+            _mode: aura_core::crypto::single_signer::SigningMode,
+        ) -> Result<bool, aura_core::AuraError> {
+            Ok(true)
+        }
     }
 
     #[tokio::test]

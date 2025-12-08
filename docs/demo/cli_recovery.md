@@ -19,16 +19,28 @@ cargo run -p aura-terminal -- scenarios run --directory scenarios/integration --
 ```
 This uses the CLI scenario runner plus the simulator to execute the guardian setup and recovery choreography and logs to `work/scenario_logs/cli_recovery_demo.log`.
 
+## Cryptographic Notes
+
+**Single-Signer Onboarding**: When a user first creates their account (Alice, Bob, Charlie each independently), the system uses standard Ed25519 signatures instead of FROST threshold signatures. This is because:
+- FROST requires at least 2 signers (threshold >= 2)
+- New accounts start with only one device
+- Ed25519 uses the same curve as FROST, so signatures are cryptographically compatible
+
+Once Bob adds Alice and Charlie as guardians and configures the threshold to 2-of-3, subsequent signing operations that require guardian approval use the full FROST threshold protocol.
+
+See [Crypto Architecture](../116_crypto.md#7-signing-modes-single-signer-vs-threshold) for details on signing modes.
+
 ## What Happens in Each Phase
 
 1) **alice_charlie_setup**
    - Create Alice and Charlie authorities (simulated).
+   - Each uses Ed25519 single-signer mode for initial key generation.
 
 2) **bob_onboarding**
-   - Create Bob authority.
+   - Create Bob authority (Ed25519 single-signer mode initially).
    - Bob sends guardian requests to Alice and Charlie.
    - Alice and Charlie accept.
-   - Guardian authority configured for Bob with threshold 2.
+   - Guardian authority configured for Bob with threshold 2 (now using FROST).
 
 3) **group_chat_setup**
    - Alice creates a group chat and invites Bob and Charlie.

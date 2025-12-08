@@ -63,6 +63,7 @@ biscuit-auth = { workspace = true }
 # Property testing (optional)
 proptest = { workspace = true, optional = true }
 
+
 [features]
 # Enable proptest integration for property testing
 proptest = ["dep:proptest"]

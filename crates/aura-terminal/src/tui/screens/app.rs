@@ -301,13 +301,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Build screen-specific hints based on current screen
     let screen_hints: Vec<KeyHint> = match current_screen {
         Screen::Block => vec![
-            KeyHint::new("c", "Compose"),
+            KeyHint::new("i", "Insert"),
             KeyHint::new("v", "Invite"),
             KeyHint::new("n", "Neighborhood"),
             KeyHint::new("↑↓", "Navigate"),
         ],
         Screen::Chat => vec![
-            KeyHint::new("i", "Type"),
+            KeyHint::new("i", "Insert"),
             KeyHint::new("n", "New channel"),
             KeyHint::new("h/l", "Focus"),
             KeyHint::new("↑↓", "Navigate"),

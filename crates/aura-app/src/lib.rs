@@ -98,6 +98,23 @@
 #[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();
 
+// UniFFI custom type bridge for ContextId (string-based representation)
+#[cfg(feature = "uniffi")]
+impl crate::UniffiCustomTypeConverter for ContextId {
+    type Builtin = String;
+
+    fn into_custom(val: Self::Builtin) -> uniffi::Result<Self> {
+        val.parse().map_err(uniffi::deps::anyhow::Error::new)
+    }
+
+    fn from_custom(obj: Self) -> Self::Builtin {
+        obj.to_string()
+    }
+}
+
+#[cfg(feature = "uniffi")]
+uniffi::custom_type!(ContextId, String);
+
 // =============================================================================
 // Modules
 // =============================================================================

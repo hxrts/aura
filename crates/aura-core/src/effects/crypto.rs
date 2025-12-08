@@ -60,6 +60,33 @@ pub struct FrostSigningPackage {
     pub public_key_package: Vec<u8>,
 }
 
+// Re-export SigningMode from crypto module for convenience
+pub use crate::crypto::single_signer::SigningMode;
+
+/// Result of signing key generation (unified for single-signer and threshold).
+///
+/// This type is returned by `generate_signing_keys()` and contains everything
+/// needed to store and use the generated keys.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SigningKeyGenResult {
+    /// Key packages (one per participant).
+    ///
+    /// For single-signer: contains one `SingleSignerKeyPackage` serialized.
+    /// For threshold: contains FROST `KeyPackage` for each participant.
+    pub key_packages: Vec<Vec<u8>>,
+
+    /// Public key package for verification.
+    ///
+    /// For single-signer: contains `SingleSignerPublicKeyPackage` serialized.
+    /// For threshold: contains FROST `PublicKeyPackage` serialized.
+    pub public_key_package: Vec<u8>,
+
+    /// Which signing mode was used.
+    ///
+    /// This determines which signing/verification algorithm to use.
+    pub mode: SigningMode,
+}
+
 /// Cryptographic effects interface
 ///
 /// This trait defines cryptographic operations for the Aura effects system.
@@ -121,9 +148,88 @@ pub trait CryptoEffects: RandomEffects + Send + Sync {
         public_key: &[u8],
     ) -> Result<bool, CryptoError>;
 
+    // ====== Unified Signing Key Generation ======
+
+    /// Generate signing keys for the given threshold configuration.
+    ///
+    /// This is the unified entry point for key generation that automatically
+    /// selects the appropriate algorithm:
+    /// - For `threshold=1, max_signers=1`: Generates Ed25519 single-signer keys
+    /// - For `threshold>=2`: Generates FROST threshold keys via DKG
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - Minimum signers required (1 for single-signer, >=2 for FROST)
+    /// * `max_signers` - Total number of key shares to generate
+    ///
+    /// # Returns
+    ///
+    /// `SigningKeyGenResult` containing key packages and the signing mode used.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - `threshold > max_signers`
+    /// - `threshold == 0`
+    /// - Key generation fails
+    async fn generate_signing_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError>;
+
+    /// Sign a message using the appropriate algorithm for the key type.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The message bytes to sign
+    /// * `key_package` - Serialized key package (SingleSignerKeyPackage or FROST KeyPackage)
+    /// * `mode` - Which signing algorithm to use
+    ///
+    /// # Returns
+    ///
+    /// The 64-byte Ed25519 signature.
+    ///
+    /// # Errors
+    ///
+    /// - For `SingleSigner`: Returns error if key is invalid
+    /// - For `Threshold`: Returns error; use full FROST protocol flow instead
+    async fn sign_with_key(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError>;
+
+    /// Verify a signature using the appropriate algorithm for the key type.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The original message bytes
+    /// * `signature` - The 64-byte signature to verify
+    /// * `public_key_package` - Serialized public key package
+    /// * `mode` - Which verification algorithm to use
+    ///
+    /// # Returns
+    ///
+    /// `true` if signature is valid, `false` otherwise.
+    async fn verify_signature(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<bool, CryptoError>;
+
     // ====== FROST Threshold Signatures ======
 
-    /// Generate FROST threshold keypair shares
+    /// Generate FROST threshold keypair shares.
+    ///
+    /// **Note**: FROST requires `threshold >= 2`. For 1-of-1 configurations,
+    /// use `generate_signing_keys(1, 1)` instead, which will use Ed25519.
+    ///
+    /// Prefer using `generate_signing_keys()` for new code as it handles
+    /// both single-signer and threshold cases automatically.
     async fn frost_generate_keys(
         &self,
         threshold: u16,
@@ -279,6 +385,35 @@ impl<T: CryptoEffects + ?Sized> CryptoEffects for std::sync::Arc<T> {
     ) -> Result<bool, CryptoError> {
         (**self)
             .ed25519_verify(message, signature, public_key)
+            .await
+    }
+
+    async fn generate_signing_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError> {
+        (**self).generate_signing_keys(threshold, max_signers).await
+    }
+
+    async fn sign_with_key(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).sign_with_key(message, key_package, mode).await
+    }
+
+    async fn verify_signature(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<bool, CryptoError> {
+        (**self)
+            .verify_signature(message, signature, public_key_package, mode)
             .await
     }
 

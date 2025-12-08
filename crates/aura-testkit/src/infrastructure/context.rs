@@ -33,8 +33,12 @@
 //! ```
 
 use aura_core::{
+    crypto::single_signer::SigningMode,
     effects::{
-        crypto::{CryptoError, FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext},
+        crypto::{
+            CryptoError, FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
+            SigningKeyGenResult,
+        },
         ConsoleEffects, CryptoEffects, ExecutionMode, JournalEffects, NetworkEffects,
         PhysicalTimeEffects, RandomEffects, StorageEffects,
     },
@@ -361,6 +365,37 @@ impl CryptoEffects for CompositeTestHandler {
     ) -> Result<FrostKeyGenResult, CryptoError> {
         self.crypto
             .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
+            .await
+    }
+
+    async fn generate_signing_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError> {
+        self.crypto
+            .generate_signing_keys(threshold, max_signers)
+            .await
+    }
+
+    async fn sign_with_key(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.sign_with_key(message, key_package, mode).await
+    }
+
+    async fn verify_signature(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<bool, CryptoError> {
+        self.crypto
+            .verify_signature(message, signature, public_key_package, mode)
             .await
     }
 

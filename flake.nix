@@ -189,7 +189,6 @@
             git
             jq
             ripgrep
-            tmux # For TUI testing with screen capture
 
             # POSIX tools (for Justfile scripts)
             coreutils

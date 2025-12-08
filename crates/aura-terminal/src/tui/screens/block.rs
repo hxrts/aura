@@ -9,13 +9,26 @@
 //! component automatically, triggering re-renders when data changes.
 
 use iocraft::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use crate::tui::components::{ContactSelectModal, ContactSelectState};
+use crate::tui::components::{ContactSelectModal, ContactSelectState, MessageInput};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{BlockBudget, Contact, Message, Resident};
+
+/// Input text shared between render and event handler (thread-safe)
+type SharedText = Arc<RwLock<String>>;
+
+/// Which panel is focused
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BlockFocus {
+    /// Residents list is focused (normal mode)
+    #[default]
+    Residents,
+    /// Message input is focused (insert mode)
+    Input,
+}
 
 /// Callback type for sending a message in the block channel
 pub type BlockSendCallback = Arc<dyn Fn(String) + Send + Sync>;
@@ -325,15 +338,23 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let channel_name = props.channel_name.clone();
 
     let resident_index = hooks.use_state(|| 0usize);
-    let compose_mode = hooks.use_state(|| false);
-    let message_input = hooks.use_state(String::new);
+    let focus = hooks.use_state(|| BlockFocus::Residents);
     let invite_modal_state = hooks.use_state(ContactSelectState::new);
+
+    // Input text state - use Arc<RwLock> for thread-safe sharing
+    let input_text: SharedText = hooks
+        .use_state(|| Arc::new(RwLock::new(String::new())))
+        .read()
+        .clone();
+    let input_text_for_handler = input_text.clone();
+
+    // Version counter to trigger rerenders when input changes
+    let mut input_version = hooks.use_state(|| 0usize);
 
     // Get contacts from props
     let contacts = props.contacts.clone();
 
-    // Hints change based on mode
-    let is_composing = compose_mode.get();
+    // Check focus and modal state
     let is_invite_modal_visible = invite_modal_state.read().visible;
 
     let current_resident_index = resident_index.get();
@@ -350,17 +371,19 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let throttle_duration = Duration::from_millis(150);
 
     hooks.use_terminal_events({
+        let input_text = input_text_for_handler;
         let mut resident_index = resident_index.clone();
-        let mut compose_mode = compose_mode.clone();
-        let mut message_input = message_input.clone();
+        let mut focus = focus.clone();
         let mut invite_modal_state = invite_modal_state.clone();
         let contacts_for_modal = contacts.clone();
         move |event| {
-            let is_composing = compose_mode.get();
+            let current_focus = focus.get();
             let is_invite_modal_visible = invite_modal_state.read().visible;
 
             match event {
-                TerminalEvent::Key(KeyEvent { code, .. }) => {
+                TerminalEvent::Key(KeyEvent {
+                    code, modifiers, kind, ..
+                }) if kind != KeyEventKind::Release => {
                     if is_invite_modal_visible {
                         // Invite modal key handling
                         match code {
@@ -394,35 +417,54 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                             }
                             _ => {}
                         }
-                    } else if is_composing {
-                        // Compose mode key handling
+                    } else if current_focus == BlockFocus::Input {
+                        // Insert mode: handle Escape, Enter, Backspace, and character input
                         match code {
+                            // Escape exits insert mode back to residents
                             KeyCode::Esc => {
-                                // Exit compose mode, clear input
-                                compose_mode.set(false);
-                                message_input.set(String::new());
+                                focus.set(BlockFocus::Residents);
                             }
+                            // Shift+Enter adds newline, plain Enter sends message
                             KeyCode::Enter => {
-                                // Send message if not empty
-                                let content = message_input.read().clone();
-                                if !content.is_empty() {
-                                    if let Some(ref callback) = on_send {
-                                        callback(content);
+                                if modifiers.contains(KeyModifiers::SHIFT) {
+                                    // Shift+Enter: add newline
+                                    if let Ok(mut guard) = input_text.write() {
+                                        guard.push('\n');
                                     }
-                                    message_input.set(String::new());
+                                    input_version.set(input_version.get().wrapping_add(1));
+                                } else {
+                                    // Plain Enter: send message
+                                    if let Ok(text) = input_text.read() {
+                                        let text = text.clone();
+                                        if !text.is_empty() {
+                                            if let Some(ref callback) = on_send {
+                                                callback(text);
+                                            }
+                                            if let Ok(mut guard) = input_text.write() {
+                                                guard.clear();
+                                            }
+                                            input_version.set(input_version.get().wrapping_add(1));
+                                        }
+                                    }
                                 }
-                                compose_mode.set(false);
                             }
+                            // Backspace removes last character
                             KeyCode::Backspace => {
-                                let mut content = message_input.read().clone();
-                                content.pop();
-                                message_input.set(content);
+                                if let Ok(mut guard) = input_text.write() {
+                                    guard.pop();
+                                }
+                                input_version.set(input_version.get().wrapping_add(1));
                             }
+                            // Character input
                             KeyCode::Char(c) => {
-                                let mut content = message_input.read().clone();
-                                content.push(c);
-                                message_input.set(content);
+                                if !modifiers.contains(KeyModifiers::CONTROL) {
+                                    if let Ok(mut guard) = input_text.write() {
+                                        guard.push(c);
+                                    }
+                                    input_version.set(input_version.get().wrapping_add(1));
+                                }
                             }
+                            // All other keys ignored in insert mode
                             _ => {}
                         }
                     } else {
@@ -448,9 +490,9 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                                     nav_throttle.set(Instant::now());
                                 }
                             }
-                            // Enter compose mode
-                            KeyCode::Char('c') => {
-                                compose_mode.set(true);
+                            // 'i' enters insert mode
+                            KeyCode::Char('i') => {
+                                focus.set(BlockFocus::Input);
                             }
                             // Invite - show modal with contacts
                             KeyCode::Char('v') => {
@@ -473,8 +515,12 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
         }
     });
 
-    // Get current values for conditional rendering
-    let current_message = message_input.read().clone();
+    // Read input text for display (using version to ensure fresh read)
+    let _ = input_version.get(); // Force dependency on version
+    let display_input_text = input_text.read().map(|g| g.clone()).unwrap_or_default();
+
+    let current_focus = focus.get();
+    let input_focused = current_focus == BlockFocus::Input;
     let modal_state = invite_modal_state.read().clone();
 
     element! {
@@ -505,23 +551,14 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                 }
             }
 
-            // Compose input (shown when in compose mode)
-            #(if is_composing {
-                Some(element! {
-                    View(
-                        flex_direction: FlexDirection::Row,
-                        border_style: BorderStyle::Round,
-                        border_color: Theme::BORDER_FOCUS,
-                        padding: 1,
-                    ) {
-                        Text(content: "> ", color: Theme::PRIMARY)
-                        Text(content: current_message.clone(), color: Theme::TEXT)
-                        Text(content: "_", color: Theme::PRIMARY)
-                    }
-                })
-            } else {
-                None
-            })
+            // Message input (always visible, like Chat screen)
+            MessageInput(
+                value: display_input_text,
+                placeholder: "Type a message...".to_string(),
+                focused: input_focused,
+                reply_to: None::<String>,
+                sending: false,
+            )
 
             // Invite modal overlay (shown when modal is visible)
             ContactSelectModal(

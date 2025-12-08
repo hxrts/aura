@@ -72,7 +72,7 @@ pub fn timestamp_sort_compare(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::{OrderTime, PhysicalTime, LogicalTime, VectorClock, ScalarClock};
+    use crate::time::{OrderTime, PhysicalTime, LogicalTime, VectorClock};
 
     // ==========================================================
     // Reflexivity tests (compare_refl in Lean)

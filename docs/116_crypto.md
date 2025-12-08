@@ -224,11 +224,76 @@ The cryptographic architecture maintains these invariants:
 4. **Key Isolation**: Private keys remain in wrapper types, not exposed as raw bytes
 5. **Randomness Quality**: Production randomness comes from OS entropy via `OsRng`
 
-## 7. FROST and Threshold Signatures
+## 7. Signing Modes: Single-Signer vs Threshold
 
-Aura provides a unified threshold signing architecture for all scenarios requiring m-of-n signatures.
+Aura supports two signing modes to handle different account configurations:
 
-### 7.1 Architecture Layers
+### 7.1 SigningMode Enum
+
+```rust
+pub enum SigningMode {
+    SingleSigner,  // Standard Ed25519 for 1-of-1
+    Threshold,     // FROST for m-of-n where m >= 2
+}
+```
+
+**SingleSigner** is used for:
+- New user onboarding (single device accounts)
+- Bootstrap scenarios before multi-device setup
+- Simple personal accounts that don't need threshold security
+
+**Threshold** is used for:
+- Multi-device accounts (2-of-3, 3-of-5, etc.)
+- Guardian-protected accounts
+- Group decisions requiring multiple approvals
+
+### 7.2 Why Two Modes?
+
+FROST (Flexible Round-Optimized Schnorr Threshold) mathematically requires at least 2 signers because threshold signatures need multiple parties. For 1-of-1 configurations, we use standard Ed25519 because it:
+- Uses the same curve (Ed25519/ristretto255) as FROST
+- Produces compatible signatures for verification
+- Has no protocol overhead (no nonce coordination, no aggregation)
+- Is simpler and faster for the single-signer case
+
+### 7.3 API Usage
+
+The unified API handles mode selection automatically:
+
+```rust
+// Generate keys - mode is determined by threshold
+let keys = crypto.generate_signing_keys(threshold, max_signers).await?;
+// keys.mode == SingleSigner if (1, 1), Threshold otherwise
+
+// Sign with the key package
+let signature = crypto.sign_with_key(&message, &key_package, keys.mode).await?;
+
+// Verify the signature
+let valid = crypto.verify_signature(&message, &signature, &pubkey, keys.mode).await?;
+```
+
+**Important**: For threshold mode (m >= 2), `sign_with_key()` returns an error. Threshold signing requires the full FROST protocol flow with nonce coordination across signers.
+
+### 7.4 Storage Separation
+
+Single-signer and threshold keys use different storage paths:
+
+```
+signing_keys/                    # Single-signer Ed25519 keys
+  └── <authority_id>/
+      └── <epoch>/
+          └── 1                  # SingleSignerKeyPackage
+
+frost_keys/                      # FROST threshold keys
+  └── <authority_id>/
+      └── <epoch>/
+          └── <signer_index>     # FROST KeyPackage
+```
+
+## 8. FROST and Threshold Signatures
+
+Aura provides a unified threshold signing architecture for all scenarios requiring m-of-n signatures where m >= 2.
+
+### 8.1 Architecture Layers
 
 **Trait Definition** (`aura-core/src/effects/threshold.rs`):
 - `ThresholdSigningEffects` trait for async signing operations
@@ -256,7 +321,7 @@ Aura provides a unified threshold signing architecture for all scenarios requiri
 - Implements FROST key generation and signing
 - Only location with direct `frost_ed25519` library calls
 
-### 7.2 Usage Pattern
+### 8.2 Usage Pattern
 
 The recommended pattern uses `AppCore` for high-level operations:
 
@@ -264,7 +329,7 @@ The recommended pattern uses `AppCore` for high-level operations:
 // Sign a tree operation
 let attested_op = app_core.sign_tree_op(&tree_op).await?;
 
-// Bootstrap 1-of-1 keys for single-device accounts
+// Bootstrap 1-of-1 keys for single-device accounts (uses Ed25519)
 let public_key = app_core.bootstrap_signing_keys().await?;
 ```
 
@@ -277,7 +342,7 @@ let context = SigningContext::self_tree_op(authority, tree_op);
 let signature = signing_service.sign(context).await?;
 ```
 
-### 7.3 Design Rationale
+### 8.3 Design Rationale
 
 The unified trait abstraction enables:
 - **Consistent interface** across multi-device, guardian, and group scenarios
@@ -285,9 +350,13 @@ The unified trait abstraction enables:
 - **Testability** via mock implementations in `aura-testkit`
 - **Key isolation** with secure storage integration
 
-## 8. Future Considerations
+### 8.4 FROST Minimum Threshold
 
-### 8.1 Algorithm Migration
+FROST requires `threshold >= 2`. Attempting to call `frost_generate_keys(1, 1)` will return an error. For single-signer scenarios, use `generate_signing_keys(1, 1)` which routes to Ed25519 automatically.
+
+## 9. Future Considerations
+
+### 9.1 Algorithm Migration
 
 The wrapper pattern enables algorithm migration:
 
@@ -295,7 +364,7 @@ The wrapper pattern enables algorithm migration:
 2. Update handler in `aura-effects/src/crypto.rs`
 3. Application code remains unchanged
 
-### 8.2 HSM Integration
+### 9.2 HSM Integration
 
 Hardware Security Module support would require:
 
@@ -303,7 +372,7 @@ Hardware Security Module support would require:
 2. Runtime selection between `RealCryptoHandler` and `HsmCryptoHandler`
 3. No changes to application code
 
-## 9. References
+## 10. References
 
 - [Effect System](./106_effect_system_and_runtime.md) - Effect trait patterns
 - [Project Structure](./999_project_structure.md) - 8-layer architecture

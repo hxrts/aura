@@ -28,7 +28,8 @@ use crate::effects::*;
 use crate::handlers::{context::immutable::AuraContext, AuraHandler, EffectType, HandlerUtils};
 use async_lock::RwLock;
 use async_trait::async_trait;
-use aura_core::effects::crypto::FrostKeyGenResult;
+use aura_core::crypto::single_signer::SigningMode;
+use aura_core::effects::crypto::{FrostKeyGenResult, SigningKeyGenResult};
 use aura_core::effects::CryptoError;
 use aura_core::AuraError;
 use std::sync::Arc;
@@ -393,6 +394,39 @@ impl CryptoEffects for TypedHandlerBridge {
     ) -> Result<FrostKeyGenResult, CryptoError> {
         Err(AuraError::crypto(
             "FROST key rotation not supported through bridge",
+        ))
+    }
+
+    async fn generate_signing_keys(
+        &self,
+        _threshold: u16,
+        _max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError> {
+        Err(AuraError::crypto(
+            "Signing key generation not supported through bridge",
+        ))
+    }
+
+    async fn sign_with_key(
+        &self,
+        _message: &[u8],
+        _key_package: &[u8],
+        _mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        Err(AuraError::crypto(
+            "sign_with_key not supported through bridge",
+        ))
+    }
+
+    async fn verify_signature(
+        &self,
+        _message: &[u8],
+        _signature: &[u8],
+        _public_key_package: &[u8],
+        _mode: SigningMode,
+    ) -> Result<bool, CryptoError> {
+        Err(AuraError::crypto(
+            "verify_signature not supported through bridge",
         ))
     }
 

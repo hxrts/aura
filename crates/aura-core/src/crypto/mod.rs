@@ -5,6 +5,7 @@ pub mod hash;
 pub mod hpke;
 pub mod key_derivation;
 pub mod merkle;
+pub mod single_signer;
 pub mod tree_signing;
 
 // Merkle helpers
@@ -23,6 +24,11 @@ pub use ed25519::{
 
 // HPKE types
 pub use hpke::{HpkeKeyPair, HpkePrivateKey, HpkePublicKey};
+
+// Single-signer types (for 1-of-1 scenarios)
+pub use single_signer::{
+    SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage,
+};
 
 /// Alias for Merkle proof re-export.
 pub type MerkleProof = SimpleMerkleProof;

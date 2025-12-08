@@ -41,14 +41,14 @@ struct GridHintItemProps {
     description: String,
 }
 
-/// A single hint item component for the global row (flexible width)
+/// A single hint item component for the global row (fixed width for 4-column grid)
 #[component]
 fn GlobalHintItem(props: &GlobalHintItemProps) -> impl Into<AnyElement<'static>> {
     let key = props.key_name.clone();
     let desc = props.description.clone();
 
     element! {
-        View(flex_direction: FlexDirection::Row, margin_right: 2) {
+        View(flex_direction: FlexDirection::Row, width: 25pct) {
             Text(content: key, weight: Weight::Bold)
             Text(content: " ")
             Text(content: desc, color: Theme::TEXT_MUTED)

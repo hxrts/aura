@@ -25,18 +25,26 @@ struct CounterProps {
 #[component]
 fn Counter(props: &CounterProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let count = hooks.use_state(|| props.initial);
+    let should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
+
+    // Handle exit outside the event handler
+    if should_exit.get() {
+        system.exit();
+    }
 
     hooks.use_terminal_events({
         let mut count = count.clone();
-        let mut system = system.clone();
+        let mut should_exit = should_exit.clone();
         move |event| match event {
-            TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Up => count.set(count.get() + 1),
-                KeyCode::Down => count.set(count.get() - 1),
-                KeyCode::Char('q') => system.exit(),
-                _ => {}
-            },
+            TerminalEvent::Key(KeyEvent { code, kind, .. }) if kind != KeyEventKind::Release => {
+                match code {
+                    KeyCode::Up => count.set(count.get() + 1),
+                    KeyCode::Down => count.set(count.get() - 1),
+                    KeyCode::Char('q') => should_exit.set(true),
+                    _ => {}
+                }
+            }
             _ => {}
         }
     });
@@ -105,21 +113,29 @@ async fn test_mock_callback_invocation() {
 
     #[component]
     fn CallbackTester(props: &CallbackProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+        let should_exit = hooks.use_state(|| false);
         let mut system = hooks.use_context_mut::<SystemContext>();
         let on_submit = props.on_submit.clone();
 
+        // Handle exit outside the event handler
+        if should_exit.get() {
+            system.exit();
+        }
+
         hooks.use_terminal_events({
-            let mut system = system.clone();
+            let mut should_exit = should_exit.clone();
             move |event| match event {
-                TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                    KeyCode::Enter => {
-                        if let Some(ref callback) = on_submit {
-                            callback();
+                TerminalEvent::Key(KeyEvent { code, kind, .. }) if kind != KeyEventKind::Release => {
+                    match code {
+                        KeyCode::Enter => {
+                            if let Some(ref callback) = on_submit {
+                                callback();
+                            }
                         }
+                        KeyCode::Char('q') => should_exit.set(true),
+                        _ => {}
                     }
-                    KeyCode::Char('q') => system.exit(),
-                    _ => {}
-                },
+                }
                 _ => {}
             }
         });
@@ -168,32 +184,44 @@ async fn test_mock_text_input() {
     #[component]
     fn TextInputTester(_props: &TextInputProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     {
-        let text: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
+        // Use use_state to persist the Arc<RwLock> across renders
+        let text: Arc<RwLock<String>> = hooks
+            .use_state(|| Arc::new(RwLock::new(String::new())))
+            .read()
+            .clone();
         let text_for_handler = text.clone();
         let text_for_display = text.clone();
         let version = hooks.use_state(|| 0usize);
+        let should_exit = hooks.use_state(|| false);
         let mut system = hooks.use_context_mut::<SystemContext>();
+
+        // Handle exit outside the event handler
+        if should_exit.get() {
+            system.exit();
+        }
 
         hooks.use_terminal_events({
             let mut version = version.clone();
-            let mut system = system.clone();
+            let mut should_exit = should_exit.clone();
             move |event| match event {
-                TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                    KeyCode::Char(c) if c != 'q' => {
-                        if let Ok(mut guard) = text_for_handler.write() {
-                            guard.push(c);
+                TerminalEvent::Key(KeyEvent { code, kind, .. }) if kind != KeyEventKind::Release => {
+                    match code {
+                        KeyCode::Char(c) if c != 'q' => {
+                            if let Ok(mut guard) = text_for_handler.write() {
+                                guard.push(c);
+                            }
+                            version.set(version.get().wrapping_add(1));
                         }
-                        version.set(version.get().wrapping_add(1));
-                    }
-                    KeyCode::Backspace => {
-                        if let Ok(mut guard) = text_for_handler.write() {
-                            guard.pop();
+                        KeyCode::Backspace => {
+                            if let Ok(mut guard) = text_for_handler.write() {
+                                guard.pop();
+                            }
+                            version.set(version.get().wrapping_add(1));
                         }
-                        version.set(version.get().wrapping_add(1));
+                        KeyCode::Char('q') => should_exit.set(true),
+                        _ => {}
                     }
-                    KeyCode::Char('q') => system.exit(),
-                    _ => {}
-                },
+                }
                 _ => {}
             }
         });
@@ -265,64 +293,80 @@ async fn test_mock_modal_interaction() {
     #[component]
     fn ModalTester(props: &ModalProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
         let modal_visible = hooks.use_state(|| props.show_modal);
-        let input_text: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
+        // Use use_state to persist the Arc<RwLock> across renders
+        let input_text: Arc<RwLock<String>> = hooks
+            .use_state(|| Arc::new(RwLock::new(String::new())))
+            .read()
+            .clone();
         let input_for_handler = input_text.clone();
         let input_for_display = input_text.clone();
         let version = hooks.use_state(|| 0usize);
+        let should_exit = hooks.use_state(|| false);
         let mut system = hooks.use_context_mut::<SystemContext>();
         let on_submit = props.on_submit.clone();
+
+        // Handle exit outside the event handler
+        if should_exit.get() {
+            system.exit();
+        }
 
         hooks.use_terminal_events({
             let mut modal_visible = modal_visible.clone();
             let mut version = version.clone();
-            let mut system = system.clone();
+            let mut should_exit = should_exit.clone();
             move |event| {
+                // Only process key presses, not releases
+                let (code, is_press) = match event {
+                    TerminalEvent::Key(KeyEvent { code, kind, .. }) => {
+                        (code, kind != KeyEventKind::Release)
+                    }
+                    _ => return,
+                };
+
+                if !is_press {
+                    return;
+                }
+
                 if !modal_visible.get() {
                     // Not in modal - handle regular navigation
-                    match event {
-                        TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                            KeyCode::Char('q') => system.exit(),
-                            _ => {}
-                        },
+                    match code {
+                        KeyCode::Char('q') => should_exit.set(true),
                         _ => {}
                     }
                     return;
                 }
 
                 // Modal is visible - capture input
-                match event {
-                    TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                        KeyCode::Char(c) => {
-                            if let Ok(mut guard) = input_for_handler.write() {
-                                guard.push(c);
-                            }
-                            version.set(version.get().wrapping_add(1));
+                match code {
+                    KeyCode::Char(c) => {
+                        if let Ok(mut guard) = input_for_handler.write() {
+                            guard.push(c);
                         }
-                        KeyCode::Backspace => {
-                            if let Ok(mut guard) = input_for_handler.write() {
-                                guard.pop();
-                            }
-                            version.set(version.get().wrapping_add(1));
+                        version.set(version.get().wrapping_add(1));
+                    }
+                    KeyCode::Backspace => {
+                        if let Ok(mut guard) = input_for_handler.write() {
+                            guard.pop();
                         }
-                        KeyCode::Enter => {
-                            let value = input_for_handler
-                                .read()
-                                .map(|s| s.clone())
-                                .unwrap_or_default();
-                            if !value.is_empty() {
-                                if let Some(ref callback) = on_submit {
-                                    callback(value);
-                                }
-                                modal_visible.set(false);
-                                version.set(version.get().wrapping_add(1));
+                        version.set(version.get().wrapping_add(1));
+                    }
+                    KeyCode::Enter => {
+                        let value = input_for_handler
+                            .read()
+                            .map(|s| s.clone())
+                            .unwrap_or_default();
+                        if !value.is_empty() {
+                            if let Some(ref callback) = on_submit {
+                                callback(value);
                             }
-                        }
-                        KeyCode::Esc => {
                             modal_visible.set(false);
                             version.set(version.get().wrapping_add(1));
                         }
-                        _ => {}
-                    },
+                    }
+                    KeyCode::Esc => {
+                        modal_visible.set(false);
+                        version.set(version.get().wrapping_add(1));
+                    }
                     _ => {}
                 }
             }
@@ -346,7 +390,9 @@ async fn test_mock_modal_interaction() {
                     }]
                 } else {
                     vec![element! {
-                        Text(content: "Main Screen - modal dismissed")
+                        View {
+                            Text(content: "Main Screen - modal dismissed")
+                        }
                     }]
                 })
             }

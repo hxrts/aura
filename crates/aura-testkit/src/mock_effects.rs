@@ -11,7 +11,11 @@
 //! - Complete coverage of all effect traits
 
 use async_trait::async_trait;
+use aura_core::crypto::single_signer::{
+    SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage,
+};
 use aura_core::effects::authorization::{AuthorizationDecision, AuthorizationError};
+use aura_core::effects::crypto::SigningKeyGenResult;
 use aura_core::effects::network::{NetworkError, PeerEventStream};
 use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::time::{
@@ -422,6 +426,87 @@ impl CryptoEffects for MockEffects {
     > {
         self.frost_generate_keys(_new_threshold, new_max_signers)
             .await
+    }
+
+    async fn generate_signing_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, aura_core::effects::crypto::CryptoError> {
+        if threshold == 1 && max_signers == 1 {
+            // Single-signer: use Ed25519
+            let (signing_key, verifying_key) = self.ed25519_generate_keypair().await?;
+            let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key.clone());
+            let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
+            Ok(SigningKeyGenResult {
+                key_packages: vec![key_package.to_bytes()],
+                public_key_package: public_package.to_bytes(),
+                mode: SigningMode::SingleSigner,
+            })
+        } else if threshold >= 2 {
+            // Threshold: use FROST
+            let frost_result = self.frost_generate_keys(threshold, max_signers).await?;
+            Ok(SigningKeyGenResult {
+                key_packages: frost_result.key_packages,
+                public_key_package: frost_result.public_key_package,
+                mode: SigningMode::Threshold,
+            })
+        } else {
+            Err(aura_core::AuraError::invalid(format!(
+                "Invalid signing configuration: threshold={}, max_signers={}. \
+                 Use 1-of-1 for single-signer or threshold>=2 for multi-party.",
+                threshold, max_signers
+            )))
+        }
+    }
+
+    async fn sign_with_key(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, aura_core::effects::crypto::CryptoError> {
+        match mode {
+            SigningMode::SingleSigner => {
+                let package = SingleSignerKeyPackage::from_bytes(key_package).map_err(|e| {
+                    aura_core::AuraError::invalid(format!(
+                        "Invalid single-signer key package: {}",
+                        e
+                    ))
+                })?;
+                self.ed25519_sign(message, package.signing_key()).await
+            }
+            SigningMode::Threshold => Err(aura_core::AuraError::invalid(
+                "sign_with_key() does not support Threshold mode. Use the full FROST protocol flow.",
+            )),
+        }
+    }
+
+    async fn verify_signature(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<bool, aura_core::effects::crypto::CryptoError> {
+        match mode {
+            SigningMode::SingleSigner => {
+                let package =
+                    SingleSignerPublicKeyPackage::from_bytes(public_key_package).map_err(|e| {
+                        aura_core::AuraError::invalid(format!(
+                            "Invalid single-signer public key package: {}",
+                            e
+                        ))
+                    })?;
+                self.ed25519_verify(message, signature, package.verifying_key())
+                    .await
+            }
+            SigningMode::Threshold => {
+                // Use FROST verification
+                self.frost_verify(message, signature, public_key_package)
+                    .await
+            }
+        }
     }
 
     fn is_simulated(&self) -> bool {

@@ -73,12 +73,17 @@ impl From<IntentError> for AppError {
                 IntentError::InternalError { .. } => "internal_error",
                 IntentError::ContextNotFound { .. } => "context_not_found",
                 IntentError::NetworkError { .. } => "network_error",
+                IntentError::StorageError { .. } => "storage_error",
+                IntentError::NoAgent { .. } => "no_agent",
+                IntentError::ServiceError { .. } => "service_error",
             }
             .to_string(),
             message: err.to_string(),
             recoverable: matches!(
                 &err,
-                IntentError::NetworkError { .. } | IntentError::ValidationFailed { .. }
+                IntentError::NetworkError { .. }
+                    | IntentError::ValidationFailed { .. }
+                    | IntentError::ServiceError { .. }
             ),
         }
     }

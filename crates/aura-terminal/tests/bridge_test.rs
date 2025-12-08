@@ -187,12 +187,15 @@ fn test_command_authorization_levels() {
         EffectCommand::StartRecovery.authorization_level(),
         CommandAuthorizationLevel::Sensitive
     );
+
+    // CreateAccount is Basic (not Sensitive) because it's the bootstrapping command
+    // that users need to run before they have an account
     assert_eq!(
         EffectCommand::CreateAccount {
             display_name: "test".to_string()
         }
         .authorization_level(),
-        CommandAuthorizationLevel::Sensitive
+        CommandAuthorizationLevel::Basic
     );
 
     // Admin commands
