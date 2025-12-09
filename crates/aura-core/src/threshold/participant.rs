@@ -63,11 +63,12 @@ impl ParticipantIdentity {
 }
 
 /// How to reach a participant for signing coordination.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ParticipantEndpoint {
     /// Local participant (this device)
     ///
     /// No network communication needed.
+    #[default]
     Local,
 
     /// Reachable via relay with a relay identifier
@@ -86,12 +87,6 @@ pub enum ParticipantEndpoint {
 
     /// Offline - needs out-of-band coordination
     Offline,
-}
-
-impl Default for ParticipantEndpoint {
-    fn default() -> Self {
-        Self::Local
-    }
 }
 
 /// A participant in a threshold signing ceremony.
