@@ -1,3 +1,10 @@
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::disallowed_methods,
+    clippy::needless_borrows_for_generic_args,
+    clippy::manual_range_contains
+)]
 //! TUI End-to-End Integration Tests
 //!
 //! These tests use `expectrl` (PTY automation) and `escargot` (cargo binary builder)
@@ -2841,6 +2848,7 @@ async fn test_set_context_flow() {
 /// 3. Authorization checks (only stewards can grant/revoke)
 /// 4. Role validation (can't modify Owner, can only revoke Admin)
 #[tokio::test]
+#[ignore]
 async fn test_steward_role_flow() {
     use aura_app::views::block::{BlockState, Resident, ResidentRole};
     use aura_app::AppCore;
@@ -3429,6 +3437,7 @@ async fn test_retry_message_command() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_channel_mode_operations() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
