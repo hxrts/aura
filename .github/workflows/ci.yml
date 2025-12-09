@@ -275,6 +275,14 @@ jobs:
       contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-journal') ||
       contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-core/src/time')
     steps:
+      - name: Free disk space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          echo "Disk space after cleanup:"
+          df -h /
       - uses: actions/checkout@v4
       - name: Install Nix
         uses: cachix/install-nix-action@v27
@@ -313,6 +321,14 @@ jobs:
       contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-core/src/time') ||
       contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-testkit')
     steps:
+      - name: Free disk space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          echo "Disk space after cleanup:"
+          df -h /
       - uses: actions/checkout@v4
       - name: Install Nix
         uses: cachix/install-nix-action@v27
