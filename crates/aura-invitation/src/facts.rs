@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_invitation_id_extraction() {
-        let facts = vec![
+        let facts = [
             InvitationFact::sent_ms(
                 test_context_id(),
                 "inv-1".to_string(),
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn test_type_id_consistency() {
-        let facts: Vec<InvitationFact> = vec![
+        let facts = [
             InvitationFact::sent_ms(
                 test_context_id(),
                 "x".to_string(),
