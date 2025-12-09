@@ -1,6 +1,6 @@
 # Journal
 
-This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes integration with the effect_api layer and defines the invariants that ensure correctness. See [Maintenance](111_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
+This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes integration with the effect system and defines the invariants that ensure correctness. See [Maintenance](111_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
 
 ## 1. Journal Namespaces
 
@@ -10,19 +10,26 @@ A journal namespace evolves through fact insertion. Facts accumulate monotonical
 
 ```rust
 pub struct Journal {
+    pub namespace: JournalNamespace,
     pub facts: BTreeSet<Fact>,
+}
+
+pub enum JournalNamespace {
+    Authority(AuthorityId),
+    Context(ContextId),
 }
 ```
 
-This type defines a journal as a set of facts. The journal is a join semilattice under set union. Merging two journals produces a new journal containing all facts from both inputs.
+This type defines a journal as a namespaced set of facts. The namespace identifies whether this journal tracks an authority's commitment tree or a relational context. The journal is a join semilattice under set union. Merging two journals produces a new journal containing all facts from both inputs. Journals with different namespaces cannot be merged.
 
 ## 2. Fact Model
 
-Facts represent immutable events or operations that contribute to the state of a namespace. Facts have identifiers and content. Facts do not contain device identifiers or timestamps used for correctness.
+Facts represent immutable events or operations that contribute to the state of a namespace. Facts have ordering tokens, timestamps, and content. Facts do not contain device identifiers used for correctness.
 
 ```rust
 pub struct Fact {
     pub order: OrderTime,
+    pub timestamp: TimeStamp,
     pub content: FactContent,
 }
 
@@ -30,10 +37,18 @@ pub enum FactContent {
     AttestedOp(AttestedOp),
     Relational(RelationalFact),
     Snapshot(SnapshotFact),
+    RendezvousReceipt {
+        envelope_id: [u8; 32],
+        authority_id: AuthorityId,
+        timestamp: TimeStamp,
+        signature: Vec<u8>,
+    },
 }
 ```
 
-This model supports account operations, relational context operations, and snapshots. Each fact is self contained. Facts are validated before insertion into a namespace.
+The `order` field provides an opaque, privacy-preserving total order for deterministic fact ordering in the BTreeSet. The `timestamp` field provides semantic time information for application logic. Facts implement `Ord` via the `OrderTime` field.
+
+This model supports account operations, relational context operations, snapshots, and rendezvous receipts. Each fact is self contained. Facts are validated before insertion into a namespace.
 
 ## 3. Semilattice Structure
 
@@ -42,94 +57,194 @@ Journals use a join semilattice. The semilattice uses set union as the join oper
 The join semilattice ensures convergence across replicas. Any two replicas that exchange facts eventually converge to identical fact sets. All replicas reduce the same fact set to the same state.
 
 ```rust
-impl Journal {
-    pub fn merge(&self, other: &Journal) -> Journal {
-        Journal { facts: self.facts.union(&other.facts).cloned().collect() }
+impl JoinSemilattice for Journal {
+    fn join(&self, other: &Self) -> Self {
+        assert_eq!(self.namespace, other.namespace);
+        let mut merged_facts = self.facts.clone();
+        merged_facts.extend(other.facts.clone());
+        Self {
+            namespace: self.namespace.clone(),
+            facts: merged_facts,
+        }
     }
 }
 ```
 
-This merge function demonstrates set union across two fact sets. The result is monotonic and convergent.
+This merge function demonstrates set union across two fact sets. The namespace assertion ensures only compatible journals merge. The result is monotonic and convergent.
 
 ## 4. Account Journal Reduction
 
 Account journals store attested operations for commitment tree updates. Reduction computes a `TreeState` from the fact set. Reduction applies only valid operations and resolves conflicts deterministically.
 
-Reduction follows these steps.
-
-1. Identify all `AttestedOp` facts.
-2. Group operations by their referenced parent state.
-3. Select a winning operation for each parent using a deterministic ordering.
-4. Apply winners in parent order.
-5. Compute commitments after each operation.
-
-The result is a single `TreeState` for the account.
-
 ```rust
-pub fn reduce_account(facts: &BTreeSet<Fact>) -> TreeState {
-    // Reduction logic applies attested operations deterministically
-    TreeState::default()
+pub struct TreeState {
+    epoch: Epoch,
+    commitment: Hash32,
+    threshold: u16,
+    device_count: u32,
 }
 ```
 
-This function signature illustrates how reduction produces deterministic state. Implementations must follow defined rules for conflict resolution and validation.
+Reduction follows these steps:
+
+1. Identify all `AttestedOp` facts.
+2. Group operations by their referenced parent state (epoch + commitment).
+3. For concurrent operations (same parent), select winner using max hash tie-breaking: `H(op)` comparison.
+4. Apply winners in topological order respecting parent dependencies.
+5. Recompute commitments bottom-up after each operation.
+
+The max hash conflict resolution ensures determinism:
+
+```rust
+fn resolve_conflict(ops: &[AttestedOp]) -> &AttestedOp {
+    // Sort by hash of operation, take maximum
+    ops.iter().max_by_key(|op| hash_op(op)).unwrap()
+}
+```
+
+The result is a single `TreeState` for the account:
+
+```rust
+pub fn reduce_authority(journal: &Journal) -> Result<AuthorityState, ReductionError> {
+    // Extract AttestedOp facts, apply in deterministic order
+    // Returns AuthorityState { tree_state, facts }
+}
+```
 
 ## 5. RelationalContext Journal Reduction
 
 Relational contexts store relational facts. These facts reference authority commitments. Reduction produces a `RelationalState` that captures the current relationship between authorities.
 
-Reduction applies relational facts in the order defined by their dependencies. Aura Consensus may produce commit facts that include thresholds and signatures. Reduction verifies that relational facts reference current authority states.
-
 ```rust
-pub fn reduce_context(facts: &BTreeSet<Fact>) -> RelationalState {
-    // Reduction logic processes relational facts
-    RelationalState::default()
+pub struct RelationalState {
+    pub bindings: Vec<RelationalBinding>,
+    pub flow_budgets: BTreeMap<(AuthorityId, AuthorityId, u64), u64>,
+    pub channel_epochs: BTreeMap<ChannelId, ChannelEpochState>,
+}
+
+pub struct RelationalBinding {
+    pub binding_type: RelationalBindingType,
+    pub context_id: ContextId,
+    pub data: Vec<u8>,
 }
 ```
 
-This function signature shows how a relational state is derived. Implementations must ensure that relational facts reference valid authority commitments.
+Reduction processes the following relational fact types:
+
+- **GuardianBinding**: Maps to `RelationalBinding` for guardian relationships
+- **RecoveryGrant**: Recovery permission bindings between authorities
+- **Consensus**: Generic bindings with consensus metadata
+- **AmpChannelCheckpoint**: Channel state snapshots for AMP messaging
+- **AmpProposedChannelEpochBump** / **AmpCommittedChannelEpochBump**: Channel epoch transitions
+- **AmpChannelPolicy**: Channel-specific policy overrides (skip windows)
+- **Generic**: Domain-specific extensibility facts
+
+```rust
+pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionError> {
+    // Process relational facts, build bindings and channel state
+}
+```
+
+Reduction verifies that relational facts reference valid authority commitments and applies them in dependency order.
 
 ## 6. Snapshots and Garbage Collection
 
-Snapshots summarize all prior facts. A snapshot fact contains a digest of the fact set at the time of creation. A snapshot establishes a high water mark. Facts older than the snapshot can be pruned.
-
-Garbage collection removes pruned facts while preserving logical meaning. Pruning does not change the result of reduction. Pruning reduces storage requirements.
+Snapshots summarize all prior facts. A snapshot fact contains a state hash, the list of superseded facts, and a sequence number. A snapshot establishes a high water mark. Facts older than the snapshot can be pruned.
 
 ```rust
 pub struct SnapshotFact {
-    pub digest: Hash32,
+    pub state_hash: Hash32,
+    pub superseded_facts: Vec<OrderTime>,
+    pub sequence: u64,
 }
 ```
 
-This structure defines a snapshot. The digest represents a summary of the fact set below the snapshot.
+Garbage collection removes pruned facts while preserving logical meaning. Pruning does not change the result of reduction. The GC algorithm uses safety margins to prevent premature pruning:
 
-## 7. Ledger Integration
+- **Default skip window**: 1024 generations
+- **Safety margin**: `skip_window / 2`
+- **Pruning boundary**: `max_generation - (2 * skip_window) - safety_margin`
 
-The effect_api layer stores facts durably. The effect_api exposes minimal operations such as append and read. The effect_api does not define logical meaning. The journal and reduction logic provide semantics.
+Helper functions determine what can be pruned:
 
-The effect_api writes facts to persistent storage. Replica synchronization loads facts from the effect_api into journal memory. The effect_api guarantees durability but does not affect CRDT merge semantics.
+```rust
+pub fn compute_checkpoint_pruning_boundary(max_gen: u64, skip_window: Option<u64>) -> u64;
+pub fn can_prune_checkpoint(checkpoint: &AmpCheckpoint, boundary: u64) -> bool;
+pub fn can_prune_proposed_bump(bump: &ProposedBump, committed_gen: u64) -> bool;
+```
+
+## 7. Journal Effects Integration
+
+The effect system provides journal operations through `JournalEffects`. This trait handles persistence, merging, and flow budget tracking:
 
 ```rust
 #[async_trait]
-pub trait LedgerEffects {
-    async fn append_fact(&self, fact: Fact) -> Result<OrderTime>;
-    async fn read_facts(&self, namespace: &str) -> Result<Vec<Fact>>;
+pub trait JournalEffects: Send + Sync {
+    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError>;
+    async fn refine_caps(&self, target: &Journal, refinement: &Journal) -> Result<Journal, AuraError>;
+    async fn get_journal(&self) -> Result<Journal, AuraError>;
+    async fn persist_journal(&self, journal: &Journal) -> Result<(), AuraError>;
+    async fn get_flow_budget(&self, context: &ContextId, peer: &AuthorityId) -> Result<FlowBudget, AuraError>;
+    async fn update_flow_budget(&self, context: &ContextId, peer: &AuthorityId, budget: &FlowBudget) -> Result<FlowBudget, AuraError>;
+    async fn charge_flow_budget(&self, context: &ContextId, peer: &AuthorityId, cost: u32) -> Result<FlowBudget, AuraError>;
 }
 ```
 
-This trait defines minimal storage operations. The journal uses these operations to persist and retrieve facts.
+The effect layer writes facts to persistent storage. Replica synchronization loads facts through effect handlers into journal memory. The effect layer guarantees durability but does not affect CRDT merge semantics.
 
-## 8. Invariants
+## 8. AttestedOp Structure
 
-The journal and reduction architecture satisfy several invariants. Convergence ensures all replicas reach the same state when they have the same facts. Idempotence ensures that repeated merges or reductions do not change state. Determinism ensures that reduction produces the same output for all replicas.
+AttestedOp exists in two layers with different levels of detail:
+
+**Layer 1 (aura-core)** - Full operation metadata:
+
+```rust
+pub struct AttestedOp {
+    pub op: TreeOp,
+    pub agg_sig: Vec<u8>,
+    pub signer_count: u16,
+}
+
+pub struct TreeOp {
+    pub parent_epoch: Epoch,
+    pub parent_commitment: TreeHash32,
+    pub op: TreeOpKind,
+    pub version: u16,
+}
+```
+
+**Layer 2 (aura-journal)** - Flattened for journal storage:
+
+```rust
+pub struct AttestedOp {
+    pub tree_op: TreeOpKind,
+    pub parent_commitment: Hash32,
+    pub new_commitment: Hash32,
+    pub witness_threshold: u16,
+    pub signature: Vec<u8>,
+}
+```
+
+The aura-core version includes epoch and version for full verification. The aura-journal version includes computed commitments for efficient reduction.
+
+## 9. Invariants
+
+The journal and reduction architecture satisfy several invariants:
+
+- **Convergence**: All replicas reach the same state when they have the same facts
+- **Idempotence**: Repeated merges or reductions do not change state
+- **Determinism**: Reduction produces identical output for identical input across all replicas
+- **No HashMap iteration**: Uses BTreeMap for deterministic ordering
+- **No system time**: Uses OrderTime tokens for ordering
+- **No floating point**: All arithmetic is exact
 
 These invariants guarantee correct distributed behavior. They also support offline operation with eventual consistency. They form the foundation for Aura's account and relational context state machines.
 
-## 9. Fact Validation Pipeline
+## 10. Fact Validation Pipeline
 
 Every fact inserted into a journal must be validated before merge. The following steps outline the required checks and the effect traits responsible for each fact type:
 
-### 9.1 AttestedOp Facts
+### 10.1 AttestedOp Facts
 
 **Checks**
 - Verify the threshold signature (`agg_sig`) using the two-phase verification model from `aura-core::tree::verification`:
@@ -143,9 +258,9 @@ See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-op
 **Responsible Effects**
 - `CryptoEffects` for FROST signature verification via `verify_attested_op()`.
 - `JournalEffects` for parent lookup, state consistency via `check_attested_op()`, and conflict detection.
-- `LedgerEffects` to persist the fact once validated.
+- `StorageEffects` to persist the fact once validated.
 
-### 9.2 Relational Facts
+### 10.2 Relational Facts
 
 **Checks**
 - Validate that each authority commitment referenced in the fact matches the current reduced state (`AuthorityState::root_commitment`).
@@ -157,7 +272,7 @@ See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-op
 - `CryptoEffects` for consensus proof verification.
 - `JournalEffects` for context-specific merge.
 
-### 9.3 FlowBudget Facts
+### 10.3 FlowBudget Facts
 
 **Checks**
 - Ensure `spent` deltas are non-negative and reference the active epoch for the `(ContextId, peer)` pair.
@@ -168,15 +283,15 @@ See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-op
 - `FlowBudgetEffects` (or FlowGuard) produce the fact and enforce monotonicity before inserting.
 - `JournalEffects` gate insertion to prevent stale epochs from updating headroom.
 
-### 9.4 Snapshot Facts
+### 10.4 Snapshot Facts
 
 **Checks**
-- Confirm the snapshot digest matches the hash of all facts below the snapshot.
-- Ensure no newer snapshot already exists for the namespace.
+- Confirm the snapshot `state_hash` matches the hash of all facts below the snapshot.
+- Ensure no newer snapshot already exists for the namespace (check `sequence` number).
 - Verify that pruning according to the snapshot does not remove facts still referenced by receipts or pending consensus operations.
 
 **Responsible Effects**
 - `JournalEffects` compute and validate snapshot digests.
-- `LedgerEffects` persist the snapshot atomically with pruning metadata.
+- `StorageEffects` persist the snapshot atomically with pruning metadata.
 
 By clearly separating validation responsibilities, runtime authors know which effect handlers must participate before a fact mutation is committed. This structure keeps fact semantics consistent across authorities and contexts.
