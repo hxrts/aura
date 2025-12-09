@@ -579,28 +579,6 @@ impl ChannelMode {
         }
     }
 
-    /// Convert to display string like "+mpt"
-    pub fn to_string(&self) -> String {
-        let mut flags = String::from("+");
-        if self.moderated {
-            flags.push('m');
-        }
-        if self.private {
-            flags.push('p');
-        }
-        if self.topic_protected {
-            flags.push('t');
-        }
-        if self.invite_only {
-            flags.push('i');
-        }
-        if flags.len() == 1 {
-            String::new() // No flags set
-        } else {
-            flags
-        }
-    }
-
     /// Get human-readable description of active modes
     pub fn description(&self) -> Vec<&'static str> {
         let mut desc = Vec::new();
@@ -617,6 +595,30 @@ impl ChannelMode {
             desc.push("Invite Only");
         }
         desc
+    }
+}
+
+impl std::fmt::Display for ChannelMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut flags = String::from("+");
+        if self.moderated {
+            flags.push('m');
+        }
+        if self.private {
+            flags.push('p');
+        }
+        if self.topic_protected {
+            flags.push('t');
+        }
+        if self.invite_only {
+            flags.push('i');
+        }
+
+        if flags.len() == 1 {
+            write!(f, "")
+        } else {
+            write!(f, "{}", flags)
+        }
     }
 }
 

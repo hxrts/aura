@@ -293,10 +293,7 @@ pub fn export_account_backup(
 
     // Load journal if it exists
     let journal = if journal_path.exists() {
-        match std::fs::read_to_string(&journal_path) {
-            Ok(content) => Some(content),
-            Err(_) => None, // Journal is optional
-        }
+        std::fs::read_to_string(&journal_path).ok()
     } else {
         None
     };

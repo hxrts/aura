@@ -251,7 +251,7 @@ pub fn navigate_grid(current: usize, cols: usize, total: usize, key: NavKey) -> 
     if total == 0 || cols == 0 {
         return 0;
     }
-    let rows = (total + cols - 1) / cols; // ceiling division
+    let rows = total.div_ceil(cols); // ceiling division
     let current_row = current / cols;
     let current_col = current % cols;
 

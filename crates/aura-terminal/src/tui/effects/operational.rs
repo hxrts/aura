@@ -451,7 +451,7 @@ impl OperationalHandler {
                 };
 
                 // Look up contact by ID
-                if let Some(contact) = contacts.contact(&target) {
+                if let Some(contact) = contacts.contact(target) {
                     Some(Ok(OpResponse::Data(format_info(contact))))
                 } else {
                     // Try partial match by name
@@ -635,8 +635,8 @@ impl OperationalHandler {
                                 };
 
                                 // Parse sender authority from string
-                                let sender_id = AuthorityId::from_str(&inv.from_id)
-                                    .unwrap_or_else(|_| authority);
+                                let sender_id =
+                                    AuthorityId::from_str(&inv.from_id).unwrap_or(authority);
 
                                 // Create ShareableInvitation
                                 let shareable = ShareableInvitation {
@@ -900,7 +900,7 @@ impl OperationalHandler {
                         }
 
                         // Find and update the target resident
-                        if let Some(resident) = block.resident_mut(&target) {
+                        if let Some(resident) = block.resident_mut(target) {
                             // Can't promote an Owner
                             if matches!(resident.role, aura_app::views::block::ResidentRole::Owner)
                             {
@@ -944,7 +944,7 @@ impl OperationalHandler {
                         }
 
                         // Find and update the target resident
-                        if let Some(resident) = block.resident_mut(&target) {
+                        if let Some(resident) = block.resident_mut(target) {
                             // Can only demote Admin, not Owner
                             if !matches!(resident.role, aura_app::views::block::ResidentRole::Admin)
                             {

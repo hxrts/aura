@@ -57,30 +57,30 @@ impl CommandContext {
     /// Create context from an AppCore StateSnapshot
     pub fn from_snapshot(snapshot: &aura_app::StateSnapshot) -> Self {
         // Extract current block ID from neighborhood position
-        let current_block_id = snapshot.neighborhood.position.as_ref().and_then(|p| {
+        let current_block_id = snapshot.neighborhood.position.as_ref().map(|p| {
             // Try to parse as UUID first, then hash the string
             if let Ok(uuid) = uuid::Uuid::parse_str(&p.current_block_id) {
-                Some(ContextId::from(uuid))
+                ContextId::from(uuid)
             } else {
                 // Hash the string for deterministic ID
                 let hash = aura_core::hash::hash(p.current_block_id.as_bytes());
                 let mut bytes = [0u8; 16];
                 bytes.copy_from_slice(&hash[..16]);
-                Some(ContextId::from(uuid::Uuid::from_bytes(bytes)))
+                ContextId::from(uuid::Uuid::from_bytes(bytes))
             }
         });
 
         // Extract recovery context ID from active recovery
-        let recovery_context_id = snapshot.recovery.active_recovery.as_ref().and_then(|r| {
+        let recovery_context_id = snapshot.recovery.active_recovery.as_ref().map(|r| {
             // Try to parse as UUID first, then hash the string
             if let Ok(uuid) = uuid::Uuid::parse_str(&r.id) {
-                Some(ContextId::from(uuid))
+                ContextId::from(uuid)
             } else {
                 // Hash the string for deterministic ID
                 let hash = aura_core::hash::hash(r.id.as_bytes());
                 let mut bytes = [0u8; 16];
                 bytes.copy_from_slice(&hash[..16]);
-                Some(ContextId::from(uuid::Uuid::from_bytes(bytes)))
+                ContextId::from(uuid::Uuid::from_bytes(bytes))
             }
         });
 
