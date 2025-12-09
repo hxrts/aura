@@ -377,4 +377,3 @@ Hardware Security Module support would require:
 - [Effect System](./106_effect_system_and_runtime.md) - Effect trait patterns
 - [Project Structure](./999_project_structure.md) - 8-layer architecture
 - [Development Patterns](./805_development_patterns.md) - Code location guidance
-- [Crypto Consolidation Plan](../work/crypto.md) - Implementation details
