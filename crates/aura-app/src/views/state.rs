@@ -150,6 +150,11 @@ cfg_if! {
                 self.invitations.get_cloned()
             }
 
+            /// Get a clone of the current neighborhood state
+            pub fn get_neighborhood(&self) -> NeighborhoodState {
+                self.neighborhood.get_cloned()
+            }
+
             /// Update chat state
             pub fn set_chat(&self, state: ChatState) {
                 self.chat.set(state);

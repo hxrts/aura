@@ -309,12 +309,13 @@ fn reduce_set_guardian_threshold(content: &str) -> ViewDelta {
 }
 
 fn reduce_create_invitation(content: &str) -> ViewDelta {
-    let params = content
-        .strip_prefix("CreateInvitation::")
-        .unwrap_or(content);
-    let invitation_id = parse_param(params, "invitation_id")
-        .unwrap_or("unknown")
-        .to_string();
+    // Generate invitation_id from content hash (same approach as dispatch)
+    // The invitation_id is deterministically derived from the fact content
+    let fact_hash = aura_core::hash::hash(content.as_bytes());
+    let invitation_id = format!(
+        "inv_{:x}",
+        u64::from_le_bytes(fact_hash[..8].try_into().unwrap_or([0u8; 8]))
+    );
 
     ViewDelta::InvitationCreated { invitation_id }
 }

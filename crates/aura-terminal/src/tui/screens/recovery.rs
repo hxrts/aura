@@ -21,22 +21,28 @@ use crate::tui::hooks::AppCoreContext;
 use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
 use crate::tui::theme::{Icons, Spacing, Theme};
 use crate::tui::types::{
-    Guardian, GuardianApproval, GuardianStatus, RecoveryState, RecoveryStatus, RecoveryTab,
+    Guardian, GuardianApproval, GuardianStatus, PendingRequest, RecoveryState, RecoveryStatus,
+    RecoveryTab,
 };
 
 /// Callback type for recovery actions (no args)
 pub type RecoveryCallback = Arc<dyn Fn() + Send + Sync>;
 
+/// Callback type for approval submission (takes request_id)
+pub type ApprovalCallback = Arc<dyn Fn(String) + Send + Sync>;
+
 /// Props for TabBar
 #[derive(Default, Props)]
 pub struct TabBarProps {
     pub active_tab: RecoveryTab,
+    pub pending_count: usize,
 }
 
 /// Tab navigation bar
 #[component]
 pub fn TabBar(props: &TabBarProps) -> impl Into<AnyElement<'static>> {
     let active = props.active_tab;
+    let pending_count = props.pending_count;
 
     element! {
         View(
@@ -47,11 +53,16 @@ pub fn TabBar(props: &TabBarProps) -> impl Into<AnyElement<'static>> {
             border_edges: Edges::Bottom,
             border_color: Theme::BORDER,
         ) {
-            #([RecoveryTab::Guardians, RecoveryTab::Recovery].iter().map(|&tab| {
+            #(RecoveryTab::all().iter().map(|&tab| {
                 let is_active = tab == active;
                 let color = if is_active { Theme::PRIMARY } else { Theme::TEXT_MUTED };
                 let weight = if is_active { Weight::Bold } else { Weight::Normal };
-                let title = tab.title().to_string();
+                // Show pending count badge on Requests tab
+                let title = if tab == RecoveryTab::Requests && pending_count > 0 {
+                    format!("{} ({})", tab.title(), pending_count)
+                } else {
+                    tab.title().to_string()
+                };
                 element! {
                     Text(content: title, color: color, weight: weight)
                 }
@@ -250,6 +261,85 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
     }
 }
 
+/// Props for PendingRequestsPanel
+#[derive(Default, Props)]
+pub struct PendingRequestsPanelProps {
+    pub requests: Vec<PendingRequest>,
+    pub selected_index: usize,
+}
+
+/// Pending recovery requests panel (requests from others that we can approve)
+#[component]
+pub fn PendingRequestsPanel(props: &PendingRequestsPanelProps) -> impl Into<AnyElement<'static>> {
+    let requests = props.requests.clone();
+    let selected = props.selected_index;
+
+    element! {
+        View(
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            gap: 0,
+        ) {
+            // Requests list
+            View(
+                flex_direction: FlexDirection::Column,
+                border_style: BorderStyle::Round,
+                border_color: Theme::BORDER_FOCUS,
+                flex_grow: 1.0,
+            ) {
+                View(padding_left: Spacing::PANEL_PADDING) {
+                    Text(content: "Recovery Requests", weight: Weight::Bold, color: Theme::PRIMARY)
+                }
+                View(
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    padding: Spacing::PANEL_PADDING,
+                    overflow: Overflow::Scroll,
+                ) {
+                    #(if requests.is_empty() {
+                        vec![element! { View { EmptyState(title: "No pending requests".to_string()) } }]
+                    } else {
+                        requests.iter().enumerate().map(|(idx, req)| {
+                            let is_selected = idx == selected;
+                            let bg = if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL };
+                            let text_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL };
+
+                            let status_icon = if req.we_approved { Icons::CHECK } else { Icons::PENDING };
+                            let status_color = if req.we_approved { Theme::SUCCESS } else { Theme::WARNING };
+
+                            let progress_text = format!("{}/{}", req.approvals_received, req.approvals_required);
+                            let account = req.account_name.clone();
+                            let key = req.id.clone();
+
+                            element! {
+                                View(key: key, flex_direction: FlexDirection::Row, background_color: bg, padding_left: Spacing::XS, gap: Spacing::SM) {
+                                    Text(content: status_icon.to_string(), color: status_color)
+                                    View(flex_direction: FlexDirection::Column, flex_grow: 1.0) {
+                                        Text(content: account, color: text_color)
+                                        View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                                            Text(content: "Progress:", color: Theme::TEXT_MUTED)
+                                            Text(content: progress_text, color: Theme::TEXT)
+                                        }
+                                    }
+                                }
+                            }
+                        }).collect()
+                    })
+                }
+            }
+
+            // Help text
+            View(
+                border_style: BorderStyle::Round,
+                border_color: Theme::BORDER,
+                padding: Spacing::PANEL_PADDING,
+            ) {
+                Text(content: "Press Enter to approve selected request", color: Theme::TEXT_MUTED)
+            }
+        }
+    }
+}
+
 /// Props for RecoveryScreen
 #[derive(Default, Props)]
 pub struct RecoveryScreenProps {
@@ -257,10 +347,14 @@ pub struct RecoveryScreenProps {
     pub threshold_required: u32,
     pub threshold_total: u32,
     pub recovery_status: RecoveryStatus,
+    /// Pending recovery requests from others (we are their guardian)
+    pub pending_requests: Vec<PendingRequest>,
     /// Callback when starting recovery
     pub on_start_recovery: Option<RecoveryCallback>,
     /// Callback when adding a guardian
     pub on_add_guardian: Option<RecoveryCallback>,
+    /// Callback when approving a pending request (takes request_id)
+    pub on_submit_approval: Option<ApprovalCallback>,
 }
 
 /// Convert aura-app guardian status to TUI guardian status
@@ -355,6 +449,10 @@ pub fn RecoveryScreen(
         let initial = props.recovery_status.clone();
         move || initial
     });
+    let reactive_pending_requests = hooks.use_state({
+        let initial = props.pending_requests.clone();
+        move || initial
+    });
 
     // Subscribe to recovery signal updates if AppCoreContext is available
     // Uses the unified ReactiveEffects system from aura-core
@@ -364,6 +462,7 @@ pub fn RecoveryScreen(
             let mut reactive_threshold_required = reactive_threshold_required.clone();
             let mut reactive_threshold_total = reactive_threshold_total.clone();
             let mut reactive_recovery_status = reactive_recovery_status.clone();
+            let mut reactive_pending_requests = reactive_pending_requests.clone();
             let app_core = ctx.app_core.clone();
             async move {
                 // Get a subscription to the recovery signal via ReactiveEffects
@@ -385,10 +484,18 @@ pub fn RecoveryScreen(
                     let status =
                         convert_recovery_status(&recovery_state, &recovery_state.guardians);
 
+                    // Convert pending requests (requests from others that we can approve)
+                    let pending: Vec<PendingRequest> = recovery_state
+                        .pending_requests
+                        .iter()
+                        .map(|p| PendingRequest::from(p))
+                        .collect();
+
                     reactive_guardians.set(guardians);
                     reactive_threshold_required.set(recovery_state.threshold);
                     reactive_threshold_total.set(recovery_state.guardian_count);
                     reactive_recovery_status.set(status);
+                    reactive_pending_requests.set(pending);
                 }
             }
         });
@@ -399,17 +506,25 @@ pub fn RecoveryScreen(
     let threshold_required = reactive_threshold_required.get();
     let threshold_total = reactive_threshold_total.get();
     let recovery_status = reactive_recovery_status.read().clone();
+    let pending_requests = reactive_pending_requests.read().clone();
 
     let mut active_tab = hooks.use_state(|| RecoveryTab::Guardians);
     let mut guardian_index = hooks.use_state(|| 0usize);
+    let mut request_index = hooks.use_state(|| 0usize);
 
     let current_tab = active_tab.get();
     let current_guardian_index = guardian_index.get();
+    let current_request_index = request_index.get();
     let guardian_count = guardians.len();
+    let request_count = pending_requests.len();
 
     // Clone callbacks for event handler
     let on_start_recovery = props.on_start_recovery.clone();
     let on_add_guardian = props.on_add_guardian.clone();
+    let on_submit_approval = props.on_submit_approval.clone();
+
+    // Clone pending_requests for approval submission
+    let requests_for_approval = pending_requests.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
     let mut nav_throttle = hooks.use_ref(NavThrottle::new);
@@ -420,21 +535,29 @@ pub fn RecoveryScreen(
             if let Some(nav_key) = is_nav_key_press(&event) {
                 if nav_throttle.write().try_navigate() {
                     match nav_key {
-                        // Horizontal: switch between tabs
+                        // Horizontal: switch between tabs using prev/next
                         NavKey::Left => {
-                            active_tab.set(RecoveryTab::Guardians);
+                            let current = active_tab.get();
+                            active_tab.set(current.prev());
                         }
                         NavKey::Right => {
-                            active_tab.set(RecoveryTab::Recovery);
+                            let current = active_tab.get();
+                            active_tab.set(current.next());
                         }
-                        // Vertical: navigate within guardian list when on Guardians tab
-                        NavKey::Up | NavKey::Down => {
-                            if active_tab.get() == RecoveryTab::Guardians && guardian_count > 0 {
+                        // Vertical: navigate within list based on active tab
+                        NavKey::Up | NavKey::Down => match active_tab.get() {
+                            RecoveryTab::Guardians if guardian_count > 0 => {
                                 let new_idx =
                                     navigate_list(guardian_index.get(), guardian_count, nav_key);
                                 guardian_index.set(new_idx);
                             }
-                        }
+                            RecoveryTab::Requests if request_count > 0 => {
+                                let new_idx =
+                                    navigate_list(request_index.get(), request_count, nav_key);
+                                request_index.set(new_idx);
+                            }
+                            _ => {}
+                        },
                     }
                 }
                 return;
@@ -455,6 +578,18 @@ pub fn RecoveryScreen(
                             callback();
                         }
                     }
+                    // Enter: approve selected request on Requests tab
+                    KeyCode::Enter => {
+                        if active_tab.get() == RecoveryTab::Requests {
+                            if let Some(request) = requests_for_approval.get(request_index.get()) {
+                                if !request.we_approved {
+                                    if let Some(ref callback) = on_submit_approval {
+                                        callback(request.id.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 },
                 _ => {}
@@ -471,8 +606,8 @@ pub fn RecoveryScreen(
             flex_shrink: 1.0,
             overflow: Overflow::Hidden,
         ) {
-            // Tab bar
-            TabBar(active_tab: current_tab)
+            // Tab bar with pending count badge
+            TabBar(active_tab: current_tab, pending_count: request_count)
 
             // Content based on active tab
             View(flex_grow: 1.0, flex_shrink: 1.0, overflow: Overflow::Hidden) {
@@ -490,6 +625,14 @@ pub fn RecoveryScreen(
                     RecoveryTab::Recovery => vec![element! {
                         View(flex_grow: 1.0) {
                             RecoveryPanel(status: recovery_status.clone())
+                        }
+                    }],
+                    RecoveryTab::Requests => vec![element! {
+                        View(flex_grow: 1.0) {
+                            PendingRequestsPanel(
+                                requests: pending_requests.clone(),
+                                selected_index: current_request_index,
+                            )
                         }
                     }],
                 })

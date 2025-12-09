@@ -73,6 +73,6 @@ pub use reactive::{
 
 // Re-export navigation types
 pub use navigation::{
-    is_nav_key_press, navigate_grid, navigate_list, NavKey, NavThrottle, ThreePanelFocus,
-    TwoPanelFocus, NAV_THROTTLE_MS,
+    is_nav_key_press, navigate_grid, navigate_list, InputThrottle, NavKey, NavThrottle,
+    ThreePanelFocus, TwoPanelFocus, INPUT_THROTTLE_MS, NAV_THROTTLE_MS,
 };

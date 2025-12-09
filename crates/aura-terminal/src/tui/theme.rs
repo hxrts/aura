@@ -86,6 +86,8 @@ impl Icons {
     // Status indicators
     /// Checkmark for success/completed
     pub const CHECK: &'static str = "\u{2713}"; // ✓
+    /// Double checkmark for delivered
+    pub const CHECK_DOUBLE: &'static str = "\u{2713}\u{2713}"; // ✓✓
     /// X mark for error/failed
     pub const CROSS: &'static str = "\u{2717}"; // ✗
     /// Warning triangle

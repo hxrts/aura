@@ -17,9 +17,11 @@ use std::sync::{Arc, RwLock};
 use aura_app::signal_defs::CHAT_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
-use crate::tui::components::{ChatCreateModal, ChatCreateState, MessageBubble, MessageInput};
+use crate::tui::components::{
+    ChannelInfoModal, ChatCreateModal, ChatCreateState, MessageBubble, MessageInput, TextInputModal,
+};
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
+use crate::tui::navigation::{is_nav_key_press, navigate_list, InputThrottle, NavKey, NavThrottle};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Channel, Message};
 
@@ -31,6 +33,93 @@ pub type ChannelSelectCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Callback type for creating new channels (name, topic)
 pub type CreateChannelCallback = Arc<dyn Fn(String, Option<String>) + Send + Sync>;
+
+/// Callback type for retrying failed messages (message_id, channel, content)
+pub type RetryMessageCallback = Arc<dyn Fn(String, String, String) + Send + Sync>;
+
+/// Callback type for setting channel topic (channel_id, topic)
+pub type SetTopicCallback = Arc<dyn Fn(String, String) + Send + Sync>;
+
+/// State for topic editing modal
+#[derive(Clone, Debug, Default)]
+pub struct TopicModalState {
+    /// Whether the modal is visible
+    pub visible: bool,
+    /// Current input value
+    pub value: String,
+    /// Channel ID being edited
+    pub channel_id: String,
+    /// Error message if any
+    pub error: String,
+}
+
+impl TopicModalState {
+    /// Show the modal with the current topic
+    pub fn show(&mut self, channel_id: &str, current_topic: &str) {
+        self.visible = true;
+        self.channel_id = channel_id.to_string();
+        self.value = current_topic.to_string();
+        self.error.clear();
+    }
+
+    /// Hide the modal
+    pub fn hide(&mut self) {
+        self.visible = false;
+        self.value.clear();
+        self.channel_id.clear();
+        self.error.clear();
+    }
+
+    /// Push a character to the input
+    pub fn push_char(&mut self, c: char) {
+        self.value.push(c);
+    }
+
+    /// Delete the last character
+    pub fn backspace(&mut self) {
+        self.value.pop();
+    }
+}
+
+/// State for channel info modal
+#[derive(Clone, Debug, Default)]
+pub struct ChannelInfoModalState {
+    /// Whether the modal is visible
+    pub visible: bool,
+    /// Channel ID being shown
+    pub channel_id: String,
+    /// Channel name
+    pub channel_name: String,
+    /// Channel topic
+    pub topic: String,
+    /// Participants in the channel
+    pub participants: Vec<String>,
+}
+
+impl ChannelInfoModalState {
+    /// Show the modal with channel info
+    pub fn show(&mut self, channel_id: &str, channel_name: &str, topic: Option<&str>) {
+        self.visible = true;
+        self.channel_id = channel_id.to_string();
+        self.channel_name = channel_name.to_string();
+        self.topic = topic.unwrap_or("").to_string();
+        self.participants.clear(); // Will be populated by callback
+    }
+
+    /// Set the participants list
+    pub fn set_participants(&mut self, participants: Vec<String>) {
+        self.participants = participants;
+    }
+
+    /// Hide the modal
+    pub fn hide(&mut self) {
+        self.visible = false;
+        self.channel_id.clear();
+        self.channel_name.clear();
+        self.topic.clear();
+        self.participants.clear();
+    }
+}
 
 /// Format a timestamp (ms since epoch) as a human-readable time string
 fn format_timestamp(ts_ms: u64) -> String {
@@ -152,6 +241,7 @@ pub fn MessageList(props: &MessageListProps) -> impl Into<AnyElement<'static>> {
                 let sender = msg.sender.clone();
                 let content = msg.content.clone();
                 let ts = msg.timestamp.clone();
+                let status = msg.delivery_status;
                 element! {
                     MessageBubble(
                         key: id,
@@ -159,9 +249,7 @@ pub fn MessageList(props: &MessageListProps) -> impl Into<AnyElement<'static>> {
                         content: content,
                         timestamp: ts,
                         is_own: msg.is_own,
-                        is_sending: false,
-                        is_failed: false,
-                        is_read: true,
+                        delivery_status: status,
                     )
                 }
             }))
@@ -182,6 +270,10 @@ pub struct ChatScreenProps {
     pub on_channel_select: Option<ChannelSelectCallback>,
     /// Callback when creating a new channel (name, topic)
     pub on_create_channel: Option<CreateChannelCallback>,
+    /// Callback when retrying a failed message (message_id, channel, content)
+    pub on_retry_message: Option<RetryMessageCallback>,
+    /// Callback when setting channel topic (channel_id, topic)
+    pub on_set_topic: Option<SetTopicCallback>,
 }
 
 /// The main chat screen component with keyboard navigation
@@ -275,6 +367,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Modal state for creating new channels
     let create_modal_state = hooks.use_state(ChatCreateState::new);
 
+    // Topic modal state
+    let topic_modal_state = hooks.use_state(TopicModalState::default);
+
+    // Channel info modal state
+    let channel_info_state = hooks.use_state(ChannelInfoModalState::default);
+
     // Input text state - use Arc<RwLock> for thread-safe sharing
     // Use use_state to persist across renders
     let input_text: SharedText = hooks
@@ -298,8 +396,19 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Throttle for navigation keys - persists across renders
     let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
+    // Throttle for text input - persists across renders
+    let mut input_throttle = hooks.use_ref(InputThrottle::new);
+
     // Clone create callback for event handler
     let on_create_channel = props.on_create_channel.clone();
+    let on_retry_message = props.on_retry_message.clone();
+    let on_set_topic = props.on_set_topic.clone();
+
+    // Message index for selecting failed messages to retry
+    let message_idx = hooks.use_state(|| 0usize);
+
+    // Clone messages for event handler
+    let messages_for_handler = messages.clone();
 
     // Handle keyboard events
     hooks.use_terminal_events({
@@ -308,12 +417,20 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         let on_send = on_send.clone();
         let on_channel_select = on_channel_select.clone();
         let on_create_channel = on_create_channel.clone();
+        let on_retry_message = on_retry_message.clone();
+        let on_set_topic = on_set_topic.clone();
         let mut create_modal_state = create_modal_state.clone();
+        let mut topic_modal_state = topic_modal_state.clone();
+        let mut channel_info_state = channel_info_state.clone();
         let channels = channels_for_handler;
+        let messages_for_retry = messages_for_handler;
         let mut input_version = input_version.clone();
         move |event| {
-            // Check if create modal is visible
-            let modal_visible = create_modal_state.read().visible;
+            // Check if any modal is visible
+            let create_modal_visible = create_modal_state.read().visible;
+            let topic_modal_visible = topic_modal_state.read().visible;
+            let channel_info_visible = channel_info_state.read().visible;
+            let modal_visible = create_modal_visible || topic_modal_visible || channel_info_visible;
             let current_focus = focus.get();
 
             // Handle navigation keys first (only in normal mode, not in modal or input mode)
@@ -361,8 +478,69 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 TerminalEvent::Key(KeyEvent {
                     code, modifiers, ..
                 }) => {
-                    if modal_visible {
-                        // Handle modal keys
+                    if channel_info_visible {
+                        // Handle channel info modal keys
+                        match code {
+                            KeyCode::Esc => {
+                                // Close modal
+                                let mut state = channel_info_state.read().clone();
+                                state.hide();
+                                channel_info_state.set(state);
+                            }
+                            KeyCode::Char('t') => {
+                                // Open topic editing from info modal
+                                let info_state = channel_info_state.read().clone();
+                                // Close info modal
+                                let mut state = channel_info_state.read().clone();
+                                state.hide();
+                                channel_info_state.set(state);
+                                // Open topic modal with channel info
+                                let mut state = topic_modal_state.read().clone();
+                                state.show(&info_state.channel_id, &info_state.topic);
+                                topic_modal_state.set(state);
+                            }
+                            _ => {}
+                        }
+                    } else if topic_modal_visible {
+                        // Handle topic modal keys
+                        match code {
+                            KeyCode::Esc => {
+                                // Close modal
+                                let mut state = topic_modal_state.read().clone();
+                                state.hide();
+                                topic_modal_state.set(state);
+                            }
+                            KeyCode::Enter => {
+                                // Submit topic
+                                let state = topic_modal_state.read().clone();
+                                if let Some(ref callback) = on_set_topic {
+                                    callback(state.channel_id.clone(), state.value.clone());
+                                }
+                                // Close modal
+                                let mut state = topic_modal_state.read().clone();
+                                state.hide();
+                                topic_modal_state.set(state);
+                            }
+                            KeyCode::Backspace => {
+                                // Delete character (with throttle)
+                                if input_throttle.write().try_input() {
+                                    let mut state = topic_modal_state.read().clone();
+                                    state.backspace();
+                                    topic_modal_state.set(state);
+                                }
+                            }
+                            KeyCode::Char(c) => {
+                                // Add character (with throttle)
+                                if input_throttle.write().try_input() {
+                                    let mut state = topic_modal_state.read().clone();
+                                    state.push_char(c);
+                                    topic_modal_state.set(state);
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else if create_modal_visible {
+                        // Handle create channel modal keys
                         match code {
                             KeyCode::Esc => {
                                 // Close modal
@@ -398,16 +576,20 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                                 }
                             }
                             KeyCode::Backspace => {
-                                // Delete character
-                                let mut state = create_modal_state.read().clone();
-                                state.pop_char();
-                                create_modal_state.set(state);
+                                // Delete character (with throttle)
+                                if input_throttle.write().try_input() {
+                                    let mut state = create_modal_state.read().clone();
+                                    state.pop_char();
+                                    create_modal_state.set(state);
+                                }
                             }
                             KeyCode::Char(c) => {
-                                // Add character
-                                let mut state = create_modal_state.read().clone();
-                                state.push_char(c);
-                                create_modal_state.set(state);
+                                // Add character (with throttle)
+                                if input_throttle.write().try_input() {
+                                    let mut state = create_modal_state.read().clone();
+                                    state.push_char(c);
+                                    create_modal_state.set(state);
+                                }
                             }
                             _ => {}
                         }
@@ -442,16 +624,20 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                                     }
                                 }
                             }
-                            // Backspace removes last character
+                            // Backspace removes last character (with throttle)
                             KeyCode::Backspace => {
-                                if let Ok(mut guard) = input_text.write() {
-                                    guard.pop();
+                                if input_throttle.write().try_input() {
+                                    if let Ok(mut guard) = input_text.write() {
+                                        guard.pop();
+                                    }
+                                    input_version.set(input_version.get().wrapping_add(1));
                                 }
-                                input_version.set(input_version.get().wrapping_add(1));
                             }
-                            // Character input (including "/" for commands)
+                            // Character input (including "/" for commands) with throttle
                             KeyCode::Char(c) => {
-                                if !modifiers.contains(KeyModifiers::CONTROL) {
+                                if !modifiers.contains(KeyModifiers::CONTROL)
+                                    && input_throttle.write().try_input()
+                                {
                                     if let Ok(mut guard) = input_text.write() {
                                         guard.push(c);
                                     }
@@ -474,6 +660,52 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                                 let mut state = create_modal_state.read().clone();
                                 state.show();
                                 create_modal_state.set(state);
+                            }
+                            // 'r' retries failed message (when in messages focus)
+                            KeyCode::Char('r') => {
+                                if focus.get() == ChatFocus::Messages {
+                                    // Find the current message and retry if it's failed
+                                    let msg_idx = message_idx.get();
+                                    if let Some(msg) = messages_for_retry.get(msg_idx) {
+                                        use crate::tui::types::DeliveryStatus;
+                                        if msg.delivery_status == DeliveryStatus::Failed {
+                                            if let Some(ref callback) = on_retry_message {
+                                                callback(
+                                                    msg.id.clone(),
+                                                    current_channel_id.clone(),
+                                                    msg.content.clone(),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // 't' opens topic editing modal (when in channels focus)
+                            KeyCode::Char('t') => {
+                                if focus.get() == ChatFocus::Channels {
+                                    // Get current channel's topic (or empty string)
+                                    let current_topic = channels
+                                        .get(channel_idx.get())
+                                        .and_then(|c| c.topic.as_ref())
+                                        .map(|t| t.as_str())
+                                        .unwrap_or("");
+                                    let mut state = topic_modal_state.read().clone();
+                                    state.show(&current_channel_id, current_topic);
+                                    topic_modal_state.set(state);
+                                }
+                            }
+                            // 'o' opens channel info modal (when in channels focus)
+                            KeyCode::Char('o') => {
+                                if focus.get() == ChatFocus::Channels {
+                                    if let Some(ch) = channels.get(channel_idx.get()) {
+                                        let mut state = channel_info_state.read().clone();
+                                        state.show(&ch.id, &ch.name, ch.topic.as_deref());
+                                        // Set default participants (You + placeholder for others)
+                                        // Full participant list can be loaded via ListParticipants command
+                                        state.set_participants(vec!["You".to_string()]);
+                                        channel_info_state.set(state);
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -501,8 +733,10 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         Theme::BORDER
     };
 
-    // Check if create modal is visible
+    // Check if modals are visible
     let is_create_modal_visible = create_modal_state.read().visible;
+    let is_topic_modal_visible = topic_modal_state.read().visible;
+    let is_channel_info_visible = channel_info_state.read().visible;
 
     element! {
         View(
@@ -540,6 +774,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         let sender = msg.sender.clone();
                         let content = msg.content.clone();
                         let ts = msg.timestamp.clone();
+                        let status = msg.delivery_status;
                         element! {
                             MessageBubble(
                                 key: id,
@@ -547,9 +782,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                                 content: content,
                                 timestamp: ts,
                                 is_own: msg.is_own,
-                                is_sending: false,
-                                is_failed: false,
-                                is_read: true,
+                                delivery_status: status,
                             )
                         }
                     }))
@@ -565,23 +798,33 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 sending: false,
             )
 
-            // Create channel modal (overlays everything)
-            #(if is_create_modal_visible {
-                let modal_state = create_modal_state.read().clone();
-                Some(element! {
-                    ChatCreateModal(
-                        visible: true,
-                        focused: true,
-                        name: modal_state.name.clone(),
-                        topic: modal_state.topic.clone(),
-                        active_field: modal_state.active_field,
-                        error: modal_state.error.clone().unwrap_or_default(),
-                        creating: modal_state.creating,
-                    )
-                })
-            } else {
-                None
-            })
+            // Create channel modal (overlay)
+            ChatCreateModal(
+                visible: is_create_modal_visible,
+                focused: is_create_modal_visible,
+                name: create_modal_state.read().name.clone(),
+                topic: create_modal_state.read().topic.clone(),
+                active_field: create_modal_state.read().active_field,
+                error: create_modal_state.read().error.clone().unwrap_or_default(),
+                creating: create_modal_state.read().creating,
+            )
+
+            // Topic editing modal (overlay)
+            TextInputModal(
+                visible: is_topic_modal_visible,
+                title: "Set Channel Topic".to_string(),
+                value: topic_modal_state.read().value.clone(),
+                placeholder: "Enter topic...".to_string(),
+                error: topic_modal_state.read().error.clone(),
+            )
+
+            // Channel info modal (overlay)
+            ChannelInfoModal(
+                visible: is_channel_info_visible,
+                channel_name: channel_info_state.read().channel_name.clone(),
+                topic: channel_info_state.read().topic.clone(),
+                participants: channel_info_state.read().participants.clone(),
+            )
         }
     }
 }

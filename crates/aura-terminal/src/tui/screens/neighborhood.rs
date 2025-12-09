@@ -325,6 +325,7 @@ pub fn NeighborhoodScreen(
     // Clone callbacks for event handler
     let on_enter_block = props.on_enter_block.clone();
     let on_go_home = props.on_go_home.clone();
+    let on_back_to_street = props.on_back_to_street.clone();
     let blocks_for_handler = blocks.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
@@ -357,6 +358,12 @@ pub fn NeighborhoodScreen(
                     // Go home - navigate to home block
                     KeyCode::Char('g') => {
                         if let Some(ref callback) = on_go_home {
+                            callback();
+                        }
+                    }
+                    // Back to street - zoom out to street view
+                    KeyCode::Char('b') => {
+                        if let Some(ref callback) = on_back_to_street {
                             callback();
                         }
                     }

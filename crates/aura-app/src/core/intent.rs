@@ -173,9 +173,17 @@ pub enum Intent {
     },
 
     /// Complete the recovery process after threshold approvals
+    ///
+    /// This is called after guardians have provided enough approvals via FROST
+    /// threshold signatures. The `recovered_authority_id` is the ORIGINAL
+    /// authority_id reconstructed by guardians - this must be cryptographically
+    /// identical to the authority before catastrophic device loss.
     CompleteRecovery {
         /// Recovery context to complete
         recovery_context: ContextId,
+        /// The original authority_id reconstructed by guardians via FROST
+        /// This is NOT derived from device_id - it's the actual recovered identity
+        recovered_authority_id: Option<AuthorityId>,
     },
 
     /// Set the guardian threshold for recovery
@@ -799,8 +807,17 @@ impl Intent {
                     recovery_context, reason
                 )
             }
-            Self::CompleteRecovery { recovery_context } => {
-                format!("CompleteRecovery::recovery_context={}", recovery_context)
+            Self::CompleteRecovery {
+                recovery_context,
+                recovered_authority_id,
+            } => {
+                let auth_str = recovered_authority_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "None".to_string());
+                format!(
+                    "CompleteRecovery::recovery_context={}&recovered_authority_id={}",
+                    recovery_context, auth_str
+                )
             }
             Self::SetGuardianThreshold { threshold } => {
                 format!("SetGuardianThreshold::threshold={}", threshold)

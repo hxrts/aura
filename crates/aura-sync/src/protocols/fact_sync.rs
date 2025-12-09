@@ -374,7 +374,10 @@ fn fact_to_bytes(fact: &IndexedFact) -> Vec<u8> {
     bytes
 }
 
-fn bloom_positions<'a>(filter: &'a BloomFilter, element: &'a [u8]) -> impl Iterator<Item = (usize, u8)> + 'a {
+fn bloom_positions<'a>(
+    filter: &'a BloomFilter,
+    element: &'a [u8],
+) -> impl Iterator<Item = (usize, u8)> + 'a {
     (0..filter.config.num_hash_functions).map(move |i| {
         let mut hasher = hash::hasher();
         hasher.update(&i.to_le_bytes());

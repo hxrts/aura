@@ -17,16 +17,24 @@ pub use app::{run_app_with_context, IoApp};
 pub use block::{
     run_block_screen, BlockInviteCallback, BlockNavCallback, BlockScreen, BlockSendCallback,
 };
-pub use chat::{run_chat_screen, ChannelSelectCallback, ChatFocus, ChatScreen, SendCallback};
+pub use chat::{
+    run_chat_screen, ChannelInfoModalState, ChannelSelectCallback, ChatFocus, ChatScreen,
+    CreateChannelCallback, RetryMessageCallback, SendCallback, SetTopicCallback, TopicModalState,
+};
 pub use contacts::{
     run_contacts_screen, ContactsScreen, StartChatCallback, ToggleGuardianCallback,
     UpdatePetnameCallback,
 };
-pub use help::{run_help_screen, HelpCommand, HelpScreen};
+pub use help::{
+    get_help_commands, get_help_commands_for_screen, run_help_screen, HelpCommand, HelpScreen,
+};
 pub use invitations::{run_invitations_screen, InvitationCallback, InvitationsScreen};
 pub use neighborhood::{
     run_neighborhood_screen, GoHomeCallback, NavigationCallback, NeighborhoodScreen,
 };
 pub use recovery::{run_recovery_screen, RecoveryCallback, RecoveryScreen};
 pub use router::{NavAction, Router, Screen};
-pub use settings::{run_settings_screen, MfaCallback, SettingsScreen};
+pub use settings::{
+    run_settings_screen, AddDeviceCallback, MfaCallback, RemoveDeviceCallback, SettingsScreen,
+    UpdateNicknameCallback, UpdateThresholdCallback,
+};

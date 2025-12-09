@@ -10,6 +10,42 @@ use crate::tui::theme::Theme;
 /// Callback type for inviting a discovered peer
 pub type InvitePeerCallback = Arc<dyn Fn(String, String) + Send + Sync>;
 
+/// Invitation status for a discovered peer
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum PeerInvitationStatus {
+    /// Not yet invited
+    #[default]
+    None,
+    /// Invitation sent, waiting for response
+    Pending,
+    /// Invitation accepted
+    Accepted,
+    /// Invitation declined or expired
+    Declined,
+}
+
+impl PeerInvitationStatus {
+    /// Get a display label for the status
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Pending => "pending",
+            Self::Accepted => "accepted",
+            Self::Declined => "declined",
+        }
+    }
+
+    /// Get the color for this status
+    pub fn color(&self) -> Color {
+        match self {
+            Self::None => Theme::TEXT_MUTED,
+            Self::Pending => Theme::WARNING,
+            Self::Accepted => Theme::SUCCESS,
+            Self::Declined => Theme::ERROR,
+        }
+    }
+}
+
 /// A discovered peer from LAN broadcast
 #[derive(Clone, Debug, Default)]
 pub struct DiscoveredPeerInfo {
@@ -23,6 +59,8 @@ pub struct DiscoveredPeerInfo {
     pub discovery_method: String,
     /// Time since discovery in seconds
     pub age_secs: u64,
+    /// Invitation status
+    pub invitation_status: PeerInvitationStatus,
 }
 
 impl DiscoveredPeerInfo {
@@ -34,6 +72,7 @@ impl DiscoveredPeerInfo {
             discovery_method: "LAN".to_string(),
             display_name: None,
             age_secs: 0,
+            invitation_status: PeerInvitationStatus::None,
         }
     }
 
@@ -52,6 +91,18 @@ impl DiscoveredPeerInfo {
     /// Set the age in seconds
     pub fn with_age(mut self, age_secs: u64) -> Self {
         self.age_secs = age_secs;
+        self
+    }
+
+    /// Set the invitation status
+    pub fn with_status(mut self, status: PeerInvitationStatus) -> Self {
+        self.invitation_status = status;
+        self
+    }
+
+    /// Mark as having a pending invitation
+    pub fn with_pending_invitation(mut self) -> Self {
+        self.invitation_status = PeerInvitationStatus::Pending;
         self
     }
 
@@ -162,6 +213,10 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                         let address = peer.address.clone();
                         let age = peer.age_display();
                         let key = peer.authority_id.clone();
+                        // Invitation status display
+                        let status_label = peer.invitation_status.label();
+                        let status_color = peer.invitation_status.color();
+                        let has_status = peer.invitation_status != PeerInvitationStatus::None;
 
                         element! {
                             View(
@@ -175,6 +230,17 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                                 Text(content: pointer, color: Theme::PRIMARY)
                                 Text(content: label, color: Theme::TEXT)
                                 Text(content: method, color: Theme::SECONDARY)
+                                // Show invitation status badge if applicable
+                                #(if has_status {
+                                    Some(element! {
+                                        Text(
+                                            content: format!("[{}]", status_label),
+                                            color: status_color,
+                                        )
+                                    })
+                                } else {
+                                    None
+                                })
                                 Text(content: address, color: Theme::TEXT_MUTED)
                                 View(flex_grow: 1.0) {}
                                 Text(content: age, color: Theme::TEXT_MUTED)

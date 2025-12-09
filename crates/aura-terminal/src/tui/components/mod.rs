@@ -4,6 +4,7 @@
 
 mod account_setup;
 mod card;
+mod channel_info_modal;
 mod chat_create_modal;
 mod command_palette;
 mod contact_select_modal;
@@ -11,6 +12,7 @@ mod demo_hint;
 mod discovered_peers;
 mod empty_state;
 mod form_modal;
+mod help_modal;
 mod invitation_code_modal;
 mod invitation_create_modal;
 mod invitation_import_modal;
@@ -26,19 +28,23 @@ mod text_input;
 mod text_input_modal;
 mod text_styled;
 mod textarea;
+mod threshold_modal;
 mod toast;
 
 pub use account_setup::{AccountSetupModal, AccountSetupState};
 pub use card::{CardFooter, CardHeader, CardStyle, SimpleCard};
+pub use channel_info_modal::ChannelInfoModal;
 pub use chat_create_modal::{ChatCreateModal, ChatCreateState, CreateChatCallback};
 pub use command_palette::{CommandItem, CommandPalette, PaletteCommand};
 pub use contact_select_modal::{ContactSelectModal, ContactSelectState};
 pub use demo_hint::{DemoHintBar, DemoInviteCodes};
 pub use discovered_peers::{
     DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, InvitePeerCallback,
+    PeerInvitationStatus,
 };
 pub use empty_state::{EmptyState, LoadingState, NoResults};
 pub use form_modal::{FormField, FormFieldComponent, FormModal, FormModalState};
+pub use help_modal::{HelpModal, HelpModalState};
 pub use invitation_code_modal::{InvitationCodeModal, InvitationCodeState};
 pub use invitation_create_modal::{
     CancelCallback, CreateInvitationCallback, InvitationCreateModal, InvitationCreateState,
@@ -56,4 +62,5 @@ pub use text_input::TextInput;
 pub use text_input_modal::{TextInputModal, TextInputState};
 pub use text_styled::{Badge, Divider, Heading, KeyValue, StyledText, TextStyle};
 pub use textarea::{Textarea, TextareaState};
+pub use threshold_modal::{ThresholdModal, ThresholdState};
 pub use toast::{StatusBar, Toast, ToastContainer, ToastLevel, ToastMessage};

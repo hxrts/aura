@@ -3,16 +3,25 @@
 //! Main application with screen navigation
 
 use iocraft::prelude::*;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::tui::components::{
-    AccountSetupModal, DiscoveredPeerInfo, InvitePeerCallback, KeyHintsBar,
+    AccountSetupModal, AccountSetupState, ContactSelectModal, ContactSelectState,
+    DiscoveredPeerInfo, HelpModal, HelpModalState, InvitePeerCallback, KeyHintsBar,
+    PeerInvitationStatus, ToastContainer, ToastMessage,
 };
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::screens::block::{BlockInviteCallback, BlockNavCallback, BlockSendCallback};
-use crate::tui::screens::chat::{ChannelSelectCallback, CreateChannelCallback, SendCallback};
+use crate::tui::navigation::InputThrottle;
+use crate::tui::screens::block::{
+    BlockInviteCallback, BlockNavCallback, BlockSendCallback, GrantStewardCallback,
+    RevokeStewardCallback,
+};
+use crate::tui::screens::chat::{
+    ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
+    SetTopicCallback,
+};
 use crate::tui::screens::contacts::{
     StartChatCallback, ToggleGuardianCallback, UpdatePetnameCallback,
 };
@@ -21,18 +30,21 @@ use crate::tui::screens::invitations::{
     InvitationCallback,
 };
 use crate::tui::screens::neighborhood::{GoHomeCallback, NavigationCallback};
-use crate::tui::screens::recovery::RecoveryCallback;
-use crate::tui::screens::settings::MfaCallback;
+use crate::tui::screens::recovery::{ApprovalCallback, RecoveryCallback};
+use crate::tui::screens::settings::{
+    AddDeviceCallback, MfaCallback, RemoveDeviceCallback, UpdateNicknameCallback,
+    UpdateThresholdCallback,
+};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
     BlockBudget, BlockSummary, Channel, Contact, Device, Guardian, Invitation, InvitationFilter,
-    KeyHint, Message, MfaPolicy, RecoveryStatus, Resident, TraversalDepth,
+    KeyHint, Message, MfaPolicy, PendingRequest, RecoveryStatus, Resident, TraversalDepth,
 };
 
 use super::router::Screen;
 use super::{
-    BlockScreen, ChatScreen, ContactsScreen, HelpCommand, HelpScreen, InvitationsScreen,
-    NeighborhoodScreen, RecoveryScreen, SettingsScreen,
+    BlockScreen, ChatScreen, ContactsScreen, InvitationsScreen, NeighborhoodScreen, RecoveryScreen,
+    SettingsScreen,
 };
 
 /// Props for ScreenTabBar
@@ -146,7 +158,6 @@ pub struct IoAppProps {
     // Screen data - populated from IoContext via reactive views
     pub channels: Vec<Channel>,
     pub messages: Vec<Message>,
-    pub help_commands: Vec<HelpCommand>,
     pub invitations: Vec<Invitation>,
     pub guardians: Vec<Guardian>,
     pub devices: Vec<Device>,
@@ -170,10 +181,14 @@ pub struct IoAppProps {
     pub traversal_depth: TraversalDepth,
     // Effect dispatch callback for sending messages
     pub on_send: Option<SendCallback>,
+    // Effect dispatch callback for retrying failed messages
+    pub on_retry_message: Option<RetryMessageCallback>,
     // Effect dispatch callback for channel selection
     pub on_channel_select: Option<ChannelSelectCallback>,
     // Effect dispatch callback for creating new channels
     pub on_create_channel: Option<CreateChannelCallback>,
+    // Effect dispatch callback for setting channel topic
+    pub on_set_topic: Option<SetTopicCallback>,
     // Effect dispatch callbacks for invitation actions
     pub on_accept_invitation: Option<InvitationCallback>,
     pub on_decline_invitation: Option<InvitationCallback>,
@@ -187,8 +202,18 @@ pub struct IoAppProps {
     // Effect dispatch callbacks for recovery actions
     pub on_start_recovery: Option<RecoveryCallback>,
     pub on_add_guardian: Option<RecoveryCallback>,
-    // Effect dispatch callback for settings
+    /// Callback when a guardian is selected from the modal (contact_id)
+    pub on_select_guardian: Option<GuardianSelectCallback>,
+    /// Pending recovery requests from others that we can approve
+    pub pending_requests: Vec<PendingRequest>,
+    /// Callback for submitting guardian approval (request_id)
+    pub on_submit_approval: Option<ApprovalCallback>,
+    // Effect dispatch callbacks for settings
     pub on_update_mfa: Option<MfaCallback>,
+    pub on_update_nickname: Option<UpdateNicknameCallback>,
+    pub on_update_threshold: Option<UpdateThresholdCallback>,
+    pub on_add_device: Option<AddDeviceCallback>,
+    pub on_remove_device: Option<RemoveDeviceCallback>,
     // Effect dispatch callbacks for contacts actions
     pub on_update_petname: Option<UpdatePetnameCallback>,
     pub on_toggle_guardian: Option<ToggleGuardianCallback>,
@@ -198,6 +223,8 @@ pub struct IoAppProps {
     pub on_block_send: Option<BlockSendCallback>,
     pub on_block_invite: Option<BlockInviteCallback>,
     pub on_block_navigate_neighborhood: Option<BlockNavCallback>,
+    pub on_grant_steward: Option<GrantStewardCallback>,
+    pub on_revoke_steward: Option<RevokeStewardCallback>,
     // Account setup
     /// Whether to show account setup modal on start
     pub show_account_setup: bool,
@@ -222,6 +249,9 @@ pub struct IoAppProps {
 /// Callback for creating an account
 pub type CreateAccountCallback = Arc<dyn Fn(String) + Send + Sync>;
 
+/// Callback for selecting a guardian from the modal (contact_id)
+pub type GuardianSelectCallback = Arc<dyn Fn(String) + Send + Sync>;
+
 /// Main application with screen navigation
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
@@ -229,18 +259,55 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
 
-    // Account setup modal state (using pattern from chat.rs for non-Copy types)
-    // - Bool flags use use_state (Copy)
-    // - String uses Arc<RwLock<String>> (thread-safe shared state)
-    // - Version counter triggers re-renders
-    let account_visible = hooks.use_state(|| props.show_account_setup);
-    let account_creating = hooks.use_state(|| false);
-    // account_error is not stored (errors are transient, shown inline)
-    let _account_error: Option<String> = None;
-    let account_display_name: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
-    let account_display_name_for_handler = account_display_name.clone();
+    // Account setup modal state - using use_ref for non-Copy AccountSetupState
+    // use_ref persists the value across renders without Copy requirement
+    // Version counter triggers re-renders when state changes
+    let show_setup = props.show_account_setup;
+    let account_state = hooks.use_ref(move || {
+        let mut state = AccountSetupState::new();
+        if show_setup {
+            state.show();
+        }
+        state
+    });
     let account_version = hooks.use_state(|| 0usize);
     let on_create_account = props.on_create_account.clone();
+
+    // Guardian selection modal state
+    let guardian_select_state = hooks.use_ref(ContactSelectState::new);
+    let guardian_select_version = hooks.use_state(|| 0usize);
+
+    // Help modal state
+    let help_modal_state = hooks.use_ref(HelpModalState::new);
+    let help_modal_version = hooks.use_state(|| 0usize);
+
+    // Toast notifications state
+    // Using use_ref for non-Copy Vec<ToastMessage>
+    let toasts_ref = hooks.use_ref(|| Vec::<ToastMessage>::new());
+    let toasts_version = hooks.use_state(|| 0usize);
+
+    // Get AppCoreContext for IoContext access
+    let app_ctx = hooks.use_context::<AppCoreContext>();
+
+    // Subscribe to toast updates by polling IoContext periodically
+    hooks.use_future({
+        let mut toasts_ref = toasts_ref.clone();
+        let mut toasts_version = toasts_version.clone();
+        let io_ctx = app_ctx.io_context.clone();
+        async move {
+            loop {
+                // Poll toasts every 100ms
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                let current_toasts = io_ctx.get_toasts().await;
+                // Update the ref and trigger re-render via version counter
+                *toasts_ref.write() = current_toasts;
+                toasts_version.set(toasts_version.get().wrapping_add(1));
+            }
+        }
+    });
+
+    // Input throttle for modal text input
+    let mut input_throttle = hooks.use_ref(InputThrottle::new);
 
     // Handle exit request
     if should_exit.get() {
@@ -250,7 +317,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Clone props for use
     let channels = props.channels.clone();
     let messages = props.messages.clone();
-    let help_commands = props.help_commands.clone();
     let invitations = props.invitations.clone();
     let guardians = props.guardians.clone();
     let devices = props.devices.clone();
@@ -273,8 +339,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let traversal_depth = props.traversal_depth;
     // Effect dispatch callbacks
     let on_send = props.on_send.clone();
+    let on_retry_message = props.on_retry_message.clone();
     let on_channel_select = props.on_channel_select.clone();
     let on_create_channel = props.on_create_channel.clone();
+    let on_set_topic = props.on_set_topic.clone();
     let on_accept_invitation = props.on_accept_invitation.clone();
     let on_decline_invitation = props.on_decline_invitation.clone();
     let on_create_invitation = props.on_create_invitation.clone();
@@ -285,7 +353,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let on_back_to_street = props.on_back_to_street.clone();
     let on_start_recovery = props.on_start_recovery.clone();
     let on_add_guardian = props.on_add_guardian.clone();
+    let on_select_guardian = props.on_select_guardian.clone();
+    let pending_requests = props.pending_requests.clone();
+    let on_submit_approval = props.on_submit_approval.clone();
     let on_update_mfa = props.on_update_mfa.clone();
+    let on_update_nickname = props.on_update_nickname.clone();
+    let on_update_threshold = props.on_update_threshold.clone();
+    let on_add_device = props.on_add_device.clone();
+    let on_remove_device = props.on_remove_device.clone();
     let on_update_petname = props.on_update_petname.clone();
     let on_toggle_guardian = props.on_toggle_guardian.clone();
     let on_start_chat = props.on_start_chat.clone();
@@ -293,6 +368,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let on_block_send = props.on_block_send.clone();
     let on_block_invite = props.on_block_invite.clone();
     let on_block_navigate_neighborhood = props.on_block_navigate_neighborhood.clone();
+    let on_grant_steward = props.on_grant_steward.clone();
+    let on_revoke_steward = props.on_revoke_steward.clone();
 
     let current_screen = screen.get();
 
@@ -302,13 +379,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("i", "Insert"),
             KeyHint::new("v", "Invite"),
             KeyHint::new("n", "Neighborhood"),
-            KeyHint::new("↑↓", "Navigate"),
+            KeyHint::new("g", "Grant steward"),
+            KeyHint::new("r", "Revoke steward"),
         ],
         Screen::Chat => vec![
             KeyHint::new("i", "Insert"),
             KeyHint::new("n", "New channel"),
-            KeyHint::new("h/l", "Focus"),
-            KeyHint::new("↑↓", "Navigate"),
+            KeyHint::new("o", "Channel info"),
+            KeyHint::new("t", "Set topic"),
+            KeyHint::new("r", "Retry failed"),
         ],
         Screen::Contacts => vec![
             KeyHint::new("e", "Edit name"),
@@ -317,9 +396,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("i", "Invite"),
         ],
         Screen::Neighborhood => vec![
-            KeyHint::new("Enter", "Enter"),
-            KeyHint::new("g", "Home"),
-            KeyHint::new("↑↓←→", "Navigate"),
+            KeyHint::new("Enter", "Enter block"),
+            KeyHint::new("g", "Go home"),
+            KeyHint::new("b", "Back to street"),
         ],
         Screen::Invitations => vec![
             KeyHint::new("n", "New"),
@@ -328,7 +407,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("f", "Filter"),
         ],
         Screen::Settings => vec![
-            KeyHint::new("↑↓", "Section"),
             KeyHint::new("h/l", "Panel"),
             KeyHint::new("Space", "Toggle"),
         ],
@@ -337,66 +415,142 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("s", "Start recovery"),
             KeyHint::new("h/l", "Tab"),
         ],
-        Screen::Help => vec![KeyHint::new("↑↓", "Navigate")],
     };
+
+    // Clone contacts for guardian modal
+    let contacts_for_modal = contacts.clone();
 
     hooks.use_terminal_events({
         let mut screen = screen.clone();
         let mut should_exit = should_exit.clone();
-        let mut account_visible = account_visible.clone();
-        let mut account_creating = account_creating.clone();
+        let mut account_state = account_state.clone();
         let mut account_version = account_version.clone();
-        let account_display_name = account_display_name_for_handler.clone();
+        let mut guardian_select_state = guardian_select_state.clone();
+        let mut guardian_select_version = guardian_select_version.clone();
+        let mut help_modal_state = help_modal_state.clone();
+        let mut help_modal_version = help_modal_version.clone();
         let on_create_account = on_create_account.clone();
+        let on_select_guardian = on_select_guardian.clone();
+        let contacts_for_modal = contacts_for_modal.clone();
         move |event| match event {
             TerminalEvent::Key(KeyEvent {
                 code, modifiers, ..
             }) => {
                 // Handle account setup modal input first (captures all input when visible)
-                if account_visible.get() {
+                let modal_visible = account_state.read().visible;
+
+                if modal_visible {
                     match code {
                         KeyCode::Char(c) => {
-                            if let Ok(mut guard) = account_display_name.write() {
-                                guard.push(c);
+                            if input_throttle.write().try_input() {
+                                account_state.write().push_char(c);
+                                account_version.set(account_version.get().wrapping_add(1));
                             }
-                            account_version.set(account_version.get().wrapping_add(1));
                         }
                         KeyCode::Backspace => {
-                            if let Ok(mut guard) = account_display_name.write() {
-                                guard.pop();
+                            if input_throttle.write().try_input() {
+                                account_state.write().backspace();
+                                account_version.set(account_version.get().wrapping_add(1));
                             }
-                            account_version.set(account_version.get().wrapping_add(1));
                         }
                         KeyCode::Enter => {
-                            // Check if we can submit (name not empty and not creating)
-                            let can_submit = account_display_name
-                                .read()
-                                .map(|n| !n.is_empty())
-                                .unwrap_or(false)
-                                && !account_creating.get();
+                            let state = account_state.read();
+                            let is_success = state.is_success();
+                            let is_error = state.is_error();
+                            let can_submit = state.can_submit();
+                            drop(state);
 
-                            if can_submit {
-                                // Trigger account creation callback
+                            if is_success {
+                                // Dismiss the modal after success
+                                account_state.write().finish_creating();
+                                account_version.set(account_version.get().wrapping_add(1));
+                            } else if is_error {
+                                // Reset to input state to retry
+                                account_state.write().reset_to_input();
+                                account_version.set(account_version.get().wrapping_add(1));
+                            } else if can_submit {
+                                // Get name and trigger callback
+                                let name = account_state.read().display_name.clone();
+
                                 if let Some(ref callback) = on_create_account {
-                                    let name = account_display_name
-                                        .read()
-                                        .map(|n| n.clone())
-                                        .unwrap_or_default();
                                     callback(name);
                                 }
+
                                 // Mark as creating
-                                account_creating.set(true);
+                                account_state.write().start_creating();
                                 account_version.set(account_version.get().wrapping_add(1));
                             }
                         }
                         KeyCode::Esc => {
                             // Allow canceling the modal
-                            account_visible.set(false);
+                            account_state.write().hide();
                             account_version.set(account_version.get().wrapping_add(1));
                         }
                         _ => {}
                     }
                     return; // Don't process other keys when modal is visible
+                }
+
+                // Handle guardian select modal input (captures all input when visible)
+                let guardian_modal_visible = guardian_select_state.read().visible;
+
+                if guardian_modal_visible {
+                    match code {
+                        KeyCode::Up => {
+                            guardian_select_state.write().select_prev();
+                            guardian_select_version
+                                .set(guardian_select_version.get().wrapping_add(1));
+                        }
+                        KeyCode::Down => {
+                            guardian_select_state.write().select_next();
+                            guardian_select_version
+                                .set(guardian_select_version.get().wrapping_add(1));
+                        }
+                        KeyCode::Enter => {
+                            // Get selected contact ID first, then hide modal and trigger callback
+                            let selected_id = guardian_select_state.read().get_selected_id();
+                            if let Some(contact_id) = selected_id {
+                                guardian_select_state.write().hide();
+                                guardian_select_version
+                                    .set(guardian_select_version.get().wrapping_add(1));
+                                if let Some(ref callback) = on_select_guardian {
+                                    callback(contact_id);
+                                }
+                            }
+                        }
+                        KeyCode::Esc => {
+                            // Cancel the modal
+                            guardian_select_state.write().hide();
+                            guardian_select_version
+                                .set(guardian_select_version.get().wrapping_add(1));
+                        }
+                        _ => {}
+                    }
+                    return; // Don't process other keys when modal is visible
+                }
+
+                // Handle help modal (captures all input when visible)
+                let help_visible = help_modal_state.read().visible;
+
+                if help_visible {
+                    match code {
+                        KeyCode::Esc | KeyCode::Char('?') => {
+                            help_modal_state.write().hide();
+                            help_modal_version.set(help_modal_version.get().wrapping_add(1));
+                        }
+                        _ => {}
+                    }
+                    return; // Don't process other keys when help modal is visible
+                }
+
+                // Handle 'a' on Recovery screen to show guardian selection modal
+                if screen.get() == Screen::Recovery && code == KeyCode::Char('a') {
+                    // Show the guardian selection modal with contacts
+                    guardian_select_state
+                        .write()
+                        .show("Select Guardian", contacts_for_modal.clone());
+                    guardian_select_version.set(guardian_select_version.get().wrapping_add(1));
+                    return;
                 }
 
                 // Normal screen navigation
@@ -408,7 +562,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     KeyCode::Char('5') => screen.set(Screen::Invitations),
                     KeyCode::Char('6') => screen.set(Screen::Settings),
                     KeyCode::Char('7') => screen.set(Screen::Recovery),
-                    KeyCode::Char('8') => screen.set(Screen::Help),
+                    KeyCode::Char('?') => {
+                        help_modal_state.write().show();
+                        help_modal_version.set(help_modal_version.get().wrapping_add(1));
+                    }
                     KeyCode::Tab => {
                         if modifiers.contains(KeyModifiers::SHIFT) {
                             screen.set(screen.get().prev());
@@ -424,17 +581,37 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         }
     });
 
-    // Extract account setup state for rendering
-    let modal_visible = account_visible.get();
-    let modal_creating = account_creating.get();
-    let modal_display_name = account_display_name
-        .read()
-        .map(|s| s.clone())
-        .unwrap_or_default();
-    // account_error is always None for now (errors are transient, not stored)
-    let modal_error = String::new();
-    // account_version is used for triggering re-renders (not directly in UI)
+    // Extract account setup state for rendering from use_ref
+    let state_ref = account_state.read();
+    let modal_visible = state_ref.visible;
+    let modal_creating = state_ref.creating;
+    let modal_success = state_ref.success;
+    let modal_display_name = state_ref.display_name.clone();
+    let modal_error = state_ref.error.clone().unwrap_or_default();
+    drop(state_ref); // Release the read lock
+                     // account_version is used for triggering re-renders (not directly in UI)
     let _ = account_version.get();
+
+    // Extract guardian select state for rendering from use_ref
+    let guardian_state_ref = guardian_select_state.read();
+    let guardian_modal_visible = guardian_state_ref.visible;
+    let guardian_modal_title = guardian_state_ref.title.clone();
+    let guardian_modal_contacts = guardian_state_ref.contacts.clone();
+    let guardian_modal_selected = guardian_state_ref.selected_index;
+    let guardian_modal_error = guardian_state_ref.error.clone().unwrap_or_default();
+    drop(guardian_state_ref); // Release the read lock
+                              // guardian_select_version is used for triggering re-renders (not directly in UI)
+    let _ = guardian_select_version.get();
+
+    // Extract help modal state for rendering from use_ref
+    let help_modal_visible = help_modal_state.read().visible;
+    // help_modal_version is used for triggering re-renders (not directly in UI)
+    let _ = help_modal_version.get();
+
+    // Get current toasts for rendering
+    // toasts_version is used for triggering re-renders (not directly in UI)
+    let _ = toasts_version.get();
+    let current_toasts = toasts_ref.read().clone();
 
     // Extract sync status from props
     let syncing = props.sync_in_progress;
@@ -472,6 +649,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 on_send: on_block_send.clone(),
                                 on_invite: on_block_invite.clone(),
                                 on_go_neighborhood: on_block_navigate_neighborhood.clone(),
+                                on_grant_steward: on_grant_steward.clone(),
+                                on_revoke_steward: on_revoke_steward.clone(),
                             )
                         }
                     }],
@@ -484,8 +663,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     messages: messages.clone(),
                                     initial_channel_index: idx,
                                     on_send: on_send.clone(),
+                                    on_retry_message: on_retry_message.clone(),
                                     on_channel_select: on_channel_select.clone(),
                                     on_create_channel: on_create_channel.clone(),
+                                    on_set_topic: on_set_topic.clone(),
                                 )
                             }
                         }]
@@ -541,6 +722,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 devices: devices.clone(),
                                 mfa_policy: mfa_policy,
                                 on_update_mfa: on_update_mfa.clone(),
+                                on_update_nickname: on_update_nickname.clone(),
+                                on_update_threshold: on_update_threshold.clone(),
+                                on_add_device: on_add_device.clone(),
+                                on_remove_device: on_remove_device.clone(),
                             )
                         }
                     }],
@@ -551,14 +736,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 threshold_required: threshold_k as u32,
                                 threshold_total: threshold_n as u32,
                                 recovery_status: recovery_status.clone(),
+                                pending_requests: pending_requests.clone(),
                                 on_start_recovery: on_start_recovery.clone(),
                                 on_add_guardian: on_add_guardian.clone(),
+                                on_submit_approval: on_submit_approval.clone(),
                             )
-                        }
-                    }],
-                    Screen::Help => vec![element! {
-                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
-                            HelpScreen(commands: help_commands.clone())
                         }
                     }],
                 })
@@ -573,8 +755,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 display_name: modal_display_name,
                 focused: true,
                 creating: modal_creating,
+                success: modal_success,
                 error: modal_error,
             )
+
+            // Guardian selection modal overlay
+            ContactSelectModal(
+                visible: guardian_modal_visible,
+                title: guardian_modal_title,
+                contacts: guardian_modal_contacts,
+                selected_index: guardian_modal_selected,
+                error: guardian_modal_error,
+            )
+
+            // Help modal overlay (context-sensitive)
+            HelpModal(visible: help_modal_visible, current_screen: Some(current_screen.name().to_string()))
+
+            // Toast notifications (top-right corner)
+            ToastContainer(toasts: current_toasts)
         }
     }
 }
@@ -598,9 +796,31 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to send message: {}", e);
+                ctx.add_error_toast("send-error", format!("Failed to send: {}", e))
+                    .await;
             }
         });
     });
+
+    // RetryMessageCallback for retrying failed messages
+    let ctx_for_retry = ctx_arc.clone();
+    let on_retry_message: RetryMessageCallback = Arc::new(
+        move |message_id: String, channel: String, content: String| {
+            let ctx = ctx_for_retry.clone();
+            let cmd = EffectCommand::RetryMessage {
+                message_id,
+                channel,
+                content,
+            };
+            tokio::spawn(async move {
+                if let Err(e) = ctx.dispatch(cmd).await {
+                    eprintln!("Failed to retry message: {}", e);
+                    ctx.add_error_toast("retry-error", format!("Retry failed: {}", e))
+                        .await;
+                }
+            });
+        },
+    );
 
     // ChannelSelectCallback for selecting a channel (triggers real-time message updates)
     let app_core_for_select = ctx_arc.app_core().clone();
@@ -626,9 +846,31 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
             tokio::spawn(async move {
                 if let Err(e) = ctx.dispatch(cmd).await {
                     eprintln!("Failed to create channel: {}", e);
+                    ctx.add_error_toast(
+                        "channel-error",
+                        format!("Failed to create channel: {}", e),
+                    )
+                    .await;
                 }
             });
         });
+
+    // SetTopicCallback for setting channel topic
+    let ctx_for_set_topic = ctx_arc.clone();
+    let on_set_topic: SetTopicCallback = Arc::new(move |channel_id: String, topic: String| {
+        let ctx = ctx_for_set_topic.clone();
+        let cmd = EffectCommand::SetTopic {
+            channel: channel_id,
+            text: topic,
+        };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to set topic: {}", e);
+                ctx.add_error_toast("topic-error", format!("Failed to set topic: {}", e))
+                    .await;
+            }
+        });
+    });
 
     // InvitationCallback for accepting invitations
     let ctx_for_accept = ctx_arc.clone();
@@ -638,6 +880,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to accept invitation: {}", e);
+                ctx.add_error_toast("invite-error", format!("Failed to accept: {}", e))
+                    .await;
             }
         });
     });
@@ -650,6 +894,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to decline invitation: {}", e);
+                ctx.add_error_toast("invite-error", format!("Failed to decline: {}", e))
+                    .await;
             }
         });
     });
@@ -667,6 +913,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
             tokio::spawn(async move {
                 if let Err(e) = ctx.dispatch(cmd).await {
                     eprintln!("Failed to create invitation: {}", e);
+                    ctx.add_error_toast("create-invite-error", format!("Failed to create: {}", e))
+                        .await;
                 }
             });
         },
@@ -687,6 +935,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to import invitation: {}", e);
+                ctx.add_error_toast("import-invite-error", format!("Failed to import: {}", e))
+                    .await;
             }
         });
     });
@@ -710,6 +960,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
             tokio::spawn(async move {
                 if let Err(e) = ctx.dispatch(cmd).await {
                     eprintln!("Failed to enter block: {}", e);
+                    ctx.add_error_toast("nav-error", format!("Failed to enter block: {}", e))
+                        .await;
                 }
             });
         });
@@ -726,6 +978,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to go home: {}", e);
+                ctx.add_error_toast("nav-error", format!("Failed to go home: {}", e))
+                    .await;
             }
         });
     });
@@ -742,6 +996,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to return to street: {}", e);
+                ctx.add_error_toast("nav-error", format!("Failed to return to street: {}", e))
+                    .await;
             }
         });
     });
@@ -754,11 +1010,14 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to start recovery: {}", e);
+                ctx.add_error_toast("recovery-error", format!("Failed to start recovery: {}", e))
+                    .await;
             }
         });
     });
 
     // RecoveryCallback for adding a guardian - dispatches InviteGuardian command
+    // Note: This is kept for backward compatibility but the modal flow uses on_select_guardian
     let ctx_for_guardian = ctx_arc.clone();
     let on_add_guardian: RecoveryCallback = Arc::new(move || {
         let ctx = ctx_for_guardian.clone();
@@ -766,18 +1025,138 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to invite guardian: {}", e);
+                ctx.add_error_toast(
+                    "guardian-error",
+                    format!("Failed to invite guardian: {}", e),
+                )
+                .await;
+            }
+        });
+    });
+
+    // GuardianSelectCallback for when a guardian is selected from the modal
+    let ctx_for_select_guardian = ctx_arc.clone();
+    let on_select_guardian: GuardianSelectCallback = Arc::new(move |contact_id: String| {
+        let ctx = ctx_for_select_guardian.clone();
+        let cmd = EffectCommand::InviteGuardian {
+            contact_id: Some(contact_id),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to invite guardian: {}", e);
+                ctx.add_error_toast(
+                    "guardian-error",
+                    format!("Failed to invite guardian: {}", e),
+                )
+                .await;
+            }
+        });
+    });
+
+    // ApprovalCallback for submitting guardian approval on a pending recovery request
+    let ctx_for_approval = ctx_arc.clone();
+    let on_submit_approval: ApprovalCallback = Arc::new(move |request_id: String| {
+        let ctx = ctx_for_approval.clone();
+        let cmd = EffectCommand::SubmitGuardianApproval {
+            guardian_id: request_id,
+        };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to submit guardian approval: {}", e);
+                ctx.add_error_toast(
+                    "approval-error",
+                    format!("Failed to submit approval: {}", e),
+                )
+                .await;
             }
         });
     });
 
     // MfaCallback for updating MFA policy
     let ctx_for_mfa = ctx_arc.clone();
-    let on_update_mfa: MfaCallback = Arc::new(move |require_mfa: bool| {
+    let on_update_mfa: MfaCallback = Arc::new(move |policy: MfaPolicy| {
         let ctx = ctx_for_mfa.clone();
-        let cmd = EffectCommand::UpdateMfaPolicy { require_mfa };
+        let cmd = EffectCommand::UpdateMfaPolicy {
+            require_mfa: policy.requires_mfa(),
+        };
         tokio::spawn(async move {
+            // Update the MFA policy in IoContext for immediate UI update
+            ctx.set_mfa_policy(policy).await;
+            // Also dispatch the command for backend persistence
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to update MFA policy: {}", e);
+                ctx.add_error_toast("mfa-error", format!("Failed to update MFA policy: {}", e))
+                    .await;
+            }
+        });
+    });
+
+    // UpdateNicknameCallback for updating display name - updates IoContext and dispatches command
+    let ctx_for_nickname = ctx_arc.clone();
+    let on_update_nickname: UpdateNicknameCallback = Arc::new(move |name: String| {
+        let ctx = ctx_for_nickname.clone();
+        let name_for_cmd = name.clone();
+        let cmd = EffectCommand::UpdateNickname { name: name_for_cmd };
+        tokio::spawn(async move {
+            // Update the display name in IoContext for immediate UI update
+            ctx.set_display_name(&name).await;
+            // Also dispatch the command for any additional processing
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to update nickname: {}", e);
+                ctx.add_error_toast(
+                    "nickname-error",
+                    format!("Failed to update display name: {}", e),
+                )
+                .await;
+            }
+        });
+    });
+
+    // UpdateThresholdCallback for updating recovery threshold - dispatches UpdateThreshold intent
+    let ctx_for_threshold = ctx_arc.clone();
+    let on_update_threshold: UpdateThresholdCallback =
+        Arc::new(move |threshold_k: u8, threshold_n: u8| {
+            let ctx = ctx_for_threshold.clone();
+            let cmd = EffectCommand::UpdateThreshold {
+                threshold_k,
+                threshold_n,
+            };
+            tokio::spawn(async move {
+                if let Err(e) = ctx.dispatch(cmd).await {
+                    eprintln!("Failed to update threshold: {}", e);
+                    ctx.add_error_toast(
+                        "threshold-error",
+                        format!("Failed to update threshold: {}", e),
+                    )
+                    .await;
+                }
+            });
+        });
+
+    // AddDeviceCallback for adding a new device
+    let ctx_for_add_device = ctx_arc.clone();
+    let on_add_device: AddDeviceCallback = Arc::new(move |device_name: String| {
+        let ctx = ctx_for_add_device.clone();
+        let cmd = EffectCommand::AddDevice { device_name };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to add device: {}", e);
+                ctx.add_error_toast("device-error", format!("Failed to add device: {}", e))
+                    .await;
+            }
+        });
+    });
+
+    // RemoveDeviceCallback for removing a device
+    let ctx_for_remove_device = ctx_arc.clone();
+    let on_remove_device: RemoveDeviceCallback = Arc::new(move |device_id: String| {
+        let ctx = ctx_for_remove_device.clone();
+        let cmd = EffectCommand::RemoveDevice { device_id };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to remove device: {}", e);
+                ctx.add_error_toast("device-error", format!("Failed to remove device: {}", e))
+                    .await;
             }
         });
     });
@@ -794,6 +1173,11 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
             tokio::spawn(async move {
                 if let Err(e) = ctx.dispatch(cmd).await {
                     eprintln!("Failed to update petname: {}", e);
+                    ctx.add_error_toast(
+                        "petname-error",
+                        format!("Failed to update contact name: {}", e),
+                    )
+                    .await;
                 }
             });
         });
@@ -806,6 +1190,11 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to toggle guardian status: {}", e);
+                ctx.add_error_toast(
+                    "guardian-error",
+                    format!("Failed to toggle guardian: {}", e),
+                )
+                .await;
             }
         });
     });
@@ -818,6 +1207,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to start direct chat: {}", e);
+                ctx.add_error_toast("chat-error", format!("Failed to start chat: {}", e))
+                    .await;
             }
         });
     });
@@ -827,27 +1218,53 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let on_invite_lan_peer: InvitePeerCallback =
         Arc::new(move |authority_id: String, address: String| {
             let ctx = ctx_for_invite_peer.clone();
+            let authority_id_for_mark = authority_id.clone();
             let cmd = EffectCommand::InviteLanPeer {
                 authority_id,
                 address,
             };
             tokio::spawn(async move {
-                if let Err(e) = ctx.dispatch(cmd).await {
-                    eprintln!("Failed to invite LAN peer: {}", e);
+                match ctx.dispatch(cmd).await {
+                    Ok(_) => {
+                        // Mark this peer as invited in the context for UI status display
+                        ctx.mark_peer_invited(&authority_id_for_mark).await;
+                        tracing::info!("LAN peer invited: {}", authority_id_for_mark);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to invite LAN peer: {}", e);
+                        ctx.add_error_toast("peer-error", format!("Failed to invite peer: {}", e))
+                            .await;
+                    }
                 }
             });
         });
 
     // BlockSendCallback for sending a message in the block channel
-    // Note: Full implementation requires compose modal/input focus UI
-    // The SendMessage command is ready for use when UI provides the message content
-    let on_block_send: BlockSendCallback = Arc::new(|content: String| {
-        // Log the action - compose modal implementation needed
-        // When modal is implemented: dispatch SendMessage { channel, content }
-        tracing::info!(
-            "Block send triggered with content '{}' - awaiting compose UI",
-            content
-        );
+    let ctx_for_block_send = ctx_arc.clone();
+    let on_block_send: BlockSendCallback = Arc::new(move |content: String| {
+        let ctx = ctx_for_block_send.clone();
+        tokio::spawn(async move {
+            // Get current block ID from snapshot
+            let block_snap = ctx.snapshot_block();
+            let block_id = block_snap
+                .block
+                .as_ref()
+                .map(|b| b.id.clone())
+                .unwrap_or_else(|| "home".to_string());
+
+            // Use block:<block_id> as the channel for block messages
+            let channel = format!("block:{}", block_id);
+            let cmd = EffectCommand::SendMessage { channel, content };
+
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to send block message: {}", e);
+                ctx.add_error_toast(
+                    "block-error",
+                    format!("Failed to send block message: {}", e),
+                )
+                .await;
+            }
+        });
     });
 
     // BlockInviteCallback for inviting a contact to the block
@@ -860,6 +1277,11 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to send block invitation: {}", e);
+                ctx.add_error_toast(
+                    "block-error",
+                    format!("Failed to send block invitation: {}", e),
+                )
+                .await;
             }
         });
         tracing::info!("Block invite sent to contact: {}", contact_id);
@@ -877,20 +1299,76 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to navigate to neighborhood: {}", e);
+                ctx.add_error_toast("nav-error", format!("Failed to navigate: {}", e))
+                    .await;
             }
         });
     });
 
+    // GrantStewardCallback for promoting a resident to steward (Admin)
+    let ctx_for_grant_steward = ctx_arc.clone();
+    let on_grant_steward: GrantStewardCallback = Arc::new(move |resident_id: String| {
+        let ctx = ctx_for_grant_steward.clone();
+        let cmd = EffectCommand::GrantSteward {
+            target: resident_id.clone(),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to grant steward role: {}", e);
+                ctx.add_error_toast(
+                    "steward-error",
+                    format!("Failed to grant steward role: {}", e),
+                )
+                .await;
+            }
+        });
+        tracing::info!("Granting steward role to: {}", resident_id);
+    });
+
+    // RevokeStewardCallback for demoting a steward back to resident
+    let ctx_for_revoke_steward = ctx_arc.clone();
+    let on_revoke_steward: RevokeStewardCallback = Arc::new(move |resident_id: String| {
+        let ctx = ctx_for_revoke_steward.clone();
+        let cmd = EffectCommand::RevokeSteward {
+            target: resident_id.clone(),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to revoke steward role: {}", e);
+                ctx.add_error_toast(
+                    "steward-error",
+                    format!("Failed to revoke steward role: {}", e),
+                )
+                .await;
+            }
+        });
+        tracing::info!("Revoking steward role from: {}", resident_id);
+    });
+
     // CreateAccountCallback for account creation from setup modal
+    // This calls IoContext::create_account which actually creates the account.json file
     let ctx_for_create = ctx_arc.clone();
     let on_create_account: CreateAccountCallback = Arc::new(move |display_name: String| {
         let ctx = ctx_for_create.clone();
-        let cmd = EffectCommand::CreateAccount { display_name };
-        tokio::spawn(async move {
-            if let Err(e) = ctx.dispatch(cmd).await {
+        // Call the actual create_account method that writes the file
+        match ctx.create_account(&display_name) {
+            Ok(()) => {
+                println!("Account created successfully for: {}", display_name);
+                // Also dispatch the intent to create a journal fact
+                let cmd = EffectCommand::CreateAccount {
+                    display_name: display_name.clone(),
+                };
+                tokio::spawn(async move {
+                    if let Err(e) = ctx.dispatch(cmd).await {
+                        // Non-fatal: file was created, journal fact is optional
+                        eprintln!("Note: Journal fact creation failed: {}", e);
+                    }
+                });
+            }
+            Err(e) => {
                 eprintln!("Failed to create account: {}", e);
             }
-        });
+        }
     });
 
     // Check if account already exists to determine if we show setup modal
@@ -906,9 +1384,28 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let residents = ctx_arc.get_residents();
     let block_budget = ctx_arc.get_block_budget();
 
-    // Get discovered LAN peers from context (populated by LAN discovery events)
-    // For now, starts empty and will be populated via LanPeersUpdated events
-    let discovered_peers: Vec<DiscoveredPeerInfo> = Vec::new();
+    // Get discovered peers from rendezvous service
+    let discovered_peer_data = ctx_arc.get_discovered_peers().await;
+    let invited_peer_ids = ctx_arc.get_invited_peer_ids().await;
+    let discovered_peers: Vec<DiscoveredPeerInfo> = discovered_peer_data
+        .into_iter()
+        .map(|(authority_id, address)| {
+            let addr = if address.is_empty() {
+                "rendezvous".to_string()
+            } else {
+                address
+            };
+            // Check if this peer has been invited
+            let status = if invited_peer_ids.contains(&authority_id) {
+                PeerInvitationStatus::Pending
+            } else {
+                PeerInvitationStatus::None
+            };
+            DiscoveredPeerInfo::new(&authority_id, &addr)
+                .with_method("rendezvous")
+                .with_status(status)
+        })
+        .collect();
 
     // Get block info from snapshot
     let block_snap = ctx_arc.snapshot_block();
@@ -917,6 +1414,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         .as_ref()
         .and_then(|b| b.name.clone())
         .unwrap_or_else(|| "My Block".to_string());
+    // Chat channel uses selected channel from context
+    // Note: Block messages use block:<block_id> channel, computed dynamically in on_block_send callback
     let channel_name = ctx_arc
         .get_selected_channel()
         .unwrap_or_else(|| "general".to_string());
@@ -938,39 +1437,9 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         })
         .collect();
 
-    // Static data (help commands, devices) - these could come from context later
-    let help_commands = vec![
-        HelpCommand::new("/join", "Join a channel", "Join #channel-name", "Channels"),
-        HelpCommand::new(
-            "/leave",
-            "Leave current channel",
-            "Leave the current channel",
-            "Channels",
-        ),
-        HelpCommand::new(
-            "/msg",
-            "Send direct message",
-            "Send a DM to user",
-            "Messaging",
-        ),
-        HelpCommand::new(
-            "/invite",
-            "Invite to channel",
-            "Invite user to channel",
-            "Invitations",
-        ),
-        HelpCommand::new(
-            "/help",
-            "Show this help",
-            "Display help information",
-            "General",
-        ),
-    ];
-
-    // Device list: Currently hardcoded as placeholder
-    // Future: Retrieve from TreeEffects::get_current_state() via commitment tree LeafNodes
-    // See docs/001_system_architecture.md for device information derived from LeafNode
-    let devices = vec![Device::new("d1", "Current Device").current()];
+    // Device list: Retrieved from IoContext snapshot
+    // Current device is derived from device_id; additional devices will come from commitment tree
+    let devices = ctx_arc.get_devices();
 
     // Get threshold info from recovery status
     let threshold_k = recovery_status.threshold as u8;
@@ -995,11 +1464,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                 IoApp(
                     channels: channels,
                     messages: messages,
-                    help_commands: help_commands,
                     invitations: invitations,
                     guardians: guardians,
                     devices: devices,
-                    display_name: "You".to_string(),
+                    display_name: ctx_arc.get_display_name().await,
                     threshold_k: threshold_k,
                     threshold_n: threshold_n,
                     mfa_policy: MfaPolicy::SensitiveOnly,
@@ -1018,8 +1486,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     traversal_depth: TraversalDepth::Street,
                     // Effect dispatch callbacks
                     on_send: Some(on_send),
+                    on_retry_message: Some(on_retry_message),
                     on_channel_select: Some(on_channel_select.clone()),
                     on_create_channel: Some(on_create_channel),
+                    on_set_topic: Some(on_set_topic),
                     on_accept_invitation: Some(on_accept_invitation),
                     on_decline_invitation: Some(on_decline_invitation),
                     on_create_invitation: Some(on_create_invitation),
@@ -1031,8 +1501,15 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     // Recovery callbacks
                     on_start_recovery: Some(on_start_recovery),
                     on_add_guardian: Some(on_add_guardian),
+                    on_select_guardian: Some(on_select_guardian),
+                    pending_requests: Vec::new(), // Populated reactively in RecoveryScreen
+                    on_submit_approval: Some(on_submit_approval),
                     // Settings callbacks
                     on_update_mfa: Some(on_update_mfa),
+                    on_update_nickname: Some(on_update_nickname),
+                    on_update_threshold: Some(on_update_threshold),
+                    on_add_device: Some(on_add_device),
+                    on_remove_device: Some(on_remove_device),
                     // Contacts callbacks
                     on_update_petname: Some(on_update_petname),
                     on_toggle_guardian: Some(on_toggle_guardian),
@@ -1042,6 +1519,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     on_block_send: Some(on_block_send),
                     on_block_invite: Some(on_block_invite),
                     on_block_navigate_neighborhood: Some(on_block_navigate_neighborhood),
+                    on_grant_steward: Some(on_grant_steward),
+                    on_revoke_steward: Some(on_revoke_steward),
                     // Account setup
                     show_account_setup: show_account_setup,
                     on_create_account: Some(on_create_account.clone()),

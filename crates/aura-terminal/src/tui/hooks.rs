@@ -341,6 +341,24 @@ impl Default for NeighborhoodSnapshot {
     }
 }
 
+/// Snapshot of device-related data for rendering
+#[derive(Debug, Clone)]
+pub struct DevicesSnapshot {
+    /// List of registered devices
+    pub devices: Vec<crate::tui::types::Device>,
+    /// ID of the current device (for highlighting)
+    pub current_device_id: Option<String>,
+}
+
+impl Default for DevicesSnapshot {
+    fn default() -> Self {
+        Self {
+            devices: Vec::new(),
+            current_device_id: None,
+        }
+    }
+}
+
 // Note: The old View-based snapshot functions have been removed.
 // Snapshots are now created directly from AppCore's ViewState in IoContext.
 // See context.rs for the snapshot_* implementations.

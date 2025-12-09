@@ -38,7 +38,7 @@ pub enum TuiMode {
 
 /// Account configuration stored on disk
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AccountConfig {
+pub struct AccountConfig {
     /// The authority ID for this account
     authority_id: String,
     /// The primary context ID for this account
@@ -79,19 +79,19 @@ fn try_load_account(base_path: &Path) -> Result<AccountLoadResult, AuraError> {
     let config: AccountConfig = serde_json::from_str(&content)
         .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
 
-    // Parse authority ID from hex string
-    let authority_bytes: [u8; 32] = hex::decode(&config.authority_id)
+    // Parse authority ID from hex string (16 bytes = UUID)
+    let authority_bytes: [u8; 16] = hex::decode(&config.authority_id)
         .map_err(|e| AuraError::internal(format!("Invalid authority_id hex: {}", e)))?
         .try_into()
-        .map_err(|_| AuraError::internal("Invalid authority_id length"))?;
-    let authority_id = AuthorityId::new_from_entropy(authority_bytes);
+        .map_err(|_| AuraError::internal("Invalid authority_id length (expected 16 bytes)"))?;
+    let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(authority_bytes));
 
-    // Parse context ID from hex string
-    let context_bytes: [u8; 32] = hex::decode(&config.context_id)
+    // Parse context ID from hex string (16 bytes = UUID)
+    let context_bytes: [u8; 16] = hex::decode(&config.context_id)
         .map_err(|e| AuraError::internal(format!("Invalid context_id hex: {}", e)))?
         .try_into()
-        .map_err(|_| AuraError::internal("Invalid context_id length"))?;
-    let context_id = ContextId::new_from_entropy(context_bytes);
+        .map_err(|_| AuraError::internal("Invalid context_id length (expected 16 bytes)"))?;
+    let context_id = ContextId::from_uuid(uuid::Uuid::from_bytes(context_bytes));
 
     println!("Loaded existing account from {}", account_path.display());
     Ok(AccountLoadResult::Loaded {
@@ -142,9 +142,11 @@ pub fn create_account(
     let context_id = ContextId::new_from_entropy(context_entropy);
 
     // Save the new account configuration
+    // Note: We store only the UUID bytes (16 bytes), not the full entropy (32 bytes)
+    // since AuthorityId/ContextId only use the first 16 bytes of entropy anyway
     let config = AccountConfig {
-        authority_id: hex::encode(authority_entropy),
-        context_id: hex::encode(context_entropy),
+        authority_id: hex::encode(authority_id.to_bytes()),
+        context_id: hex::encode(context_id.to_bytes()),
         created_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -164,6 +166,258 @@ pub fn create_account(
         .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
 
     println!("Created new account at {}", account_path.display());
+    Ok((authority_id, context_id))
+}
+
+/// Restore an account from guardian-based recovery
+///
+/// This is used after catastrophic device loss where guardians have
+/// reconstructed the ORIGINAL authority_id via FROST threshold signatures.
+/// Unlike `create_account()` which derives from device_id, this preserves
+/// the cryptographically identical authority from before the loss.
+///
+/// # Arguments
+/// * `base_path` - Data directory for account storage
+/// * `recovered_authority_id` - The ORIGINAL authority_id reconstructed by guardians
+/// * `recovered_context_id` - Optional context_id (generated deterministically if None)
+///
+/// # Returns
+/// * The authority and context IDs written to disk
+pub fn restore_recovered_account(
+    base_path: &Path,
+    recovered_authority_id: AuthorityId,
+    recovered_context_id: Option<ContextId>,
+) -> Result<(AuthorityId, ContextId), AuraError> {
+    let account_path = base_path.join("account.json");
+
+    // Use the recovered authority directly (NOT derived from device_id)
+    // This is the key difference from create_account()
+    let authority_bytes = recovered_authority_id.to_bytes();
+
+    // For context, either use the recovered one or derive deterministically from authority
+    let context_id = recovered_context_id.unwrap_or_else(|| {
+        let context_entropy = aura_core::hash::hash(
+            format!("context:recovered:{}", hex::encode(authority_bytes)).as_bytes(),
+        );
+        ContextId::new_from_entropy(context_entropy)
+    });
+    let context_bytes = context_id.to_bytes();
+
+    // Save the recovered account configuration
+    let config = AccountConfig {
+        authority_id: hex::encode(authority_bytes),
+        context_id: hex::encode(context_bytes),
+        created_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    };
+
+    // Ensure directory exists
+    if let Some(parent) = account_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AuraError::internal(format!("Failed to create data directory: {}", e)))?;
+    }
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
+
+    std::fs::write(&account_path, content)
+        .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
+
+    println!(
+        "Restored recovered account at {} (authority: {})",
+        account_path.display(),
+        recovered_authority_id
+    );
+    Ok((recovered_authority_id, context_id))
+}
+
+// =============================================================================
+// Account Backup/Export
+// =============================================================================
+
+/// Current backup format version
+const BACKUP_VERSION: u32 = 1;
+
+/// Backup format prefix for identification
+const BACKUP_PREFIX: &str = "aura:backup:v1:";
+
+/// Complete account backup data structure
+///
+/// Contains all data needed to restore an account on a new device:
+/// - Account configuration (authority_id, context_id, created_at)
+/// - Journal facts (all state history)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountBackup {
+    /// Backup format version
+    pub version: u32,
+    /// Account configuration
+    pub account: AccountConfig,
+    /// Journal content (JSON string of all facts)
+    pub journal: Option<String>,
+    /// Backup creation timestamp (ms since epoch)
+    pub backup_at: u64,
+    /// Device ID that created the backup (informational only)
+    pub source_device: Option<String>,
+}
+
+/// Export account to a portable backup code
+///
+/// The backup code is a base64-encoded JSON blob with a prefix for easy identification.
+/// Format: `aura:backup:v1:<base64>`
+///
+/// # Arguments
+/// * `base_path` - Data directory containing account.json and journal.json
+/// * `device_id` - Optional device ID to include in backup metadata
+///
+/// # Returns
+/// * Portable backup code string
+pub fn export_account_backup(
+    base_path: &Path,
+    device_id: Option<&str>,
+) -> Result<String, AuraError> {
+    let account_path = base_path.join("account.json");
+    let journal_path = base_path.join("journal.json");
+
+    // Load account configuration
+    if !account_path.exists() {
+        return Err(AuraError::internal("No account exists to backup"));
+    }
+
+    let account_content = std::fs::read_to_string(&account_path)
+        .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?;
+
+    let account: AccountConfig = serde_json::from_str(&account_content)
+        .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
+
+    // Load journal if it exists
+    let journal = if journal_path.exists() {
+        match std::fs::read_to_string(&journal_path) {
+            Ok(content) => Some(content),
+            Err(_) => None, // Journal is optional
+        }
+    } else {
+        None
+    };
+
+    // Create backup structure
+    let backup = AccountBackup {
+        version: BACKUP_VERSION,
+        account,
+        journal,
+        backup_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+        source_device: device_id.map(String::from),
+    };
+
+    // Serialize to JSON
+    let json = serde_json::to_string(&backup)
+        .map_err(|e| AuraError::internal(format!("Failed to serialize backup: {}", e)))?;
+
+    // Encode as base64 with prefix
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(json.as_bytes());
+
+    Ok(format!("{}{}", BACKUP_PREFIX, encoded))
+}
+
+/// Import and restore account from backup code
+///
+/// # Arguments
+/// * `base_path` - Data directory to restore account to
+/// * `backup_code` - The backup code from `export_account_backup`
+/// * `overwrite` - If true, overwrite existing account; if false, fail if account exists
+///
+/// # Returns
+/// * The restored authority and context IDs
+pub fn import_account_backup(
+    base_path: &Path,
+    backup_code: &str,
+    overwrite: bool,
+) -> Result<(AuthorityId, ContextId), AuraError> {
+    let account_path = base_path.join("account.json");
+    let journal_path = base_path.join("journal.json");
+
+    // Check for existing account
+    if account_path.exists() && !overwrite {
+        return Err(AuraError::internal(
+            "Account already exists. Use overwrite=true to replace.",
+        ));
+    }
+
+    // Parse backup code
+    if !backup_code.starts_with(BACKUP_PREFIX) {
+        return Err(AuraError::internal(format!(
+            "Invalid backup code format (expected prefix '{}')",
+            BACKUP_PREFIX
+        )));
+    }
+
+    let encoded = &backup_code[BACKUP_PREFIX.len()..];
+
+    // Decode base64
+    use base64::Engine;
+    let json_bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| AuraError::internal(format!("Invalid backup code encoding: {}", e)))?;
+
+    let json = String::from_utf8(json_bytes)
+        .map_err(|e| AuraError::internal(format!("Invalid backup code UTF-8: {}", e)))?;
+
+    // Parse backup structure
+    let backup: AccountBackup = serde_json::from_str(&json)
+        .map_err(|e| AuraError::internal(format!("Invalid backup format: {}", e)))?;
+
+    // Validate version
+    if backup.version > BACKUP_VERSION {
+        return Err(AuraError::internal(format!(
+            "Backup version {} is newer than supported version {}",
+            backup.version, BACKUP_VERSION
+        )));
+    }
+
+    // Parse authority ID
+    let authority_bytes: [u8; 16] = hex::decode(&backup.account.authority_id)
+        .map_err(|e| AuraError::internal(format!("Invalid authority_id in backup: {}", e)))?
+        .try_into()
+        .map_err(|_| AuraError::internal("Invalid authority_id length in backup"))?;
+    let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(authority_bytes));
+
+    // Parse context ID
+    let context_bytes: [u8; 16] = hex::decode(&backup.account.context_id)
+        .map_err(|e| AuraError::internal(format!("Invalid context_id in backup: {}", e)))?
+        .try_into()
+        .map_err(|_| AuraError::internal("Invalid context_id length in backup"))?;
+    let context_id = ContextId::from_uuid(uuid::Uuid::from_bytes(context_bytes));
+
+    // Ensure directory exists
+    if let Some(parent) = account_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AuraError::internal(format!("Failed to create data directory: {}", e)))?;
+    }
+
+    // Write account configuration
+    let account_content = serde_json::to_string_pretty(&backup.account)
+        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
+
+    std::fs::write(&account_path, account_content)
+        .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
+
+    // Write journal if present in backup
+    if let Some(ref journal_content) = backup.journal {
+        std::fs::write(&journal_path, journal_content)
+            .map_err(|e| AuraError::internal(format!("Failed to write journal: {}", e)))?;
+    }
+
+    println!(
+        "Restored account from backup at {} (authority: {})",
+        account_path.display(),
+        authority_id
+    );
+
     Ok((authority_id, context_id))
 }
 
@@ -385,6 +639,7 @@ async fn handle_tui_launch(
 
     // Create IoContext with AppCore integration
     // Pass has_existing_account so the TUI knows whether to show the account setup modal
+    // Also pass base_path and device_id for account file creation
     // In demo mode, include hints with Alice/Charlie invite codes
     #[cfg(feature = "development")]
     let ctx = match mode {
@@ -393,15 +648,29 @@ async fn handle_tui_launch(
             println!("Demo hints available:");
             println!("  Alice invite code: {}", hints.alice_invite_code);
             println!("  Charlie invite code: {}", hints.charlie_invite_code);
-            IoContext::with_demo_hints(app_core, hints, has_existing_account)
+            IoContext::with_demo_hints(
+                app_core,
+                hints,
+                has_existing_account,
+                base_path.clone(),
+                device_id_for_account.to_string(),
+            )
         }
-        TuiMode::Production => {
-            IoContext::with_account_status(app_core.clone(), has_existing_account)
-        }
+        TuiMode::Production => IoContext::with_account_status(
+            app_core.clone(),
+            has_existing_account,
+            base_path.clone(),
+            device_id_for_account.to_string(),
+        ),
     };
 
     #[cfg(not(feature = "development"))]
-    let ctx = IoContext::with_account_status(app_core.clone(), has_existing_account);
+    let ctx = IoContext::with_account_status(
+        app_core.clone(),
+        has_existing_account,
+        base_path.clone(),
+        device_id_for_account.to_string(),
+    );
 
     // Without development feature, demo mode just shows a warning
     #[cfg(not(feature = "development"))]

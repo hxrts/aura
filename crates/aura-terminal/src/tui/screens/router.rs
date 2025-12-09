@@ -22,12 +22,10 @@ pub enum Screen {
     Settings,
     /// Recovery and guardians
     Recovery,
-    /// Help and commands
-    Help,
 }
 
 impl Screen {
-    /// Get the numeric key (1-8) for this screen
+    /// Get the numeric key (1-7) for this screen
     pub fn key_number(&self) -> u8 {
         match self {
             Screen::Block => 1,
@@ -37,11 +35,10 @@ impl Screen {
             Screen::Invitations => 5,
             Screen::Settings => 6,
             Screen::Recovery => 7,
-            Screen::Help => 8,
         }
     }
 
-    /// Get screen from numeric key (1-8)
+    /// Get screen from numeric key (1-7)
     pub fn from_key(key: u8) -> Option<Self> {
         match key {
             1 => Some(Screen::Block),
@@ -51,7 +48,6 @@ impl Screen {
             5 => Some(Screen::Invitations),
             6 => Some(Screen::Settings),
             7 => Some(Screen::Recovery),
-            8 => Some(Screen::Help),
             _ => None,
         }
     }
@@ -66,7 +62,6 @@ impl Screen {
             Screen::Invitations => "Invitations",
             Screen::Settings => "Settings",
             Screen::Recovery => "Recovery",
-            Screen::Help => "Help",
         }
     }
 
@@ -80,7 +75,6 @@ impl Screen {
             Screen::Invitations => "✉",
             Screen::Settings => "⚙",
             Screen::Recovery => "⊗",
-            Screen::Help => "?",
         }
     }
 
@@ -94,7 +88,6 @@ impl Screen {
             Screen::Invitations,
             Screen::Settings,
             Screen::Recovery,
-            Screen::Help,
         ]
     }
 
@@ -107,22 +100,20 @@ impl Screen {
             Screen::Neighborhood => Screen::Invitations,
             Screen::Invitations => Screen::Settings,
             Screen::Settings => Screen::Recovery,
-            Screen::Recovery => Screen::Help,
-            Screen::Help => Screen::Block,
+            Screen::Recovery => Screen::Block,
         }
     }
 
     /// Get previous screen in tab order
     pub fn prev(&self) -> Screen {
         match self {
-            Screen::Block => Screen::Help,
+            Screen::Block => Screen::Recovery,
             Screen::Chat => Screen::Block,
             Screen::Contacts => Screen::Chat,
             Screen::Neighborhood => Screen::Contacts,
             Screen::Invitations => Screen::Neighborhood,
             Screen::Settings => Screen::Invitations,
             Screen::Recovery => Screen::Settings,
-            Screen::Help => Screen::Recovery,
         }
     }
 }
@@ -311,16 +302,16 @@ mod tests {
         router.prev_tab();
         assert_eq!(router.current(), Screen::Contacts);
 
-        // Go all the way back
+        // Go all the way back (wraps to Recovery)
         let mut r2 = Router::new(Screen::Block);
         r2.prev_tab();
-        assert_eq!(r2.current(), Screen::Help);
+        assert_eq!(r2.current(), Screen::Recovery);
     }
 
     #[test]
     fn test_screen_keys() {
         assert_eq!(Screen::Block.key_number(), 1);
         assert_eq!(Screen::from_key(1), Some(Screen::Block));
-        assert_eq!(Screen::from_key(9), None);
+        assert_eq!(Screen::from_key(8), None);
     }
 }

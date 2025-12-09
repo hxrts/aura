@@ -4,7 +4,7 @@
 //!
 //! Layout:
 //! - Top row(s): Screen-specific hints in a 4-column grid (max 4 per row)
-//! - Bottom row: Global navigation hints (Tab, S-Tab, 1-8, q Quit)
+//! - Bottom row: Global navigation hints (Tab/S-Tab, arrows, q Quit, ? Help)
 
 use iocraft::prelude::*;
 
@@ -76,10 +76,10 @@ pub fn KeyHintsBar(props: &KeyHintsBarProps) -> impl Into<AnyElement<'static>> {
 
     // Build global hints (always in this fixed order)
     let global_hints = [
-        KeyHint::new("Tab", "Next"),
-        KeyHint::new("S-Tab", "Prev"),
-        KeyHint::new("1-8", "Screen"),
+        KeyHint::new("Tab/S-Tab", "Screen"),
+        KeyHint::new("↑↓←→", "Navigate"),
         KeyHint::new("q", "Quit"),
+        KeyHint::new("?", "Help"),
     ];
 
     element! {

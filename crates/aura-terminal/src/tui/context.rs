@@ -27,6 +27,7 @@
 //! updates. The snapshot methods in this context provide synchronous access
 //! for initial rendering and fallback cases.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use aura_app::AppCore;
@@ -37,13 +38,16 @@ use aura_app::signal_defs::{
 };
 use aura_core::effects::reactive::ReactiveEffects;
 
-use crate::tui::effects::{command_to_intent, EffectCommand, OpResponse, OperationalHandler};
+use crate::tui::effects::{
+    command_to_intent, CommandContext, EffectCommand, OpResponse, OperationalHandler,
+};
 use crate::tui::hooks::{
-    BlockSnapshot, ChatSnapshot, ContactsSnapshot, GuardiansSnapshot, InvitationsSnapshot,
-    NeighborhoodSnapshot, RecoverySnapshot,
+    BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
+    InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
 use crate::tui::types::{
-    BlockBudget, Channel, Contact, Guardian, Invitation, Message, RecoveryStatus, Resident,
+    BlockBudget, Channel, ChannelMode, Contact, Guardian, Invitation, Message, RecoveryStatus,
+    Resident,
 };
 
 /// iocraft-friendly context
@@ -77,11 +81,41 @@ pub struct IoContext {
 
     /// Whether an actual account exists (vs placeholder IDs for pre-setup state)
     /// When false, the account setup modal should be shown
-    has_existing_account: bool,
+    has_existing_account: Arc<std::sync::atomic::AtomicBool>,
+
+    /// Base path for data storage (needed for account file creation)
+    base_path: std::path::PathBuf,
+
+    /// Device ID string (needed for account file creation)
+    device_id_str: String,
 
     /// Demo mode hints (None in production mode)
     #[cfg(feature = "development")]
     demo_hints: Option<crate::demo::DemoHints>,
+
+    /// Tracks authority_ids of peers that have been invited via LAN
+    /// Used to display invitation status in the contacts screen
+    invited_lan_peers: Arc<RwLock<HashSet<String>>>,
+
+    /// User's display name / nickname
+    /// This is the name shown in the Settings screen and shared with contacts
+    display_name: Arc<RwLock<String>>,
+
+    /// MFA policy setting
+    /// Controls when multi-factor authentication is required
+    mfa_policy: Arc<RwLock<crate::tui::types::MfaPolicy>>,
+
+    /// Current active context (block/channel ID)
+    /// Tracks the user's current navigation context for command targeting
+    current_context: Arc<RwLock<Option<String>>>,
+
+    /// Channel mode settings (channel_id -> mode flags)
+    /// Stores local channel mode configuration
+    channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
+
+    /// Toast notifications for displaying errors/info in the UI
+    /// These are shown temporarily at the top-right of the screen
+    toasts: Arc<RwLock<Vec<crate::tui::components::ToastMessage>>>,
 }
 
 impl IoContext {
@@ -91,14 +125,26 @@ impl IoContext {
     /// - Full ViewState signal infrastructure
     /// - Intent-based state management
     /// - Reactive signal subscriptions for screens
-    pub fn new(app_core: Arc<RwLock<AppCore>>) -> Self {
+    pub fn new(
+        app_core: Arc<RwLock<AppCore>>,
+        base_path: std::path::PathBuf,
+        device_id_str: String,
+    ) -> Self {
         let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
             operational,
             app_core,
-            has_existing_account: true, // Default to true for backwards compatibility
+            has_existing_account: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            base_path,
+            device_id_str,
             #[cfg(feature = "development")]
             demo_hints: None,
+            invited_lan_peers: Arc::new(RwLock::new(HashSet::new())),
+            display_name: Arc::new(RwLock::new(String::new())),
+            mfa_policy: Arc::new(RwLock::new(crate::tui::types::MfaPolicy::default())),
+            current_context: Arc::new(RwLock::new(None)),
+            channel_modes: Arc::new(RwLock::new(HashMap::new())),
+            toasts: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -106,14 +152,29 @@ impl IoContext {
     ///
     /// Use this constructor when you need to control whether the account setup
     /// modal should be shown. Pass `has_existing_account: false` to show the modal.
-    pub fn with_account_status(app_core: Arc<RwLock<AppCore>>, has_existing_account: bool) -> Self {
+    pub fn with_account_status(
+        app_core: Arc<RwLock<AppCore>>,
+        has_existing_account: bool,
+        base_path: std::path::PathBuf,
+        device_id_str: String,
+    ) -> Self {
         let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
             operational,
             app_core,
-            has_existing_account,
+            has_existing_account: Arc::new(std::sync::atomic::AtomicBool::new(
+                has_existing_account,
+            )),
+            base_path,
+            device_id_str,
             #[cfg(feature = "development")]
             demo_hints: None,
+            invited_lan_peers: Arc::new(RwLock::new(HashSet::new())),
+            display_name: Arc::new(RwLock::new(String::new())),
+            mfa_policy: Arc::new(RwLock::new(crate::tui::types::MfaPolicy::default())),
+            current_context: Arc::new(RwLock::new(None)),
+            channel_modes: Arc::new(RwLock::new(HashMap::new())),
+            toasts: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -126,13 +187,25 @@ impl IoContext {
         app_core: Arc<RwLock<AppCore>>,
         hints: crate::demo::DemoHints,
         has_existing_account: bool,
+        base_path: std::path::PathBuf,
+        device_id_str: String,
     ) -> Self {
         let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
             operational,
             app_core,
-            has_existing_account,
+            has_existing_account: Arc::new(std::sync::atomic::AtomicBool::new(
+                has_existing_account,
+            )),
+            base_path,
+            device_id_str,
             demo_hints: Some(hints),
+            invited_lan_peers: Arc::new(RwLock::new(HashSet::new())),
+            display_name: Arc::new(RwLock::new(String::new())),
+            mfa_policy: Arc::new(RwLock::new(crate::tui::types::MfaPolicy::default())),
+            current_context: Arc::new(RwLock::new(None)),
+            channel_modes: Arc::new(RwLock::new(HashMap::new())),
+            toasts: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -199,9 +272,17 @@ impl IoContext {
         Self {
             operational,
             app_core,
-            has_existing_account: true, // Defaults assume account exists
+            has_existing_account: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            base_path: std::path::PathBuf::from("./aura-data"),
+            device_id_str: "default-device".to_string(),
             #[cfg(feature = "development")]
             demo_hints: None,
+            invited_lan_peers: Arc::new(RwLock::new(HashSet::new())),
+            display_name: Arc::new(RwLock::new(String::new())),
+            mfa_policy: Arc::new(RwLock::new(crate::tui::types::MfaPolicy::default())),
+            current_context: Arc::new(RwLock::new(None)),
+            channel_modes: Arc::new(RwLock::new(HashMap::new())),
+            toasts: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -224,14 +305,153 @@ impl IoContext {
     /// When false, the account setup modal should be shown.
     pub fn has_account(&self) -> bool {
         self.has_existing_account
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Mark that an account has been created
     ///
     /// Called after the user completes the account setup modal.
     /// This updates the internal flag so `has_account()` returns true.
-    pub fn set_account_created(&mut self) {
-        self.has_existing_account = true;
+    pub fn set_account_created(&self) {
+        self.has_existing_account
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Create a new account and save to disk
+    ///
+    /// This is the method that actually creates the account.json file.
+    /// It should be called when the user completes the account setup modal.
+    ///
+    /// Returns Ok(()) on success, Err with message on failure.
+    pub fn create_account(&self, _display_name: &str) -> Result<(), String> {
+        use crate::handlers::tui::create_account;
+
+        // Create the account file on disk
+        match create_account(&self.base_path, &self.device_id_str) {
+            Ok((authority_id, context_id)) => {
+                // Update the flag to indicate account exists
+                self.set_account_created();
+
+                // Log success
+                tracing::info!(
+                    "Account created: authority={}, context={}",
+                    authority_id,
+                    context_id
+                );
+
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Failed to create account: {}", e);
+                Err(format!("Failed to create account: {}", e))
+            }
+        }
+    }
+
+    /// Restore an account from guardian-based recovery
+    ///
+    /// This is called after guardians have reconstructed the ORIGINAL authority_id
+    /// via FROST threshold signatures. Unlike `create_account()` which derives
+    /// the authority from device_id, this preserves the cryptographically identical
+    /// authority from before the catastrophic device loss.
+    ///
+    /// # Arguments
+    /// * `recovered_authority_id` - The ORIGINAL authority reconstructed by guardians
+    /// * `recovered_context_id` - Optional context_id (generated if None)
+    ///
+    /// Returns Ok(()) on success, Err with message on failure.
+    pub fn restore_recovered_account(
+        &self,
+        recovered_authority_id: aura_core::identifiers::AuthorityId,
+        recovered_context_id: Option<aura_core::identifiers::ContextId>,
+    ) -> Result<(), String> {
+        use crate::handlers::tui::restore_recovered_account;
+
+        // Restore the account file on disk with the RECOVERED authority
+        match restore_recovered_account(
+            &self.base_path,
+            recovered_authority_id,
+            recovered_context_id,
+        ) {
+            Ok((authority_id, context_id)) => {
+                // Update the flag to indicate account exists
+                self.set_account_created();
+
+                // Log success
+                tracing::info!(
+                    "Account restored from recovery: authority={}, context={}",
+                    authority_id,
+                    context_id
+                );
+
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Failed to restore recovered account: {}", e);
+                Err(format!("Failed to restore recovered account: {}", e))
+            }
+        }
+    }
+
+    /// Export account to a portable backup code
+    ///
+    /// The backup code includes:
+    /// - Account configuration (authority_id, context_id)
+    /// - Journal facts (all state history)
+    ///
+    /// Format: `aura:backup:v1:<base64>`
+    ///
+    /// Returns the backup code string on success, error message on failure.
+    pub fn export_account_backup(&self) -> Result<String, String> {
+        use crate::handlers::tui::export_account_backup;
+
+        if !self.has_account() {
+            return Err("No account exists to backup".to_string());
+        }
+
+        match export_account_backup(&self.base_path, Some(&self.device_id_str)) {
+            Ok(backup_code) => {
+                tracing::info!("Account backup exported successfully");
+                Ok(backup_code)
+            }
+            Err(e) => {
+                tracing::error!("Failed to export backup: {}", e);
+                Err(format!("Failed to export backup: {}", e))
+            }
+        }
+    }
+
+    /// Import and restore account from backup code
+    ///
+    /// This completely replaces the current account with the backup.
+    /// Use with caution - existing data will be overwritten!
+    ///
+    /// # Arguments
+    /// * `backup_code` - The backup code from `export_account_backup`
+    ///
+    /// Returns Ok(()) on success, error message on failure.
+    pub fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
+        use crate::handlers::tui::import_account_backup;
+
+        // Allow overwrite for restoration
+        match import_account_backup(&self.base_path, backup_code, true) {
+            Ok((authority_id, context_id)) => {
+                // Update the flag to indicate account exists
+                self.set_account_created();
+
+                tracing::info!(
+                    "Account restored from backup: authority={}, context={}",
+                    authority_id,
+                    context_id
+                );
+
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Failed to import backup: {}", e);
+                Err(format!("Failed to import backup: {}", e))
+            }
+        }
     }
 
     /// Get a snapshot from AppCore (blocking read lock)
@@ -243,6 +463,19 @@ impl IoContext {
             return Some(core.snapshot());
         }
         None
+    }
+
+    /// Build a CommandContext from current AppCore state.
+    ///
+    /// This extracts the current block ID and recovery context ID from the
+    /// AppCore snapshot for use in command-to-intent mapping.
+    fn build_command_context(&self) -> CommandContext {
+        if let Some(snapshot) = self.app_core_snapshot() {
+            CommandContext::from_snapshot(&snapshot)
+        } else {
+            // If we can't get a snapshot, use empty context (nil_context fallback)
+            CommandContext::empty()
+        }
     }
 
     // ─── Snapshot Accessors ─────────────────────────────────────────────────
@@ -331,13 +564,20 @@ impl IoContext {
     pub fn snapshot_block(&self) -> BlockSnapshot {
         // Try AppCore first
         if let Some(snapshot) = self.app_core_snapshot() {
+            // Get current authority ID for is_self detection
+            let current_authority_str = self
+                .app_core
+                .try_read()
+                .ok()
+                .and_then(|core| core.authority().map(|a| a.to_string()));
+
             // Map aura-app BlockState to TUI BlockSnapshot
             let block_info = if !snapshot.block.name.is_empty() {
                 Some(crate::tui::reactive::views::BlockInfo {
                     id: snapshot.block.id.clone(),
                     name: Some(snapshot.block.name.clone()),
                     description: None,
-                    created_at: 0, // Not tracked in aura-app BlockState
+                    created_at: snapshot.block.created_at, // Use actual created_at from BlockState
                 })
             } else {
                 None
@@ -360,12 +600,20 @@ impl IoContext {
                     .block
                     .residents
                     .iter()
-                    .map(|r| crate::tui::reactive::views::Resident {
-                        authority_id: r.id.clone(),
-                        name: r.name.clone(),
-                        is_self: false, // Not tracked in aura-app Resident
-                        is_online: r.is_online,
-                        role: convert_role(&r.role),
+                    .map(|r| {
+                        // Determine is_self by comparing resident ID with current authority
+                        let is_self = current_authority_str
+                            .as_ref()
+                            .map(|auth| r.id == *auth)
+                            .unwrap_or(false);
+
+                        crate::tui::reactive::views::Resident {
+                            authority_id: r.id.clone(),
+                            name: r.name.clone(),
+                            is_self,
+                            is_online: r.is_online,
+                            role: convert_role(&r.role),
+                        }
                     })
                     .collect(),
                 storage: crate::tui::reactive::views::StorageInfo {
@@ -388,14 +636,23 @@ impl IoContext {
                     .contacts
                     .contacts
                     .iter()
-                    .map(|c| crate::tui::reactive::views::Contact {
-                        authority_id: c.id.clone(),
-                        petname: c.petname.clone(),
-                        suggested_name: c.suggested_name.clone(),
-                        is_online: Some(c.is_online),
-                        added_at: 0, // Not tracked in aura-app Contact
-                        last_seen: c.last_interaction,
-                        has_pending_suggestion: false, // Not tracked in aura-app Contact
+                    .map(|c| {
+                        // has_pending_suggestion is true when there's a suggested name
+                        // that differs from the current petname
+                        let has_pending_suggestion =
+                            c.suggested_name.as_ref().map_or(false, |suggested| {
+                                !suggested.is_empty() && *suggested != c.petname
+                            });
+
+                        crate::tui::reactive::views::Contact {
+                            authority_id: c.id.clone(),
+                            petname: c.petname.clone(),
+                            suggested_name: c.suggested_name.clone(),
+                            is_online: Some(c.is_online),
+                            added_at: c.last_interaction.unwrap_or(0), // Use last_interaction as proxy
+                            last_seen: c.last_interaction,
+                            has_pending_suggestion,
+                        }
                     })
                     .collect(),
                 policy: crate::tui::reactive::views::SuggestionPolicy::default(),
@@ -444,6 +701,29 @@ impl IoContext {
         NeighborhoodSnapshot::default()
     }
 
+    /// Get a snapshot of devices data
+    ///
+    /// Returns the list of devices registered for this account.
+    /// Currently derives the current device from context; future versions
+    /// will read additional devices from the commitment tree.
+    pub fn snapshot_devices(&self) -> DevicesSnapshot {
+        use crate::tui::types::Device;
+
+        let current_device_id = self.device_id_str.clone();
+
+        // Build device list - start with current device
+        let devices = vec![Device::new(&current_device_id, "Current Device").current()];
+
+        // Future: Read additional devices from TreeEffects::get_current_state()
+        // The commitment tree stores devices as LeafNode entries with role=Device
+        // For now, we only show the current device
+
+        DevicesSnapshot {
+            devices,
+            current_device_id: Some(current_device_id),
+        }
+    }
+
     // Backwards-compatible view helpers for tests and harnesses.
     pub fn chat_view(&self) -> ChatSnapshot {
         self.snapshot_chat()
@@ -463,6 +743,10 @@ impl IoContext {
 
     pub fn block_view(&self) -> BlockSnapshot {
         self.snapshot_block()
+    }
+
+    pub fn devices_view(&self) -> DevicesSnapshot {
+        self.snapshot_devices()
     }
 
     // ─── iocraft-Compatible Getters ────────────────────────────────────────
@@ -526,6 +810,11 @@ impl IoContext {
         budget
     }
 
+    /// Get devices as iocraft types
+    pub fn get_devices(&self) -> Vec<crate::tui::types::Device> {
+        self.snapshot_devices().devices
+    }
+
     // ─── Effect Dispatch ────────────────────────────────────────────────────
     //
     // Dispatch strategy:
@@ -538,11 +827,32 @@ impl IoContext {
     /// Dispatch a command (fire and forget)
     ///
     /// Dispatch strategy:
-    /// 1. If command maps to an Intent → dispatch through AppCore (journaled)
-    /// 2. If command is operational → dispatch through OperationalHandler
+    /// 0. Check authorization - Admin commands require Steward role
+    /// 1. Handle backup commands directly (need IoContext access)
+    /// 2. If command maps to an Intent → dispatch through AppCore (journaled)
+    /// 3. If command is operational → dispatch through OperationalHandler
     pub async fn dispatch(&self, command: EffectCommand) -> Result<(), String> {
+        // Check authorization before dispatching
+        self.check_authorization(&command)?;
+
+        // Handle backup commands directly (they need IoContext access for base_path)
+        match &command {
+            EffectCommand::ExportAccountBackup => {
+                // Export is handled specially - returns the code
+                // but for dispatch() we just verify it works
+                return self.export_account_backup().map(|_| ());
+            }
+            EffectCommand::ImportAccountBackup { backup_code } => {
+                return self.import_account_backup(backup_code);
+            }
+            _ => {} // Continue with normal dispatch
+        }
+
+        // Build command context from current state for proper ID resolution
+        let cmd_ctx = self.build_command_context();
+
         // Try to map command to intent for unified dispatch
-        if let Some(intent) = command_to_intent(&command) {
+        if let Some(intent) = command_to_intent(&command, &cmd_ctx) {
             // Dispatch through AppCore (journaled operation)
             let mut core = self.app_core.write().await;
             match core.dispatch(intent) {
@@ -553,8 +863,21 @@ impl IoContext {
                 Err(e) => Err(format!("Intent dispatch failed: {}", e)),
             }
         } else if let Some(result) = self.operational.execute(&command).await {
-            // Handle operational command
-            result.map(|_| ()).map_err(|e| e.to_string())
+            // Handle operational command, checking for special responses
+            match result {
+                Ok(OpResponse::ContextChanged { context_id }) => {
+                    // Update the current context in IoContext
+                    self.set_current_context(context_id).await;
+                    Ok(())
+                }
+                Ok(OpResponse::ChannelModeSet { channel_id, flags }) => {
+                    // Update channel mode in IoContext
+                    self.set_channel_mode(&channel_id, &flags).await;
+                    Ok(())
+                }
+                Ok(_) => Ok(()),
+                Err(e) => Err(e.to_string()),
+            }
         } else {
             // Unknown command - log warning and return error
             tracing::warn!(
@@ -584,11 +907,30 @@ impl IoContext {
     /// Dispatch a command and wait for completion
     ///
     /// Dispatch strategy:
-    /// 1. If command maps to an Intent → dispatch through AppCore (journaled)
-    /// 2. If command is operational → dispatch through OperationalHandler
+    /// 0. Check authorization - Admin commands require Steward role
+    /// 1. Handle backup commands directly (need IoContext access)
+    /// 2. If command maps to an Intent → dispatch through AppCore (journaled)
+    /// 3. If command is operational → dispatch through OperationalHandler
     pub async fn dispatch_and_wait(&self, command: EffectCommand) -> Result<(), String> {
+        // Check authorization before dispatching
+        self.check_authorization(&command)?;
+
+        // Handle backup commands directly (they need IoContext access for base_path)
+        match &command {
+            EffectCommand::ExportAccountBackup => {
+                return self.export_account_backup().map(|_| ());
+            }
+            EffectCommand::ImportAccountBackup { backup_code } => {
+                return self.import_account_backup(backup_code);
+            }
+            _ => {} // Continue with normal dispatch
+        }
+
+        // Build command context from current state for proper ID resolution
+        let cmd_ctx = self.build_command_context();
+
         // Try to map command to intent for unified dispatch
-        if let Some(intent) = command_to_intent(&command) {
+        if let Some(intent) = command_to_intent(&command, &cmd_ctx) {
             // Dispatch through AppCore (journaled operation)
             let mut core = self.app_core.write().await;
             match core.dispatch(intent) {
@@ -601,8 +943,21 @@ impl IoContext {
                 Err(e) => Err(format!("Intent dispatch failed: {}", e)),
             }
         } else if let Some(result) = self.operational.execute(&command).await {
-            // Handle operational command
-            result.map(|_| ()).map_err(|e| e.to_string())
+            // Handle operational command, checking for special responses
+            match result {
+                Ok(OpResponse::ContextChanged { context_id }) => {
+                    // Update the current context in IoContext
+                    self.set_current_context(context_id).await;
+                    Ok(())
+                }
+                Ok(OpResponse::ChannelModeSet { channel_id, flags }) => {
+                    // Update channel mode in IoContext
+                    self.set_channel_mode(&channel_id, &flags).await;
+                    Ok(())
+                }
+                Ok(_) => Ok(()),
+                Err(e) => Err(e.to_string()),
+            }
         } else {
             // Unknown command - log warning and return error
             tracing::warn!(
@@ -726,6 +1081,339 @@ impl IoContext {
 
         0
     }
+
+    /// Get discovered peers from rendezvous service
+    ///
+    /// Returns a list of (authority_id, address) pairs for discovered peers.
+    /// Returns empty list if no runtime is available.
+    pub async fn get_discovered_peers(&self) -> Vec<(String, String)> {
+        let core = self.app_core.read().await;
+
+        // Get discovered peers from rendezvous
+        match core.discover_peers().await {
+            Ok(peers) => peers
+                .iter()
+                .map(|a| (a.to_string(), String::new())) // No address available from this API
+                .collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    /// Mark a LAN peer as having been invited
+    ///
+    /// Call this after successfully dispatching an InviteLanPeer command.
+    /// The contacts screen will show these peers with "pending" status.
+    pub async fn mark_peer_invited(&self, authority_id: &str) {
+        let mut invited = self.invited_lan_peers.write().await;
+        invited.insert(authority_id.to_string());
+    }
+
+    /// Check if a LAN peer has been invited
+    ///
+    /// Returns true if `mark_peer_invited` was called for this authority_id.
+    pub async fn is_peer_invited(&self, authority_id: &str) -> bool {
+        let invited = self.invited_lan_peers.read().await;
+        invited.contains(authority_id)
+    }
+
+    /// Get all invited peer authority_ids
+    ///
+    /// Returns a set of authority_ids for peers that have been invited.
+    pub async fn get_invited_peer_ids(&self) -> HashSet<String> {
+        let invited = self.invited_lan_peers.read().await;
+        invited.clone()
+    }
+
+    // =========================================================================
+    // Display Name / Nickname Methods
+    // =========================================================================
+
+    /// Get the current display name
+    ///
+    /// Returns the user's display name, or empty string if not set.
+    pub async fn get_display_name(&self) -> String {
+        let name = self.display_name.read().await;
+        name.clone()
+    }
+
+    /// Set the user's display name
+    ///
+    /// Updates the display name in memory. In the future, this should also
+    /// persist to account.json or a settings file.
+    pub async fn set_display_name(&self, name: &str) {
+        let mut display_name = self.display_name.write().await;
+        *display_name = name.to_string();
+        tracing::info!("Display name updated to: {}", name);
+    }
+
+    // =========================================================================
+    // MFA Policy Methods
+    // =========================================================================
+
+    /// Get the current MFA policy
+    ///
+    /// Returns the user's MFA policy setting.
+    pub async fn get_mfa_policy(&self) -> crate::tui::types::MfaPolicy {
+        let policy = self.mfa_policy.read().await;
+        *policy
+    }
+
+    /// Set the MFA policy
+    ///
+    /// Updates the MFA policy in memory. In the future, this should also
+    /// persist to account.json or a settings file.
+    pub async fn set_mfa_policy(&self, policy: crate::tui::types::MfaPolicy) {
+        let mut mfa_policy = self.mfa_policy.write().await;
+        *mfa_policy = policy;
+        tracing::info!("MFA policy updated to: {:?}", policy);
+    }
+
+    // =========================================================================
+    // Current Context Methods
+    // =========================================================================
+
+    /// Get the current active context (block/channel ID)
+    ///
+    /// Returns the ID of the currently active context for navigation and
+    /// command targeting. Returns None if no context is set.
+    pub async fn get_current_context(&self) -> Option<String> {
+        let context = self.current_context.read().await;
+        context.clone()
+    }
+
+    /// Set the current active context (block/channel ID)
+    ///
+    /// Updates the active context ID for navigation and command targeting.
+    /// Pass None to clear the context.
+    pub async fn set_current_context(&self, context_id: Option<String>) {
+        let mut current_context = self.current_context.write().await;
+        *current_context = context_id.clone();
+        tracing::debug!("Current context updated to: {:?}", context_id);
+    }
+
+    /// Get channel mode for a specific channel
+    ///
+    /// Returns the mode flags for a channel, or default if not set.
+    pub async fn get_channel_mode(&self, channel_id: &str) -> ChannelMode {
+        let modes = self.channel_modes.read().await;
+        modes.get(channel_id).cloned().unwrap_or_default()
+    }
+
+    /// Set channel mode flags for a channel
+    ///
+    /// Parses IRC-style mode string (e.g., "+mpt" or "-i") and updates the channel's mode.
+    pub async fn set_channel_mode(&self, channel_id: &str, flags: &str) {
+        let mut modes = self.channel_modes.write().await;
+        let mode = modes.entry(channel_id.to_string()).or_default();
+        mode.parse_flags(flags);
+        tracing::debug!(
+            "Channel {} mode updated to: {}",
+            channel_id,
+            mode.to_string()
+        );
+    }
+
+    // =========================================================================
+    // Toast Notifications
+    // =========================================================================
+
+    /// Add a toast notification
+    ///
+    /// Toasts are displayed temporarily at the top-right of the screen.
+    /// Use for errors, success messages, and other notifications.
+    pub async fn add_toast(&self, toast: crate::tui::components::ToastMessage) {
+        let mut toasts = self.toasts.write().await;
+        // Limit to 5 toasts max to avoid UI clutter
+        if toasts.len() >= 5 {
+            toasts.remove(0);
+        }
+        toasts.push(toast);
+    }
+
+    /// Add an error toast notification
+    ///
+    /// Convenience method for error messages.
+    pub async fn add_error_toast(&self, id: impl Into<String>, message: impl Into<String>) {
+        use crate::tui::components::ToastMessage;
+        self.add_toast(ToastMessage::error(id, message)).await;
+    }
+
+    /// Add a success toast notification
+    ///
+    /// Convenience method for success messages.
+    pub async fn add_success_toast(&self, id: impl Into<String>, message: impl Into<String>) {
+        use crate::tui::components::ToastMessage;
+        self.add_toast(ToastMessage::success(id, message)).await;
+    }
+
+    /// Get all current toast notifications
+    pub async fn get_toasts(&self) -> Vec<crate::tui::components::ToastMessage> {
+        let toasts = self.toasts.read().await;
+        toasts.clone()
+    }
+
+    /// Clear a specific toast by id
+    pub async fn clear_toast(&self, id: &str) {
+        let mut toasts = self.toasts.write().await;
+        toasts.retain(|t| t.id != id);
+    }
+
+    /// Clear all toast notifications
+    pub async fn clear_toasts(&self) {
+        let mut toasts = self.toasts.write().await;
+        toasts.clear();
+    }
+
+    // =========================================================================
+    // Capability Checking
+    // =========================================================================
+
+    /// Get the current user's role in the current block context
+    ///
+    /// Returns `None` if:
+    /// - There is no current context (not in a block)
+    /// - The AppCore lock is busy
+    pub fn get_current_role(&self) -> Option<crate::tui::reactive::views::ResidentRole> {
+        // Get a snapshot from AppCore
+        let snapshot = self.app_core_snapshot()?;
+
+        // BlockState has a `my_role` field that tracks the current user's role
+        // Convert aura-app ResidentRole to local ResidentRole
+        let role = match snapshot.block.my_role {
+            aura_app::views::block::ResidentRole::Owner
+            | aura_app::views::block::ResidentRole::Admin => {
+                crate::tui::reactive::views::ResidentRole::Steward
+            }
+            aura_app::views::block::ResidentRole::Resident => {
+                crate::tui::reactive::views::ResidentRole::Resident
+            }
+        };
+
+        Some(role)
+    }
+
+    /// Check if the current user has a specific capability
+    ///
+    /// Capability mapping:
+    /// - `None` capability: Always allowed
+    /// - User-level capabilities: Any resident (Resident or Steward)
+    /// - Moderator/Admin capabilities: Steward only
+    pub fn has_capability(&self, capability: &crate::tui::commands::CommandCapability) -> bool {
+        use crate::tui::commands::CommandCapability;
+        use crate::tui::reactive::views::ResidentRole;
+
+        // None capability is always allowed
+        if matches!(capability, CommandCapability::None) {
+            return true;
+        }
+
+        // Get current role
+        let role = match self.get_current_role() {
+            Some(r) => r,
+            None => {
+                // Not in a block context - only allow basic user commands
+                // that don't require block membership
+                return matches!(
+                    capability,
+                    CommandCapability::SendDm | CommandCapability::UpdateContact
+                );
+            }
+        };
+
+        // Check capability against role
+        match capability {
+            // Always allowed
+            CommandCapability::None => true,
+
+            // User-level capabilities - any resident can do these
+            CommandCapability::SendDm
+            | CommandCapability::SendMessage
+            | CommandCapability::UpdateContact
+            | CommandCapability::ViewMembers
+            | CommandCapability::JoinChannel
+            | CommandCapability::LeaveContext => true,
+
+            // Moderator capabilities - require Steward role
+            CommandCapability::ModerateKick
+            | CommandCapability::ModerateBan
+            | CommandCapability::ModerateMute
+            | CommandCapability::Invite
+            | CommandCapability::ManageChannel
+            | CommandCapability::PinContent
+            | CommandCapability::GrantSteward => {
+                matches!(role, ResidentRole::Steward)
+            }
+        }
+    }
+
+    /// Check capability and return a detailed error if unauthorized
+    pub fn check_capability(
+        &self,
+        capability: &crate::tui::commands::CommandCapability,
+    ) -> Result<(), crate::tui::effects::DispatchError> {
+        if self.has_capability(capability) {
+            Ok(())
+        } else {
+            Err(crate::tui::effects::DispatchError::PermissionDenied {
+                required: capability.clone(),
+            })
+        }
+    }
+
+    /// Check if the current user can execute a command based on its authorization level
+    ///
+    /// Authorization level mapping:
+    /// - `Public` - Always allowed (read-only, status queries)
+    /// - `Basic` - Always allowed (user token assumed in TUI)
+    /// - `Sensitive` - Always allowed (account owner operations)
+    /// - `Admin` - Requires Steward role in current block
+    pub fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
+        use crate::tui::effects::CommandAuthorizationLevel;
+        use crate::tui::reactive::views::ResidentRole;
+
+        let level = command.authorization_level();
+
+        match level {
+            // Public, Basic, Sensitive are always allowed
+            CommandAuthorizationLevel::Public
+            | CommandAuthorizationLevel::Basic
+            | CommandAuthorizationLevel::Sensitive => Ok(()),
+
+            // Admin requires Steward role
+            CommandAuthorizationLevel::Admin => {
+                let role = self.get_current_role();
+                match role {
+                    Some(ResidentRole::Steward) => Ok(()),
+                    Some(ResidentRole::Resident) => Err(format!(
+                        "Permission denied: {} requires administrator privileges",
+                        Self::command_name(command)
+                    )),
+                    None => {
+                        // Not in a block context - some admin commands might still be
+                        // allowed depending on the operation, but by default deny
+                        Err(format!(
+                            "Permission denied: {} requires a block context",
+                            Self::command_name(command)
+                        ))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Get a human-readable name for a command (for error messages)
+    fn command_name(command: &EffectCommand) -> &'static str {
+        match command {
+            EffectCommand::KickUser { .. } => "Kick user",
+            EffectCommand::BanUser { .. } => "Ban user",
+            EffectCommand::UnbanUser { .. } => "Unban user",
+            EffectCommand::GrantSteward { .. } => "Grant steward",
+            EffectCommand::RevokeSteward { .. } => "Revoke steward",
+            EffectCommand::SetChannelMode { .. } => "Set channel mode",
+            EffectCommand::Shutdown => "Shutdown",
+            _ => "This operation",
+        }
+    }
 }
 
 impl Default for IoContext {
@@ -777,6 +1465,70 @@ mod tests {
             .await
             .expect("expected code");
 
-        assert!(code.contains("AURA-"));
+        // Now generates proper shareable invitation codes in aura:v1: format
+        assert!(
+            code.starts_with("aura:v1:"),
+            "Expected aura:v1: prefix, got: {}",
+            code
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_account_writes_file() {
+        // Create a temporary directory for the test
+        let test_dir = std::env::temp_dir().join(format!("aura-ctx-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&test_dir);
+        std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
+
+        // Create AppCore
+        let app_core =
+            AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+        let app_core = Arc::new(RwLock::new(app_core));
+
+        // Create IoContext with the test directory
+        let ctx = IoContext::with_account_status(
+            app_core,
+            false, // No existing account
+            test_dir.clone(),
+            "test-device".to_string(),
+        );
+
+        // Verify no account exists initially
+        assert!(!ctx.has_account(), "Should not have account initially");
+
+        // Account file should not exist
+        let account_file = test_dir.join("account.json");
+        assert!(
+            !account_file.exists(),
+            "account.json should not exist before creation"
+        );
+
+        // Create account
+        let result = ctx.create_account("Test User");
+        assert!(
+            result.is_ok(),
+            "create_account should succeed: {:?}",
+            result
+        );
+
+        // Verify flag updated
+        assert!(ctx.has_account(), "Should have account after creation");
+
+        // CRITICAL: Verify the account.json file was written
+        assert!(
+            account_file.exists(),
+            "account.json should exist after creation"
+        );
+
+        // Verify file content
+        let content = std::fs::read_to_string(&account_file).expect("Failed to read account.json");
+        assert!(
+            content.contains("authority_id"),
+            "Should contain authority_id"
+        );
+        assert!(content.contains("context_id"), "Should contain context_id");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&test_dir);
     }
 }

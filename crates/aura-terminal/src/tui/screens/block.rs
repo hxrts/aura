@@ -18,7 +18,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::{ContactSelectModal, ContactSelectState, MessageInput};
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
+use crate::tui::navigation::{is_nav_key_press, navigate_list, InputThrottle, NavKey, NavThrottle};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{BlockBudget, Contact, Message, Resident};
 
@@ -43,6 +43,12 @@ pub type BlockInviteCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Callback type for navigating to neighborhood view
 pub type BlockNavCallback = Arc<dyn Fn() + Send + Sync>;
+
+/// Callback type for granting steward role (receives resident_id: String)
+pub type GrantStewardCallback = Arc<dyn Fn(String) + Send + Sync>;
+
+/// Callback type for revoking steward role (receives resident_id: String)
+pub type RevokeStewardCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Props for ResidentList
 #[derive(Default, Props)]
@@ -234,6 +240,10 @@ pub struct BlockScreenProps {
     pub on_invite: Option<BlockInviteCallback>,
     /// Callback when navigating to neighborhood view
     pub on_go_neighborhood: Option<BlockNavCallback>,
+    /// Callback when granting steward role (receives resident_id)
+    pub on_grant_steward: Option<GrantStewardCallback>,
+    /// Callback when revoking steward role (receives resident_id)
+    pub on_revoke_steward: Option<RevokeStewardCallback>,
 }
 
 /// Convert aura-app resident role to TUI is_steward flag
@@ -365,11 +375,19 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let on_send = props.on_send.clone();
     let on_invite = props.on_invite.clone();
     let on_go_neighborhood = props.on_go_neighborhood.clone();
+    let on_grant_steward = props.on_grant_steward.clone();
+    let on_revoke_steward = props.on_revoke_steward.clone();
 
     let resident_count = residents.len();
 
     // Throttle for navigation keys - persists across renders using use_ref
     let mut nav_throttle = hooks.use_ref(NavThrottle::new);
+
+    // Throttle for text input - persists across renders
+    let mut input_throttle = hooks.use_ref(InputThrottle::new);
+
+    // Clone residents for event handler to access selected resident
+    let residents_for_handler = residents.clone();
 
     hooks.use_terminal_events({
         let input_text = input_text_for_handler;
@@ -378,38 +396,58 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
         let mut invite_modal_state = invite_modal_state.clone();
         let contacts_for_modal = contacts.clone();
         let mut input_version = input_version.clone();
+        let residents = residents_for_handler;
         move |event| {
             let current_focus = focus.get();
             let is_invite_modal_visible = invite_modal_state.read().visible;
 
-            // Check for navigation keys first
-            if let Some(nav_key) = is_nav_key_press(&event) {
-                if is_invite_modal_visible {
-                    // Modal navigation
-                    match nav_key {
-                        NavKey::Up => {
-                            let mut state = invite_modal_state.read().clone();
-                            state.select_prev();
-                            invite_modal_state.set(state);
+            // Check for navigation keys first (only in modal or normal mode, not in input mode)
+            // This prevents vim-style nav keys (h,j,k,l) from being consumed when typing
+            if is_invite_modal_visible || current_focus != BlockFocus::Input {
+                if let Some(nav_key) = is_nav_key_press(&event) {
+                    if is_invite_modal_visible {
+                        // Modal navigation
+                        match nav_key {
+                            NavKey::Up => {
+                                let mut state = invite_modal_state.read().clone();
+                                state.select_prev();
+                                invite_modal_state.set(state);
+                            }
+                            NavKey::Down => {
+                                let mut state = invite_modal_state.read().clone();
+                                state.select_next();
+                                invite_modal_state.set(state);
+                            }
+                            _ => {}
                         }
-                        NavKey::Down => {
-                            let mut state = invite_modal_state.read().clone();
-                            state.select_next();
-                            invite_modal_state.set(state);
+                        return;
+                    }
+
+                    if nav_throttle.write().try_navigate() {
+                        match nav_key {
+                            // Horizontal: toggle between Residents and Input (wrap around)
+                            NavKey::Left | NavKey::Right => {
+                                let new_focus = match current_focus {
+                                    BlockFocus::Residents => BlockFocus::Input,
+                                    BlockFocus::Input => BlockFocus::Residents,
+                                };
+                                focus.set(new_focus);
+                            }
+                            // Vertical: navigate residents list when focused on Residents
+                            NavKey::Up | NavKey::Down => {
+                                if current_focus == BlockFocus::Residents && resident_count > 0 {
+                                    let new_idx = navigate_list(
+                                        resident_index.get(),
+                                        resident_count,
+                                        nav_key,
+                                    );
+                                    resident_index.set(new_idx);
+                                }
+                            }
                         }
-                        _ => {}
                     }
                     return;
                 }
-
-                if current_focus == BlockFocus::Residents {
-                    // Normal mode: navigate residents list with throttle
-                    if nav_throttle.write().try_navigate() {
-                        let new_idx = navigate_list(resident_index.get(), resident_count, nav_key);
-                        resident_index.set(new_idx);
-                    }
-                }
-                return;
             }
 
             // Handle other key events
@@ -474,16 +512,20 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                                     }
                                 }
                             }
-                            // Backspace removes last character
+                            // Backspace removes last character (with throttle)
                             KeyCode::Backspace => {
-                                if let Ok(mut guard) = input_text.write() {
-                                    guard.pop();
+                                if input_throttle.write().try_input() {
+                                    if let Ok(mut guard) = input_text.write() {
+                                        guard.pop();
+                                    }
+                                    input_version.set(input_version.get().wrapping_add(1));
                                 }
-                                input_version.set(input_version.get().wrapping_add(1));
                             }
-                            // Character input
+                            // Character input (with throttle)
                             KeyCode::Char(c) => {
-                                if !modifiers.contains(KeyModifiers::CONTROL) {
+                                if !modifiers.contains(KeyModifiers::CONTROL)
+                                    && input_throttle.write().try_input()
+                                {
                                     if let Ok(mut guard) = input_text.write() {
                                         guard.push(c);
                                     }
@@ -510,6 +552,28 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                             KeyCode::Char('n') => {
                                 if let Some(ref callback) = on_go_neighborhood {
                                     callback();
+                                }
+                            }
+                            // Grant steward role to selected resident
+                            KeyCode::Char('g') => {
+                                if !residents.is_empty() {
+                                    let idx = resident_index.get();
+                                    if let Some(resident) = residents.get(idx) {
+                                        if let Some(ref callback) = on_grant_steward {
+                                            callback(resident.id.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            // Revoke steward role from selected resident
+                            KeyCode::Char('r') => {
+                                if !residents.is_empty() {
+                                    let idx = resident_index.get();
+                                    if let Some(resident) = residents.get(idx) {
+                                        if let Some(ref callback) = on_revoke_steward {
+                                            callback(resident.id.clone());
+                                        }
+                                    }
                                 }
                             }
                             _ => {}

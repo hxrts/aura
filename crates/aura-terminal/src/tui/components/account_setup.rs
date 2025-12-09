@@ -17,6 +17,8 @@ pub struct AccountSetupModalProps {
     pub focused: bool,
     /// Whether account creation is in progress
     pub creating: bool,
+    /// Whether account was created successfully
+    pub success: bool,
     /// Error message if creation failed
     pub error: String,
 }
@@ -32,9 +34,137 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 
     let display_name = props.display_name.clone();
     let creating = props.creating;
+    let success = props.success;
     let has_error = !props.error.is_empty();
     let error = props.error.clone();
-    let can_submit = !display_name.is_empty() && !creating;
+
+    // Show success/error result view
+    if success || has_error {
+        let (status_icon, status_text, status_color) = if success {
+            ("✓", "Account created successfully!", Theme::SUCCESS)
+        } else {
+            ("✗", error.as_str(), Theme::ERROR)
+        };
+
+        return element! {
+            View(
+                position: Position::Absolute,
+                width: 100pct,
+                height: 100pct,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                background_color: Theme::OVERLAY,
+            ) {
+                View(
+                    width: Percent(60.0),
+                    flex_direction: FlexDirection::Column,
+                    background_color: Theme::BG_DARK,
+                    border_style: BorderStyle::Round,
+                    border_color: if success { Theme::SUCCESS } else { Theme::ERROR },
+                ) {
+                    // Header
+                    View(
+                        padding: 2,
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        border_style: BorderStyle::Single,
+                        border_edges: Edges::Bottom,
+                        border_color: Theme::BORDER,
+                    ) {
+                        Text(
+                            content: if success { "Account Created" } else { "Account Creation Failed" },
+                            weight: Weight::Bold,
+                            color: status_color,
+                        )
+                    }
+
+                    // Status content
+                    View(padding: 3, flex_direction: FlexDirection::Column, align_items: AlignItems::Center) {
+                        View(flex_direction: FlexDirection::Row, gap: 2) {
+                            Text(content: status_icon, color: status_color, weight: Weight::Bold)
+                            Text(content: status_text, color: status_color)
+                        }
+                        #(if success {
+                            Some(element! {
+                                View(margin_top: 2) {
+                                    Text(
+                                        content: format!("Welcome, {}!", display_name),
+                                        color: Theme::TEXT_MUTED,
+                                    )
+                                }
+                            })
+                        } else {
+                            None
+                        })
+                    }
+
+                    // Footer
+                    View(
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::Center,
+                        padding: 2,
+                        border_style: BorderStyle::Single,
+                        border_edges: Edges::Top,
+                        border_color: Theme::BORDER,
+                    ) {
+                        View(flex_direction: FlexDirection::Row, gap: 1) {
+                            Text(content: "Enter", color: Theme::SECONDARY)
+                            Text(content: if success { "to continue" } else { "to try again" }, color: Theme::TEXT_MUTED)
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    // Show creating spinner
+    if creating {
+        return element! {
+            View(
+                position: Position::Absolute,
+                width: 100pct,
+                height: 100pct,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                background_color: Theme::OVERLAY,
+            ) {
+                View(
+                    width: Percent(60.0),
+                    flex_direction: FlexDirection::Column,
+                    background_color: Theme::BG_DARK,
+                    border_style: BorderStyle::Round,
+                    border_color: Theme::PRIMARY,
+                ) {
+                    // Header
+                    View(
+                        padding: 2,
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        border_style: BorderStyle::Single,
+                        border_edges: Edges::Bottom,
+                        border_color: Theme::BORDER,
+                    ) {
+                        Text(
+                            content: "Creating Account",
+                            weight: Weight::Bold,
+                            color: Theme::PRIMARY,
+                        )
+                    }
+
+                    // Creating content
+                    View(padding: 3, flex_direction: FlexDirection::Column, align_items: AlignItems::Center) {
+                        Text(content: "Generating FROST threshold keys...", color: Theme::TEXT_MUTED)
+                        View(margin_top: 1) {
+                            Text(content: "Please wait...", color: Theme::TEXT_MUTED)
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    // Show input form (default state)
+    let can_submit = !display_name.is_empty();
 
     let placeholder = if display_name.is_empty() {
         "Enter your name...".to_string()
@@ -48,18 +178,10 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         Theme::TEXT
     };
 
-    let border_color = if has_error {
-        Theme::ERROR
-    } else if props.focused {
+    let border_color = if props.focused {
         Theme::BORDER_FOCUS
     } else {
         Theme::BORDER
-    };
-
-    let submit_text = if creating {
-        "Creating...".to_string()
-    } else {
-        "Create Account".to_string()
     };
 
     element! {
@@ -133,17 +255,6 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                             Text(content: placeholder, color: text_color)
                         }
                     }
-
-                    // Error message
-                    #(if has_error {
-                        Some(element! {
-                            View(margin_top: 1) {
-                                Text(content: error, color: Theme::ERROR)
-                            }
-                        })
-                    } else {
-                        None
-                    })
                 }
 
                 // Footer with hints and button
@@ -168,7 +279,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                         border_color: if can_submit { Theme::PRIMARY } else { Theme::BORDER },
                     ) {
                         Text(
-                            content: submit_text,
+                            content: "Create Account",
                             color: if can_submit { Theme::BG_DARK } else { Theme::TEXT_MUTED },
                         )
                     }
@@ -187,6 +298,8 @@ pub struct AccountSetupState {
     pub display_name: String,
     /// Whether account creation is in progress
     pub creating: bool,
+    /// Whether account was created successfully
+    pub success: bool,
     /// Error message if creation failed
     pub error: Option<String>,
 }
@@ -202,6 +315,7 @@ impl AccountSetupState {
         self.visible = true;
         self.display_name.clear();
         self.creating = false;
+        self.success = false;
         self.error = None;
     }
 
@@ -229,25 +343,52 @@ impl AccountSetupState {
 
     /// Check if submission is valid
     pub fn can_submit(&self) -> bool {
-        !self.display_name.is_empty() && !self.creating
+        !self.display_name.is_empty() && !self.creating && !self.success
     }
 
     /// Start creating account
     pub fn start_creating(&mut self) {
         self.creating = true;
+        self.success = false;
         self.error = None;
     }
 
-    /// Mark creation as complete
+    /// Mark creation as successful (shows success screen)
+    pub fn set_success(&mut self) {
+        self.creating = false;
+        self.success = true;
+        self.error = None;
+    }
+
+    /// Mark creation as complete and dismiss modal
     pub fn finish_creating(&mut self) {
         self.creating = false;
+        self.success = false;
         self.visible = false;
     }
 
     /// Set error message
     pub fn set_error(&mut self, error: impl Into<String>) {
         self.creating = false;
+        self.success = false;
         self.error = Some(error.into());
+    }
+
+    /// Reset to input state (for retry after error)
+    pub fn reset_to_input(&mut self) {
+        self.creating = false;
+        self.success = false;
+        self.error = None;
+    }
+
+    /// Check if in success state
+    pub fn is_success(&self) -> bool {
+        self.success
+    }
+
+    /// Check if in error state
+    pub fn is_error(&self) -> bool {
+        self.error.is_some()
     }
 
     /// Get display name if valid

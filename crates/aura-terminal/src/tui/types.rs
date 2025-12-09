@@ -25,6 +25,7 @@ use crate::tui::reactive::views;
 pub struct Channel {
     pub id: String,
     pub name: String,
+    pub topic: Option<String>,
     pub unread_count: usize,
     pub is_selected: bool,
 }
@@ -34,6 +35,7 @@ impl From<&AppChannel> for Channel {
         Self {
             id: ch.id.clone(),
             name: ch.name.clone(),
+            topic: ch.topic.clone(),
             unread_count: ch.unread_count as usize,
             is_selected: false,
         }
@@ -46,6 +48,7 @@ impl Channel {
         Self {
             id: ch.id.clone(),
             name: ch.name.clone(),
+            topic: ch.topic.clone(),
             unread_count: ch.unread_count as usize,
             is_selected,
         }
@@ -57,6 +60,7 @@ impl Channel {
         Self {
             id: id.into(),
             name: name.into(),
+            topic: None,
             unread_count: 0,
             is_selected: false,
         }
@@ -67,9 +71,50 @@ impl Channel {
         self
     }
 
+    pub fn with_topic(mut self, topic: impl Into<String>) -> Self {
+        self.topic = Some(topic.into());
+        self
+    }
+
     pub fn selected(mut self, is_selected: bool) -> Self {
         self.is_selected = is_selected;
         self
+    }
+}
+
+/// Message delivery status
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DeliveryStatus {
+    /// Message is being sent to the network
+    Sending,
+    /// Message was sent and acknowledged by the network
+    #[default]
+    Sent,
+    /// Message was delivered to all recipients
+    Delivered,
+    /// Message delivery failed (with retry available)
+    Failed,
+}
+
+impl DeliveryStatus {
+    /// Get the status indicator character
+    pub fn indicator(&self) -> &'static str {
+        match self {
+            DeliveryStatus::Sending => "⏳",   // Hourglass
+            DeliveryStatus::Sent => "✓",       // Single check
+            DeliveryStatus::Delivered => "✓✓", // Double check
+            DeliveryStatus::Failed => "✗",     // X mark
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> &'static str {
+        match self {
+            DeliveryStatus::Sending => "Sending...",
+            DeliveryStatus::Sent => "Sent",
+            DeliveryStatus::Delivered => "Delivered",
+            DeliveryStatus::Failed => "Failed",
+        }
     }
 }
 
@@ -81,6 +126,8 @@ pub struct Message {
     pub content: String,
     pub timestamp: String,
     pub is_own: bool,
+    /// Delivery status for own messages
+    pub delivery_status: DeliveryStatus,
 }
 
 impl From<&AppMessage> for Message {
@@ -91,6 +138,8 @@ impl From<&AppMessage> for Message {
             content: msg.content.clone(),
             timestamp: format_timestamp(msg.timestamp),
             is_own: msg.is_own,
+            // Default to Delivered for messages loaded from storage
+            delivery_status: DeliveryStatus::Delivered,
         }
     }
 }
@@ -107,7 +156,30 @@ impl Message {
             content: content.into(),
             timestamp: String::new(),
             is_own: false,
+            delivery_status: DeliveryStatus::default(),
         }
+    }
+
+    /// Create a new message in sending state (for optimistic UI)
+    pub fn sending(
+        id: impl Into<String>,
+        sender: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            sender: sender.into(),
+            content: content.into(),
+            timestamp: String::new(),
+            is_own: true,
+            delivery_status: DeliveryStatus::Sending,
+        }
+    }
+
+    /// Builder method to set delivery status
+    pub fn with_status(mut self, status: DeliveryStatus) -> Self {
+        self.delivery_status = status;
+        self
     }
 
     pub fn with_timestamp(mut self, ts: impl Into<String>) -> Self {
@@ -471,12 +543,91 @@ impl MfaPolicy {
     }
 }
 
+/// Channel mode flags
+///
+/// IRC-style mode flags for channel configuration:
+/// - `m` - moderated: only admins can send messages
+/// - `p` - private: channel not visible to non-members
+/// - `t` - topic protected: only admins can change topic
+/// - `i` - invite only: members must be invited
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChannelMode {
+    /// Moderated - only admins can send messages
+    pub moderated: bool,
+    /// Private - not visible to non-members
+    pub private: bool,
+    /// Topic protected - only admins can change topic
+    pub topic_protected: bool,
+    /// Invite only - must be invited to join
+    pub invite_only: bool,
+}
+
+impl ChannelMode {
+    /// Parse mode flags from a string like "+mpt" or "-i"
+    pub fn parse_flags(&mut self, flags: &str) {
+        let mut adding = true;
+        for c in flags.chars() {
+            match c {
+                '+' => adding = true,
+                '-' => adding = false,
+                'm' => self.moderated = adding,
+                'p' => self.private = adding,
+                't' => self.topic_protected = adding,
+                'i' => self.invite_only = adding,
+                _ => {} // Ignore unknown flags
+            }
+        }
+    }
+
+    /// Convert to display string like "+mpt"
+    pub fn to_string(&self) -> String {
+        let mut flags = String::from("+");
+        if self.moderated {
+            flags.push('m');
+        }
+        if self.private {
+            flags.push('p');
+        }
+        if self.topic_protected {
+            flags.push('t');
+        }
+        if self.invite_only {
+            flags.push('i');
+        }
+        if flags.len() == 1 {
+            String::new() // No flags set
+        } else {
+            flags
+        }
+    }
+
+    /// Get human-readable description of active modes
+    pub fn description(&self) -> Vec<&'static str> {
+        let mut desc = Vec::new();
+        if self.moderated {
+            desc.push("Moderated");
+        }
+        if self.private {
+            desc.push("Private");
+        }
+        if self.topic_protected {
+            desc.push("Topic Protected");
+        }
+        if self.invite_only {
+            desc.push("Invite Only");
+        }
+        desc
+    }
+}
+
 /// Recovery screen tab
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RecoveryTab {
     #[default]
     Guardians,
     Recovery,
+    /// Pending requests from others that we can approve (we are their guardian)
+    Requests,
 }
 
 impl RecoveryTab {
@@ -484,14 +635,29 @@ impl RecoveryTab {
         match self {
             Self::Guardians => "Guardians",
             Self::Recovery => "Recovery",
+            Self::Requests => "Requests",
         }
     }
 
     pub fn next(self) -> Self {
         match self {
             Self::Guardians => Self::Recovery,
-            Self::Recovery => Self::Guardians,
+            Self::Recovery => Self::Requests,
+            Self::Requests => Self::Guardians,
         }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Guardians => Self::Requests,
+            Self::Recovery => Self::Guardians,
+            Self::Requests => Self::Recovery,
+        }
+    }
+
+    /// Returns all tabs in order
+    pub fn all() -> [Self; 3] {
+        [Self::Guardians, Self::Recovery, Self::Requests]
     }
 }
 
@@ -674,6 +840,36 @@ impl From<&AppRecoveryProcess> for RecoveryStatus {
             approvals_received: p.approvals_received,
             threshold: p.approvals_required,
             approvals: p.approvals.iter().map(|a| a.into()).collect(),
+        }
+    }
+}
+
+/// A pending recovery request that we can approve (we are their guardian)
+#[derive(Clone, Debug, Default)]
+pub struct PendingRequest {
+    /// Recovery request ID
+    pub id: String,
+    /// Account being recovered (display name or ID)
+    pub account_name: String,
+    /// Number of approvals received
+    pub approvals_received: u32,
+    /// Number of approvals required
+    pub approvals_required: u32,
+    /// Whether we have already approved this request
+    pub we_approved: bool,
+    /// When the request was initiated (ms since epoch)
+    pub initiated_at: u64,
+}
+
+impl From<&AppRecoveryProcess> for PendingRequest {
+    fn from(p: &AppRecoveryProcess) -> Self {
+        Self {
+            id: p.id.clone(),
+            account_name: p.account_id.clone(), // Will be resolved to name by UI if possible
+            approvals_received: p.approvals_received,
+            approvals_required: p.approvals_required,
+            we_approved: false, // Caller should set this based on our guardian ID
+            initiated_at: p.initiated_at,
         }
     }
 }

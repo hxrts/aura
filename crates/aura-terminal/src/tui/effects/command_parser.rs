@@ -176,6 +176,15 @@ pub enum EffectCommand {
         /// Channel ID
         channel: String,
     },
+    /// Retry sending a failed message
+    RetryMessage {
+        /// Message ID to retry
+        message_id: String,
+        /// Channel ID
+        channel: String,
+        /// Original message content
+        content: String,
+    },
     /// Update contact suggestion (nickname)
     UpdateNickname {
         /// New nickname
@@ -370,6 +379,15 @@ pub enum EffectCommand {
     Ping,
     /// Shutdown the bridge
     Shutdown,
+
+    // === Backup Commands ===
+    /// Export account to a portable backup code
+    ExportAccountBackup,
+    /// Import account from backup code
+    ImportAccountBackup {
+        /// The backup code to import
+        backup_code: String,
+    },
 }
 
 impl EffectCommand {
@@ -404,6 +422,7 @@ impl EffectCommand {
             | Self::CloseChannel { .. }
             | Self::JoinChannel { .. }
             | Self::LeaveChannel { .. }
+            | Self::RetryMessage { .. }
             | Self::UpdateNickname { .. }
             | Self::UpdateContactPetname { .. }
             | Self::SetTopic { .. }
@@ -438,7 +457,9 @@ impl EffectCommand {
             | Self::ToggleContactGuardian { .. }
             | Self::InviteGuardian { .. }
             | Self::MuteUser { .. }
-            | Self::UnmuteUser { .. } => CommandAuthorizationLevel::Sensitive,
+            | Self::UnmuteUser { .. }
+            | Self::ExportAccountBackup
+            | Self::ImportAccountBackup { .. } => CommandAuthorizationLevel::Sensitive,
 
             // Admin - steward/admin capabilities
             Self::KickUser { .. }

@@ -21,7 +21,9 @@ use crate::tui::components::{
     StatusIndicator, TextInputModal, TextInputState,
 };
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle, TwoPanelFocus};
+use crate::tui::navigation::{
+    is_nav_key_press, navigate_list, InputThrottle, NavKey, NavThrottle, TwoPanelFocus,
+};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Contact, ContactStatus};
 
@@ -340,6 +342,9 @@ pub fn ContactsScreen(
     // Throttle for navigation keys - persists across renders using use_ref
     let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
+    // Throttle for text input - persists across renders
+    let mut input_throttle = hooks.use_ref(InputThrottle::new);
+
     hooks.use_terminal_events({
         let mut petname_modal_state = petname_modal_state.clone();
         let count = contacts.len();
@@ -399,14 +404,20 @@ pub fn ContactsScreen(
                                 }
                             }
                             KeyCode::Backspace => {
-                                let mut state = petname_modal_state.read().clone();
-                                state.pop_char();
-                                petname_modal_state.set(state);
+                                // Delete character (with throttle)
+                                if input_throttle.write().try_input() {
+                                    let mut state = petname_modal_state.read().clone();
+                                    state.pop_char();
+                                    petname_modal_state.set(state);
+                                }
                             }
                             KeyCode::Char(c) => {
-                                let mut state = petname_modal_state.read().clone();
-                                state.push_char(c);
-                                petname_modal_state.set(state);
+                                // Add character (with throttle)
+                                if input_throttle.write().try_input() {
+                                    let mut state = petname_modal_state.read().clone();
+                                    state.push_char(c);
+                                    petname_modal_state.set(state);
+                                }
                             }
                             _ => {}
                         }

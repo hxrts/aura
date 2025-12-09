@@ -5,6 +5,7 @@
 use iocraft::prelude::*;
 
 use crate::tui::theme::{Icons, Spacing, Theme};
+use crate::tui::types::DeliveryStatus;
 
 /// Props for MessageBubble
 #[derive(Default, Props)]
@@ -17,12 +18,8 @@ pub struct MessageBubbleProps {
     pub timestamp: String,
     /// Whether this is the current user's message
     pub is_own: bool,
-    /// Whether the message is being sent
-    pub is_sending: bool,
-    /// Whether the message failed to send
-    pub is_failed: bool,
-    /// Whether the message is read
-    pub is_read: bool,
+    /// Delivery status for own messages
+    pub delivery_status: DeliveryStatus,
 }
 
 /// An enhanced message bubble with status indicators
@@ -38,16 +35,13 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
         (Theme::MSG_OTHER, Theme::BORDER, AlignItems::FlexStart)
     };
 
-    // Status icon for own messages
+    // Status icon for own messages based on delivery status
     let status_icon = if props.is_own {
-        if props.is_failed {
-            Some((Icons::CROSS, Theme::ERROR))
-        } else if props.is_sending {
-            Some((Icons::PENDING, Theme::TEXT_MUTED))
-        } else if props.is_read {
-            Some((Icons::CHECK, Theme::SUCCESS))
-        } else {
-            Some((Icons::CHECK, Theme::TEXT_MUTED))
+        match props.delivery_status {
+            DeliveryStatus::Sending => Some((Icons::PENDING, Theme::TEXT_MUTED)),
+            DeliveryStatus::Sent => Some((Icons::CHECK, Theme::TEXT_MUTED)),
+            DeliveryStatus::Delivered => Some((Icons::CHECK_DOUBLE, Theme::SUCCESS)),
+            DeliveryStatus::Failed => Some((Icons::CROSS, Theme::ERROR)),
         }
     } else {
         None

@@ -26,6 +26,11 @@ impl ToastLevel {
         }
     }
 
+    /// Alias for icon() - returns the indicator symbol for this level
+    pub fn indicator(self) -> &'static str {
+        self.icon()
+    }
+
     pub fn color(self) -> Color {
         match self {
             Self::Info => Theme::SECONDARY,
@@ -72,6 +77,11 @@ impl ToastMessage {
 
     pub fn error(id: impl Into<String>, message: impl Into<String>) -> Self {
         Self::new(id, message).with_level(ToastLevel::Error)
+    }
+
+    /// Check if this toast is an error level toast
+    pub fn is_error(&self) -> bool {
+        matches!(self.level, ToastLevel::Error)
     }
 }
 

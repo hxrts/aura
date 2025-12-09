@@ -22,6 +22,9 @@ use std::time::{Duration, Instant};
 /// Navigation throttle duration to prevent too-rapid key repeats
 pub const NAV_THROTTLE_MS: u64 = 150;
 
+/// Input throttle duration for text input (slightly faster than navigation)
+pub const INPUT_THROTTLE_MS: u64 = 50;
+
 /// Check if a navigation key was pressed (not released)
 pub fn is_nav_key_press(event: &TerminalEvent) -> Option<NavKey> {
     match event {
@@ -111,6 +114,49 @@ impl NavThrottle {
     }
 }
 
+/// Throttle helper for text input to prevent too-rapid key repeats
+pub struct InputThrottle {
+    last_input: Instant,
+    duration: Duration,
+}
+
+impl Default for InputThrottle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl InputThrottle {
+    /// Create a new input throttle
+    pub fn new() -> Self {
+        Self {
+            // Start in the past so first input is immediate
+            last_input: Instant::now() - Duration::from_millis(INPUT_THROTTLE_MS + 100),
+            duration: Duration::from_millis(INPUT_THROTTLE_MS),
+        }
+    }
+
+    /// Check if enough time has passed for another input
+    pub fn can_input(&self) -> bool {
+        self.last_input.elapsed() >= self.duration
+    }
+
+    /// Mark that input occurred
+    pub fn mark(&mut self) {
+        self.last_input = Instant::now();
+    }
+
+    /// Check and mark in one call - returns true if input is allowed
+    pub fn try_input(&mut self) -> bool {
+        if self.can_input() {
+            self.mark();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// Focus state for two-panel layouts (list + detail)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TwoPanelFocus {
@@ -128,11 +174,11 @@ impl TwoPanelFocus {
         }
     }
 
-    /// Move focus based on navigation key
+    /// Move focus based on navigation key (with wrap-around)
     pub fn navigate(&self, key: NavKey) -> Self {
         match key {
-            NavKey::Left => TwoPanelFocus::List,
-            NavKey::Right => TwoPanelFocus::Detail,
+            // Left/Right both toggle (wrap around between two panels)
+            NavKey::Left | NavKey::Right => self.toggle(),
             _ => *self,
         }
     }
@@ -176,49 +222,73 @@ impl ThreePanelFocus {
     }
 }
 
-/// Navigate within a list (vertical navigation)
+/// Navigate within a list (vertical navigation) with wrap-around
 pub fn navigate_list(current: usize, count: usize, key: NavKey) -> usize {
     if count == 0 {
         return 0;
     }
     match key {
-        NavKey::Up => current.saturating_sub(1),
-        NavKey::Down => (current + 1).min(count.saturating_sub(1)),
+        NavKey::Up => {
+            if current == 0 {
+                count - 1 // Wrap to last item
+            } else {
+                current - 1
+            }
+        }
+        NavKey::Down => {
+            if current >= count - 1 {
+                0 // Wrap to first item
+            } else {
+                current + 1
+            }
+        }
         _ => current,
     }
 }
 
-/// Navigate within a 2D grid
+/// Navigate within a 2D grid with wrap-around
 pub fn navigate_grid(current: usize, cols: usize, total: usize, key: NavKey) -> usize {
     if total == 0 || cols == 0 {
         return 0;
     }
-    let new_pos = match key {
-        NavKey::Up => current.saturating_sub(cols),
+    let rows = (total + cols - 1) / cols; // ceiling division
+    let current_row = current / cols;
+    let current_col = current % cols;
+
+    match key {
+        NavKey::Up => {
+            if current_row == 0 {
+                // Wrap to last row, same column (or last item if column doesn't exist)
+                let target = (rows - 1) * cols + current_col;
+                target.min(total - 1)
+            } else {
+                current - cols
+            }
+        }
         NavKey::Down => {
             let next = current + cols;
-            if next < total {
-                next
+            if next >= total {
+                // Wrap to first row, same column
+                current_col.min(total - 1)
             } else {
-                current
+                next
             }
         }
         NavKey::Left => {
-            if current % cols > 0 {
-                current - 1
+            if current == 0 {
+                total - 1 // Wrap to last item
             } else {
-                current
+                current - 1
             }
         }
         NavKey::Right => {
-            if current % cols < cols - 1 && current + 1 < total {
-                current + 1
+            if current >= total - 1 {
+                0 // Wrap to first item
             } else {
-                current
+                current + 1
             }
         }
-    };
-    new_pos.min(total.saturating_sub(1))
+    }
 }
 
 #[cfg(test)]
@@ -235,8 +305,13 @@ mod tests {
     #[test]
     fn test_two_panel_focus_navigate() {
         let focus = TwoPanelFocus::List;
+        // Left and Right both toggle (wrap around)
         assert_eq!(focus.navigate(NavKey::Right), TwoPanelFocus::Detail);
-        assert_eq!(focus.navigate(NavKey::Left), TwoPanelFocus::List);
+        assert_eq!(focus.navigate(NavKey::Left), TwoPanelFocus::Detail);
+        // Detail wraps back to List
+        let detail = TwoPanelFocus::Detail;
+        assert_eq!(detail.navigate(NavKey::Right), TwoPanelFocus::List);
+        assert_eq!(detail.navigate(NavKey::Left), TwoPanelFocus::List);
         // Vertical keys don't change panel focus
         assert_eq!(focus.navigate(NavKey::Up), TwoPanelFocus::List);
         assert_eq!(focus.navigate(NavKey::Down), TwoPanelFocus::List);
@@ -255,31 +330,40 @@ mod tests {
         // Empty list
         assert_eq!(navigate_list(0, 0, NavKey::Down), 0);
 
-        // Single item
+        // Single item - wraps to itself
         assert_eq!(navigate_list(0, 1, NavKey::Up), 0);
         assert_eq!(navigate_list(0, 1, NavKey::Down), 0);
 
-        // Multiple items
+        // Multiple items - normal navigation
         assert_eq!(navigate_list(0, 5, NavKey::Down), 1);
         assert_eq!(navigate_list(2, 5, NavKey::Up), 1);
-        assert_eq!(navigate_list(4, 5, NavKey::Down), 4); // Can't go past end
-        assert_eq!(navigate_list(0, 5, NavKey::Up), 0); // Can't go before start
+
+        // Wrap-around behavior
+        assert_eq!(navigate_list(4, 5, NavKey::Down), 0); // Wraps to first
+        assert_eq!(navigate_list(0, 5, NavKey::Up), 4); // Wraps to last
     }
 
     #[test]
     fn test_navigate_grid() {
         // 2x2 grid (indices 0,1 on row 0; 2,3 on row 1)
         assert_eq!(navigate_grid(0, 2, 4, NavKey::Right), 1);
-        assert_eq!(navigate_grid(1, 2, 4, NavKey::Right), 1); // Can't go past edge
+        assert_eq!(navigate_grid(1, 2, 4, NavKey::Right), 2); // Continues to next row
         assert_eq!(navigate_grid(0, 2, 4, NavKey::Down), 2);
         assert_eq!(navigate_grid(2, 2, 4, NavKey::Up), 0);
         assert_eq!(navigate_grid(1, 2, 4, NavKey::Left), 0);
 
+        // Wrap-around in 2x2 grid
+        assert_eq!(navigate_grid(3, 2, 4, NavKey::Right), 0); // Wraps to first
+        assert_eq!(navigate_grid(0, 2, 4, NavKey::Left), 3); // Wraps to last
+        assert_eq!(navigate_grid(0, 2, 4, NavKey::Up), 2); // Wraps to bottom row
+        assert_eq!(navigate_grid(2, 2, 4, NavKey::Down), 0); // Wraps to top row
+
         // 3x2 grid (6 items)
         assert_eq!(navigate_grid(0, 3, 6, NavKey::Right), 1);
         assert_eq!(navigate_grid(1, 3, 6, NavKey::Right), 2);
-        assert_eq!(navigate_grid(2, 3, 6, NavKey::Right), 2); // Edge
+        assert_eq!(navigate_grid(2, 3, 6, NavKey::Right), 3); // Continues to next row
         assert_eq!(navigate_grid(0, 3, 6, NavKey::Down), 3);
+        assert_eq!(navigate_grid(5, 3, 6, NavKey::Right), 0); // Wraps to first
     }
 
     #[test]

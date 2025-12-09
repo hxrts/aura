@@ -21,7 +21,9 @@ use crate::tui::components::{
     InvitationCreateState, InvitationImportModal, InvitationImportState,
 };
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle, TwoPanelFocus};
+use crate::tui::navigation::{
+    is_nav_key_press, navigate_list, InputThrottle, NavKey, NavThrottle, TwoPanelFocus,
+};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
     format_timestamp, Invitation, InvitationDirection, InvitationFilter, InvitationStatus,
@@ -465,6 +467,9 @@ pub fn InvitationsScreen(
     // Throttle for navigation keys - persists across renders using use_ref
     let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
+    // Throttle for text input - persists across renders
+    let mut input_throttle = hooks.use_ref(InputThrottle::new);
+
     hooks.use_terminal_events({
         let mut create_modal_state = create_modal_state.clone();
         let mut code_modal_state = code_modal_state.clone();
@@ -538,14 +543,16 @@ pub fn InvitationsScreen(
                                 }
                             }
                             KeyCode::Backspace => {
-                                // Delete character
-                                let mut state = import_modal_state.read().clone();
-                                state.pop_char();
-                                import_modal_state.set(state);
+                                // Delete character (with throttle)
+                                if input_throttle.write().try_input() {
+                                    let mut state = import_modal_state.read().clone();
+                                    state.pop_char();
+                                    import_modal_state.set(state);
+                                }
                             }
                             KeyCode::Char(c) => {
+                                // Demo mode shortcuts don't need throttle (they fill entire code)
                                 let state = import_modal_state.read().clone();
-                                // Demo mode shortcuts: when input is empty, 'a' fills Alice, 'c' fills Charlie
                                 if demo_mode && state.code.is_empty() {
                                     if c == 'a' || c == 'A' {
                                         let mut state = state.clone();
@@ -559,10 +566,12 @@ pub fn InvitationsScreen(
                                         return;
                                     }
                                 }
-                                // Normal character input
-                                let mut state = state.clone();
-                                state.push_char(c);
-                                import_modal_state.set(state);
+                                // Normal character input (with throttle)
+                                if input_throttle.write().try_input() {
+                                    let mut state = state.clone();
+                                    state.push_char(c);
+                                    import_modal_state.set(state);
+                                }
                             }
                             _ => {}
                         }
