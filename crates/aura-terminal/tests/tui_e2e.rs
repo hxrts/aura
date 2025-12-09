@@ -2848,7 +2848,6 @@ async fn test_set_context_flow() {
 /// 3. Authorization checks (only stewards can grant/revoke)
 /// 4. Role validation (can't modify Owner, can only revoke Admin)
 #[tokio::test]
-#[ignore]
 async fn test_steward_role_flow() {
     use aura_app::views::block::{BlockState, Resident, ResidentRole};
     use aura_app::AppCore;
@@ -2939,7 +2938,7 @@ async fn test_steward_role_flow() {
         })
         .await;
 
-    assert!(result.is_ok(), "GrantSteward should succeed");
+    assert!(result.is_ok(), "GrantSteward should succeed: {:?}", result);
     println!("  ✓ GrantSteward command dispatched successfully");
 
     // Verify role changed
@@ -3437,7 +3436,6 @@ async fn test_retry_message_command() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_channel_mode_operations() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
@@ -3513,7 +3511,44 @@ async fn test_channel_mode_operations() {
     // Phase 5: Test IoContext channel mode storage
     println!("\nPhase 5: Testing IoContext channel mode storage");
 
-    let ctx = IoContext::with_defaults();
+    use aura_app::views::block::{BlockState, ResidentRole};
+    use aura_app::AppCore;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    let test_dir =
+        std::env::temp_dir().join(format!("aura-channel-mode-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
+
+    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let app_core = Arc::new(RwLock::new(app_core));
+
+    let ctx = IoContext::with_account_status(
+        app_core.clone(),
+        false,
+        test_dir.clone(),
+        "test-device-channel-mode".to_string(),
+    );
+
+    // Create account
+    ctx.create_account("ChannelModeTester")
+        .expect("Failed to create account");
+
+    // Set up a block with the user as owner (required for SetChannelMode)
+    {
+        let core = app_core.write().await;
+        let mut block = BlockState::new(
+            "test-block-mode".to_string(),
+            Some("Test Block".to_string()),
+            "owner-id".to_string(),
+            0,
+            "context-1".to_string(),
+        );
+        block.my_role = ResidentRole::Owner;
+        core.views().add_block(block);
+        core.views().select_block(Some("test-block-mode".to_string()));
+    }
 
     // Initially no mode set
     let initial_mode = ctx.get_channel_mode("test-channel").await;
@@ -3548,7 +3583,7 @@ async fn test_channel_mode_operations() {
             flags: "+pt".to_string(),
         })
         .await;
-    assert!(result.is_ok(), "Dispatch should succeed");
+    assert!(result.is_ok(), "Dispatch should succeed: {:?}", result);
     println!("  ✓ SetChannelMode dispatch succeeded");
 
     let dispatched_mode = ctx.get_channel_mode("another-channel").await;

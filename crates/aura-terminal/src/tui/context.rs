@@ -640,7 +640,7 @@ impl IoContext {
                         // has_pending_suggestion is true when there's a suggested name
                         // that differs from the current petname
                         let has_pending_suggestion =
-                            c.suggested_name.as_ref().map_or(false, |suggested| {
+                            c.suggested_name.as_ref().is_some_and(|suggested| {
                                 !suggested.is_empty() && *suggested != c.petname
                             });
 
@@ -1072,10 +1072,10 @@ impl IoContext {
                 }
             }
 
-            if let Ok(conn_status) = core.read(&*CONNECTION_STATUS_SIGNAL).await {
-                if let ConnectionStatus::Online { peer_count } = conn_status {
-                    return peer_count;
-                }
+            if let Ok(ConnectionStatus::Online { peer_count }) =
+                core.read(&*CONNECTION_STATUS_SIGNAL).await
+            {
+                return peer_count;
             }
         }
 
@@ -1277,9 +1277,13 @@ impl IoContext {
         // Get a snapshot from AppCore
         let snapshot = self.app_core_snapshot()?;
 
+        // Get the current block from BlocksState (multi-block support)
+        // Fall back to the legacy singular block field for backwards compatibility
+        let block = snapshot.blocks.current_block().unwrap_or(&snapshot.block);
+
         // BlockState has a `my_role` field that tracks the current user's role
         // Convert aura-app ResidentRole to local ResidentRole
-        let role = match snapshot.block.my_role {
+        let role = match block.my_role {
             aura_app::views::block::ResidentRole::Owner
             | aura_app::views::block::ResidentRole::Admin => {
                 crate::tui::reactive::views::ResidentRole::Steward
@@ -1434,6 +1438,7 @@ pub trait HasContext {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
     use super::*;
 
     #[tokio::test]
