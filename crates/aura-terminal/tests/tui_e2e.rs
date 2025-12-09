@@ -3547,7 +3547,8 @@ async fn test_channel_mode_operations() {
         );
         block.my_role = ResidentRole::Owner;
         core.views().add_block(block);
-        core.views().select_block(Some("test-block-mode".to_string()));
+        core.views()
+            .select_block(Some("test-block-mode".to_string()));
     }
 
     // Initially no mode set
