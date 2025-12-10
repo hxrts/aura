@@ -1,4 +1,4 @@
-# Aura Messaging Protocol
+# Ratchets Without Trees
 
 The Aura Messaging Protocol (AMP) provides secure asynchronous messaging for threshold identity systems. 
 
@@ -39,6 +39,8 @@ These checks must integrate into the key derivation path. Authorization failure 
 AMP combines a three-level key hierarchy, CRDT-based state management, and a dual window ratchet to achieve its design goals.
 
 ### Key Hierarchy
+
+Despite the title, AMP does, in fact, use a tree, just not for ratcheting. The commitment tree defines Aura's authority structure and threshold policies. In contrast, TreeKEM protocols use binary trees for key distribution, where ratchet state derives from tree path updates. AMP separates these concerns: the tree handles identity, while a linear ratchet handles message keys.
 
 AMP separates key evolution across three levels:
 

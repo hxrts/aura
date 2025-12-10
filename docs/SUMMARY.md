@@ -37,7 +37,7 @@
 # Blog
 
 - [Beyond Local First](blog/000_beyond_local_first.md)
-- [Aura Messaging Protocol](blog/001_group_messaging.md)
+- [Ratchets Without Trees](blog/001_ratchets_without_trees.md)
 - [Aura Consensus](blog/002_consensus.md)
 
 # Demo
