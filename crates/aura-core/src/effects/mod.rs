@@ -119,12 +119,12 @@ pub use capability::{
 pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
+pub use fact::{CheckpointInfo, FactEffects, FactError, TemporalFact};
 pub use flood::{
     FloodAction, FloodBudget, FloodError, LayeredBudget, RendezvousFlooder, RendezvousPacket,
 };
 pub use flow::{FlowBudgetEffects, FlowHint};
 pub use guardian::{GuardianAcceptInput, GuardianEffects, GuardianRequestInput};
-pub use fact::{CheckpointInfo, FactEffects, FactError, TemporalFact};
 pub use indexed::{FactId, IndexStats, IndexedFact, IndexedJournalEffects};
 pub use intent::{
     AuthorizationLevel, IntentDispatchError, IntentEffects, IntentMetadata, SimpleIntentEffects,

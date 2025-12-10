@@ -222,7 +222,10 @@ pub enum MutationReceipt {
 impl MutationReceipt {
     /// Create an immediate receipt
     pub fn immediate(fact_ids: Vec<FactId>, timestamp: PhysicalTime) -> Self {
-        Self::Immediate { fact_ids, timestamp }
+        Self::Immediate {
+            fact_ids,
+            timestamp,
+        }
     }
 
     /// Create a consensus receipt

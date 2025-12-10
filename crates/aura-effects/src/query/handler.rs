@@ -411,6 +411,7 @@ impl QueryEffects for QueryHandler {
         }
     }
 
+    #[allow(clippy::disallowed_methods)] // Instant::now() legitimate for internal performance measurement
     async fn query_with_stats<Q: Query>(
         &self,
         query: &Q,
@@ -428,6 +429,7 @@ impl QueryEffects for QueryHandler {
         Ok((result, stats))
     }
 
+    #[allow(clippy::disallowed_methods)] // Instant::now() legitimate for internal performance measurement
     async fn query_full<Q: Query>(
         &self,
         query: &Q,

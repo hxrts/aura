@@ -318,7 +318,9 @@ pub fn reduce_authority(
 ///
 /// Returns `ReductionNamespaceError::ContextAsAuthority` if the journal
 /// has a Context namespace instead of an Authority namespace.
-pub fn reduce_account_facts(journal: &Journal) -> Result<TreeStateSummary, ReductionNamespaceError> {
+pub fn reduce_account_facts(
+    journal: &Journal,
+) -> Result<TreeStateSummary, ReductionNamespaceError> {
     Ok(reduce_authority(journal)?.tree_state)
 }
 

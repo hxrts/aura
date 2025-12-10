@@ -727,7 +727,7 @@ impl Transaction {
 }
 
 /// Metadata about a transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TransactionMetadata {
     /// Human-readable description
     pub description: Option<String>,
@@ -735,16 +735,6 @@ pub struct TransactionMetadata {
     pub correlation_id: Option<String>,
     /// Application-specific tags
     pub tags: Vec<String>,
-}
-
-impl Default for TransactionMetadata {
-    fn default() -> Self {
-        Self {
-            description: None,
-            correlation_id: None,
-            tags: Vec::new(),
-        }
-    }
 }
 
 /// Receipt for a completed transaction
@@ -954,8 +944,8 @@ impl ScopeFinalityConfig {
             Ok(())
         } else {
             Err(FinalityError::BelowMinimum {
-                requested: requested.clone(),
-                minimum: self.minimum_finality.clone(),
+                requested: Box::new(requested.clone()),
+                minimum: Box::new(self.minimum_finality.clone()),
             })
         }
     }
@@ -985,12 +975,12 @@ impl ContentFinalityOverride {
 pub enum FinalityError {
     #[error("Requested finality {requested} is below minimum {minimum}")]
     BelowMinimum {
-        requested: Finality,
-        minimum: Finality,
+        requested: Box<Finality>,
+        minimum: Box<Finality>,
     },
 
     #[error("Finality timeout: could not achieve {target} within deadline")]
-    Timeout { target: Finality },
+    Timeout { target: Box<Finality> },
 
     #[error("Finality level not supported: {reason}")]
     NotSupported { reason: String },
@@ -1010,9 +1000,13 @@ mod tests {
         assert_eq!(scope.depth(), 3);
 
         let segments = scope.segments();
-        assert!(matches!(&segments[0], ScopeSegment::Typed { kind, id } if kind == "authority" && id == "abc123"));
+        assert!(
+            matches!(&segments[0], ScopeSegment::Typed { kind, id } if kind == "authority" && id == "abc123")
+        );
         assert!(matches!(&segments[1], ScopeSegment::Named(n) if n == "chat"));
-        assert!(matches!(&segments[2], ScopeSegment::Typed { kind, id } if kind == "channel" && id == "xyz"));
+        assert!(
+            matches!(&segments[2], ScopeSegment::Typed { kind, id } if kind == "channel" && id == "xyz")
+        );
     }
 
     #[test]
