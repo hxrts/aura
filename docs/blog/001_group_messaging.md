@@ -151,8 +151,8 @@ TreeKEM protocols expose group structure through tree operations. AMP derives ke
 | Pure recovery from facts | No | Partial | Yes |
 | Linear epoch chain | Via DS | No | Via consensus |
 | Concurrent sends | No | Yes | Yes |
-| Guard chain hooks | No | No | Yes |
-| Authority opacity | No | No | Yes |
+| Extensible authorization | No | No | Yes |
+| Opaque authority | No | No | Yes |
 
 ## Conclusion
 
