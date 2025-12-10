@@ -84,18 +84,8 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
                 padding_right: 1,
                 align_items: AlignItems::Center,
             ) {
-                #(if sending {
-                    Some(element! {
-                        Text(content: "⏳ ", color: Theme::SECONDARY)
-                    })
-                } else {
-                    Some(element! {
-                        Text(content: "› ", color: Theme::PRIMARY)
-                    })
-                })
-                View(flex_grow: 1.0) {
-                    Text(content: display_text, color: text_color)
-                }
+                Text(content: if sending { "> " } else { "> " }, color: Theme::PRIMARY)
+                Text(content: display_text, color: text_color, wrap: TextWrap::NoWrap)
             }
             // Hint bar
             View(

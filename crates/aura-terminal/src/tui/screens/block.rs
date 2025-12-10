@@ -450,14 +450,14 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                 }
             }
 
-            // Handle other key events
+            // Handle other key events (only Press, not Repeat or Release)
             match event {
                 TerminalEvent::Key(KeyEvent {
                     code,
                     modifiers,
                     kind,
                     ..
-                }) if kind != KeyEventKind::Release => {
+                }) if kind == KeyEventKind::Press => {
                     if is_invite_modal_visible {
                         // Invite modal key handling
                         match code {

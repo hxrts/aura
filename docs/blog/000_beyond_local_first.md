@@ -4,7 +4,7 @@
 
 The Local-First movement reframed collaboration by proving that real-time, multi-device software does not have to rely on centralized servers. Its core insight is that data should live primarily on the user’s own devices, with the network acting as a helper rather than a gatekeeper. CRDTs, offline-first UX, and user agency over data push us toward a healthier relationship with our tools.
 
-Aura builds on the same dissatisfaction with cloud dependency, but arrives at a different destination. Where Local-First keeps authority on the device, Aura treats the social graph as the computational substrate. The device loses its status as the privileged anchor of truth. Instead, identity, state, and availability emerge from a network of peers who collectively maintain each other’s presence and continuity.
+Aura builds on the same dissatisfaction with cloud dependency, but arrives at a different destination. Where Local-First keeps authority on the device, Aura treats the social graph as the computational substrate. The device loses its status as the privileged anchor of trust. Instead, identity, state, and availability emerge from a network of peers who collectively maintain each other’s presence and continuity.
 
 Rather than asking “How can a device own its data?”, Aura asks a deeper question: Who is the user in a world where people span many devices, trust relationships, and shared spaces?
 
@@ -26,7 +26,7 @@ This allows the system to support resources that belong to relationships, not de
 
 Local-First aims for privacy through local storage and controlled replication. Aura requires stronger guarantees because the social graph is the network. Data, metadata, and protocol steps flow through people’s devices. This requires a discipline that goes beyond access control.
 
-Aura makes consent a technical primitive. Every action that produces a network-visible effect must pass a guard chain: capabilities (Biscuit), flow budgets, leakage budgets, and journal coupling. Guard evaluation runs over a prepared `GuardSnapshot` and returns `EffectCommand` data that an async interpreter executes only after the entire chain succeeds, so no transport work occurs unless every permission and budget check passes. A message cannot be sent—literally cannot be emitted on the wire—unless all parties have cryptographically granted the necessary permissions. This ensures that participation, disclosure, and coordination are always intentional.
+Aura makes consent a technical primitive. Every action that produces a network-visible effect must pass a guard chain: capabilities, information flow budgets, leakage budgets, and journal coupling. Guard evaluation runs over a prepared `GuardSnapshot` and returns `EffectCommand` data that an async interpreter executes only after the entire chain succeeds, so no transport work occurs unless every permission and budget check passes. A message cannot be sent—literally cannot be emitted on the wire—unless all parties have cryptographically granted the necessary permissions. This ensures that participation, disclosure, and coordination are always intentional.
 
 Local-First keeps data on your device. Aura ensures that every observable effect results from consent—whether the data lives locally or within a shared context.
 
@@ -44,7 +44,7 @@ Aura moves past that. It treats identity as relational, data as shared between p
 
 In this sense, Aura is not only Local-First. It is Network-Native, where the network is not an infrastructure provider but the set of people you trust. It is a world where collaboration is not a feature but the substrate—and where autonomy is guaranteed not by ownership of hardware, but by the sovereignty of the user within their social graph.
 
-This is what lies beyond Local-First: a system where data is local, relationships are global, and neither depends on the cloud to survive.
+This is what lies beyond Local-First: a system where data is local, relationships are global, but neither depends on the cloud to survive.
 
 ## See Also
 

@@ -476,8 +476,11 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
 
             match event {
                 TerminalEvent::Key(KeyEvent {
-                    code, modifiers, ..
-                }) => {
+                    code,
+                    modifiers,
+                    kind,
+                    ..
+                }) if kind == KeyEventKind::Press => {
                     if channel_info_visible {
                         // Handle channel info modal keys
                         match code {

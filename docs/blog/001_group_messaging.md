@@ -52,7 +52,7 @@ The commitment tree defines authority structure and allows for key derivation. E
 
 ```mermaid
 graph TD
-    subgraph "Authority (opaque to external parties)"
+    subgraph "Authority (opaque)"
         R[Root: 2-of-3]
         R --> B1[Branch: 1-of-2]
         R --> L3[Leaf: Device C]
