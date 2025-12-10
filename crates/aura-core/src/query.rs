@@ -60,12 +60,13 @@ use crate::ResourceScope;
 ///     QueryIsolation::ReadCommitted { wait_for: vec![consensus_id] },
 /// ).await?;
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum QueryIsolation {
     /// See all facts including uncommitted (CRDT state).
     ///
     /// Fastest option - queries execute immediately against the current
     /// CRDT state without waiting for consensus confirmation.
+    #[default]
     ReadUncommitted,
 
     /// Only see facts with consensus commit.
@@ -99,12 +100,6 @@ pub enum QueryIsolation {
         /// Resource scope to wait for
         scope: ResourceScope,
     },
-}
-
-impl Default for QueryIsolation {
-    fn default() -> Self {
-        Self::ReadUncommitted
-    }
 }
 
 impl QueryIsolation {

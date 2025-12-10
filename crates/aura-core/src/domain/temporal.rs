@@ -285,11 +285,12 @@ pub enum ScopeParseError {
 ///
 /// Facts progress through finality stages as they're replicated and confirmed.
 /// Higher finality means stronger durability but typically higher latency.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Finality {
     /// Written to local storage only.
     ///
     /// Fastest, but may be lost if the device fails before replication.
+    #[default]
     Local,
 
     /// Acknowledged by N peers.
@@ -357,12 +358,6 @@ impl Finality {
             Self::Consensus { .. } => 3,
             Self::Anchored { .. } => 4,
         }
-    }
-}
-
-impl Default for Finality {
-    fn default() -> Self {
-        Self::Local
     }
 }
 
@@ -545,9 +540,10 @@ impl FactContent {
 }
 
 /// Reason for tombstoning a fact
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RetractReason {
     /// User-initiated deletion
+    #[default]
     UserDeleted,
     /// Superseded by a newer fact (with reference)
     Superseded { by: FactId },
@@ -559,12 +555,6 @@ pub enum RetractReason {
     Compliance { regulation: String },
     /// Application-specific reason
     Custom { reason: String },
-}
-
-impl Default for RetractReason {
-    fn default() -> Self {
-        Self::UserDeleted
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -761,7 +751,7 @@ pub struct TransactionReceipt {
 /// - Order token (opaque ordering)
 /// - Transaction ID (state after transaction)
 /// - Epoch (scope epoch number)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TemporalPoint {
     /// Physical wall-clock time
     Physical(PhysicalTime),
@@ -772,6 +762,7 @@ pub enum TemporalPoint {
     /// State at a specific epoch in a scope
     AtEpoch { scope: ScopeId, epoch: Epoch },
     /// Current (latest) state
+    #[default]
     Now,
 }
 
@@ -798,12 +789,6 @@ impl TemporalPoint {
 
     /// Create a point at the current time
     pub fn now() -> Self {
-        Self::Now
-    }
-}
-
-impl Default for TemporalPoint {
-    fn default() -> Self {
         Self::Now
     }
 }
