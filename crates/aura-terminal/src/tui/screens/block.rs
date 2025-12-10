@@ -455,9 +455,9 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                 TerminalEvent::Key(KeyEvent {
                     code,
                     modifiers,
-                    kind,
+                    kind: KeyEventKind::Press,
                     ..
-                }) if kind == KeyEventKind::Press => {
+                }) => {
                     if is_invite_modal_visible {
                         // Invite modal key handling
                         match code {
