@@ -279,8 +279,13 @@ jobs:
         run: |
           echo "Disk space before cleanup:"
           df -h /
+          # Aggressive cleanup to ensure enough space for Nix store + cache
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /opt/hostedtoolcache/Python /opt/hostedtoolcache/Ruby /opt/hostedtoolcache/go /opt/hostedtoolcache/node
           sudo docker image prune --all --force || true
+          sudo apt-get clean || true
           echo "Disk space after cleanup:"
           df -h /
       - uses: actions/checkout@v4
@@ -292,8 +297,10 @@ jobs:
         uses: actions/cache@v3
         with:
           path: /nix/store
-          key: ${{ runner.os }}-nix-${{ hashFiles('flake.lock') }}
-          restore-keys: ${{ runner.os }}-nix-
+          key: ${{ runner.os }}-nix-lean-${{ hashFiles('flake.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nix-lean-
+            ${{ runner.os }}-nix-
       - name: Build Lean proofs
         run: |
           echo "Building Lean formal verification modules..."
@@ -307,6 +314,13 @@ jobs:
           else
             echo "[OK] All proofs complete (no sorry found)"
           fi
+      - name: Cleanup before cache save
+        if: always()
+        run: |
+          # Run nix garbage collection to reduce store size
+          nix-collect-garbage -d || true
+          echo "Disk space before cache save:"
+          df -h /
 
   differential-testing:
     name: Lean Differential Testing
@@ -325,8 +339,13 @@ jobs:
         run: |
           echo "Disk space before cleanup:"
           df -h /
+          # Aggressive cleanup to ensure enough space for Nix store + cache
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /opt/hostedtoolcache/Python /opt/hostedtoolcache/Ruby /opt/hostedtoolcache/go /opt/hostedtoolcache/node
           sudo docker image prune --all --force || true
+          sudo apt-get clean || true
           echo "Disk space after cleanup:"
           df -h /
       - uses: actions/checkout@v4
@@ -338,8 +357,10 @@ jobs:
         uses: actions/cache@v3
         with:
           path: /nix/store
-          key: ${{ runner.os }}-nix-${{ hashFiles('flake.lock') }}
-          restore-keys: ${{ runner.os }}-nix-
+          key: ${{ runner.os }}-nix-differential-${{ hashFiles('flake.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nix-differential-
+            ${{ runner.os }}-nix-
       - name: Cache cargo registry
         uses: actions/cache@v3
         with:
@@ -358,3 +379,12 @@ jobs:
         run: |
           echo "Running differential tests (Rust vs Lean oracle)..."
           nix develop --command just test-differential
+      - name: Cleanup before cache save
+        if: always()
+        run: |
+          # Clean up build artifacts before cache save to reduce cache size
+          rm -rf target/debug/deps target/debug/build target/debug/incremental || true
+          # Run nix garbage collection to reduce store size
+          nix-collect-garbage -d || true
+          echo "Disk space before cache save:"
+          df -h /
