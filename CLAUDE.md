@@ -213,6 +213,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **How the guard chain works** → `docs/001_system_architecture.md` (sections 2.1-2.3)
 - **How crypto architecture works** → `docs/116_crypto.md` + `just check-arch --crypto`
 - **How journals work** → `docs/102_journal.md`
+- **How the query system works** → `docs/113_database.md` (Datalog queries, isolation levels, statistics)
 - **How testing works** → `docs/805_testing_guide.md` + `docs/806_simulation_guide.md`
 - **How to write tests** → `docs/805_testing_guide.md`
 - **How privacy and flow budgets work** → `docs/003_information_flow_contract.md`

@@ -42,7 +42,10 @@ use aura_core::effects::{
     query::{QueryEffects, QueryError, QuerySubscription},
     reactive::{ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream},
 };
-use aura_core::query::{DatalogBindings, DatalogProgram, FactPredicate, Query, QueryCapability};
+use aura_core::query::{
+    DatalogBindings, DatalogProgram, FactPredicate, Query, QueryCapability, QueryIsolation,
+    QueryStats,
+};
 
 use crate::query::QueryHandler;
 use crate::reactive::ReactiveHandler;
@@ -326,6 +329,29 @@ impl QueryEffects for UnifiedHandler {
 
     async fn invalidate(&self, predicate: &FactPredicate) {
         self.query.invalidate(predicate).await
+    }
+
+    async fn query_with_isolation<Q: Query>(
+        &self,
+        query: &Q,
+        isolation: QueryIsolation,
+    ) -> Result<Q::Result, QueryError> {
+        self.query.query_with_isolation(query, isolation).await
+    }
+
+    async fn query_with_stats<Q: Query>(
+        &self,
+        query: &Q,
+    ) -> Result<(Q::Result, QueryStats), QueryError> {
+        self.query.query_with_stats(query).await
+    }
+
+    async fn query_full<Q: Query>(
+        &self,
+        query: &Q,
+        isolation: QueryIsolation,
+    ) -> Result<(Q::Result, QueryStats), QueryError> {
+        self.query.query_full(query, isolation).await
     }
 }
 

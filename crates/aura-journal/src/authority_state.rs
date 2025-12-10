@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::threshold::{SignableOperation, SigningContext};
 use aura_core::tree::TreeOp;
-use aura_core::{authority::TreeState, AuraError, Authority, AuthorityId, Hash32, Result};
+use aura_core::{authority::TreeStateSummary, AuraError, Authority, AuthorityId, Hash32, Result};
 // Using aura-core type aliases for cryptographic types
 use aura_core::authority::{Ed25519Signature as Signature, Ed25519VerifyingKey as PublicKey};
 
@@ -28,16 +28,16 @@ use aura_core::authority::{Ed25519Signature as Signature, Ed25519VerifyingKey as
 /// for proper FROST threshold cryptography.
 #[derive(Debug, Clone)]
 pub struct AuthorityState {
-    /// Tree state derived from attested operations
-    pub tree_state: TreeState,
+    /// Tree state summary derived from attested operations
+    pub tree_state: TreeStateSummary,
 
     /// The authority identifier for signing operations
     pub authority_id: Option<AuthorityId>,
 }
 
 impl AuthorityState {
-    /// Create a new authority state with just tree state
-    pub fn new(tree_state: TreeState) -> Self {
+    /// Create a new authority state with just tree state summary
+    pub fn new(tree_state: TreeStateSummary) -> Self {
         Self {
             tree_state,
             authority_id: None,
@@ -45,7 +45,7 @@ impl AuthorityState {
     }
 
     /// Create authority state with authority ID for signing
-    pub fn with_authority(tree_state: TreeState, authority_id: AuthorityId) -> Self {
+    pub fn with_authority(tree_state: TreeStateSummary, authority_id: AuthorityId) -> Self {
         Self {
             tree_state,
             authority_id: Some(authority_id),
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn test_authority_state_creation() {
         // Test basic authority state creation
-        let tree_state = aura_core::authority::TreeState::new();
+        let tree_state = aura_core::authority::TreeStateSummary::new();
         let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
 
         let authority_state = AuthorityState::new(tree_state.clone());

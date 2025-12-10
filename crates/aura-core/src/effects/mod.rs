@@ -52,6 +52,7 @@ pub mod capability;
 pub mod choreographic; // Multi-party protocol coordination
 pub mod console;
 pub mod crypto;
+pub mod fact; // Temporal database mutations (write side of journal)
 pub mod flood; // Rendezvous flooding for discovery
 pub mod flow; // Flow budget management
 pub mod guard; // Pure guard evaluation with effect commands
@@ -123,6 +124,7 @@ pub use flood::{
 };
 pub use flow::{FlowBudgetEffects, FlowHint};
 pub use guardian::{GuardianAcceptInput, GuardianEffects, GuardianRequestInput};
+pub use fact::{CheckpointInfo, FactEffects, FactError, TemporalFact};
 pub use indexed::{FactId, IndexStats, IndexedFact, IndexedJournalEffects};
 pub use intent::{
     AuthorizationLevel, IntentDispatchError, IntentEffects, IntentMetadata, SimpleIntentEffects,
@@ -290,6 +292,9 @@ pub enum EffectType {
     /// Journal operations (event log, snapshots)
     Journal,
 
+    /// Fact operations (temporal database mutations)
+    Fact,
+
     /// Tree operations (commitment tree, MLS)
     Tree,
 
@@ -336,6 +341,7 @@ impl std::fmt::Display for EffectType {
             Self::Intent => write!(f, "intent"),
             Self::EffectApi => write!(f, "effect_api"),
             Self::Journal => write!(f, "journal"),
+            Self::Fact => write!(f, "fact"),
             Self::Tree => write!(f, "tree"),
             Self::Choreographic => write!(f, "choreographic"),
             Self::System => write!(f, "system"),
@@ -367,6 +373,7 @@ impl EffectType {
             Self::Intent,
             Self::EffectApi,
             Self::Journal,
+            Self::Fact,
             Self::Tree,
             Self::Choreographic,
             Self::System,

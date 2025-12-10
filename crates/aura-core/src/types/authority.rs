@@ -73,18 +73,22 @@ pub type AuthorityRef = Arc<dyn Authority>;
 /// This is computed deterministically from the authority's journal facts.
 #[derive(Debug, Clone)]
 pub struct AuthorityState {
-    /// Current commitment tree state (internal structure)
-    pub tree_state: TreeState,
+    /// Current commitment tree state summary (public view)
+    pub tree_state: TreeStateSummary,
     /// Journal facts that define this authority's state
     pub facts: std::collections::BTreeSet<Fact>,
 }
 
-/// Commitment tree state for authority management
+/// Summary view of commitment tree state for external consumers
 ///
-/// This is the canonical tree state type used throughout the system.
-/// It provides a public interface while hiding internal device structure.
+/// This lightweight type exposes only the public-facing data that external
+/// parties can see: epoch, root commitment, and aggregate policy information.
+/// It hides internal device structure in accordance with the opacity principle.
+///
+/// For the full internal representation with branches, leaves, and topology,
+/// see `aura_journal::commitment_tree::TreeState`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TreeState {
+pub struct TreeStateSummary {
     /// Current epoch
     epoch: Epoch,
     /// Current commitment hash
@@ -95,13 +99,13 @@ pub struct TreeState {
     device_count: u32,
 }
 
-impl Default for TreeState {
+impl Default for TreeStateSummary {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl TreeState {
+impl TreeStateSummary {
     /// Create a new tree state with zero commitment
     pub fn new() -> Self {
         Self {

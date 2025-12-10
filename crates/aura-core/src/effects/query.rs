@@ -31,7 +31,10 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::effects::reactive::SignalStream;
-use crate::query::{DatalogBindings, Query, QueryCapability, QueryParseError};
+use crate::query::{
+    ConsensusId, DatalogBindings, Query, QueryCapability, QueryIsolation, QueryParseError,
+    QueryStats,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Error Types
@@ -71,6 +74,18 @@ pub enum QueryError {
     /// Internal error
     #[error("Internal query error: {reason}")]
     Internal { reason: String },
+
+    /// Consensus wait timeout
+    #[error("Timed out waiting for consensus: {consensus_id:?}")]
+    ConsensusTimeout { consensus_id: ConsensusId },
+
+    /// Snapshot not available (garbage collected)
+    #[error("Snapshot not available: prestate {prestate_hash:?} has been garbage collected")]
+    SnapshotNotAvailable { prestate_hash: crate::Hash32 },
+
+    /// Isolation level not supported
+    #[error("Isolation level not supported: {reason}")]
+    IsolationNotSupported { reason: String },
 }
 
 impl QueryError {
@@ -105,6 +120,23 @@ impl QueryError {
     /// Create an internal error
     pub fn internal(reason: impl Into<String>) -> Self {
         Self::Internal {
+            reason: reason.into(),
+        }
+    }
+
+    /// Create a consensus timeout error
+    pub fn consensus_timeout(consensus_id: ConsensusId) -> Self {
+        Self::ConsensusTimeout { consensus_id }
+    }
+
+    /// Create a snapshot not available error
+    pub fn snapshot_not_available(prestate_hash: crate::Hash32) -> Self {
+        Self::SnapshotNotAvailable { prestate_hash }
+    }
+
+    /// Create an isolation not supported error
+    pub fn isolation_not_supported(reason: impl Into<String>) -> Self {
+        Self::IsolationNotSupported {
             reason: reason.into(),
         }
     }
@@ -178,6 +210,51 @@ pub trait QueryEffects: Send + Sync {
     ///
     /// Called when facts change to trigger re-evaluation of subscriptions.
     async fn invalidate(&self, predicate: &crate::query::FactPredicate);
+
+    /// Execute a query with a specific isolation level.
+    ///
+    /// Allows specifying consistency requirements for the query.
+    /// See `QueryIsolation` for available levels.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Wait for specific consensus before querying
+    /// let result = handler.query_with_isolation(
+    ///     &ChannelsQuery::default(),
+    ///     QueryIsolation::ReadCommitted { wait_for: vec![consensus_id] },
+    /// ).await?;
+    /// ```
+    async fn query_with_isolation<Q: Query>(
+        &self,
+        query: &Q,
+        isolation: QueryIsolation,
+    ) -> Result<Q::Result, QueryError>;
+
+    /// Execute a query and return results with execution statistics.
+    ///
+    /// Useful for debugging, profiling, and optimization. Returns both
+    /// the query results and metadata about the execution.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let (channels, stats) = handler.query_with_stats(&ChannelsQuery::default()).await?;
+    /// println!("Query took {:?}, scanned {} facts", stats.execution_time, stats.facts_scanned);
+    /// ```
+    async fn query_with_stats<Q: Query>(
+        &self,
+        query: &Q,
+    ) -> Result<(Q::Result, QueryStats), QueryError>;
+
+    /// Execute a query with both isolation level and statistics.
+    ///
+    /// Combines `query_with_isolation` and `query_with_stats`.
+    async fn query_full<Q: Query>(
+        &self,
+        query: &Q,
+        isolation: QueryIsolation,
+    ) -> Result<(Q::Result, QueryStats), QueryError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,6 +329,29 @@ impl<T: QueryEffects + ?Sized> QueryEffects for Arc<T> {
 
     async fn invalidate(&self, predicate: &crate::query::FactPredicate) {
         (**self).invalidate(predicate).await
+    }
+
+    async fn query_with_isolation<Q: Query>(
+        &self,
+        query: &Q,
+        isolation: QueryIsolation,
+    ) -> Result<Q::Result, QueryError> {
+        (**self).query_with_isolation(query, isolation).await
+    }
+
+    async fn query_with_stats<Q: Query>(
+        &self,
+        query: &Q,
+    ) -> Result<(Q::Result, QueryStats), QueryError> {
+        (**self).query_with_stats(query).await
+    }
+
+    async fn query_full<Q: Query>(
+        &self,
+        query: &Q,
+        isolation: QueryIsolation,
+    ) -> Result<(Q::Result, QueryStats), QueryError> {
+        (**self).query_full(query, isolation).await
     }
 }
 

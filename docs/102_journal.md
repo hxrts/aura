@@ -74,16 +74,18 @@ This merge function demonstrates set union across two fact sets. The namespace a
 
 ## 4. Account Journal Reduction
 
-Account journals store attested operations for commitment tree updates. Reduction computes a `TreeState` from the fact set. Reduction applies only valid operations and resolves conflicts deterministically.
+Account journals store attested operations for commitment tree updates. Reduction computes a `TreeStateSummary` from the fact set. Reduction applies only valid operations and resolves conflicts deterministically.
 
 ```rust
-pub struct TreeState {
+pub struct TreeStateSummary {
     epoch: Epoch,
     commitment: Hash32,
     threshold: u16,
     device_count: u32,
 }
 ```
+
+The `TreeStateSummary` is a lightweight public view that hides internal device structure. For the full internal representation with branches, leaves, and topology, see `TreeState` in `aura-journal::commitment_tree`.
 
 Reduction follows these steps:
 
@@ -102,7 +104,7 @@ fn resolve_conflict(ops: &[AttestedOp]) -> &AttestedOp {
 }
 ```
 
-The result is a single `TreeState` for the account:
+The result is a single `TreeStateSummary` for the account:
 
 ```rust
 pub fn reduce_authority(journal: &Journal) -> Result<AuthorityState, ReductionError> {
@@ -295,3 +297,10 @@ See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-op
 - `StorageEffects` persist the snapshot atomically with pruning metadata.
 
 By clearly separating validation responsibilities, runtime authors know which effect handlers must participate before a fact mutation is committed. This structure keeps fact semantics consistent across authorities and contexts.
+
+## See Also
+
+- [Database Architecture](113_database.md) - Query system for reading journal facts via Datalog
+- [State Reduction](110_state_reduction.md) - Reduction pipeline details
+- [Maintenance](111_maintenance.md) - Snapshot and garbage collection pipeline
+- [Relational Contexts](103_relational_contexts.md) - Context journal structure

@@ -25,6 +25,336 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::time::Duration;
+
+use crate::time::PhysicalTime;
+use crate::Hash32;
+use crate::ResourceScope;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Query Isolation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Query isolation levels for consistency requirements.
+///
+/// Aura's journal is eventually consistent via CRDT merge. These isolation levels
+/// let queries specify their consistency requirements:
+///
+/// - `ReadUncommitted`: See latest CRDT state (fastest, may see uncommitted facts)
+/// - `ReadCommitted`: Only see facts confirmed by consensus
+/// - `Snapshot`: Query against a specific historical prestate
+/// - `ReadLatest`: Wait for all pending consensus in scope to complete
+///
+/// # Example
+///
+/// ```ignore
+/// // Fast query - may see uncommitted facts
+/// let result = effects.query_with_isolation(
+///     &ChannelsQuery::default(),
+///     QueryIsolation::ReadUncommitted,
+/// ).await?;
+///
+/// // Strong consistency - wait for specific consensus
+/// let result = effects.query_with_isolation(
+///     &ChannelsQuery::default(),
+///     QueryIsolation::ReadCommitted { wait_for: vec![consensus_id] },
+/// ).await?;
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum QueryIsolation {
+    /// See all facts including uncommitted (CRDT state).
+    ///
+    /// Fastest option - queries execute immediately against the current
+    /// CRDT state without waiting for consensus confirmation.
+    ReadUncommitted,
+
+    /// Only see facts with consensus commit.
+    ///
+    /// Waits for specified consensus instances to complete before executing
+    /// the query. Use this when you need to see the results of specific
+    /// operations that required consensus.
+    ReadCommitted {
+        /// Consensus instances to wait for before executing query
+        wait_for: Vec<ConsensusId>,
+    },
+
+    /// Snapshot at specific prestate (time-travel query).
+    ///
+    /// Queries against a historical state identified by its prestate hash.
+    /// Useful for auditing or debugging. The prestate must still be available
+    /// (not garbage collected).
+    Snapshot {
+        /// Hash of the prestate to query against
+        prestate_hash: Hash32,
+    },
+
+    /// Wait for all pending consensus in scope to complete.
+    ///
+    /// More expensive than `ReadCommitted` - waits for all pending consensus
+    /// operations that affect the specified resource scope. Use sparingly.
+    ///
+    /// **Note:** This is NOT linearizable - just ensures all pending commits
+    /// are visible at query time.
+    ReadLatest {
+        /// Resource scope to wait for
+        scope: ResourceScope,
+    },
+}
+
+impl Default for QueryIsolation {
+    fn default() -> Self {
+        Self::ReadUncommitted
+    }
+}
+
+impl QueryIsolation {
+    /// Create a ReadCommitted isolation waiting for a single consensus
+    pub fn read_committed(consensus_id: ConsensusId) -> Self {
+        Self::ReadCommitted {
+            wait_for: vec![consensus_id],
+        }
+    }
+
+    /// Create a Snapshot isolation for a specific prestate
+    pub fn snapshot(prestate_hash: Hash32) -> Self {
+        Self::Snapshot { prestate_hash }
+    }
+
+    /// Create a ReadLatest isolation for a resource scope
+    pub fn read_latest(scope: ResourceScope) -> Self {
+        Self::ReadLatest { scope }
+    }
+
+    /// Check if this isolation level requires waiting
+    pub fn requires_wait(&self) -> bool {
+        !matches!(self, Self::ReadUncommitted | Self::Snapshot { .. })
+    }
+}
+
+/// Identifier for a consensus instance.
+///
+/// Used to track and wait for consensus completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ConsensusId(pub [u8; 32]);
+
+impl ConsensusId {
+    /// Create a new consensus ID from bytes
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Get the underlying bytes
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// Identifier for a fact in the journal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FactId(pub [u8; 32]);
+
+impl FactId {
+    /// Create a new fact ID from bytes
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Get the underlying bytes
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mutation Receipt
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Receipt returned from mutation operations.
+///
+/// Indicates whether the operation was completed immediately (monotone) or
+/// required consensus (non-monotone). This allows callers to:
+/// - Know when their operation has taken effect
+/// - Wait for consensus completion if needed
+/// - Track latency and operation routing
+///
+/// # Example
+///
+/// ```ignore
+/// let receipt = effects.mutate(mutation).await?;
+/// match receipt {
+///     MutationReceipt::Immediate { fact_ids, .. } => {
+///         println!("Operation completed immediately, {} facts created", fact_ids.len());
+///     }
+///     MutationReceipt::Consensus { consensus_id, .. } => {
+///         // Can use consensus_id with QueryIsolation::ReadCommitted to wait
+///         println!("Operation requires consensus: {:?}", consensus_id);
+///     }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MutationReceipt {
+    /// Monotone operation completed immediately via CRDT merge.
+    ///
+    /// No coordination was required - the facts were appended directly
+    /// to the local journal and will propagate via anti-entropy.
+    Immediate {
+        /// IDs of facts created by this operation
+        fact_ids: Vec<FactId>,
+        /// When the operation completed
+        timestamp: PhysicalTime,
+    },
+
+    /// Non-monotone operation required consensus.
+    ///
+    /// The operation has been submitted to the consensus protocol.
+    /// Use `consensus_id` with `QueryIsolation::ReadCommitted` to wait
+    /// for the operation to complete before querying.
+    Consensus {
+        /// ID of the consensus instance handling this operation
+        consensus_id: ConsensusId,
+        /// Hash of the prestate the consensus is based on
+        prestate_hash: Hash32,
+        /// Time taken to submit to consensus (not total completion time)
+        submit_latency: Duration,
+    },
+}
+
+impl MutationReceipt {
+    /// Create an immediate receipt
+    pub fn immediate(fact_ids: Vec<FactId>, timestamp: PhysicalTime) -> Self {
+        Self::Immediate { fact_ids, timestamp }
+    }
+
+    /// Create a consensus receipt
+    pub fn consensus(
+        consensus_id: ConsensusId,
+        prestate_hash: Hash32,
+        submit_latency: Duration,
+    ) -> Self {
+        Self::Consensus {
+            consensus_id,
+            prestate_hash,
+            submit_latency,
+        }
+    }
+
+    /// Check if this was an immediate (monotone) operation
+    pub fn is_immediate(&self) -> bool {
+        matches!(self, Self::Immediate { .. })
+    }
+
+    /// Check if this required consensus
+    pub fn requires_consensus(&self) -> bool {
+        matches!(self, Self::Consensus { .. })
+    }
+
+    /// Get the consensus ID if this was a consensus operation
+    pub fn consensus_id(&self) -> Option<ConsensusId> {
+        match self {
+            Self::Consensus { consensus_id, .. } => Some(*consensus_id),
+            Self::Immediate { .. } => None,
+        }
+    }
+
+    /// Get the fact IDs if this was an immediate operation
+    pub fn fact_ids(&self) -> Option<&[FactId]> {
+        match self {
+            Self::Immediate { fact_ids, .. } => Some(fact_ids),
+            Self::Consensus { .. } => None,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Query Statistics
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Statistics about query execution.
+///
+/// Returned alongside query results when using `query_with_stats()`.
+/// Useful for debugging, profiling, and optimization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryStats {
+    /// Time taken to execute the query
+    pub execution_time: Duration,
+
+    /// Number of facts scanned during execution
+    pub facts_scanned: usize,
+
+    /// Number of facts that matched the query
+    pub facts_matched: usize,
+
+    /// Whether the result was served from cache
+    pub cache_hit: bool,
+
+    /// Isolation level used for the query
+    pub isolation_used: QueryIsolation,
+
+    /// Time spent waiting for consensus (if any)
+    pub consensus_wait_time: Option<Duration>,
+}
+
+impl Default for QueryStats {
+    fn default() -> Self {
+        Self {
+            execution_time: Duration::ZERO,
+            facts_scanned: 0,
+            facts_matched: 0,
+            cache_hit: false,
+            isolation_used: QueryIsolation::default(),
+            consensus_wait_time: None,
+        }
+    }
+}
+
+impl QueryStats {
+    /// Create new stats with execution time
+    pub fn new(execution_time: Duration) -> Self {
+        Self {
+            execution_time,
+            ..Default::default()
+        }
+    }
+
+    /// Mark as a cache hit
+    pub fn with_cache_hit(mut self) -> Self {
+        self.cache_hit = true;
+        self
+    }
+
+    /// Set facts scanned
+    pub fn with_facts_scanned(mut self, count: usize) -> Self {
+        self.facts_scanned = count;
+        self
+    }
+
+    /// Set facts matched
+    pub fn with_facts_matched(mut self, count: usize) -> Self {
+        self.facts_matched = count;
+        self
+    }
+
+    /// Set isolation level used
+    pub fn with_isolation(mut self, isolation: QueryIsolation) -> Self {
+        self.isolation_used = isolation;
+        self
+    }
+
+    /// Set consensus wait time
+    pub fn with_consensus_wait(mut self, duration: Duration) -> Self {
+        self.consensus_wait_time = Some(duration);
+        self
+    }
+
+    /// Calculate selectivity (matched / scanned)
+    pub fn selectivity(&self) -> f64 {
+        if self.facts_scanned == 0 {
+            0.0
+        } else {
+            self.facts_matched as f64 / self.facts_scanned as f64
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Datalog Types
@@ -682,5 +1012,69 @@ mod tests {
         assert_eq!(row.get_integer("count"), Some(42));
         assert_eq!(row.get_bool("active"), Some(true));
         assert_eq!(row.get_string("missing"), None);
+    }
+
+    #[test]
+    fn test_query_isolation_default() {
+        let isolation = QueryIsolation::default();
+        assert_eq!(isolation, QueryIsolation::ReadUncommitted);
+        assert!(!isolation.requires_wait());
+    }
+
+    #[test]
+    fn test_query_isolation_read_committed() {
+        let consensus_id = ConsensusId::new([1u8; 32]);
+        let isolation = QueryIsolation::read_committed(consensus_id);
+        assert!(isolation.requires_wait());
+        if let QueryIsolation::ReadCommitted { wait_for } = isolation {
+            assert_eq!(wait_for.len(), 1);
+            assert_eq!(wait_for[0], consensus_id);
+        } else {
+            panic!("Expected ReadCommitted variant");
+        }
+    }
+
+    #[test]
+    fn test_query_isolation_snapshot() {
+        let hash = crate::Hash32([42u8; 32]);
+        let isolation = QueryIsolation::snapshot(hash);
+        assert!(!isolation.requires_wait()); // Snapshot doesn't require waiting
+        if let QueryIsolation::Snapshot { prestate_hash } = isolation {
+            assert_eq!(prestate_hash, hash);
+        } else {
+            panic!("Expected Snapshot variant");
+        }
+    }
+
+    #[test]
+    fn test_query_stats_default() {
+        let stats = QueryStats::default();
+        assert_eq!(stats.execution_time, Duration::ZERO);
+        assert_eq!(stats.facts_scanned, 0);
+        assert_eq!(stats.facts_matched, 0);
+        assert!(!stats.cache_hit);
+        assert_eq!(stats.selectivity(), 0.0);
+    }
+
+    #[test]
+    fn test_query_stats_builder() {
+        let stats = QueryStats::new(Duration::from_millis(50))
+            .with_facts_scanned(100)
+            .with_facts_matched(25)
+            .with_cache_hit()
+            .with_isolation(QueryIsolation::ReadUncommitted);
+
+        assert_eq!(stats.execution_time, Duration::from_millis(50));
+        assert_eq!(stats.facts_scanned, 100);
+        assert_eq!(stats.facts_matched, 25);
+        assert!(stats.cache_hit);
+        assert!((stats.selectivity() - 0.25).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_consensus_id() {
+        let bytes = [0xAB; 32];
+        let id = ConsensusId::new(bytes);
+        assert_eq!(id.as_bytes(), &bytes);
     }
 }

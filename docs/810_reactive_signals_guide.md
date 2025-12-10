@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Aura TUI uses **futures-signals** for fine-grained reactive state management. This provides automatic change propagation without manual lock management or explicit notification code.
+The Aura TUI uses `futures-signals` for fine-grained reactive state management. This provides automatic change propagation without manual lock management or explicit notification code.
 
 ## Core Concepts
 

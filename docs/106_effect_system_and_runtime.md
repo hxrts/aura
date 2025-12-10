@@ -272,8 +272,43 @@ pub trait QueryEffects: Send + Sync {
 
     /// Invalidate queries affected by fact changes
     async fn invalidate(&self, predicate: &FactPredicate);
+
+    /// Execute with specific isolation level
+    async fn query_with_isolation<Q: Query>(
+        &self, query: &Q, isolation: QueryIsolation,
+    ) -> Result<Q::Result, QueryError>;
+
+    /// Execute and return statistics
+    async fn query_with_stats<Q: Query>(
+        &self, query: &Q,
+    ) -> Result<(Q::Result, QueryStats), QueryError>;
 }
 ```
+
+### 5.2.1 Query Isolation Levels
+
+`QueryIsolation` specifies consistency requirements:
+
+- **ReadUncommitted**: Sees all facts including uncommitted CRDT state (fastest)
+- **ReadCommitted**: Waits for specified consensus instances before querying
+- **Snapshot**: Time-travel query against historical prestate
+- **ReadLatest**: Waits for all pending consensus in scope
+
+### 5.2.2 Query Statistics
+
+`QueryStats` provides execution metrics for debugging and optimization:
+
+```rust
+pub struct QueryStats {
+    pub execution_time: Duration,
+    pub facts_scanned: usize,
+    pub facts_matched: usize,
+    pub cache_hit: bool,
+    pub isolation_used: QueryIsolation,
+}
+```
+
+See [Database Architecture](113_database.md) for complete query system documentation.
 
 ### 5.3 BoundSignal<Q>
 

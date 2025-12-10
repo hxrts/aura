@@ -434,19 +434,19 @@ Generative simulation bridges Quint formal specifications with actual Aura effec
 │       │                                                     │
 │       ▼ GenerativeSimulator.replay_trace()                  │
 │    ┌─────────────────────────────────────────┐              │
-│    │         ActionRegistry Dispatch          │              │
+│    │         ActionRegistry Dispatch         │              │
 │    │  ┌─────────┐ ┌─────────┐ ┌───────────┐  │              │
 │    │  │ Journal │ │Transport│ │  Crypto   │  │              │
 │    │  │ Effects │ │ Effects │ │  Effects  │  │              │
 │    │  └────┬────┘ └────┬────┘ └─────┬─────┘  │              │
-│    └───────┼──────────┼────────────┼────────┘              │
-│            │          │            │                        │
-│            ▼          ▼            ▼                        │
-│    ┌─────────────────────────────────────────┐              │
-│    │       Aura State (Real Handlers)         │              │
-│    │  • JournalState  • TreeState             │              │
-│    │  • FlowBudgetState  • GuardState         │              │
-│    └─────────────────────────────────────────┘              │
+│    └───────┼───────────┼────────────┼────────┘              │
+│            │           │            │                       │
+│            ▼           ▼            ▼                       │
+│    ┌──────────────────────────────────────────┐             │
+│    │       Aura State (Real Handlers)         │             │
+│    │  • JournalState  • TreeState             │             │
+│    │  • FlowBudgetState  • GuardState         │             │
+│    └──────────────────────────────────────────┘             │
 │            │                                                │
 │            ▼ StateMapper.aura_to_quint()                    │
 │    Quint-Compatible State (for property eval)               │

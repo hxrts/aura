@@ -14,7 +14,7 @@ pub mod scope;
 pub mod sessions;
 
 // Re-export all public types for convenience
-pub use authority::{Authority, AuthorityRef, AuthorityState, TreeState};
+pub use authority::{Authority, AuthorityRef, AuthorityState, TreeStateSummary};
 pub use epochs::*;
 pub use flow::{FlowBudget, Receipt};
 pub use identifiers::{

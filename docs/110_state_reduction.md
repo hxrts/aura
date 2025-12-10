@@ -87,12 +87,12 @@ RendezvousReceipt {
 
 Receipts are stored as relational facts scoped to the emitting context. This coupling ensures that receipt validity follows commitment tree epochs.
 
-## TreeState Computation
+## TreeStateSummary Computation
 
-Account reduction produces a `TreeState` representing the current commitment tree:
+Account reduction produces a `TreeStateSummary` representing the public view of the commitment tree:
 
 ```rust
-pub struct TreeState {
+pub struct TreeStateSummary {
     epoch: Epoch,
     commitment: Hash32,
     threshold: u16,
@@ -100,7 +100,9 @@ pub struct TreeState {
 }
 ```
 
-Operations update TreeState as follows:
+The `TreeStateSummary` is a lightweight type that hides internal device structure. For the full internal representation with branches, leaves, and topology, see `TreeState` in `aura-journal::commitment_tree`.
+
+Operations update TreeStateSummary as follows:
 - **AddLeaf**: Increments `device_count`, recomputes commitment
 - **RemoveLeaf**: Decrements `device_count`, recomputes commitment
 - **UpdatePolicy**: Changes `threshold`, recomputes commitment

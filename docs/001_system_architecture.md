@@ -28,14 +28,7 @@ Authorities interact with other authorities through relational contexts. These i
 
 An account authority maintains internal state through a [commitment tree](101_accounts_and_commitment_tree.md) and an account journal. The commitment tree defines device membership and threshold policies. The journal stores facts that represent signed tree operations. The reduction function reconstructs canonical tree state from accumulated facts.
 
-```rust
-pub struct AccountAuthority {
-    account_id: AccountId,
-    root_keypair: KeyPair,
-}
-```
-
-This structure represents the account authority with its unique account identifier and root keypair for creating device tokens. The root keypair enables creation of Biscuit tokens for device authentication. The account authority does not reveal device structure to external parties.
+Account authorities are represented by their `AuthorityId` and manage state through the commitment tree's `Policy` and `LeafNode` structures. The root keypair enables creation of Biscuit tokens for device authentication. The account authority does not reveal device structure to external parties.
 
 Account authorities use deterministic key derivation to create context-specific identities. These derived authorities represent application-scoped identities without exposing the structure of the account authority.
 
@@ -68,12 +61,13 @@ flowchart LR
     A[Send Request] --> B[CapGuard<br/>Authorization];
     B --> C[FlowGuard<br/>Budget Charge];
     C --> D[JournalCoupler<br/>Fact Commit];
-    D --> E[TransportEffects<br/>Network Send];
+    D --> E[LeakageTracker<br/>Privacy Budget];
+    E --> F[TransportEffects<br/>Network Send];
 ```
 
 Each guard must succeed before the next guard executes. Any failure returns locally and produces no observable side effect. This design ensures that unauthorized or over-budget sends do not create side channels.
 
-The `CapGuard` evaluates Biscuit capabilities and sovereign policy to derive the capability frontier for the context and peer pair. The `FlowGuard` charges the replicated spent counter and produces a signed receipt if headroom exists. The `JournalCoupler` merges protocol facts together with budget charges to preserve charge-before-send invariants. See [Transport and Information Flow](108_transport_and_information_flow.md) for detailed implementation.
+The `CapGuard` evaluates Biscuit capabilities and sovereign policy to derive the capability frontier for the context and peer pair. The `FlowGuard` charges the replicated spent counter and produces a signed receipt if headroom exists. The `JournalCoupler` merges protocol facts together with budget charges to preserve charge-before-send invariants. The `LeakageTracker` validates privacy budgets per observer class (external, neighbor, group). See [Transport and Information Flow](108_transport_and_information_flow.md) for detailed implementation.
 
 Guard evaluation is pure and synchronous over a prepared `GuardSnapshot`. The evaluation returns `EffectCommand` data that an async interpreter executes (production or simulation). No guard performs I/O directly.
 
@@ -132,9 +126,9 @@ Effect traits define abstract capabilities without exposing implementation detai
 
 Effect traits are organized into three categories that determine implementation location and usage patterns.
 
-Infrastructure effects are foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all use cases. Examples include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, the time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`, `TimeAttestationEffects`), `RandomEffects`, and `ReactiveEffects`. These traits must have corresponding handlers in `aura-effects`. See [Effect System and Runtime](106_effect_system_and_runtime.md) for implementation details.
+Infrastructure effects are foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all use cases. Examples include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, the time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`), and `RandomEffects`. These traits must have corresponding handlers in `aura-effects`. See [Effect System and Runtime](106_effect_system_and_runtime.md) for implementation details.
 
-`ReactiveEffects` provides type-safe signal-based state management for UI and inter-component communication. It enables FRP (Functional Reactive Programming) patterns through typed `Signal<T>` identifiers with read, emit, and subscribe operations. The signal system decouples state producers from consumers, allowing UI components to subscribe to specific signals without knowing the source of state changes.
+`ReactiveEffects` provides type-safe signal-based state management for UI and inter-component communication. It enables FRP (Functional Reactive Programming) patterns through typed `Signal<T>` identifiers with read, emit, and subscribe operations. The signal system decouples state producers from consumers, allowing UI components to subscribe to specific signals without knowing the source of state changes. Note that `ReactiveEffects` is defined in `aura-core` but implemented in `aura-agent` as it encodes application-level reactive semantics rather than pure OS integration.
 
 Application effects encode Aura-specific abstractions and business logic. These traits capture domain concepts meaningful only within Aura's architecture. Examples include `JournalEffects` (see [Journal System](102_journal.md)), `AuthorityEffects` (see [Authority and Identity](100_authority_and_identity.md)), `FlowBudgetEffects`, `LeakageEffects` (see [Privacy and Information Flow](003_information_flow_contract.md)), and `AuthorizationEffects` (see [Authorization](109_authorization.md)). These traits are implemented in their respective domain crates.
 
@@ -198,7 +192,7 @@ Aura consolidates time handling into a single `TimeStamp` enum with four domains
 - **OrderClock**: opaque, privacy-preserving total order token with no temporal meaning, produced by `OrderClockEffects`.
 - **Range**: validity window for constraints; composed with other domains where needed.
 
-An orthogonal provenance wrapper (`ProvenancedTime`) adds attestation proofs when consensus or multi-party validation is required via `TimeAttestationEffects`.
+An orthogonal provenance wrapper (`ProvenancedTime`) adds attestation proofs when consensus or multi-party validation is required. This is a data structure containing `stamp: TimeStamp`, `proofs: Vec<TimeProof>`, and `origin: Option<AuthorityId>`, used in consensus commit facts and other contexts requiring attested time claims.
 
 Ordering across domains is explicit—call `TimeStamp::compare(policy)` for native partial ordering or deterministic tie-breaks. Facts store `TimeStamp` directly (legacy FactId removed), and guard/journal logic uses domain-appropriate timestamps:
 
@@ -214,27 +208,22 @@ Effect handlers expose time through domain-specific traits; no direct `SystemTim
 The effect system propagates `EffectContext` through async tasks. The context carries authority identification, optional session context, and metadata without ambient state.
 
 ```rust
+// Located in aura-agent/src/runtime/context.rs
 pub struct EffectContext {
-    /// Authority performing the operation
-    pub authority_id: AuthorityId,
+    authority_id: AuthorityId,
+    context_id: ContextId,
+    session_id: SessionId,
+    execution_mode: ExecutionMode,
+    flow_budget: FlowBudgetContext,
+    leakage_budget: LeakageBudgetContext,
+    metadata: HashMap<String, String>,
+}
 
-    /// Relational context for cross-authority operations
-    pub context_id: ContextId,
-
-    /// Session context for protocol execution
-    pub session_id: SessionId,
-
-    /// Execution mode (production or simulation)
-    pub execution_mode: ExecutionMode,
-
-    /// Flow budget tracking for rate limiting
-    pub flow_budget: FlowBudgetContext,
-
-    /// Leakage budget tracking for privacy
-    pub leakage_budget: LeakageBudgetContext,
-
-    /// Additional metadata
-    pub metadata: HashMap<String, String>,
+impl EffectContext {
+    pub fn authority_id(&self) -> AuthorityId { ... }
+    pub fn context_id(&self) -> ContextId { ... }
+    pub fn flow_budget(&self) -> &FlowBudgetContext { ... }
+    // ... other accessors
 }
 ```
 
@@ -272,7 +261,7 @@ Choreographies define global interaction patterns from a bird's eye view. Aura e
 
 ```rust
 choreography! {
-    #[namespace = "ping_pong"]
+    #[namespace = "ping_pong"]  // Required: unique namespace prevents module conflicts
     protocol PingPong {
         roles: Alice, Bob;
         Alice[guard_capability = "send_ping", flow_cost = 5] -> Bob: Ping(data: Vec<u8>);
@@ -281,21 +270,38 @@ choreography! {
 }
 ```
 
-Global protocols are projected to local session types for each role. Projection ensures deadlock freedom and communication safety. Annotations specify capability requirements and flow costs that the guard chain enforces.
+Global protocols are projected to local session types for each role via `rumpsteak-aura`. Projection ensures deadlock freedom and communication safety. Annotations specify capability requirements and flow costs that the guard chain enforces. The `#[namespace = "..."]` attribute is required and must be unique within each compilation unit.
 
 ### 4.2 Session Type Integration
 
 Projection converts global choreographies into local session types that enforce structured communication patterns. Each local session type defines the exact sequence of sends and receives for a single role.
 
 ```rust
+// Located in aura-protocol/src/handlers/core/erased.rs
 #[async_trait]
-pub trait ChoreoHandler {
-    async fn send<M>(&mut self, msg: &M) -> Result<()> where M: Serialize;
-    async fn recv<M>(&mut self) -> Result<M> where M: DeserializeOwned;
+pub trait AuraHandler: Send + Sync {
+    /// Execute an effect with serialized parameters and return serialized result
+    async fn execute_effect(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+        ctx: &AuraContext,
+    ) -> Result<Vec<u8>, AuraHandlerError>;
+
+    /// Execute a session type
+    async fn execute_session(
+        &self,
+        session: LocalSessionType,
+        ctx: &AuraContext,
+    ) -> Result<(), AuraHandlerError>;
+
+    /// Check if this handler supports a specific effect type
+    fn supports_effect(&self, effect_type: EffectType) -> bool;
 }
 ```
 
-The `AuraHandler` implements `ChoreoHandler` by mapping session operations to effect calls through `NetworkEffects`, `JournalEffects`, and other traits. Each send operation triggers the guard chain before actual transport.
+The `AuraHandler` trait is the primary interface for effect execution and session interpretation. It uses serialized bytes for parameters and results to enable trait object compatibility. Each send operation triggers the guard chain before actual transport.
 
 ### 4.3 Extension Effects and Annotations
 
@@ -445,16 +451,21 @@ A database table corresponds to a journal reduction view. A database row corresp
 
 ### 8.2 Query Architecture
 
-The `AuraQuery` wrapper loads facts from the journal into Biscuit's authorizer. Query scoping uses the existing `ResourceScope` type. Authorization happens via the guard chain before query execution.
+The `AuraQuery` wrapper loads facts from the journal into Biscuit's authorizer. Query scoping uses authority context. Authorization happens via the guard chain before query execution.
 
 ```rust
-pub struct ScopedQuery {
-    scope: ResourceScope,
-    query: String,
+// Located in aura-effects/src/database/query.rs
+pub struct AuraQuery {
+    /// Facts to be added to the authorizer, keyed by predicate
+    facts: Vec<(String, Vec<FactTerm>)>,
+    /// Authority context for scoped queries
+    authority_context: Option<AuthorityId>,
+    /// Additional context facts (key -> value pairs)
+    context_facts: HashMap<String, String>,
 }
 ```
 
-The scoped query combines a resource scope with a Datalog query string. Execution filters facts to the requested scope before loading into the query engine.
+The `AuraQuery` struct provides an ergonomic API for querying Aura journal facts using Biscuit's Datalog engine. It maintains a set of facts and allows executing Datalog queries against them. Authority context can be injected for scoped queries.
 
 ### 8.3 Indexing Layer
 

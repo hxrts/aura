@@ -14,7 +14,10 @@ use aura_core::effects::{
     query::{QueryEffects, QueryError, QuerySubscription},
     reactive::{ReactiveEffects, Signal},
 };
-use aura_core::query::{DatalogBindings, DatalogProgram, FactPredicate, Query, QueryCapability};
+use aura_core::query::{
+    DatalogBindings, DatalogProgram, FactPredicate, Query, QueryCapability, QueryIsolation,
+    QueryStats,
+};
 
 use crate::database::query::AuraQuery;
 use crate::reactive::ReactiveHandler;
@@ -50,6 +53,11 @@ impl QueryFacts {
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.facts.is_empty()
+    }
+
+    /// Get the total number of facts across all predicates.
+    pub fn len(&self) -> usize {
+        self.facts.values().map(|v| v.len()).sum()
     }
 
     /// Load facts into an AuraQuery for execution.
@@ -367,6 +375,75 @@ impl QueryEffects for QueryHandler {
 
     async fn invalidate(&self, predicate: &FactPredicate) {
         self.reactive.invalidate_queries(predicate).await;
+    }
+
+    async fn query_with_isolation<Q: Query>(
+        &self,
+        query: &Q,
+        isolation: QueryIsolation,
+    ) -> Result<Q::Result, QueryError> {
+        // For now, only ReadUncommitted is fully supported
+        // Other isolation levels would require consensus integration
+        match &isolation {
+            QueryIsolation::ReadUncommitted => {
+                // Standard query execution
+                self.query(query).await
+            }
+            QueryIsolation::ReadCommitted { .. } => {
+                // TODO: Wait for consensus instances to complete
+                // For now, fall back to ReadUncommitted with a warning
+                tracing::warn!(
+                    "ReadCommitted isolation not yet fully implemented, using ReadUncommitted"
+                );
+                self.query(query).await
+            }
+            QueryIsolation::Snapshot { prestate_hash } => {
+                // TODO: Query against historical state
+                Err(QueryError::snapshot_not_available(*prestate_hash))
+            }
+            QueryIsolation::ReadLatest { .. } => {
+                // TODO: Wait for all pending consensus
+                tracing::warn!(
+                    "ReadLatest isolation not yet fully implemented, using ReadUncommitted"
+                );
+                self.query(query).await
+            }
+        }
+    }
+
+    async fn query_with_stats<Q: Query>(
+        &self,
+        query: &Q,
+    ) -> Result<(Q::Result, QueryStats), QueryError> {
+        let start = std::time::Instant::now();
+
+        // Execute the query
+        let result = self.query(query).await?;
+
+        // Build stats
+        let stats = QueryStats::new(start.elapsed())
+            .with_facts_scanned(self.facts.read().await.len())
+            .with_isolation(QueryIsolation::ReadUncommitted);
+
+        Ok((result, stats))
+    }
+
+    async fn query_full<Q: Query>(
+        &self,
+        query: &Q,
+        isolation: QueryIsolation,
+    ) -> Result<(Q::Result, QueryStats), QueryError> {
+        let start = std::time::Instant::now();
+
+        // Execute with isolation
+        let result = self.query_with_isolation(query, isolation.clone()).await?;
+
+        // Build stats
+        let stats = QueryStats::new(start.elapsed())
+            .with_facts_scanned(self.facts.read().await.len())
+            .with_isolation(isolation);
+
+        Ok((result, stats))
     }
 }
 

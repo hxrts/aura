@@ -89,7 +89,7 @@ Commitment tree types MUST remain in `aura-core` because:
 4. **Foundational cryptographic structures**: Commitment trees are merkle trees with threshold policies - core cryptographic primitives, not domain logic
 
 **Layer 2 separation (`aura-journal`) contains**:
-- Tree state machine: `TreeState` with node storage and path validation
+- Tree state machine: Full `TreeState` with branches, leaves, topology, and path validation
 - Reduction logic: Deterministic state derivation from `OpLog<AttestedOp>`
 - Domain validation: Business rules for tree operations (e.g., policy monotonicity, leaf lifecycle)
 - Application logic: `apply_verified()`, compaction, garbage collection

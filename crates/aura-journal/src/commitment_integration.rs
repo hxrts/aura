@@ -1,17 +1,17 @@
 //! Integration between commitment tree operations and fact-based journal
 //!
 //! This module bridges the commitment tree implementation with the fact-based journal model,
-//! providing conversion between AuthorityTreeState and aura-core TreeState.
+//! providing conversion between AuthorityTreeState and aura-core TreeStateSummary.
 
 use crate::commitment_tree::authority_state::AuthorityTreeState;
 use crate::fact::AttestedOp;
-use aura_core::authority::TreeState;
+use aura_core::authority::TreeStateSummary;
 use aura_core::{epochs::Epoch, Hash32};
 
-/// Convert AuthorityTreeState to the canonical TreeState
-impl From<&AuthorityTreeState> for TreeState {
+/// Convert AuthorityTreeState to the summary TreeStateSummary
+impl From<&AuthorityTreeState> for TreeStateSummary {
     fn from(authority_state: &AuthorityTreeState) -> Self {
-        TreeState::with_values(
+        TreeStateSummary::with_values(
             Epoch(authority_state.epoch),
             Hash32::new(authority_state.root_commitment),
             authority_state.get_threshold(),
@@ -22,12 +22,12 @@ impl From<&AuthorityTreeState> for TreeState {
 
 /// Extension trait for AuthorityTreeState conversions
 pub trait TreeStateConversion {
-    /// Convert to canonical TreeState
-    fn to_tree_state(&self) -> TreeState;
+    /// Convert to TreeStateSummary
+    fn to_tree_state_summary(&self) -> TreeStateSummary;
 }
 
 impl TreeStateConversion for AuthorityTreeState {
-    fn to_tree_state(&self) -> TreeState {
+    fn to_tree_state_summary(&self) -> TreeStateSummary {
         self.into()
     }
 }
@@ -35,7 +35,7 @@ impl TreeStateConversion for AuthorityTreeState {
 /// Convert AttestedOp to a format suitable for tree application
 impl AttestedOp {
     /// Validate that this operation can be applied to the given parent state
-    pub fn validate_against_parent(&self, parent_state: &TreeState) -> bool {
+    pub fn validate_against_parent(&self, parent_state: &TreeStateSummary) -> bool {
         self.parent_commitment == parent_state.root_commitment()
     }
 
@@ -58,7 +58,7 @@ mod tests {
         auth_state.epoch = 5;
         auth_state.root_commitment = [1; 32];
 
-        let tree_state = auth_state.to_tree_state();
+        let tree_state = auth_state.to_tree_state_summary();
 
         assert_eq!(tree_state.epoch(), Epoch(5));
 
@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn test_attested_op_validation() {
         let parent_commitment = Hash32::new([2; 32]);
-        let tree_state = TreeState::with_values(Epoch(10), parent_commitment, 2, 3);
+        let tree_state = TreeStateSummary::with_values(Epoch(10), parent_commitment, 2, 3);
 
         let valid_op = AttestedOp {
             tree_op: TreeOpKind::AddLeaf {

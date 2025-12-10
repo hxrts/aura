@@ -8,7 +8,7 @@ use crate::fact::{
     FactContent, Journal, JournalNamespace, ProposedChannelEpochBump, RelationalFact,
 };
 use aura_core::{
-    authority::TreeState,
+    authority::TreeStateSummary,
     epochs::Epoch,
     hash,
     identifiers::{AuthorityId, ChannelId, ContextId},
@@ -34,7 +34,7 @@ pub enum ReductionNamespaceError {
 ///
 /// This function processes different types of attested operations and
 /// updates the tree state accordingly.
-fn apply_attested_op(tree_state: &TreeState, op: &AttestedOp) -> TreeState {
+fn apply_attested_op(tree_state: &TreeStateSummary, op: &AttestedOp) -> TreeStateSummary {
     match &op.tree_op {
         crate::fact::TreeOpKind::AddLeaf { public_key, role } => {
             // Add a new leaf to the tree with proper device/guardian distinction
@@ -57,7 +57,7 @@ fn apply_attested_op(tree_state: &TreeState, op: &AttestedOp) -> TreeState {
 
 /// Apply add leaf operation to tree state (deprecated - use fact-based approach)
 #[allow(dead_code)]
-fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
+fn apply_add_leaf(tree_state: &TreeStateSummary, public_key: &[u8]) -> TreeStateSummary {
     // Old implementation that assumes device role
     // This is kept for backward compatibility but new code should use apply_add_leaf_with_role
     apply_add_leaf_with_role(tree_state, public_key, aura_core::tree::LeafRole::Device)
@@ -65,15 +65,15 @@ fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
 
 /// Apply add leaf operation to tree state with device/guardian role distinction
 fn apply_add_leaf_with_role(
-    tree_state: &TreeState,
+    tree_state: &TreeStateSummary,
     public_key: &[u8],
     role: aura_core::tree::LeafRole,
-) -> TreeState {
+) -> TreeStateSummary {
     // For a proper implementation, we would need to:
     // 1. Maintain the actual tree structure (branches and leaves)
     // 2. Find the appropriate branch to add the leaf to
     // 3. Recompute commitments up the tree
-    // Since we don't have the full tree structure in TreeState, we'll compute
+    // Since we don't have the full tree structure in TreeStateSummary, we'll compute
     // a leaf commitment and use it to update the root
 
     let new_leaf_id = LeafId(tree_state.device_count());
@@ -94,7 +94,7 @@ fn apply_add_leaf_with_role(
         aura_core::tree::LeafRole::Guardian => tree_state.device_count(), // Don't increment for guardians
     };
 
-    TreeState::with_values(
+    TreeStateSummary::with_values(
         tree_state.epoch(),
         Hash32::new(new_commitment),
         tree_state.threshold(),
@@ -103,7 +103,7 @@ fn apply_add_leaf_with_role(
 }
 
 /// Apply remove leaf operation to tree state
-fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
+fn apply_remove_leaf(tree_state: &TreeStateSummary, leaf_index: u32) -> TreeStateSummary {
     // For leaf removal, we would normally:
     // 1. Mark the leaf as removed in the tree structure
     // 2. Recompute commitments up the tree
@@ -120,7 +120,7 @@ fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
     hasher.update(&tree_state.epoch().0.to_le_bytes());
     let new_commitment = hasher.finalize();
 
-    TreeState::with_values(
+    TreeStateSummary::with_values(
         tree_state.epoch(),
         Hash32::new(new_commitment),
         tree_state.threshold(),
@@ -129,7 +129,7 @@ fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
 }
 
 /// Apply policy update operation to tree state
-fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
+fn apply_update_policy(tree_state: &TreeStateSummary, threshold: u16) -> TreeStateSummary {
     // Policy updates affect branch nodes. We compute a new commitment
     // that incorporates the policy change
 
@@ -149,7 +149,7 @@ fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
     hasher.update(&tree_state.epoch().0.to_le_bytes());
     let new_commitment = hasher.finalize();
 
-    TreeState::with_values(
+    TreeStateSummary::with_values(
         tree_state.epoch(),
         Hash32::new(new_commitment),
         threshold,
@@ -158,7 +158,7 @@ fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
 }
 
 /// Apply epoch rotation operation to tree state
-fn apply_rotate_epoch(tree_state: &TreeState) -> TreeState {
+fn apply_rotate_epoch(tree_state: &TreeStateSummary) -> TreeStateSummary {
     // Epoch rotation requires recomputing all commitments in the tree
     // with the new epoch value
 
@@ -186,7 +186,7 @@ fn apply_rotate_epoch(tree_state: &TreeState) -> TreeState {
     hasher.update(tree_state.root_commitment().as_bytes());
     let new_commitment = hasher.finalize();
 
-    TreeState::with_values(
+    TreeStateSummary::with_values(
         new_epoch,
         Hash32::new(new_commitment),
         tree_state.threshold(),
@@ -287,7 +287,7 @@ pub fn reduce_authority(
                 .collect();
 
             // Start with empty tree state
-            let mut tree_state = TreeState::default();
+            let mut tree_state = TreeStateSummary::default();
 
             // Apply operations in order (facts are already ordered by BTreeSet)
             for op in attested_ops {
@@ -311,14 +311,14 @@ pub fn reduce_authority(
 
 /// Reduce account facts to tree state
 ///
-/// This is the main entry point for reducing journal facts to a TreeState.
+/// This is the main entry point for reducing journal facts to a TreeStateSummary.
 /// It delegates to reduce_authority for the actual work.
 ///
 /// # Errors
 ///
 /// Returns `ReductionNamespaceError::ContextAsAuthority` if the journal
 /// has a Context namespace instead of an Authority namespace.
-pub fn reduce_account_facts(journal: &Journal) -> Result<TreeState, ReductionNamespaceError> {
+pub fn reduce_account_facts(journal: &Journal) -> Result<TreeStateSummary, ReductionNamespaceError> {
     Ok(reduce_authority(journal)?.tree_state)
 }
 
@@ -348,7 +348,7 @@ pub fn reduce_authority_with_validation(
                     .cmp(b.parent_commitment.as_bytes())
             });
 
-            let mut tree_state = TreeState::default();
+            let mut tree_state = TreeStateSummary::default();
             let mut current_commitment = tree_state.root_commitment();
 
             // Apply operations in order, validating parent commitments

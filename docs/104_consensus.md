@@ -374,7 +374,7 @@ Consensus is also used for relational context operations. Guardian bindings use 
 
 ## 11. FROST Threshold Signatures
 
-Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key stored in [TreeState](101_accounts_and_commitment_tree.md).
+Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key stored in the commitment tree. See [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) for details on the `TreeState` structure.
 
 ```rust
 pub struct WitnessShare {
