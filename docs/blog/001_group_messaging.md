@@ -132,7 +132,7 @@ Both protocols derive ratchet state from processing history. Recovery requires r
 
 Keyhive uses BeeKEM, a decentralized TreeKEM variant. It tolerates concurrent updates through conflict keys that persist until pruned. The protocol provides eventual consistency for all operations.
 
-Eventual consistency cannot enforce linear epoch chains. Concurrent epoch proposals would create forks requiring application-level resolution. Linear epochs matter because authority key rotation requires all participants to agree on the new key material before using it. Aura's consensus-finalized bumps ensure exactly one committed bump per parent epoch.
+Eventual consistency cannot enforce linear epoch chains. Concurrent epoch proposals would create forks requiring application-level resolution. Epoch linearity is important for Aura because key rotation requires all participants to agree on the new key material before use. Aura's consensus-finalized bumps ensure exactly one committed bump per parent epoch.
 
 Keyhive has a simple fixed authorization model with read, write, admin, and pull permissions. Aura requires arbitrary capabilities that can be attenuated and delegated.
 
