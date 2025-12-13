@@ -140,9 +140,16 @@ pub fn ToastContainer(props: &ToastContainerProps) -> impl Into<AnyElement<'stat
             flex_direction: FlexDirection::Column,
             gap: 1,
             min_width: 30,
+            max_width: 50,
+            overflow: Overflow::Hidden,
         ) {
             #(toasts.iter().map(|t| {
-                let message = t.message.clone();
+                // Truncate long messages to avoid breaking layout
+                let message = if t.message.len() > 45 {
+                    format!("{}...", &t.message[..42])
+                } else {
+                    t.message.clone()
+                };
                 let level = t.level;
                 element! {
                     View {
