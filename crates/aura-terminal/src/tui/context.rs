@@ -34,8 +34,10 @@ use aura_app::AppCore;
 use tokio::sync::RwLock;
 
 use aura_app::signal_defs::{
-    ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, ERROR_SIGNAL, SYNC_STATUS_SIGNAL,
+    ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL,
+    SYNC_STATUS_SIGNAL,
 };
+use aura_app::views::contacts::Contact as ViewContact;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::effects::{
@@ -181,7 +183,7 @@ impl IoContext {
     /// Create a new IoContext for demo mode with hints
     ///
     /// This constructor includes demo hints that provide contextual guidance
-    /// and pre-generated invite codes for Alice and Charlie.
+    /// and pre-generated invite codes for Alice and Carol.
     #[cfg(feature = "development")]
     pub fn with_demo_hints(
         app_core: Arc<RwLock<AppCore>>,
@@ -236,12 +238,12 @@ impl IoContext {
             .unwrap_or_default()
     }
 
-    /// Get Charlie's invite code (for demo mode)
+    /// Get Carol's invite code (for demo mode)
     #[cfg(feature = "development")]
-    pub fn demo_charlie_code(&self) -> String {
+    pub fn demo_carol_code(&self) -> String {
         self.demo_hints
             .as_ref()
-            .map(|h| h.charlie_invite_code.clone())
+            .map(|h| h.carol_invite_code.clone())
             .unwrap_or_default()
     }
 
@@ -251,9 +253,9 @@ impl IoContext {
         String::new()
     }
 
-    /// Get Charlie's invite code (empty without development feature)
+    /// Get Carol's invite code (empty without development feature)
     #[cfg(not(feature = "development"))]
-    pub fn demo_charlie_code(&self) -> String {
+    pub fn demo_carol_code(&self) -> String {
         String::new()
     }
 
@@ -875,7 +877,38 @@ impl IoContext {
                     self.set_channel_mode(&channel_id, &flags).await;
                     Ok(())
                 }
-                Ok(_) => Ok(()),
+                Ok(OpResponse::InvitationImported {
+                    sender_id,
+                    invitation_type,
+                    message,
+                    ..
+                }) => {
+                    // Add the sender as a contact
+                    self.add_contact_from_invitation(&sender_id, &invitation_type, message.as_deref())
+                        .await;
+                    Ok(())
+                }
+                Ok(OpResponse::Ok) => {
+                    // Command succeeded with no data - intentionally no-op
+                    Ok(())
+                }
+                Ok(OpResponse::Data(data)) => {
+                    // Log the returned data for debugging
+                    tracing::info!("Command returned data: {}", data);
+                    Ok(())
+                }
+                Ok(OpResponse::List(items)) => {
+                    // Log the returned list with {} items: {:?}", items.len(), items);
+                    tracing::info!("Command returned list with {} items", items.len());
+                    Ok(())
+                }
+                Ok(OpResponse::InvitationCode { id, code }) => {
+                    // Show the generated invitation code to the user
+                    tracing::info!("Generated invitation code for {}: {}", id, code);
+                    self.add_success_toast("invitation-code", format!("Invitation code: {}", code))
+                        .await;
+                    Ok(())
+                }
                 Err(e) => Err(e.to_string()),
             }
         } else {
@@ -955,7 +988,38 @@ impl IoContext {
                     self.set_channel_mode(&channel_id, &flags).await;
                     Ok(())
                 }
-                Ok(_) => Ok(()),
+                Ok(OpResponse::InvitationImported {
+                    sender_id,
+                    invitation_type,
+                    message,
+                    ..
+                }) => {
+                    // Add the sender as a contact
+                    self.add_contact_from_invitation(&sender_id, &invitation_type, message.as_deref())
+                        .await;
+                    Ok(())
+                }
+                Ok(OpResponse::Ok) => {
+                    // Command succeeded with no data - intentionally no-op
+                    Ok(())
+                }
+                Ok(OpResponse::Data(data)) => {
+                    // Log the returned data for debugging
+                    tracing::info!("Command returned data: {}", data);
+                    Ok(())
+                }
+                Ok(OpResponse::List(items)) => {
+                    // Log the returned list with {} items: {:?}", items.len(), items);
+                    tracing::info!("Command returned list with {} items", items.len());
+                    Ok(())
+                }
+                Ok(OpResponse::InvitationCode { id, code }) => {
+                    // Show the generated invitation code to the user
+                    tracing::info!("Generated invitation code for {}: {}", id, code);
+                    self.add_success_toast("invitation-code", format!("Invitation code: {}", code))
+                        .await;
+                    Ok(())
+                }
                 Err(e) => Err(e.to_string()),
             }
         } else {
@@ -1213,6 +1277,71 @@ impl IoContext {
         );
     }
 
+    /// Add a contact from an imported invitation
+    ///
+    /// Called when an invitation is successfully imported. Adds the sender
+    /// as a contact in the CONTACTS_SIGNAL, marking them as a guardian if
+    /// the invitation type is "guardian".
+    pub async fn add_contact_from_invitation(
+        &self,
+        sender_id: &str,
+        invitation_type: &str,
+        message: Option<&str>,
+    ) {
+        // Determine if this is a guardian invitation
+        let is_guardian = invitation_type.to_lowercase().contains("guardian");
+
+        // Extract name from message if available (demo invitations include name)
+        // Format: "Guardian invitation from Alice (demo)"
+        let suggested_name = message.and_then(|msg| {
+            if msg.contains("from ") {
+                msg.split("from ")
+                    .nth(1)
+                    .and_then(|s| s.split(' ').next())
+                    .map(|s| s.to_string())
+            } else {
+                None
+            }
+        });
+
+        // Create contact entry
+        let contact = ViewContact {
+            id: sender_id.to_string(),
+            petname: suggested_name.clone().unwrap_or_default(),
+            suggested_name,
+            is_guardian,
+            is_resident: false,
+            last_interaction: Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64,
+            ),
+            is_online: true, // Demo agents are "online"
+        };
+
+        // Update CONTACTS_SIGNAL
+        if let Ok(core) = self.app_core.try_read() {
+            if let Ok(mut contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
+                // Check if contact already exists
+                if !contacts_state.contacts.iter().any(|c| c.id == sender_id) {
+                    contacts_state.contacts.push(contact);
+                    if let Err(e) = core.emit(&*CONTACTS_SIGNAL, contacts_state).await {
+                        tracing::warn!("Failed to update contacts signal: {}", e);
+                    } else {
+                        tracing::info!(
+                            "Added contact from invitation: {} (guardian: {})",
+                            sender_id,
+                            is_guardian
+                        );
+                    }
+                } else {
+                    tracing::debug!("Contact {} already exists, skipping", sender_id);
+                }
+            }
+        }
+    }
+
     // =========================================================================
     // Toast Notifications
     // =========================================================================
@@ -1223,6 +1352,10 @@ impl IoContext {
     /// Use for errors, success messages, and other notifications.
     pub async fn add_toast(&self, toast: crate::tui::components::ToastMessage) {
         let mut toasts = self.toasts.write().await;
+        // Deduplicate: if a toast with the same ID exists, don't add another
+        if toasts.iter().any(|t| t.id == toast.id) {
+            return;
+        }
         // Limit to 5 toasts max to avoid UI clutter
         if toasts.len() >= 5 {
             toasts.remove(0);
