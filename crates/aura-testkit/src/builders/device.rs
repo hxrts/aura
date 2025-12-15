@@ -191,7 +191,7 @@ pub mod helpers {
 
     /// Get common test device labels
     pub fn standard_labels() -> Vec<&'static str> {
-        vec!["alice", "bob", "charlie", "diana", "eve"]
+        vec!["alice", "bob", "carol", "diana", "eve"]
     }
 
     /// Verify device collection integrity
@@ -221,15 +221,11 @@ mod tests {
 
     #[test]
     fn test_device_set_with_labels() {
-        let labels = vec![
-            "alice".to_string(),
-            "bob".to_string(),
-            "charlie".to_string(),
-        ];
+        let labels = vec!["alice".to_string(), "bob".to_string(), "carol".to_string()];
         let devices = DeviceSetBuilder::new(3).with_labels(labels).build();
         assert_eq!(devices[0].label(), "alice");
         assert_eq!(devices[1].label(), "bob");
-        assert_eq!(devices[2].label(), "charlie");
+        assert_eq!(devices[2].label(), "carol");
     }
 
     #[test]

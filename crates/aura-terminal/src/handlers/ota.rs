@@ -2,10 +2,12 @@
 //! OTA Upgrade CLI Commands
 //!
 //! Commands for managing over-the-air upgrades using the proper effect system architecture.
+//!
+//! Returns structured `CliOutput` for testability.
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::{Context, Result};
-use aura_core::effects::{ConsoleEffects, StorageEffects};
+use aura_core::effects::StorageEffects;
 use aura_core::{hash, AccountId, Hash32, SemanticVersion};
 use aura_sync::maintenance::{IdentityEpochFence, UpgradeProposal};
 use aura_sync::protocols::ota::UpgradeKind;
@@ -17,8 +19,10 @@ use crate::{ids, OtaAction};
 
 /// Handle OTA commands through effects
 ///
+/// Returns `CliOutput` instead of printing directly.
+///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_ota(ctx: &HandlerContext<'_>, action: &OtaAction) -> Result<()> {
+pub async fn handle_ota(ctx: &HandlerContext<'_>, action: &OtaAction) -> Result<CliOutput> {
     match action {
         OtaAction::Propose {
             from_version,
@@ -52,11 +56,13 @@ async fn propose_upgrade(
     upgrade_type: &str,
     download_url: &str,
     description: &str,
-) -> Result<()> {
-    println!(
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
+    output.println(format!(
         "Proposing {} upgrade to version {}: {}",
         upgrade_type, to_version, description
-    );
+    ));
 
     let kind = match upgrade_type {
         "soft" => UpgradeKind::SoftFork,
@@ -110,40 +116,39 @@ async fn propose_upgrade(
         .await
         .map_err(anyhow::Error::from)?;
 
-    ConsoleEffects::log_info(
-        ctx.effects(),
-        &format!(
-            "Created upgrade proposal {} (version {}, kind {:?})",
-            proposal.package_id, proposal.version, proposal.kind
-        ),
-    )
-    .await?;
+    output.kv("Proposal ID", proposal.package_id.to_string());
+    output.kv("Version", proposal.version.to_string());
+    output.kv("Kind", format!("{:?}", proposal.kind));
 
-    Ok(())
+    Ok(output)
 }
 
-async fn set_policy(ctx: &HandlerContext<'_>, policy: &str) -> Result<()> {
+async fn set_policy(ctx: &HandlerContext<'_>, policy: &str) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let key = "ota:policy";
     ctx.effects()
         .store(key, policy.as_bytes().to_vec())
         .await
         .map_err(anyhow::Error::from)?;
-    ConsoleEffects::log_info(ctx.effects(), &format!("OTA policy set to: {}", policy)).await?;
-    Ok(())
+
+    output.kv("OTA policy set to", policy);
+    Ok(output)
 }
 
-async fn get_status(ctx: &HandlerContext<'_>) -> Result<()> {
+async fn get_status(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
+    output.section("OTA Status");
+
     let proposals = list_saved_proposals(ctx).await?;
     if proposals.is_empty() {
-        ConsoleEffects::log_info(ctx.effects(), "OTA Status: No active upgrades").await?;
-        return Ok(());
+        output.println("No active upgrades");
+        return Ok(output);
     }
 
-    ConsoleEffects::log_info(
-        ctx.effects(),
-        &format!("OTA Status: {} proposal(s) tracked", proposals.len()),
-    )
-    .await?;
+    output.kv("Proposals tracked", proposals.len().to_string());
+    output.blank();
 
     for proposal in proposals {
         let opt_in_key = format!("ota:optin:{}", proposal.package_id);
@@ -153,19 +158,18 @@ async fn get_status(ctx: &HandlerContext<'_>) -> Result<()> {
             .await
             .map(|v| v.is_some())
             .unwrap_or(false);
-        ConsoleEffects::log_info(
-            ctx.effects(),
-            &format!(
-                "  • {} ({}, kind {:?}) opted_in={}",
-                proposal.package_id, proposal.version, proposal.kind, opted_in
-            ),
-        )
-        .await?;
+        output.println(format!(
+            "  • {} ({}, kind {:?}) opted_in={}",
+            proposal.package_id, proposal.version, proposal.kind, opted_in
+        ));
     }
-    Ok(())
+
+    Ok(output)
 }
 
-async fn opt_in(ctx: &HandlerContext<'_>, proposal_id: &str) -> Result<()> {
+async fn opt_in(ctx: &HandlerContext<'_>, proposal_id: &str) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let proposal_uuid = Uuid::parse_str(proposal_id).context("proposal_id must be a UUID")?;
 
     let key = format!("ota:optin:{}", proposal_uuid);
@@ -174,41 +178,36 @@ async fn opt_in(ctx: &HandlerContext<'_>, proposal_id: &str) -> Result<()> {
         .await
         .map_err(anyhow::Error::from)?;
 
-    ConsoleEffects::log_info(
-        ctx.effects(),
-        &format!("Opted into proposal: {}", proposal_uuid),
-    )
-    .await?;
-    Ok(())
+    output.kv("Opted into proposal", proposal_uuid.to_string());
+    Ok(output)
 }
 
-async fn list_proposals(ctx: &HandlerContext<'_>) -> Result<()> {
+async fn list_proposals(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let proposals = list_saved_proposals(ctx).await?;
     if proposals.is_empty() {
-        ConsoleEffects::log_info(ctx.effects(), "No upgrade proposals found").await?;
-        return Ok(());
+        output.println("No upgrade proposals found");
+        return Ok(output);
     }
 
-    ConsoleEffects::log_info(
-        ctx.effects(),
-        &format!("Listing {} proposal(s):", proposals.len()),
-    )
-    .await?;
+    output.section(&format!("Upgrade Proposals ({})", proposals.len()));
 
     for proposal in proposals {
-        ConsoleEffects::log_info(
-            ctx.effects(),
-            &format!(
-                "  • {} version {} kind {:?}",
-                proposal.package_id, proposal.version, proposal.kind
-            ),
-        )
-        .await?;
+        output.println(format!(
+            "  • {} version {} kind {:?}",
+            proposal.package_id, proposal.version, proposal.kind
+        ));
     }
-    Ok(())
+
+    Ok(output)
 }
 
-async fn get_stats(ctx: &HandlerContext<'_>) -> Result<()> {
+async fn get_stats(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
+    output.section("OTA Statistics");
+
     let proposals = list_saved_proposals(ctx).await?;
     let opt_ins = ctx
         .effects()
@@ -217,14 +216,10 @@ async fn get_stats(ctx: &HandlerContext<'_>) -> Result<()> {
         .map(|list| list.len())
         .unwrap_or(0);
 
-    ConsoleEffects::log_info(ctx.effects(), "OTA Statistics:").await?;
-    ConsoleEffects::log_info(
-        ctx.effects(),
-        &format!("  Total proposals: {}", proposals.len()),
-    )
-    .await?;
-    ConsoleEffects::log_info(ctx.effects(), &format!("  Opt-ins: {}", opt_ins)).await?;
-    Ok(())
+    output.kv("Total proposals", proposals.len().to_string());
+    output.kv("Opt-ins", opt_ins.to_string());
+
+    Ok(output)
 }
 
 fn compute_artifact_hash(download_url: &str) -> Result<Hash32> {

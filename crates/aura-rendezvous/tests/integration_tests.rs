@@ -362,7 +362,7 @@ fn test_channel_manager_lifecycle() {
 fn test_channel_manager_epoch_advancement() {
     let alice = test_authority(1);
     let bob = test_authority(2);
-    let charlie = test_authority(3);
+    let carol = test_authority(3);
     let context = test_context(100);
 
     let mut manager = ChannelManager::new();
@@ -372,7 +372,7 @@ fn test_channel_manager_epoch_advancement() {
     ch1.mark_active();
     manager.register(ch1);
 
-    let mut ch2 = SecureChannel::new([2u8; 32], context, alice, charlie, 1);
+    let mut ch2 = SecureChannel::new([2u8; 32], context, alice, carol, 1);
     ch2.mark_active();
     manager.register(ch2);
 
@@ -385,7 +385,7 @@ fn test_channel_manager_epoch_advancement() {
         .unwrap()
         .needs_rotation());
     assert!(manager
-        .find_by_context_peer(context, charlie)
+        .find_by_context_peer(context, carol)
         .unwrap()
         .needs_rotation());
 }

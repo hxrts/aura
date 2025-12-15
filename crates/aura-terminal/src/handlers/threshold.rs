@@ -1,17 +1,19 @@
 //! Threshold Command Handler
 //!
 //! Effect-based implementation of threshold operations.
+//! Returns structured `CliOutput` for testability.
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::Result;
 use aura_authenticate::{DkdConfig, DkdProtocol};
 use aura_core::effects::StorageEffects;
 use aura_core::DeviceId;
-// Removed unused effect traits
 use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Handle threshold operations through effects
+///
+/// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
 pub async fn handle_threshold(
@@ -19,15 +21,16 @@ pub async fn handle_threshold(
     configs: &str,
     threshold: u32,
     mode: &str,
-) -> Result<()> {
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
     let config_paths: Vec<&str> = configs.split(',').collect();
 
-    println!(
+    output.println(format!(
         "Running threshold operation with {} configs (threshold: {}, mode: {})",
         config_paths.len(),
         threshold,
         mode
-    );
+    ));
 
     // Validate all config files exist through storage effects
     let mut valid_configs = Vec::new();
@@ -40,16 +43,19 @@ pub async fn handle_threshold(
             Ok(Some(data)) => match String::from_utf8(data) {
                 Ok(config_string) => match parse_config_data(config_string.as_bytes()) {
                     Ok(config) => {
-                        println!("Loaded config: {}", config_path);
+                        output.println(format!("Loaded config: {}", config_path));
                         valid_configs.push((path, config));
                     }
                     Err(e) => {
-                        eprintln!("Invalid config {}: {}", config_path, e);
+                        output.eprintln(format!("Invalid config {}: {}", config_path, e));
                         return Err(anyhow::anyhow!("Invalid config {}: {}", config_path, e));
                     }
                 },
                 Err(e) => {
-                    eprintln!("Invalid UTF-8 in config file {}: {}", config_path, e);
+                    output.eprintln(format!(
+                        "Invalid UTF-8 in config file {}: {}",
+                        config_path, e
+                    ));
                     return Err(anyhow::anyhow!(
                         "Invalid UTF-8 in config file {}: {}",
                         config_path,
@@ -58,11 +64,11 @@ pub async fn handle_threshold(
                 }
             },
             Ok(None) => {
-                eprintln!("Config file not found: {}", config_path);
+                output.eprintln(format!("Config file not found: {}", config_path));
                 return Err(anyhow::anyhow!("Config file not found: {}", config_path));
             }
             Err(e) => {
-                eprintln!("Failed to read config {}: {}", config_path, e);
+                output.eprintln(format!("Failed to read config {}: {}", config_path, e));
                 return Err(anyhow::anyhow!(
                     "Failed to read config {}: {}",
                     config_path,
@@ -73,19 +79,23 @@ pub async fn handle_threshold(
     }
 
     // Validate threshold parameters
-    validate_threshold_params(ctx, &valid_configs, threshold).await?;
+    validate_threshold_params(&valid_configs, threshold, &mut output)?;
 
     // Execute threshold operation based on mode
     match mode {
-        "sign" => execute_threshold_signing(ctx, &valid_configs, threshold).await,
-        "verify" => execute_threshold_verification(ctx, &valid_configs, threshold).await,
-        "keygen" => execute_threshold_keygen(ctx, &valid_configs, threshold).await,
-        "dkd" => execute_dkd_protocol(ctx, &valid_configs, threshold).await,
+        "sign" => execute_threshold_signing(ctx, &valid_configs, threshold, &mut output).await?,
+        "verify" => {
+            execute_threshold_verification(ctx, &valid_configs, threshold, &mut output).await?
+        }
+        "keygen" => execute_threshold_keygen(ctx, &valid_configs, threshold, &mut output).await?,
+        "dkd" => execute_dkd_protocol(ctx, &valid_configs, threshold, &mut output).await?,
         _ => {
-            eprintln!("Unknown threshold mode: {}", mode);
-            Err(anyhow::anyhow!("Unknown threshold mode: {}", mode))
+            output.eprintln(format!("Unknown threshold mode: {}", mode));
+            return Err(anyhow::anyhow!("Unknown threshold mode: {}", mode));
         }
     }
+
+    Ok(output)
 }
 
 /// Parse configuration data
@@ -99,24 +109,24 @@ fn parse_config_data(data: &[u8]) -> Result<ThresholdConfig> {
     Ok(config)
 }
 
-/// Validate threshold parameters
-async fn validate_threshold_params(
-    _ctx: &HandlerContext<'_>,
+/// Validate threshold parameters (pure function)
+fn validate_threshold_params(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
+    output: &mut CliOutput,
 ) -> Result<()> {
     if configs.is_empty() {
-        eprintln!("No valid configurations provided");
+        output.eprintln("No valid configurations provided");
         return Err(anyhow::anyhow!("No valid configurations"));
     }
 
     let num_devices = configs.len() as u32;
 
     if threshold > num_devices {
-        eprintln!(
+        output.eprintln(format!(
             "Threshold ({}) cannot be greater than number of devices ({})",
             threshold, num_devices
-        );
+        ));
         return Err(anyhow::anyhow!(
             "Invalid threshold: {} > {}",
             threshold,
@@ -125,41 +135,39 @@ async fn validate_threshold_params(
     }
 
     if threshold == 0 {
-        eprintln!("Threshold must be greater than 0");
+        output.eprintln("Threshold must be greater than 0");
         return Err(anyhow::anyhow!("Invalid threshold: 0"));
     }
 
     // Verify all configs have compatible threshold settings
     for (path, config) in configs {
         if config.threshold != configs[0].1.threshold {
-            eprintln!(
+            output.eprintln(format!(
                 "Threshold mismatch in {}: expected {}, got {}",
                 path.display(),
                 configs[0].1.threshold,
                 config.threshold
-            );
+            ));
             return Err(anyhow::anyhow!("Threshold mismatch in {}", path.display()));
         }
     }
 
-    println!("Threshold parameters validated");
+    output.println("Threshold parameters validated");
     Ok(())
 }
 
 /// Execute threshold signing operation
-///
-/// Signs a test message using the threshold signing service.
-/// For production use, prefer `aura sign` with proper authority context.
 async fn execute_threshold_signing(
     ctx: &HandlerContext<'_>,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
+    output: &mut CliOutput,
 ) -> Result<()> {
     use aura_core::effects::ThresholdSigningEffects;
     use aura_core::threshold::{ApprovalContext, SignableOperation, SigningContext};
     use aura_core::tree::{TreeOp, TreeOpKind};
 
-    println!("Executing threshold signing operation");
+    output.section("Threshold Signing Operation");
 
     // Get authority from context
     let authority_id = ctx.effect_context().authority_id();
@@ -178,24 +186,26 @@ async fn execute_threshold_signing(
         approval_context: ApprovalContext::SelfOperation,
     };
 
-    println!("Signing with authority: {}", authority_id);
-    println!(
-        "Threshold configuration: {}/{} required",
-        threshold,
-        configs.len()
+    output.kv("Signing with authority", authority_id.to_string());
+    output.kv(
+        "Threshold configuration",
+        format!("{}/{} required", threshold, configs.len()),
     );
 
     // Attempt to sign using the threshold signing service
     match ctx.effects().sign(signing_context).await {
         Ok(signature) => {
-            println!("Threshold signing successful!");
-            println!("  Signers: {}", signature.signer_count);
-            println!("  Epoch: {}", signature.epoch);
-            println!("  Signature bytes: {}", signature.signature.len());
+            output.println("Threshold signing successful!");
+            output.kv("Signers", signature.signer_count.to_string());
+            output.kv("Epoch", signature.epoch.to_string());
+            output.kv("Signature bytes", signature.signature.len().to_string());
         }
         Err(e) => {
-            println!("Threshold signing failed: {}", e);
-            println!("  This may require {} signers to be online", threshold);
+            output.println(format!("Threshold signing failed: {}", e));
+            output.println(format!(
+                "  This may require {} signers to be online",
+                threshold
+            ));
         }
     }
 
@@ -203,17 +213,15 @@ async fn execute_threshold_signing(
 }
 
 /// Execute threshold verification operation
-///
-/// Verifies a threshold signature using the crypto effects.
-/// For production use, prefer `aura verify` with proper signature context.
 async fn execute_threshold_verification(
     ctx: &HandlerContext<'_>,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
+    output: &mut CliOutput,
 ) -> Result<()> {
     use aura_core::effects::{CryptoEffects, ThresholdSigningEffects};
 
-    println!("Executing threshold verification operation");
+    output.section("Threshold Verification Operation");
 
     // Get authority from context
     let authority_id = ctx.effect_context().authority_id();
@@ -222,31 +230,34 @@ async fn execute_threshold_verification(
     let public_key_package = match ctx.effects().public_key_package(&authority_id).await {
         Some(pkg) => pkg,
         None => {
-            println!(
+            output.println(format!(
                 "No public key package found for authority: {}",
                 authority_id
-            );
-            println!("Run key generation first with: aura threshold --mode keygen");
+            ));
+            output.println("Run key generation first with: aura threshold --mode keygen");
             return Ok(());
         }
     };
 
-    println!("Verifying with authority: {}", authority_id);
-    println!("Public key package: {} bytes", public_key_package.len());
-    println!(
-        "Threshold configuration: {}/{} required",
-        threshold,
-        configs.len()
+    output.kv("Verifying with authority", authority_id.to_string());
+    output.kv(
+        "Public key package",
+        format!("{} bytes", public_key_package.len()),
+    );
+    output.kv(
+        "Threshold configuration",
+        format!("{}/{} required", threshold, configs.len()),
     );
 
     // Create a test message and empty signature for demonstration
     let test_message = b"test message for verification";
 
     // Verify using frost_verify (this will fail without a real signature)
-    println!("Verification requires a valid signature to check.");
-    println!("To verify a real signature:");
-    println!("  1. Obtain the signature bytes from a previous signing operation");
-    println!("  2. Use `aura verify --signature <bytes> --message <msg>`");
+    output.blank();
+    output.println("Verification requires a valid signature to check.");
+    output.println("To verify a real signature:");
+    output.println("  1. Obtain the signature bytes from a previous signing operation");
+    output.println("  2. Use `aura verify --signature <bytes> --message <msg>`");
 
     // Demonstrate the verification call structure
     let empty_signature = vec![0u8; 64]; // Placeholder
@@ -257,16 +268,16 @@ async fn execute_threshold_verification(
     {
         Ok(valid) => {
             if valid {
-                println!("Signature verification: VALID");
+                output.println("Signature verification: VALID");
             } else {
-                println!("Signature verification: INVALID (expected for placeholder)");
+                output.println("Signature verification: INVALID (expected for placeholder)");
             }
         }
         Err(e) => {
-            println!(
+            output.println(format!(
                 "Verification failed: {} (expected for placeholder signature)",
                 e
-            );
+            ));
         }
     }
 
@@ -274,48 +285,50 @@ async fn execute_threshold_verification(
 }
 
 /// Execute threshold key generation operation
-///
-/// Bootstraps a new authority with 1-of-1 keys.
-/// For multi-device DKG, use `aura init` with proper participant coordination.
 async fn execute_threshold_keygen(
     ctx: &HandlerContext<'_>,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
+    output: &mut CliOutput,
 ) -> Result<()> {
     use aura_core::effects::ThresholdSigningEffects;
 
-    println!("Executing threshold key generation operation");
+    output.section("Threshold Key Generation");
 
     // Get authority from context
     let authority_id = ctx.effect_context().authority_id();
 
-    println!("Generating keys for authority: {}", authority_id);
-    println!(
-        "Threshold configuration: {}/{} participants",
-        threshold,
-        configs.len()
+    output.kv("Generating keys for authority", authority_id.to_string());
+    output.kv(
+        "Threshold configuration",
+        format!("{}/{} participants", threshold, configs.len()),
     );
 
     if threshold > 1 {
-        println!("Multi-device DKG requires network coordination.");
-        println!("For single-device bootstrap, use threshold=1.");
-        println!("For multi-device setup, use `aura init` with participant coordination.");
+        output.blank();
+        output.println("Multi-device DKG requires network coordination.");
+        output.println("For single-device bootstrap, use threshold=1.");
+        output.println("For multi-device setup, use `aura init` with participant coordination.");
         return Ok(());
     }
 
     // Bootstrap 1-of-1 keys for single-device operation
     match ctx.effects().bootstrap_authority(&authority_id).await {
         Ok(public_key_package) => {
-            println!("Key generation successful!");
-            println!("  Authority: {}", authority_id);
-            println!("  Public key package: {} bytes", public_key_package.len());
-            println!("  Threshold: 1/1 (single-device)");
-            println!();
-            println!("Keys stored in secure storage. You can now sign operations.");
+            output.blank();
+            output.println("Key generation successful!");
+            output.kv("Authority", authority_id.to_string());
+            output.kv(
+                "Public key package",
+                format!("{} bytes", public_key_package.len()),
+            );
+            output.kv("Threshold", "1/1 (single-device)");
+            output.blank();
+            output.println("Keys stored in secure storage. You can now sign operations.");
         }
         Err(e) => {
-            println!("Key generation failed: {}", e);
-            println!("  This may occur if keys already exist for this authority.");
+            output.println(format!("Key generation failed: {}", e));
+            output.println("  This may occur if keys already exist for this authority.");
         }
     }
 
@@ -327,8 +340,9 @@ async fn execute_dkd_protocol(
     ctx: &HandlerContext<'_>,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
+    output: &mut CliOutput,
 ) -> Result<()> {
-    println!("Executing DKD (Distributed Key Derivation) protocol");
+    output.section("DKD (Distributed Key Derivation) Protocol");
 
     // Create participant device IDs from configs
     let participants: Vec<DeviceId> = configs
@@ -344,15 +358,13 @@ async fn execute_dkd_protocol(
         })
         .collect();
 
-    println!(
-        "DKD participants: {}",
-        participants
-            .iter()
-            .enumerate()
-            .map(|(i, id)| format!("{}:{}", i + 1, id))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
+    let participant_list = participants
+        .iter()
+        .enumerate()
+        .map(|(i, id)| format!("{}:{}", i + 1, id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    output.kv("DKD participants", participant_list);
 
     let total_participants = participants.len() as u16;
     let config = DkdConfig {
@@ -374,16 +386,19 @@ async fn execute_dkd_protocol(
         .await
         .map_err(|e| anyhow::anyhow!("DKD protocol execution failed: {}", e))?;
 
-    println!("DKD protocol completed successfully!");
-    println!("Session: {}", result.session_id.0);
-    println!("Participants: {}", result.participant_count);
-    println!("Derived key (len): {}", result.derived_key.len());
-    println!("Epoch: {}", result.epoch);
+    output.blank();
+    output.println("DKD protocol completed successfully!");
+    output.kv("Session", result.session_id.0.to_string());
+    output.kv("Participants", result.participant_count.to_string());
+    output.kv("Derived key length", result.derived_key.len().to_string());
+    output.kv("Epoch", result.epoch.to_string());
 
     Ok(())
 }
 
 /// Handle DKD testing with specific parameters
+///
+/// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
 pub async fn handle_dkd_test(
@@ -392,11 +407,13 @@ pub async fn handle_dkd_test(
     context: &str,
     threshold: u16,
     total: u16,
-) -> Result<()> {
-    println!(
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
+    output.println(format!(
         "Starting DKD test: app_id={}, context={}, threshold={}, total={}",
         app_id, context, threshold, total
-    );
+    ));
 
     // Create test participants
     let participants: Vec<DeviceId> = (0..total)
@@ -434,15 +451,13 @@ pub async fn handle_dkd_test(
         .await
         .map_err(|e| anyhow::anyhow!("DKD protocol execution failed: {}", e))?;
 
-    println!("DKD test completed successfully!");
-    println!(
-        "Results: session={}, participants={}, key_len={}",
-        result.session_id.0,
-        result.participant_count,
-        result.derived_key.len()
-    );
+    output.blank();
+    output.println("DKD test completed successfully!");
+    output.kv("Session", result.session_id.0.to_string());
+    output.kv("Participants", result.participant_count.to_string());
+    output.kv("Key length", result.derived_key.len().to_string());
 
-    Ok(())
+    Ok(output)
 }
 
 /// Threshold configuration structure
@@ -450,20 +465,70 @@ pub async fn handle_dkd_test(
 struct ThresholdConfig {
     device_id: String,
     threshold: u32,
-    _total_devices: u32,
-    _logging: Option<LoggingConfig>,
-    _network: Option<NetworkConfig>,
+    #[serde(rename = "total_devices")]
+    #[allow(dead_code)]
+    total_devices: u32,
+    #[allow(dead_code)]
+    logging: Option<LoggingConfig>,
+    #[allow(dead_code)]
+    network: Option<NetworkConfig>,
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct LoggingConfig {
-    _level: String,
-    _structured: bool,
+    level: String,
+    structured: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct NetworkConfig {
-    _default_port: u16,
-    _timeout: u64,
-    _max_retries: u32,
+    default_port: u16,
+    timeout: u64,
+    max_retries: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_config_data() {
+        let config_str = r#"
+device_id = "device_1"
+threshold = 2
+total_devices = 3
+"#;
+        let config = parse_config_data(config_str.as_bytes()).unwrap();
+        assert_eq!(config.device_id, "device_1");
+        assert_eq!(config.threshold, 2);
+    }
+
+    #[test]
+    fn test_validate_threshold_params_empty() {
+        let configs: Vec<(PathBuf, ThresholdConfig)> = vec![];
+        let mut output = CliOutput::new();
+        let result = validate_threshold_params(&configs, 2, &mut output);
+        assert!(result.is_err());
+        assert!(output.stderr_lines().iter().any(|l| l.contains("No valid")));
+    }
+
+    #[test]
+    fn test_validate_threshold_params_threshold_too_high() {
+        let configs = vec![(
+            PathBuf::from("test.toml"),
+            ThresholdConfig {
+                device_id: "d1".into(),
+                threshold: 2,
+                total_devices: 3,
+                logging: None,
+                network: None,
+            },
+        )];
+        let mut output = CliOutput::new();
+        let result = validate_threshold_params(&configs, 5, &mut output);
+        assert!(result.is_err());
+        assert!(output.stderr_lines().iter().any(|l| l.contains("greater")));
+    }
 }

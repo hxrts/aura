@@ -1970,7 +1970,7 @@ mod tests {
         let result = handler.create_chat_group(
             "Test Group",
             "alice",
-            vec!["bob".to_string(), "charlie".to_string()],
+            vec!["bob".to_string(), "carol".to_string()],
         );
         assert!(result.is_ok());
 
@@ -1992,7 +1992,7 @@ mod tests {
             .create_chat_group(
                 "Test Group",
                 "alice",
-                vec!["bob".to_string(), "charlie".to_string()],
+                vec!["bob".to_string(), "carol".to_string()],
             )
             .unwrap();
 
@@ -2050,7 +2050,7 @@ mod tests {
         // Initiate recovery process
         let result = handler.initiate_guardian_recovery(
             "bob",
-            vec!["alice".to_string(), "charlie".to_string()],
+            vec!["alice".to_string(), "carol".to_string()],
             2,
         );
         assert!(result.is_ok());

@@ -21,7 +21,7 @@ name = "phase1_frost"
 description = "FROST key generation"
 timeout_seconds = 3
 actions = [
-    { type = "run_choreography", choreography = "frost_key_generation", participants = ["alice", "bob", "charlie", "dave"], threshold = 3 }
+    { type = "run_choreography", choreography = "frost_key_generation", participants = ["alice", "bob", "carol", "dave"], threshold = 3 }
 ]
 
 [[phases]]
@@ -37,7 +37,7 @@ name = "phase3_session"
 description = "Establish session"
 timeout_seconds = 3
 actions = [
-    { type = "run_choreography", choreography = "session_establishment", participants = ["alice", "bob", "charlie"], threshold = 2 }
+    { type = "run_choreography", choreography = "session_establishment", participants = ["alice", "bob", "carol"], threshold = 2 }
 ]
 
 [[phases]]

@@ -55,6 +55,17 @@ pub enum InvitationDelta {
     },
     /// Invitation was removed/deleted
     InvitationRemoved { invitation_id: String },
+    /// Ceremony status changed
+    CeremonyStatusChanged {
+        ceremony_id: String,
+        /// Status: "initiated", "acceptance_received", "committed", "aborted"
+        status: String,
+        /// For "aborted" status, the reason
+        reason: Option<String>,
+        /// For "committed" status, the resulting relationship ID
+        relationship_id: Option<String>,
+        timestamp_ms: u64,
+    },
 }
 
 /// View reducer for invitation facts.
@@ -123,6 +134,50 @@ impl ViewDeltaReducer for InvitationViewReducer {
             InvitationFact::Cancelled { invitation_id, .. } => {
                 Some(InvitationDelta::InvitationRemoved { invitation_id })
             }
+            // Ceremony facts
+            InvitationFact::CeremonyInitiated {
+                ceremony_id,
+                timestamp_ms,
+                ..
+            } => Some(InvitationDelta::CeremonyStatusChanged {
+                ceremony_id,
+                status: "initiated".to_string(),
+                reason: None,
+                relationship_id: None,
+                timestamp_ms,
+            }),
+            InvitationFact::CeremonyAcceptanceReceived {
+                ceremony_id,
+                timestamp_ms,
+            } => Some(InvitationDelta::CeremonyStatusChanged {
+                ceremony_id,
+                status: "acceptance_received".to_string(),
+                reason: None,
+                relationship_id: None,
+                timestamp_ms,
+            }),
+            InvitationFact::CeremonyCommitted {
+                ceremony_id,
+                relationship_id,
+                timestamp_ms,
+            } => Some(InvitationDelta::CeremonyStatusChanged {
+                ceremony_id,
+                status: "committed".to_string(),
+                reason: None,
+                relationship_id: Some(relationship_id),
+                timestamp_ms,
+            }),
+            InvitationFact::CeremonyAborted {
+                ceremony_id,
+                reason,
+                timestamp_ms,
+            } => Some(InvitationDelta::CeremonyStatusChanged {
+                ceremony_id,
+                status: "aborted".to_string(),
+                reason: Some(reason),
+                relationship_id: None,
+                timestamp_ms,
+            }),
         };
 
         delta.map(|d| vec![d.into_view_delta()]).unwrap_or_default()

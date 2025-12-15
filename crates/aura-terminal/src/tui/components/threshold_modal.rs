@@ -155,12 +155,12 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
             height: 100pct,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+
         ) {
             View(
                 width: 50,
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
+                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
                 border_color: if props.focused { Theme::BORDER_FOCUS } else { Theme::BORDER },
             ) {
@@ -196,7 +196,6 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
                         View(
                             padding_left: 1,
                             padding_right: 1,
-                            background_color: if can_decrement { Theme::BG_DARK } else { Theme::BG_DARK },
                             border_style: BorderStyle::Round,
                             border_color: if can_decrement { Theme::SECONDARY } else { Theme::BORDER },
                         ) {
@@ -210,14 +209,13 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
                         View(
                             padding_left: 2,
                             padding_right: 2,
-                            background_color: Theme::PRIMARY,
                             border_style: BorderStyle::Round,
                             border_color: Theme::PRIMARY,
                         ) {
                             Text(
                                 content: format!("{}", k),
                                 weight: Weight::Bold,
-                                color: Theme::BG_DARK,
+                                color: Theme::PRIMARY,
                             )
                         }
 
@@ -236,7 +234,6 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
                         View(
                             padding_left: 1,
                             padding_right: 1,
-                            background_color: if can_increment { Theme::BG_DARK } else { Theme::BG_DARK },
                             border_style: BorderStyle::Round,
                             border_color: if can_increment { Theme::SECONDARY } else { Theme::BORDER },
                         ) {

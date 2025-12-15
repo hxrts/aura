@@ -18,11 +18,12 @@
 - [Authorization](109_authorization.md)
 - [Rendezvous Architecture](110_rendezvous.md)
 - [State Reduction Flows](110_state_reduction.md)
-- [Maintenance Guidelines](111_maintenance.md)
+- [Distributed Maintenance Architecture](111_maintenance.md)
 - [Aura Messaging Protocol (AMP)](112_amp.md)
 - [Database Architecture](113_database.md)
 - [Social Architecture](114_social_architecture.md)
 - [Terminal User Interface](115_tui.md)
+- [Cryptographic Architecture](116_crypto.md)
 - [Hello World Guide](801_hello_world_guide.md)
 - [Core Systems Guide: Time Domain Selection](802_core_systems_guide.md)
 - [Coordination Systems Guide](803_coordination_guide.md)
@@ -32,13 +33,17 @@
 - [Simulation Guide](806_simulation_guide.md)
 - [Verification Guide](807_verification_guide.md)
 - [Maintenance and OTA Guide](808_maintenance_guide.md)
+- [Generative Testing Guide](809_generative_testing_guide.md)
+- [Reactive Signals Guide](810_reactive_signals_guide.md)
 - [Aura Crate Structure and Dependency Graph](999_project_structure.md)
 
 # Blog
 
-- [Beyond Local First](blog/000_beyond_local_first.md)
-- [Ratchets Without Trees](blog/001_ratchets_without_trees.md)
-- [Aura Consensus](blog/002_consensus.md)
+- [000 Digital Sovereignty](blog/000_digital_sovereignty.md)
+- [Beyond Local-First](blog/001_beyond_local_first.md)
+- [Ratchets Without Trees](blog/002_ratchets_without_trees.md)
+- [The Shape of Agreement](blog/003_the_shape_of_agreement.md)
+- [Aura Consensus](blog/004_aura_consensus.md)
 
 # Demo
 

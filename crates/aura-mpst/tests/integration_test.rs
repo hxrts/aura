@@ -81,7 +81,7 @@ fn test_extension_types() {
     let journal_fact = JournalFact {
         fact: "message_sent".to_string(),
         operation: "send".to_string(),
-        role: "Charlie".to_string(),
+        role: "Carol".to_string(),
     };
     assert_eq!(journal_fact.fact, "message_sent");
 

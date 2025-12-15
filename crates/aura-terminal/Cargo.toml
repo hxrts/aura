@@ -19,13 +19,22 @@ name = "aura"
 path = "src/main.rs"
 required-features = ["terminal"]
 
+# Integration tests requiring the testing module
+[[test]]
+name = "itf_trace_replay"
+required-features = ["testing"]
+
 [features]
 default = ["terminal"]
 terminal = []
 
+# Testing utilities for deterministic TUI/CLI testing
+testing = ["terminal"]
+
 # Development mode with simulator, testkit, and debugging
 development = [
     "terminal",
+    "testing",
     "aura-app/debug-serialize",
     "aura-app/instrumented",
     "dep:aura-simulator",
@@ -91,7 +100,9 @@ aura-macros = { path = "../aura-macros" }
 tempfile = { workspace = true }
 insta = "1.34"  # Snapshot testing for TUI render tests
 futures = "0.3"  # For mock terminal testing with streams
+proptest = { workspace = true }  # Property-based testing for TUI state machine
 
-# PTY-based integration testing
+# PTY-based integration testing (optional - only used by some e2e tests)
+# These tests are slow and flaky; prefer deterministic tests in tui_deterministic.rs
 expectrl = "0.7"  # Terminal automation (like expect)
 escargot = "0.5"  # Build binary for integration tests

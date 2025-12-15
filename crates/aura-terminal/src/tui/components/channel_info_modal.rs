@@ -44,12 +44,12 @@ pub fn ChannelInfoModal(props: &ChannelInfoModalProps) -> impl Into<AnyElement<'
             height: 100pct,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+
         ) {
             View(
                 width: Percent(60.0),
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
+                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
                 border_color: Theme::PRIMARY,
             ) {

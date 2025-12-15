@@ -77,6 +77,9 @@ pub mod coordinator;
 /// Guardian setup choreography for initial relationship establishment
 pub mod guardian_setup;
 
+/// Consensus-based guardian ceremony with linear protocol guarantees
+pub mod guardian_ceremony;
+
 /// Guardian key recovery approvals
 pub mod guardian_key_recovery;
 
@@ -85,6 +88,9 @@ pub mod guardian_membership;
 
 /// Recovery protocol using relational contexts
 pub mod recovery_protocol;
+
+/// Consensus-based recovery approval ceremony
+pub mod recovery_ceremony;
 
 /// Shared types for guardian operations
 pub mod types;
@@ -108,6 +114,12 @@ pub use aura_authenticate::{RecoveryContext, RecoveryOperationType};
 pub use guardian_membership::GuardianMembershipCoordinator;
 pub use guardian_setup::GuardianSetupCoordinator;
 
+// Re-export consensus-based ceremony
+pub use guardian_ceremony::{
+    CeremonyId, CeremonyResponse, CeremonyState, CeremonyStatus, GuardianCeremonyExecutor,
+    GuardianCeremonyManager, GuardianRotationOp, GuardianState,
+};
+
 // Re-export new recovery protocol
 pub use recovery_protocol::{RecoveryOutcome, RecoveryProtocol, RecoveryProtocolHandler};
 
@@ -130,4 +142,11 @@ pub use effects::{RecoveryEffects, RecoveryNetworkEffects};
 pub use state::{
     MembershipProposalState, ProposalStatus, RecoveryOperationState, RecoveryState, RecoveryStatus,
     SetupState, SetupStatus,
+};
+
+// Re-export consensus-based recovery ceremony
+pub use recovery_ceremony::{
+    CeremonyRecoveryOperation, CeremonyRecoveryRequest, RecoveryApproval, RecoveryCeremonyConfig,
+    RecoveryCeremonyEffects, RecoveryCeremonyExecutor, RecoveryCeremonyFact, RecoveryCeremonyId,
+    RecoveryCeremonyState, RecoveryCeremonyStatus,
 };

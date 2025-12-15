@@ -1,6 +1,9 @@
 //! AMP CLI handlers with actual functionality.
+//!
+//! Returns structured `CliOutput` for testability.
+
 use crate::cli::amp::AmpAction;
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::Result;
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{hash, Hash32};
@@ -12,8 +15,10 @@ use std::str::FromStr;
 
 /// Handle AMP commands with effect system integration.
 ///
+/// Returns `CliOutput` instead of printing directly.
+///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_amp(ctx: &HandlerContext<'_>, action: &AmpAction) -> Result<()> {
+pub async fn handle_amp(ctx: &HandlerContext<'_>, action: &AmpAction) -> Result<CliOutput> {
     match action {
         AmpAction::Inspect { context, channel } => handle_amp_inspect(ctx, context, channel).await,
         AmpAction::Bump {
@@ -32,29 +37,34 @@ async fn handle_amp_inspect(
     ctx: &HandlerContext<'_>,
     context_str: &str,
     channel_str: &str,
-) -> Result<()> {
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let context = ContextId::from_str(context_str)?;
     let channel = ChannelId::from_str(channel_str)?;
 
     let state = get_channel_state(ctx.effects(), context, channel).await?;
 
-    println!("Channel State for {}:{}", context_str, channel_str);
-    println!("  Current Epoch: {}", state.chan_epoch);
-    println!("  Current Generation: {}", state.current_gen);
-    println!("  Last Checkpoint Gen: {}", state.last_checkpoint_gen);
-    println!("  Skip Window: {}", state.skip_window);
+    output.section(&format!(
+        "Channel State for {}:{}",
+        context_str, channel_str
+    ));
+    output.kv("Current Epoch", state.chan_epoch.to_string());
+    output.kv("Current Generation", state.current_gen.to_string());
+    output.kv("Last Checkpoint Gen", state.last_checkpoint_gen.to_string());
+    output.kv("Skip Window", state.skip_window.to_string());
 
     if let Some(pending) = &state.pending_bump {
-        println!(
-            "  Pending Bump: {} -> {}",
-            pending.parent_epoch, pending.new_epoch
+        output.kv(
+            "Pending Bump",
+            format!("{} -> {}", pending.parent_epoch, pending.new_epoch),
         );
-        println!("  Bump ID: {}", pending.bump_id);
+        output.kv("Bump ID", pending.bump_id.to_string());
     } else {
-        println!("  No pending bumps");
+        output.println("No pending bumps");
     }
 
-    Ok(())
+    Ok(output)
 }
 
 /// Handle AMP channel epoch bump proposal
@@ -63,15 +73,17 @@ async fn handle_amp_bump(
     context_str: &str,
     channel_str: &str,
     reason: &str,
-) -> Result<()> {
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let context = ContextId::from_str(context_str)?;
     let channel = ChannelId::from_str(channel_str)?;
 
     let state = get_channel_state(ctx.effects(), context, channel).await?;
 
     if state.pending_bump.is_some() {
-        println!("Error: Channel already has a pending bump");
-        return Ok(());
+        output.eprintln("Error: Channel already has a pending bump");
+        return Ok(output);
     }
 
     let proposal = ProposedChannelEpochBump {
@@ -91,14 +103,14 @@ async fn handle_amp_bump(
         ))
         .await?;
 
-    println!(
+    output.println(format!(
         "Proposed epoch bump: {} -> {} (reason: {})",
         proposal.parent_epoch, proposal.new_epoch, reason
-    );
-    println!("Bump ID: {}", proposal.bump_id);
-    println!("Note: Consensus finalization is handled automatically by the protocol layer.");
+    ));
+    output.kv("Bump ID", proposal.bump_id.to_string());
+    output.println("Note: Consensus finalization is handled automatically by the protocol layer.");
 
-    Ok(())
+    Ok(output)
 }
 
 /// Handle AMP channel checkpoint creation
@@ -106,7 +118,9 @@ async fn handle_amp_checkpoint(
     ctx: &HandlerContext<'_>,
     context_str: &str,
     channel_str: &str,
-) -> Result<()> {
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let context = ContextId::from_str(context_str)?;
     let channel = ChannelId::from_str(channel_str)?;
 
@@ -130,10 +144,13 @@ async fn handle_amp_checkpoint(
         .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint.clone()))
         .await?;
 
-    println!("Checkpoint created for {}:{}", context_str, channel_str);
-    println!("  Epoch: {}", checkpoint.chan_epoch);
-    println!("  Base Generation: {}", checkpoint.base_gen);
-    println!("  Window Size: {}", checkpoint.window);
+    output.section(&format!(
+        "Checkpoint created for {}:{}",
+        context_str, channel_str
+    ));
+    output.kv("Epoch", checkpoint.chan_epoch.to_string());
+    output.kv("Base Generation", checkpoint.base_gen.to_string());
+    output.kv("Window Size", checkpoint.window.to_string());
 
-    Ok(())
+    Ok(output)
 }

@@ -13,16 +13,16 @@ async fn test_message_history_validation_comprehensive() {
     // Phase 1: Setup chat group and baseline messages
     let group_id = handler
         .create_chat_group(
-            "Alice, Bob & Charlie",
+            "Alice, Bob & Carol",
             "alice",
-            vec!["bob".to_string(), "charlie".to_string()],
+            vec!["bob".to_string(), "carol".to_string()],
         )
         .expect("group created");
 
     let messages = vec![
         ("alice", "Welcome to our group, Bob!"),
         ("bob", "Thanks Alice! Great to be here."),
-        ("charlie", "Hey everyone! This chat system is awesome."),
+        ("carol", "Hey everyone! This chat system is awesome."),
         ("alice", "Bob, you should backup your account soon"),
         ("bob", "I'll do that right after this demo!"),
     ];
@@ -40,7 +40,7 @@ async fn test_message_history_validation_comprehensive() {
 
     // Guardian recovery coordination
     handler
-        .initiate_guardian_recovery("bob", vec!["alice".to_string(), "charlie".to_string()], 2)
+        .initiate_guardian_recovery("bob", vec!["alice".to_string(), "carol".to_string()], 2)
         .expect("guardian recovery initiated");
 
     let recovery_success = handler
@@ -94,14 +94,14 @@ async fn test_multi_group_message_history() {
         .unwrap();
 
     let group2_id = handler
-        .create_chat_group("Bob & Charlie", "bob", vec!["charlie".to_string()])
+        .create_chat_group("Bob & Carol", "bob", vec!["carol".to_string()])
         .unwrap();
 
     let group3_id = handler
         .create_chat_group(
             "All Friends",
             "alice",
-            vec!["bob".to_string(), "charlie".to_string()],
+            vec!["bob".to_string(), "carol".to_string()],
         )
         .unwrap();
 
@@ -109,11 +109,11 @@ async fn test_multi_group_message_history() {
     let messages = vec![
         (group1_id.as_str(), "alice", "Alice to Bob privately"),
         (group1_id.as_str(), "bob", "Bob replies to Alice"),
-        (group2_id.as_str(), "bob", "Bob to Charlie privately"),
-        (group2_id.as_str(), "charlie", "Charlie replies to Bob"),
+        (group2_id.as_str(), "bob", "Bob to Carol privately"),
+        (group2_id.as_str(), "carol", "Carol replies to Bob"),
         (group3_id.as_str(), "alice", "Alice to group"),
         (group3_id.as_str(), "bob", "Bob to group"),
-        (group3_id.as_str(), "charlie", "Charlie to group"),
+        (group3_id.as_str(), "carol", "Carol to group"),
     ];
 
     for (group_id, sender, message) in &messages {
@@ -136,13 +136,13 @@ async fn test_multi_group_message_history() {
         "Alice should see 4 messages from her groups"
     );
 
-    // Charlie should see messages from group2 and group3 (4 messages total)
-    let charlie_pre_loss = handler
-        .validate_message_history("charlie", 4, false)
+    // Carol should see messages from group2 and group3 (4 messages total)
+    let carol_pre_loss = handler
+        .validate_message_history("carol", 4, false)
         .unwrap();
     assert!(
-        charlie_pre_loss,
-        "Charlie should see 4 messages from his groups"
+        carol_pre_loss,
+        "Carol should see 4 messages from his groups"
     );
 
     // Simulate Bob's data loss
@@ -152,7 +152,7 @@ async fn test_multi_group_message_history() {
 
     // Initiate and complete recovery
     handler
-        .initiate_guardian_recovery("bob", vec!["alice".to_string(), "charlie".to_string()], 2)
+        .initiate_guardian_recovery("bob", vec!["alice".to_string(), "carol".to_string()], 2)
         .unwrap();
 
     handler
@@ -275,7 +275,7 @@ async fn test_concurrent_message_history_operations() {
         .create_chat_group(
             "Concurrent Test",
             "alice",
-            vec!["bob".to_string(), "charlie".to_string()],
+            vec!["bob".to_string(), "carol".to_string()],
         )
         .unwrap();
 
@@ -283,7 +283,7 @@ async fn test_concurrent_message_history_operations() {
     let concurrent_messages = vec![
         ("alice", "Concurrent message 1"),
         ("bob", "Bob's last message before loss"),
-        ("charlie", "Charlie's message"),
+        ("carol", "Carol's message"),
     ];
 
     for (sender, message) in &concurrent_messages {
@@ -300,7 +300,7 @@ async fn test_concurrent_message_history_operations() {
     // More messages sent while Bob is offline
     let offline_messages = vec![
         ("alice", "Message while Bob offline 1"),
-        ("charlie", "Message while Bob offline 2"),
+        ("carol", "Message while Bob offline 2"),
         ("alice", "Message while Bob offline 3"),
     ];
 
@@ -312,7 +312,7 @@ async fn test_concurrent_message_history_operations() {
 
     // Initiate recovery
     handler
-        .initiate_guardian_recovery("bob", vec!["alice".to_string(), "charlie".to_string()], 2)
+        .initiate_guardian_recovery("bob", vec!["alice".to_string(), "carol".to_string()], 2)
         .unwrap();
 
     handler

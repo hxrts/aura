@@ -202,12 +202,8 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                 } else {
                     peers.iter().enumerate().map(|(idx, peer)| {
                         let is_selected = idx == selected_index && focused;
-                        let bg = if is_selected {
-                            Theme::BG_SELECTED
-                        } else {
-                            Theme::BG_DARK
-                        };
                         let pointer = if is_selected { "▸ " } else { "  " }.to_string();
+                        let text_color = if is_selected { Theme::PRIMARY } else { Theme::TEXT };
                         let label = peer.display_label();
                         let method = format!("[{}]", peer.discovery_method);
                         let address = peer.address.clone();
@@ -222,13 +218,12 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                             View(
                                 key: key,
                                 flex_direction: FlexDirection::Row,
-                                background_color: bg,
                                 padding_left: 1,
                                 padding_right: 1,
                                 gap: 1,
                             ) {
                                 Text(content: pointer, color: Theme::PRIMARY)
-                                Text(content: label, color: Theme::TEXT)
+                                Text(content: label, color: text_color)
                                 Text(content: method, color: Theme::SECONDARY)
                                 // Show invitation status badge if applicable
                                 #(if has_status {

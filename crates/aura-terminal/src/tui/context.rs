@@ -35,7 +35,7 @@ use tokio::sync::RwLock;
 
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL,
-    SYNC_STATUS_SIGNAL,
+    RECOVERY_SIGNAL, SYNC_STATUS_SIGNAL,
 };
 use aura_app::views::contacts::Contact as ViewContact;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -859,7 +859,12 @@ impl IoContext {
             let mut core = self.app_core.write().await;
             match core.dispatch(intent) {
                 Ok(_fact_id) => {
-                    // Successfully dispatched - state will be updated via signals
+                    // Commit pending facts and emit to reactive signals
+                    // This is critical: dispatch() only queues facts, we must commit and emit
+                    // to notify UI subscribers (ChatScreen, ContactsScreen, etc.)
+                    if let Err(e) = core.commit_pending_facts_and_emit().await {
+                        tracing::warn!("Failed to commit facts or emit signals: {}", e);
+                    }
                     Ok(())
                 }
                 Err(e) => Err(format!("Intent dispatch failed: {}", e)),
@@ -877,6 +882,22 @@ impl IoContext {
                     self.set_channel_mode(&channel_id, &flags).await;
                     Ok(())
                 }
+                Ok(OpResponse::NicknameUpdated { name }) => {
+                    // Update display name in IoContext
+                    self.set_display_name(&name).await;
+                    Ok(())
+                }
+                Ok(OpResponse::MfaPolicyUpdated { require_mfa }) => {
+                    // Update MFA policy in IoContext
+                    use crate::tui::types::MfaPolicy;
+                    let policy = if require_mfa {
+                        MfaPolicy::SensitiveOnly
+                    } else {
+                        MfaPolicy::Disabled
+                    };
+                    self.set_mfa_policy(policy).await;
+                    Ok(())
+                }
                 Ok(OpResponse::InvitationImported {
                     sender_id,
                     invitation_type,
@@ -884,8 +905,12 @@ impl IoContext {
                     ..
                 }) => {
                     // Add the sender as a contact
-                    self.add_contact_from_invitation(&sender_id, &invitation_type, message.as_deref())
-                        .await;
+                    self.add_contact_from_invitation(
+                        &sender_id,
+                        &invitation_type,
+                        message.as_deref(),
+                    )
+                    .await;
                     Ok(())
                 }
                 Ok(OpResponse::Ok) => {
@@ -968,9 +993,12 @@ impl IoContext {
             let mut core = self.app_core.write().await;
             match core.dispatch(intent) {
                 Ok(_fact_id) => {
-                    // Successfully dispatched - state will be updated via signals
-                    // For "wait" semantics, we could poll signals for confirmation
-                    // but for now this is equivalent to regular dispatch
+                    // Commit pending facts and emit to reactive signals
+                    // This is critical: dispatch() only queues facts, we must commit and emit
+                    // to notify UI subscribers (ChatScreen, ContactsScreen, etc.)
+                    if let Err(e) = core.commit_pending_facts_and_emit().await {
+                        tracing::warn!("Failed to commit facts or emit signals: {}", e);
+                    }
                     Ok(())
                 }
                 Err(e) => Err(format!("Intent dispatch failed: {}", e)),
@@ -988,6 +1016,22 @@ impl IoContext {
                     self.set_channel_mode(&channel_id, &flags).await;
                     Ok(())
                 }
+                Ok(OpResponse::NicknameUpdated { name }) => {
+                    // Update display name in IoContext
+                    self.set_display_name(&name).await;
+                    Ok(())
+                }
+                Ok(OpResponse::MfaPolicyUpdated { require_mfa }) => {
+                    // Update MFA policy in IoContext
+                    use crate::tui::types::MfaPolicy;
+                    let policy = if require_mfa {
+                        MfaPolicy::SensitiveOnly
+                    } else {
+                        MfaPolicy::Disabled
+                    };
+                    self.set_mfa_policy(policy).await;
+                    Ok(())
+                }
                 Ok(OpResponse::InvitationImported {
                     sender_id,
                     invitation_type,
@@ -995,8 +1039,12 @@ impl IoContext {
                     ..
                 }) => {
                     // Add the sender as a contact
-                    self.add_contact_from_invitation(&sender_id, &invitation_type, message.as_deref())
-                        .await;
+                    self.add_contact_from_invitation(
+                        &sender_id,
+                        &invitation_type,
+                        message.as_deref(),
+                    )
+                    .await;
                     Ok(())
                 }
                 Ok(OpResponse::Ok) => {
@@ -1280,17 +1328,24 @@ impl IoContext {
     /// Add a contact from an imported invitation
     ///
     /// Called when an invitation is successfully imported. Adds the sender
-    /// as a contact in the CONTACTS_SIGNAL, marking them as a guardian if
-    /// the invitation type is "guardian".
+    /// as a contact in the CONTACTS_SIGNAL.
+    ///
+    /// **Important**: Importing an invitation does NOT make someone a guardian.
+    /// The `is_guardian` flag indicates "this person is MY guardian", which
+    /// requires a complete guardian acceptance flow:
+    /// 1. User creates guardian invitation and shares with contact
+    /// 2. Contact imports invitation (they become a contact, NOT a guardian)
+    /// 3. Contact accepts the invitation
+    /// 4. Contact becomes the user's guardian
+    ///
+    /// When WE import someone else's guardian invitation, they want US to be
+    /// THEIR guardian - they don't become OUR guardian.
     pub async fn add_contact_from_invitation(
         &self,
         sender_id: &str,
-        invitation_type: &str,
+        _invitation_type: &str,
         message: Option<&str>,
     ) {
-        // Determine if this is a guardian invitation
-        let is_guardian = invitation_type.to_lowercase().contains("guardian");
-
         // Extract name from message if available (demo invitations include name)
         // Format: "Guardian invitation from Alice (demo)"
         let suggested_name = message.and_then(|msg| {
@@ -1305,11 +1360,13 @@ impl IoContext {
         });
 
         // Create contact entry
+        // NOTE: is_guardian is always false when importing - guardian status
+        // is only established after completing the guardian acceptance flow
         let contact = ViewContact {
             id: sender_id.to_string(),
             petname: suggested_name.clone().unwrap_or_default(),
             suggested_name,
-            is_guardian,
+            is_guardian: false, // Never set on import - requires acceptance flow
             is_resident: false,
             last_interaction: Some(
                 std::time::SystemTime::now()
@@ -1321,23 +1378,66 @@ impl IoContext {
         };
 
         // Update CONTACTS_SIGNAL
-        if let Ok(core) = self.app_core.try_read() {
-            if let Ok(mut contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-                // Check if contact already exists
-                if !contacts_state.contacts.iter().any(|c| c.id == sender_id) {
-                    contacts_state.contacts.push(contact);
-                    if let Err(e) = core.emit(&*CONTACTS_SIGNAL, contacts_state).await {
-                        tracing::warn!("Failed to update contacts signal: {}", e);
-                    } else {
-                        tracing::info!(
-                            "Added contact from invitation: {} (guardian: {})",
-                            sender_id,
-                            is_guardian
-                        );
-                    }
+        // Note: Use .read().await (not try_read()) to properly wait for the lock.
+        // try_read() would silently fail if the lock is held during TUI rendering.
+        let core = self.app_core.read().await;
+        if let Ok(mut contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
+            // Check if contact already exists
+            if !contacts_state.contacts.iter().any(|c| c.id == sender_id) {
+                contacts_state.contacts.push(contact);
+                if let Err(e) = core.emit(&*CONTACTS_SIGNAL, contacts_state).await {
+                    tracing::warn!("Failed to update contacts signal: {}", e);
                 } else {
-                    tracing::debug!("Contact {} already exists, skipping", sender_id);
+                    tracing::info!("Added contact from invitation: {}", sender_id);
                 }
+            } else {
+                tracing::debug!("Contact {} already exists, skipping", sender_id);
+            }
+        }
+    }
+
+    /// Toggle guardian status for a contact (demo mode)
+    ///
+    /// In demo mode, when user selects a contact as guardian, we immediately
+    /// mark them as a guardian (simulating instant acceptance).
+    ///
+    /// This updates both:
+    /// - CONTACTS_SIGNAL: Sets `is_guardian` flag on the contact
+    /// - RECOVERY_SIGNAL: Adds/removes the contact from guardian list
+    pub async fn toggle_contact_guardian(&self, contact_id: &str, is_guardian: bool) {
+        tracing::info!(
+            "Toggling guardian status for contact {}: {}",
+            contact_id,
+            is_guardian
+        );
+
+        let core = self.app_core.read().await;
+
+        // 1. Update CONTACTS_SIGNAL
+        if let Ok(mut contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
+            if let Some(contact) = contacts_state
+                .contacts
+                .iter_mut()
+                .find(|c| c.id == contact_id)
+            {
+                contact.is_guardian = is_guardian;
+                if let Err(e) = core.emit(&*CONTACTS_SIGNAL, contacts_state.clone()).await {
+                    tracing::warn!("Failed to update contacts signal: {}", e);
+                }
+            }
+        }
+
+        // 2. Update RECOVERY_SIGNAL
+        if let Ok(mut recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
+            recovery_state.toggle_guardian(contact_id.to_string(), is_guardian);
+            if let Err(e) = core.emit(&*RECOVERY_SIGNAL, recovery_state).await {
+                tracing::warn!("Failed to update recovery signal: {}", e);
+            } else {
+                tracing::info!(
+                    "Guardian status toggled for {}: is_guardian={}",
+                    contact_id,
+                    is_guardian
+                );
             }
         }
     }
@@ -1572,6 +1672,7 @@ pub trait HasContext {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
+    #![allow(clippy::disallowed_methods)] // Test code uses std::fs for setup/teardown
     use super::*;
 
     #[tokio::test]
@@ -1613,7 +1714,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_account_writes_file() {
-        // Create a temporary directory for the test
+        // Set up isolated test directory
         let test_dir = std::env::temp_dir().join(format!("aura-ctx-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");

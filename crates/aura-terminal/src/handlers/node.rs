@@ -1,8 +1,9 @@
 //! Node Command Handler
 //!
 //! Effect-based implementation of the node command.
+//! Returns structured `CliOutput` for testability.
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::Result;
 use aura_core::effects::PhysicalTimeEffects;
 use aura_protocol::effect_traits::StorageEffects;
@@ -11,16 +12,22 @@ use std::path::Path;
 
 /// Handle node operations through effects
 ///
+/// Returns `CliOutput` instead of printing directly.
+///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
 pub async fn handle_node(
     ctx: &HandlerContext<'_>,
     port: u16,
     daemon: bool,
     config_path: &Path,
-) -> Result<()> {
-    println!("Starting node on port {} (daemon: {})", port, daemon);
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
 
-    println!("Config: {}", config_path.display());
+    output.println(format!(
+        "Starting node on port {} (daemon: {})",
+        port, daemon
+    ));
+    output.kv("Config", config_path.display().to_string());
 
     // Validate config exists through storage effects
     if ctx
@@ -29,7 +36,7 @@ pub async fn handle_node(
         .await
         .map_or(true, |data| data.is_none())
     {
-        eprintln!("Config file not found: {}", config_path.display());
+        output.eprintln(format!("Config file not found: {}", config_path.display()));
         return Err(anyhow::anyhow!(
             "Config file not found: {}",
             config_path.display()
@@ -37,19 +44,25 @@ pub async fn handle_node(
     }
 
     // Load and validate configuration
-    let _config = load_node_config(ctx, config_path).await?;
+    let _config = load_node_config(ctx, config_path, &mut output).await?;
 
     if daemon {
         // Simulate daemon mode through effects
-        run_daemon_mode(ctx, port).await
+        run_daemon_mode(ctx, port, &mut output).await?;
     } else {
         // Run interactive mode through effects
-        run_interactive_mode(ctx, port).await
+        run_interactive_mode(ctx, port, &mut output).await?;
     }
+
+    Ok(output)
 }
 
 /// Load node configuration through storage effects
-async fn load_node_config(ctx: &HandlerContext<'_>, config_path: &Path) -> Result<NodeConfig> {
+async fn load_node_config(
+    ctx: &HandlerContext<'_>,
+    config_path: &Path,
+    output: &mut CliOutput,
+) -> Result<NodeConfig> {
     let config_data = ctx
         .effects()
         .retrieve(&config_path.display().to_string())
@@ -63,23 +76,27 @@ async fn load_node_config(ctx: &HandlerContext<'_>, config_path: &Path) -> Resul
     let config: NodeConfig = toml::from_str(&config_str)
         .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
 
-    println!("Node configuration loaded");
+    output.println("Node configuration loaded");
 
     Ok(config)
 }
 
 /// Run node in daemon mode through effects
-async fn run_daemon_mode(ctx: &HandlerContext<'_>, port: u16) -> Result<()> {
-    println!("Initializing daemon mode...");
+async fn run_daemon_mode(
+    ctx: &HandlerContext<'_>,
+    port: u16,
+    output: &mut CliOutput,
+) -> Result<()> {
+    output.println("Initializing daemon mode...");
 
     // Simulate daemon initialization
     let start_time = ctx.effects().current_epoch().await.unwrap_or(0);
-    println!("Node started at epoch: {}", start_time);
+    output.kv("Node started at epoch", start_time.to_string());
 
     // Simulate some startup delay and health checks
-    simulate_startup_delay(ctx).await?;
+    simulate_startup_delay(ctx, output).await?;
 
-    println!("Node daemon started successfully on port {}", port);
+    output.println(format!("Node daemon started successfully on port {}", port));
 
     // Run a short, effect-driven heartbeat loop to verify the node can make progress
     for idx in 0..3 {
@@ -88,32 +105,36 @@ async fn run_daemon_mode(ctx: &HandlerContext<'_>, port: u16) -> Result<()> {
             .await
             .map_err(|e| anyhow::anyhow!("daemon heartbeat sleep failed: {}", e))?;
         let epoch = ctx.effects().current_epoch().await.unwrap_or(0);
-        println!("Daemon heartbeat {} at epoch {}", idx + 1, epoch);
+        output.println(format!("Daemon heartbeat {} at epoch {}", idx + 1, epoch));
     }
 
     Ok(())
 }
 
 /// Run node in interactive mode through effects
-async fn run_interactive_mode(ctx: &HandlerContext<'_>, port: u16) -> Result<()> {
-    println!(
+async fn run_interactive_mode(
+    ctx: &HandlerContext<'_>,
+    port: u16,
+    output: &mut CliOutput,
+) -> Result<()> {
+    output.println(format!(
         "Node started in interactive mode on port {}. Press Ctrl+C to stop.",
         port
-    );
+    ));
 
     let start_time = ctx.effects().current_epoch().await.unwrap_or(0);
-    println!("Started at epoch: {}", start_time);
+    output.kv("Started at epoch", start_time.to_string());
 
     // Simulate interactive mode - in real implementation would handle signals
-    simulate_interactive_session(ctx).await?;
+    simulate_interactive_session(ctx, output).await?;
 
-    println!("Node stopped");
+    output.println("Node stopped");
 
     Ok(())
 }
 
 /// Simulate startup delay using time effects
-async fn simulate_startup_delay(ctx: &HandlerContext<'_>) -> Result<()> {
+async fn simulate_startup_delay(ctx: &HandlerContext<'_>, output: &mut CliOutput) -> Result<()> {
     let delay_start = ctx.effects().current_epoch().await.unwrap_or(0);
 
     // Simulate 1 second startup time
@@ -129,16 +150,19 @@ async fn simulate_startup_delay(ctx: &HandlerContext<'_>) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("startup sleep failed: {}", e))?;
     }
 
-    println!("Startup complete");
+    output.println("Startup complete");
 
     Ok(())
 }
 
 /// Simulate interactive session
-async fn simulate_interactive_session(ctx: &HandlerContext<'_>) -> Result<()> {
+async fn simulate_interactive_session(
+    ctx: &HandlerContext<'_>,
+    output: &mut CliOutput,
+) -> Result<()> {
     for i in 1..=3 {
         let current = ctx.effects().current_epoch().await.unwrap_or(0);
-        println!("Interactive tick {} at epoch {}", i, current);
+        output.println(format!("Interactive tick {} at epoch {}", i, current));
 
         // Simulate some work
         ctx.effects()
@@ -147,7 +171,7 @@ async fn simulate_interactive_session(ctx: &HandlerContext<'_>) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("interactive sleep failed: {}", e))?;
     }
 
-    println!("Interactive session ended (simulated)");
+    output.println("Interactive session ended (simulated)");
 
     Ok(())
 }

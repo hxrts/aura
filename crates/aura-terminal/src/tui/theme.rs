@@ -16,6 +16,7 @@ impl Theme {
     // === Text Colors ===
     pub const TEXT: Color = Color::White;
     pub const TEXT_MUTED: Color = Color::AnsiValue(245); // Light grey - visible on dark backgrounds
+    pub const TEXT_DISABLED: Color = Color::AnsiValue(240); // Darker grey - for inactive/disabled elements
     pub const TEXT_HIGHLIGHT: Color = Color::Cyan;
 
     // === Background Colors ===
@@ -24,12 +25,15 @@ impl Theme {
     pub const BG_SELECTED: Color = Color::AnsiValue(24); // Dark blue - distinct but not overpowering
     pub const BG_HOVER: Color = Color::AnsiValue(238); // Slightly lighter than dark
     pub const OVERLAY: Color = Color::AnsiValue(0); // Black for overlay backdrop
+    /// Solid background for modal/toast content boxes (opaque to cover content behind)
+    /// Uses black to match most terminal default backgrounds
+    pub const BG_MODAL: Color = Color::AnsiValue(0); // Black - matches typical terminal background
 
     // === List Item Colors (for consistent scrollable lists) ===
-    /// Background for selected list items
-    pub const LIST_BG_SELECTED: Color = Color::AnsiValue(24); // Dark blue
-    /// Background for unselected list items
-    pub const LIST_BG_NORMAL: Color = Color::AnsiValue(236); // Dark grey
+    /// Background for selected list items (terminal default)
+    pub const LIST_BG_SELECTED: Color = Color::Reset;
+    /// Background for unselected list items (terminal default)
+    pub const LIST_BG_NORMAL: Color = Color::Reset;
     /// Text color for selected list items - high contrast on dark blue
     pub const LIST_TEXT_SELECTED: Color = Color::White;
     /// Primary text color for unselected list items

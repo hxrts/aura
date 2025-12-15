@@ -52,6 +52,7 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            width: 100pct,
             border_style: BorderStyle::Round,
             border_color: border_color,
         ) {
@@ -63,10 +64,9 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
                         flex_direction: FlexDirection::Row,
                         padding_left: 1,
                         padding_right: 1,
-                        background_color: Theme::BG_DARK,
                         border_style: BorderStyle::Single,
                         border_edges: Edges::Bottom,
-                        border_color: Theme::BORDER,
+                        border_color: border_color,
                     ) {
                         Text(content: "↩ Reply to: ", color: Theme::TEXT_MUTED)
                         Text(content: reply_text, color: Theme::TEXT)
@@ -87,14 +87,14 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
                 Text(content: if sending { "> " } else { "> " }, color: Theme::PRIMARY)
                 Text(content: display_text, color: text_color, wrap: TextWrap::NoWrap)
             }
-            // Hint bar
+            // Hint bar - border color matches focus state
             View(
                 flex_direction: FlexDirection::Row,
                 padding_left: 1,
                 padding_right: 1,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
-                border_color: Theme::BORDER,
+                border_color: border_color,
             ) {
                 Text(content: "Enter", color: Theme::SECONDARY)
                 Text(content: " Send  ", color: Theme::TEXT_MUTED)

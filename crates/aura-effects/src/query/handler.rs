@@ -4,9 +4,10 @@
 //! Datalog execution engine (Biscuit).
 
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::time::Duration;
+use tokio::sync::{broadcast, RwLock};
 
 use aura_core::domain::journal::FactValue;
 use aura_core::effects::{
@@ -15,9 +16,10 @@ use aura_core::effects::{
     reactive::{ReactiveEffects, Signal},
 };
 use aura_core::query::{
-    DatalogBindings, DatalogProgram, FactPredicate, Query, QueryCapability, QueryIsolation,
-    QueryStats,
+    ConsensusId, DatalogBindings, DatalogProgram, FactPredicate, Query, QueryCapability,
+    QueryIsolation, QueryStats,
 };
+use aura_core::{Hash32, ResourceScope};
 
 use crate::database::query::AuraQuery;
 use crate::reactive::ReactiveHandler;
@@ -29,7 +31,7 @@ use super::datalog::{format_rule, parse_fact_to_row};
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Facts available for querying (loaded from journal).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct QueryFacts {
     /// Raw facts keyed by predicate
     facts: HashMap<String, Vec<Vec<String>>>,
@@ -111,6 +113,164 @@ impl CapabilityChecker {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Consensus Tracker
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tracks consensus completion for ReadCommitted isolation.
+///
+/// When a consensus instance completes, call `mark_completed()` to allow
+/// queries waiting on that consensus ID to proceed.
+#[derive(Debug)]
+pub struct ConsensusTracker {
+    /// Set of completed consensus IDs
+    completed: HashSet<ConsensusId>,
+    /// Broadcast sender for completion notifications
+    notify_tx: broadcast::Sender<ConsensusId>,
+}
+
+impl Default for ConsensusTracker {
+    fn default() -> Self {
+        let (notify_tx, _) = broadcast::channel(256);
+        Self {
+            completed: HashSet::new(),
+            notify_tx,
+        }
+    }
+}
+
+impl ConsensusTracker {
+    /// Mark a consensus instance as completed.
+    ///
+    /// This wakes up any queries waiting for this consensus ID.
+    pub fn mark_completed(&mut self, id: ConsensusId) {
+        self.completed.insert(id);
+        // Ignore send errors - no receivers is fine
+        let _ = self.notify_tx.send(id);
+    }
+
+    /// Check if a consensus instance has completed.
+    pub fn is_completed(&self, id: &ConsensusId) -> bool {
+        self.completed.contains(id)
+    }
+
+    /// Subscribe to consensus completion notifications.
+    pub fn subscribe(&self) -> broadcast::Receiver<ConsensusId> {
+        self.notify_tx.subscribe()
+    }
+
+    /// Check if all specified consensus IDs have completed.
+    pub fn all_completed(&self, ids: &[ConsensusId]) -> bool {
+        ids.iter().all(|id| self.completed.contains(id))
+    }
+
+    /// Convert from aura_core::query::ConsensusId to local representation
+    pub fn from_core_id(id: &aura_core::query::ConsensusId) -> ConsensusId {
+        ConsensusId::new(id.0)
+    }
+
+    /// Convert to aura_core::query::ConsensusId
+    pub fn to_core_id(id: &ConsensusId) -> aura_core::query::ConsensusId {
+        aura_core::query::ConsensusId::new(*id.as_bytes())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Snapshot Store
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Stores historical fact snapshots for Snapshot isolation.
+///
+/// Snapshots are identified by prestate hash and contain a frozen copy
+/// of facts at that point in time. Old snapshots may be garbage collected
+/// to limit memory usage.
+#[derive(Debug, Default)]
+pub struct SnapshotStore {
+    /// Snapshots keyed by prestate hash
+    snapshots: HashMap<Hash32, QueryFacts>,
+    /// Maximum number of snapshots to retain
+    max_snapshots: usize,
+    /// Order of snapshot creation (for LRU eviction)
+    creation_order: Vec<Hash32>,
+}
+
+impl SnapshotStore {
+    /// Create a new snapshot store with the specified capacity.
+    pub fn new(max_snapshots: usize) -> Self {
+        Self {
+            snapshots: HashMap::new(),
+            max_snapshots,
+            creation_order: Vec::new(),
+        }
+    }
+
+    /// Create a snapshot of the current facts at the given prestate hash.
+    pub fn create_snapshot(&mut self, prestate_hash: Hash32, facts: &QueryFacts) {
+        // Clone the facts for the snapshot
+        let snapshot = QueryFacts {
+            facts: facts.facts.clone(),
+        };
+
+        // Evict oldest snapshot if at capacity
+        while self.snapshots.len() >= self.max_snapshots && !self.creation_order.is_empty() {
+            let oldest = self.creation_order.remove(0);
+            self.snapshots.remove(&oldest);
+        }
+
+        self.snapshots.insert(prestate_hash, snapshot);
+        self.creation_order.push(prestate_hash);
+    }
+
+    /// Get a snapshot by prestate hash.
+    pub fn get_snapshot(&self, prestate_hash: &Hash32) -> Option<&QueryFacts> {
+        self.snapshots.get(prestate_hash)
+    }
+
+    /// Check if a snapshot exists.
+    pub fn has_snapshot(&self, prestate_hash: &Hash32) -> bool {
+        self.snapshots.contains_key(prestate_hash)
+    }
+
+    /// Remove a specific snapshot.
+    pub fn remove_snapshot(&mut self, prestate_hash: &Hash32) {
+        self.snapshots.remove(prestate_hash);
+        self.creation_order.retain(|h| h != prestate_hash);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pending Consensus Tracker
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tracks pending consensus instances by resource scope for ReadLatest isolation.
+#[derive(Debug, Default)]
+pub struct PendingConsensusTracker {
+    /// Pending consensus IDs by resource scope
+    pending_by_scope: HashMap<ResourceScope, HashSet<ConsensusId>>,
+}
+
+impl PendingConsensusTracker {
+    /// Register a pending consensus instance for a resource scope.
+    pub fn register_pending(&mut self, scope: ResourceScope, id: ConsensusId) {
+        self.pending_by_scope.entry(scope).or_default().insert(id);
+    }
+
+    /// Mark a consensus instance as completed across all scopes.
+    pub fn mark_completed(&mut self, id: &ConsensusId) {
+        for pending_set in self.pending_by_scope.values_mut() {
+            pending_set.remove(id);
+        }
+    }
+
+    /// Get all pending consensus IDs for a scope.
+    pub fn pending_for_scope(&self, scope: &ResourceScope) -> Vec<ConsensusId> {
+        self.pending_by_scope
+            .get(scope)
+            .map(|set| set.iter().copied().collect())
+            .unwrap_or_default()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -139,6 +299,12 @@ fn fact_value_to_args(value: &FactValue) -> Vec<String> {
 // Query Handler
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Default timeout for waiting on consensus completion (30 seconds).
+const DEFAULT_CONSENSUS_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Default maximum number of snapshots to retain.
+const DEFAULT_MAX_SNAPSHOTS: usize = 100;
+
 /// Production query effect handler.
 ///
 /// Implements `QueryEffects` by:
@@ -159,6 +325,14 @@ fn fact_value_to_args(value: &FactValue) -> Vec<String> {
 /// When an indexed journal is provided via `with_indexed_journal()`, the handler:
 /// - Uses bloom filter pre-filtering to skip queries for non-existent predicates
 /// - Can load facts directly from the index for O(log n) lookups
+///
+/// # Query Isolation
+///
+/// Supports four isolation levels:
+/// - `ReadUncommitted`: Immediate query against current CRDT state
+/// - `ReadCommitted`: Wait for specific consensus IDs before querying
+/// - `Snapshot`: Query against historical state by prestate hash
+/// - `ReadLatest`: Wait for all pending consensus in a scope
 pub struct QueryHandler {
     /// Reactive handler for signal-based subscriptions
     reactive: Arc<ReactiveHandler>,
@@ -168,6 +342,14 @@ pub struct QueryHandler {
     capabilities: Arc<RwLock<CapabilityChecker>>,
     /// Optional indexed journal for efficient lookups
     indexed_journal: Option<Arc<dyn IndexedJournalEffects + Send + Sync>>,
+    /// Consensus completion tracker for ReadCommitted isolation
+    consensus_tracker: Arc<RwLock<ConsensusTracker>>,
+    /// Snapshot store for historical state queries
+    snapshot_store: Arc<RwLock<SnapshotStore>>,
+    /// Pending consensus tracker for ReadLatest isolation
+    pending_consensus: Arc<RwLock<PendingConsensusTracker>>,
+    /// Timeout for waiting on consensus
+    consensus_timeout: Duration,
 }
 
 impl QueryHandler {
@@ -178,6 +360,10 @@ impl QueryHandler {
             facts: Arc::new(RwLock::new(QueryFacts::default())),
             capabilities: Arc::new(RwLock::new(CapabilityChecker::default())),
             indexed_journal: None,
+            consensus_tracker: Arc::new(RwLock::new(ConsensusTracker::default())),
+            snapshot_store: Arc::new(RwLock::new(SnapshotStore::new(DEFAULT_MAX_SNAPSHOTS))),
+            pending_consensus: Arc::new(RwLock::new(PendingConsensusTracker::default())),
+            consensus_timeout: DEFAULT_CONSENSUS_TIMEOUT,
         }
     }
 
@@ -195,7 +381,17 @@ impl QueryHandler {
             facts: Arc::new(RwLock::new(QueryFacts::default())),
             capabilities: Arc::new(RwLock::new(CapabilityChecker::default())),
             indexed_journal: Some(indexed_journal),
+            consensus_tracker: Arc::new(RwLock::new(ConsensusTracker::default())),
+            snapshot_store: Arc::new(RwLock::new(SnapshotStore::new(DEFAULT_MAX_SNAPSHOTS))),
+            pending_consensus: Arc::new(RwLock::new(PendingConsensusTracker::default())),
+            consensus_timeout: DEFAULT_CONSENSUS_TIMEOUT,
         }
+    }
+
+    /// Set the consensus wait timeout.
+    pub fn with_consensus_timeout(mut self, timeout: Duration) -> Self {
+        self.consensus_timeout = timeout;
+        self
     }
 
     /// Add a fact to the query store.
@@ -272,15 +468,179 @@ impl QueryHandler {
         }
     }
 
-    /// Execute a Datalog program and return bindings.
-    async fn execute_program(
+    // ─────────────────────────────────────────────────────────────────────────
+    // Isolation Infrastructure Management
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Mark a consensus instance as completed.
+    ///
+    /// Call this when a consensus operation completes to wake up any
+    /// queries waiting with `ReadCommitted` isolation.
+    pub async fn mark_consensus_completed(&self, id: ConsensusId) {
+        let mut tracker = self.consensus_tracker.write().await;
+        tracker.mark_completed(id);
+
+        // Also update pending consensus tracker
+        let mut pending = self.pending_consensus.write().await;
+        pending.mark_completed(&id);
+    }
+
+    /// Register a pending consensus instance for a resource scope.
+    ///
+    /// Call this when a new consensus operation is started to track it
+    /// for `ReadLatest` isolation.
+    pub async fn register_pending_consensus(&self, scope: ResourceScope, id: ConsensusId) {
+        let mut pending = self.pending_consensus.write().await;
+        pending.register_pending(scope, id);
+    }
+
+    /// Create a snapshot of current facts at a specific prestate hash.
+    ///
+    /// Call this when a consensus operation starts to enable `Snapshot`
+    /// isolation queries against this state.
+    pub async fn create_snapshot(&self, prestate_hash: Hash32) {
+        let facts = self.facts.read().await;
+        let mut store = self.snapshot_store.write().await;
+        store.create_snapshot(prestate_hash, &facts);
+    }
+
+    /// Remove a snapshot (e.g., after garbage collection window).
+    pub async fn remove_snapshot(&self, prestate_hash: Hash32) {
+        let mut store = self.snapshot_store.write().await;
+        store.remove_snapshot(&prestate_hash);
+    }
+
+    /// Check if a snapshot exists for a prestate hash.
+    pub async fn has_snapshot(&self, prestate_hash: &Hash32) -> bool {
+        let store = self.snapshot_store.read().await;
+        store.has_snapshot(prestate_hash)
+    }
+
+    /// Wait for specific consensus instances to complete.
+    ///
+    /// Returns Ok(()) when all consensus IDs have completed, or an error
+    /// if the timeout is reached.
+    async fn wait_for_consensus(&self, ids: &[ConsensusId]) -> Result<(), QueryError> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+
+        // Check if already completed
+        {
+            let tracker = self.consensus_tracker.read().await;
+            if tracker.all_completed(ids) {
+                return Ok(());
+            }
+        }
+
+        // Subscribe and wait
+        let mut receiver = {
+            let tracker = self.consensus_tracker.read().await;
+            tracker.subscribe()
+        };
+
+        let deadline = tokio::time::Instant::now() + self.consensus_timeout;
+
+        loop {
+            // Check current state
+            {
+                let tracker = self.consensus_tracker.read().await;
+                if tracker.all_completed(ids) {
+                    return Ok(());
+                }
+            }
+
+            // Wait for next notification or timeout
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                // Return timeout error with the first incomplete consensus ID
+                let tracker = self.consensus_tracker.read().await;
+                for id in ids {
+                    if !tracker.is_completed(id) {
+                        return Err(QueryError::consensus_timeout(ConsensusTracker::to_core_id(
+                            id,
+                        )));
+                    }
+                }
+                return Ok(()); // All completed while checking
+            }
+
+            match tokio::time::timeout(remaining, receiver.recv()).await {
+                Ok(Ok(_completed_id)) => {
+                    // Check if we're done
+                    continue;
+                }
+                Ok(Err(_)) => {
+                    // Channel closed - all senders dropped
+                    return Err(QueryError::internal(
+                        "Consensus tracker channel closed unexpectedly",
+                    ));
+                }
+                Err(_) => {
+                    // Timeout
+                    let tracker = self.consensus_tracker.read().await;
+                    for id in ids {
+                        if !tracker.is_completed(id) {
+                            return Err(QueryError::consensus_timeout(
+                                ConsensusTracker::to_core_id(id),
+                            ));
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    /// Wait for all pending consensus in a resource scope to complete.
+    async fn wait_for_scope_consensus(&self, scope: &ResourceScope) -> Result<(), QueryError> {
+        let pending_ids = {
+            let pending = self.pending_consensus.read().await;
+            pending.pending_for_scope(scope)
+        };
+
+        if pending_ids.is_empty() {
+            return Ok(());
+        }
+
+        self.wait_for_consensus(&pending_ids).await
+    }
+
+    /// Execute a query against a specific snapshot.
+    async fn execute_snapshot_query<Q: Query>(
+        &self,
+        query: &Q,
+        prestate_hash: &Hash32,
+    ) -> Result<Q::Result, QueryError> {
+        // Check capabilities first
+        let required = query.required_capabilities();
+        self.check_capabilities(&required).await?;
+
+        // Get the snapshot
+        let snapshot = {
+            let store = self.snapshot_store.read().await;
+            store
+                .get_snapshot(prestate_hash)
+                .ok_or_else(|| QueryError::snapshot_not_available(*prestate_hash))?
+                .clone()
+        };
+
+        // Execute against snapshot facts
+        let program = query.to_datalog();
+        let bindings = self.execute_program_with_facts(&program, &snapshot).await?;
+
+        Q::parse(bindings).map_err(QueryError::from)
+    }
+
+    /// Execute a Datalog program against a specific facts store.
+    async fn execute_program_with_facts(
         &self,
         program: &DatalogProgram,
+        facts: &QueryFacts,
     ) -> Result<DatalogBindings, QueryError> {
-        let facts = self.facts.read().await;
         let mut aura_query = AuraQuery::new();
 
-        // Load all facts
+        // Load facts from the provided store
         facts.load_into(&mut aura_query);
 
         // Execute each rule and collect results
@@ -297,13 +657,21 @@ impl QueryHandler {
                     }
                 }
                 Err(e) => {
-                    // Log but continue - some rules may fail
                     tracing::warn!(rule = %rule_string, error = %e, "Rule execution failed");
                 }
             }
         }
 
         Ok(DatalogBindings { rows: all_rows })
+    }
+
+    /// Execute a Datalog program and return bindings.
+    async fn execute_program(
+        &self,
+        program: &DatalogProgram,
+    ) -> Result<DatalogBindings, QueryError> {
+        let facts = self.facts.read().await;
+        self.execute_program_with_facts(program, &facts).await
     }
 }
 
@@ -320,6 +688,10 @@ impl Clone for QueryHandler {
             facts: self.facts.clone(),
             capabilities: self.capabilities.clone(),
             indexed_journal: self.indexed_journal.clone(),
+            consensus_tracker: self.consensus_tracker.clone(),
+            snapshot_store: self.snapshot_store.clone(),
+            pending_consensus: self.pending_consensus.clone(),
+            consensus_timeout: self.consensus_timeout,
         }
     }
 }
@@ -382,30 +754,33 @@ impl QueryEffects for QueryHandler {
         query: &Q,
         isolation: QueryIsolation,
     ) -> Result<Q::Result, QueryError> {
-        // For now, only ReadUncommitted is fully supported
-        // Other isolation levels would require consensus integration
         match &isolation {
             QueryIsolation::ReadUncommitted => {
-                // Standard query execution
+                // Standard query execution - immediate against current CRDT state
                 self.query(query).await
             }
-            QueryIsolation::ReadCommitted { .. } => {
-                // TODO: Wait for consensus instances to complete
-                // For now, fall back to ReadUncommitted with a warning
-                tracing::warn!(
-                    "ReadCommitted isolation not yet fully implemented, using ReadUncommitted"
-                );
+            QueryIsolation::ReadCommitted { wait_for } => {
+                // Convert from aura_core::query::ConsensusId to local ConsensusId
+                let local_ids: Vec<ConsensusId> = wait_for
+                    .iter()
+                    .map(ConsensusTracker::from_core_id)
+                    .collect();
+
+                // Wait for all specified consensus instances to complete
+                self.wait_for_consensus(&local_ids).await?;
+
+                // Now execute the query against updated state
                 self.query(query).await
             }
             QueryIsolation::Snapshot { prestate_hash } => {
-                // TODO: Query against historical state
-                Err(QueryError::snapshot_not_available(*prestate_hash))
+                // Execute query against historical snapshot state
+                self.execute_snapshot_query(query, prestate_hash).await
             }
-            QueryIsolation::ReadLatest { .. } => {
-                // TODO: Wait for all pending consensus
-                tracing::warn!(
-                    "ReadLatest isolation not yet fully implemented, using ReadUncommitted"
-                );
+            QueryIsolation::ReadLatest { scope } => {
+                // Wait for all pending consensus in the specified scope
+                self.wait_for_scope_consensus(scope).await?;
+
+                // Execute query against updated state
                 self.query(query).await
             }
         }
@@ -520,5 +895,139 @@ mod tests {
         // Should pass now
         let result = handler.check_capabilities(&[cap]).await;
         assert!(result.is_ok());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Isolation Infrastructure Tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_consensus_tracker_completion() {
+        let handler = QueryHandler::default();
+
+        let consensus_id = ConsensusId::new([1u8; 32]);
+
+        // Not completed initially
+        {
+            let tracker = handler.consensus_tracker.read().await;
+            assert!(!tracker.is_completed(&consensus_id));
+        }
+
+        // Mark completed
+        handler.mark_consensus_completed(consensus_id).await;
+
+        // Should be completed now
+        {
+            let tracker = handler.consensus_tracker.read().await;
+            assert!(tracker.is_completed(&consensus_id));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_create_and_retrieve() {
+        let handler = QueryHandler::default();
+
+        // Add some facts
+        handler.add_fact("user", vec!["alice".to_string()]).await;
+        handler.add_fact("user", vec!["bob".to_string()]).await;
+
+        // Create snapshot
+        let prestate_hash = Hash32([42u8; 32]);
+        handler.create_snapshot(prestate_hash).await;
+
+        // Verify snapshot exists
+        assert!(handler.has_snapshot(&prestate_hash).await);
+
+        // Verify snapshot contains facts
+        {
+            let store = handler.snapshot_store.read().await;
+            let snapshot = store.get_snapshot(&prestate_hash).unwrap();
+            assert_eq!(snapshot.len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_removal() {
+        let handler = QueryHandler::default();
+
+        // Create snapshot
+        let prestate_hash = Hash32([42u8; 32]);
+        handler.create_snapshot(prestate_hash).await;
+
+        assert!(handler.has_snapshot(&prestate_hash).await);
+
+        // Remove snapshot
+        handler.remove_snapshot(prestate_hash).await;
+
+        assert!(!handler.has_snapshot(&prestate_hash).await);
+    }
+
+    #[tokio::test]
+    async fn test_pending_consensus_registration() {
+        let handler = QueryHandler::default();
+
+        let consensus_id = ConsensusId::new([1u8; 32]);
+        let scope = ResourceScope::Authority {
+            authority_id: aura_core::AuthorityId::new_from_entropy([1u8; 32]),
+            operation: aura_core::AuthorityOp::UpdateTree,
+        };
+
+        // Register pending consensus
+        handler
+            .register_pending_consensus(scope.clone(), consensus_id)
+            .await;
+
+        // Check pending
+        {
+            let pending = handler.pending_consensus.read().await;
+            let ids = pending.pending_for_scope(&scope);
+            assert_eq!(ids.len(), 1);
+            assert_eq!(ids[0], consensus_id);
+        }
+
+        // Mark completed
+        handler.mark_consensus_completed(consensus_id).await;
+
+        // Should no longer be pending
+        {
+            let pending = handler.pending_consensus.read().await;
+            let ids = pending.pending_for_scope(&scope);
+            assert!(ids.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_consensus_already_completed() {
+        let handler = QueryHandler::default();
+
+        let consensus_id = ConsensusId::new([1u8; 32]);
+
+        // Mark completed before waiting
+        handler.mark_consensus_completed(consensus_id).await;
+
+        // Wait should return immediately
+        let result = handler.wait_for_consensus(&[consensus_id]).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_consensus_empty_list() {
+        let handler = QueryHandler::default();
+
+        // Waiting for empty list should succeed immediately
+        let result = handler.wait_for_consensus(&[]).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_consensus_id_conversion_roundtrip() {
+        let original_bytes = [42u8; 32];
+        let core_id = aura_core::query::ConsensusId::new(original_bytes);
+
+        let local_id = ConsensusTracker::from_core_id(&core_id);
+        let back_to_core = ConsensusTracker::to_core_id(&local_id);
+
+        assert_eq!(core_id, back_to_core);
+        assert_eq!(local_id.as_bytes(), &original_bytes);
     }
 }

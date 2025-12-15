@@ -54,6 +54,7 @@ pub mod secure;
 pub mod simulation;
 pub mod storage;
 pub mod system;
+pub mod terminal;
 pub mod time;
 pub mod transport;
 
@@ -69,5 +70,9 @@ pub use random::MockRandomHandler;
 pub use simulation::MockSimulationHandler;
 pub use storage::MemoryStorageHandler;
 pub use system::{LoggingHandler, MetricsHandler, MonitoringHandler};
+pub use terminal::{
+    cell_has_fg_color, count_char_in_frame, empty_frame, find_text_in_frame, frame_contains_text,
+    frame_from_string, frame_to_string, get_frame_row, MockTerminalHandler,
+};
 pub use time::SimulatedTimeHandler;
 pub use transport::InMemoryTransportHandler;

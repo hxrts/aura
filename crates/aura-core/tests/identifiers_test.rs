@@ -276,7 +276,7 @@ fn test_identifier_equality_and_ordering() {
 
     // Test string identifier ordering
     let members = vec![
-        MemberId::new(String::from("charlie")),
+        MemberId::new(String::from("carol")),
         MemberId::new(String::from("alice")),
         MemberId::new(String::from("bob")),
     ];
@@ -286,7 +286,7 @@ fn test_identifier_equality_and_ordering() {
 
     assert_eq!(sorted_members[0].as_str(), "alice");
     assert_eq!(sorted_members[1].as_str(), "bob");
-    assert_eq!(sorted_members[2].as_str(), "charlie");
+    assert_eq!(sorted_members[2].as_str(), "carol");
 }
 
 /// Test identifier determinism with known inputs

@@ -1,8 +1,9 @@
 //! Init Command Handler
 //!
 //! Effect-based implementation of the init command.
+//! Returns structured `CliOutput` for testability.
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::Result;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::time::TimeStamp;
@@ -11,24 +12,30 @@ use std::path::Path;
 
 /// Handle initialization through effects
 ///
+/// Returns `CliOutput` instead of printing directly, enabling:
+/// - Unit testing without capturing stdout
+/// - Consistent output formatting
+/// - Clear separation of logic from I/O
+///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
 pub async fn handle_init(
     ctx: &HandlerContext<'_>,
     num_devices: u32,
     threshold: u32,
-    output: &Path,
-) -> Result<()> {
+    output_dir: &Path,
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     // Log initialization start
-    println!(
+    output.println(format!(
         "Initializing {}-of-{} threshold account",
         threshold, num_devices
-    );
-
-    println!("Output directory: {}", output.display());
+    ));
+    output.kv("Output directory", output_dir.display().to_string());
 
     // Validate parameters through effects
     if threshold > num_devices {
-        eprintln!("Threshold cannot be greater than number of devices");
+        output.eprintln("Threshold cannot be greater than number of devices");
         return Err(anyhow::anyhow!(
             "Invalid parameters: threshold ({}) > num_devices ({})",
             threshold,
@@ -37,18 +44,18 @@ pub async fn handle_init(
     }
 
     if threshold == 0 {
-        eprintln!("Threshold must be greater than 0");
+        output.eprintln("Threshold must be greater than 0");
         return Err(anyhow::anyhow!("Invalid threshold: 0"));
     }
 
     // Create directory structure through storage effects
-    let configs_dir = output.join("configs");
-    create_directory_through_effects(ctx, output).await?;
+    let configs_dir = output_dir.join("configs");
+    create_directory_through_effects(ctx, output_dir).await?;
     create_directory_through_effects(ctx, &configs_dir).await?;
 
     // Create effect API metadata through storage effects
-    let effect_api_path = output.join("effect_api.cbor");
-    let effect_api_data = create_effect_api(ctx, threshold, num_devices).await?;
+    let effect_api_path = output_dir.join("effect_api.cbor");
+    let effect_api_data = create_effect_api(ctx, threshold, num_devices, &mut output).await?;
 
     ctx.effects()
         .store(&effect_api_path.display().to_string(), effect_api_data)
@@ -73,13 +80,14 @@ pub async fn handle_init(
                 )
             })?;
 
-        println!("Created device_{}.toml", i);
+        output.println(format!("Created device_{}.toml", i));
     }
 
     // Success message
-    println!("Account initialized successfully!");
+    output.blank();
+    output.println("Account initialized successfully!");
 
-    Ok(())
+    Ok(output)
 }
 
 /// Create directory marker through storage effects
@@ -116,6 +124,7 @@ async fn create_effect_api(
     ctx: &HandlerContext<'_>,
     threshold: u32,
     num_devices: u32,
+    output: &mut CliOutput,
 ) -> Result<Vec<u8>> {
     // Use unified time system to get physical time
     let physical_time = ctx
@@ -131,12 +140,12 @@ async fn create_effect_api(
         threshold, num_devices, timestamp
     );
 
-    println!("Created effect API metadata");
+    output.println("Created effect API metadata");
 
     Ok(effect_api_data.into_bytes())
 }
 
-/// Create device configuration content
+/// Create device configuration content (pure function)
 fn create_device_config(device_num: u32, threshold: u32, total_devices: u32) -> String {
     format!(
         r#"# Device {} configuration
@@ -159,4 +168,30 @@ max_retries = 3
         total_devices,
         58835 + device_num - 1 // Different port for each device
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_device_config() {
+        let config = create_device_config(1, 2, 3);
+        assert!(config.contains("device_id = \"device_1\""));
+        assert!(config.contains("threshold = 2"));
+        assert!(config.contains("total_devices = 3"));
+        assert!(config.contains("default_port = 58835"));
+    }
+
+    #[test]
+    fn test_create_device_config_ports() {
+        // Each device should have a different port
+        let config1 = create_device_config(1, 2, 3);
+        let config2 = create_device_config(2, 2, 3);
+        let config3 = create_device_config(3, 2, 3);
+
+        assert!(config1.contains("default_port = 58835"));
+        assert!(config2.contains("default_port = 58836"));
+        assert!(config3.contains("default_port = 58837"));
+    }
 }

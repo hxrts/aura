@@ -154,6 +154,195 @@ pub struct AntiEntropyResult {
 }
 
 // =============================================================================
+// Progress Tracking Types
+// =============================================================================
+
+/// Progress event emitted during anti-entropy synchronization
+///
+/// These events allow UI to track sync status in real-time for optimistic updates.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SyncProgressEvent {
+    /// Sync started with a peer
+    Started {
+        /// Peer being synchronized with
+        peer_id: uuid::Uuid,
+        /// Total peers to sync with in this batch
+        total_peers: usize,
+    },
+
+    /// Digest exchange completed
+    DigestExchanged {
+        /// Peer
+        peer_id: uuid::Uuid,
+        /// Result of digest comparison
+        status: DigestStatus,
+        /// Operations we have locally
+        local_ops: usize,
+        /// Operations peer has
+        remote_ops: usize,
+    },
+
+    /// Operations being pulled from peer
+    Pulling {
+        /// Peer
+        peer_id: uuid::Uuid,
+        /// Operations pulled so far
+        pulled: usize,
+        /// Total operations to pull
+        total: usize,
+    },
+
+    /// Operations being pushed to peer
+    Pushing {
+        /// Peer
+        peer_id: uuid::Uuid,
+        /// Operations pushed so far
+        pushed: usize,
+        /// Total operations to push
+        total: usize,
+    },
+
+    /// Single peer sync completed
+    PeerCompleted {
+        /// Peer that was synced
+        peer_id: uuid::Uuid,
+        /// Operations applied from this peer
+        applied: usize,
+        /// Whether sync was successful
+        success: bool,
+        /// Peers remaining
+        peers_remaining: usize,
+    },
+
+    /// All peers synced
+    AllCompleted {
+        /// Total operations applied across all peers
+        total_applied: usize,
+        /// Total duplicates across all peers
+        total_duplicates: usize,
+        /// Peers that synced successfully
+        successful_peers: usize,
+        /// Peers that failed
+        failed_peers: usize,
+    },
+
+    /// Sync failed for a peer
+    PeerFailed {
+        /// Peer that failed
+        peer_id: uuid::Uuid,
+        /// Error message
+        error: String,
+        /// Will retry
+        will_retry: bool,
+        /// Retry attempt number
+        retry_attempt: usize,
+    },
+}
+
+/// Callback trait for receiving sync progress events
+///
+/// Implement this trait to receive real-time progress updates during sync.
+pub trait SyncProgressCallback: Send + Sync {
+    /// Called when a progress event occurs
+    fn on_progress(&self, event: SyncProgressEvent);
+}
+
+/// A no-op progress callback for when progress tracking isn't needed
+pub struct NoOpProgressCallback;
+
+impl SyncProgressCallback for NoOpProgressCallback {
+    fn on_progress(&self, _event: SyncProgressEvent) {
+        // Intentionally empty
+    }
+}
+
+/// A progress callback that logs events
+pub struct LoggingProgressCallback;
+
+impl SyncProgressCallback for LoggingProgressCallback {
+    fn on_progress(&self, event: SyncProgressEvent) {
+        match &event {
+            SyncProgressEvent::Started {
+                peer_id,
+                total_peers,
+            } => {
+                tracing::info!("Sync started with peer {} ({} total)", peer_id, total_peers);
+            }
+            SyncProgressEvent::DigestExchanged {
+                peer_id,
+                status,
+                local_ops,
+                remote_ops,
+            } => {
+                tracing::debug!(
+                    "Digest exchanged with {}: {:?} (local: {}, remote: {})",
+                    peer_id,
+                    status,
+                    local_ops,
+                    remote_ops
+                );
+            }
+            SyncProgressEvent::Pulling {
+                peer_id,
+                pulled,
+                total,
+            } => {
+                tracing::debug!("Pulling from {}: {}/{}", peer_id, pulled, total);
+            }
+            SyncProgressEvent::Pushing {
+                peer_id,
+                pushed,
+                total,
+            } => {
+                tracing::debug!("Pushing to {}: {}/{}", peer_id, pushed, total);
+            }
+            SyncProgressEvent::PeerCompleted {
+                peer_id,
+                applied,
+                success,
+                peers_remaining,
+            } => {
+                tracing::info!(
+                    "Peer {} completed: {} applied, success={}, {} remaining",
+                    peer_id,
+                    applied,
+                    success,
+                    peers_remaining
+                );
+            }
+            SyncProgressEvent::AllCompleted {
+                total_applied,
+                total_duplicates,
+                successful_peers,
+                failed_peers,
+            } => {
+                tracing::info!(
+                    "Sync completed: {} applied, {} duplicates, {} succeeded, {} failed",
+                    total_applied,
+                    total_duplicates,
+                    successful_peers,
+                    failed_peers
+                );
+            }
+            SyncProgressEvent::PeerFailed {
+                peer_id,
+                error,
+                will_retry,
+                retry_attempt,
+            } => {
+                tracing::warn!(
+                    "Peer {} failed: {} (retry={}, attempt={})",
+                    peer_id,
+                    error,
+                    will_retry,
+                    retry_attempt
+                );
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Configuration
 // =============================================================================
 
@@ -1085,5 +1274,136 @@ mod tests {
         assert_eq!(result.applied, 2);
         assert_eq!(result.duplicates, 1);
         assert_eq!(local_ops.len(), 3);
+    }
+
+    // -------------------------------------------------------------------------
+    // Progress Tracking Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_sync_progress_event_serialization() {
+        let events = vec![
+            SyncProgressEvent::Started {
+                peer_id: uuid::Uuid::new_v4(),
+                total_peers: 3,
+            },
+            SyncProgressEvent::DigestExchanged {
+                peer_id: uuid::Uuid::new_v4(),
+                status: DigestStatus::LocalBehind,
+                local_ops: 5,
+                remote_ops: 10,
+            },
+            SyncProgressEvent::Pulling {
+                peer_id: uuid::Uuid::new_v4(),
+                pulled: 3,
+                total: 10,
+            },
+            SyncProgressEvent::Pushing {
+                peer_id: uuid::Uuid::new_v4(),
+                pushed: 2,
+                total: 5,
+            },
+            SyncProgressEvent::PeerCompleted {
+                peer_id: uuid::Uuid::new_v4(),
+                applied: 5,
+                success: true,
+                peers_remaining: 2,
+            },
+            SyncProgressEvent::AllCompleted {
+                total_applied: 15,
+                total_duplicates: 3,
+                successful_peers: 3,
+                failed_peers: 0,
+            },
+            SyncProgressEvent::PeerFailed {
+                peer_id: uuid::Uuid::new_v4(),
+                error: "connection timeout".to_string(),
+                will_retry: true,
+                retry_attempt: 1,
+            },
+        ];
+
+        for event in events {
+            let json = serde_json::to_string(&event).unwrap();
+            let deserialized: SyncProgressEvent = serde_json::from_str(&json).unwrap();
+            assert_eq!(event, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_no_op_progress_callback() {
+        let callback = NoOpProgressCallback;
+        // Should not panic
+        callback.on_progress(SyncProgressEvent::Started {
+            peer_id: uuid::Uuid::new_v4(),
+            total_peers: 1,
+        });
+    }
+
+    #[test]
+    fn test_logging_progress_callback() {
+        let callback = LoggingProgressCallback;
+        // Should not panic (logging happens internally)
+        callback.on_progress(SyncProgressEvent::AllCompleted {
+            total_applied: 10,
+            total_duplicates: 2,
+            successful_peers: 3,
+            failed_peers: 1,
+        });
+    }
+
+    /// Test custom callback implementation
+    struct TestProgressCallback {
+        events: std::sync::Mutex<Vec<SyncProgressEvent>>,
+    }
+
+    impl TestProgressCallback {
+        fn new() -> Self {
+            Self {
+                events: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn events(&self) -> Vec<SyncProgressEvent> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+
+    impl SyncProgressCallback for TestProgressCallback {
+        fn on_progress(&self, event: SyncProgressEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    #[test]
+    fn test_custom_progress_callback() {
+        let callback = TestProgressCallback::new();
+        let peer_id = uuid::Uuid::new_v4();
+
+        callback.on_progress(SyncProgressEvent::Started {
+            peer_id,
+            total_peers: 2,
+        });
+        callback.on_progress(SyncProgressEvent::DigestExchanged {
+            peer_id,
+            status: DigestStatus::Equal,
+            local_ops: 10,
+            remote_ops: 10,
+        });
+        callback.on_progress(SyncProgressEvent::PeerCompleted {
+            peer_id,
+            applied: 0,
+            success: true,
+            peers_remaining: 1,
+        });
+
+        let events = callback.events();
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0], SyncProgressEvent::Started { .. }));
+        assert!(matches!(
+            events[1],
+            SyncProgressEvent::DigestExchanged { .. }
+        ));
+        assert!(matches!(events[2], SyncProgressEvent::PeerCompleted { .. }));
     }
 }

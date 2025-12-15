@@ -6,16 +6,16 @@
 //!
 //! The signal coordinator:
 //! 1. Subscribes to AppCore signals to detect Bob's actions
-//! 2. Routes actions to simulated agents (Alice/Charlie)
+//! 2. Routes actions to simulated agents (Alice/Carol)
 //! 3. Updates signals with agent responses
 //!
 //! This replaces the AuraEvent-based event forwarding with a unified signal approach.
 
 use std::sync::Arc;
 
-use aura_app::signal_defs::{CHAT_SIGNAL, RECOVERY_SIGNAL};
+use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::views::chat::Message as ChatMessage;
-use aura_app::views::recovery::RecoveryProcessStatus;
+use aura_app::views::recovery::{Guardian, GuardianStatus, RecoveryProcessStatus};
 use aura_app::views::{ChatState, RecoveryState};
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -265,13 +265,63 @@ impl DemoSignalCoordinator {
                 account,
                 context_id,
             } => {
+                let guardian_id = authority_id.to_string();
+                let guardian_name = self.get_agent_name(&authority_id);
                 tracing::info!(
-                    "Demo: Guardian {} accepted binding for {} in {}",
-                    authority_id,
+                    "Demo: Guardian {} ({}) accepted binding for {} in {}",
+                    guardian_name,
+                    guardian_id,
                     account,
                     context_id
                 );
-                // Guardian binding is tracked internally, no signal update needed
+
+                // Update CONTACTS_SIGNAL to mark contact as guardian
+                if let Ok(core) = self.app_core.try_read() {
+                    if let Ok(mut contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
+                        if let Some(contact) = contacts_state
+                            .contacts
+                            .iter_mut()
+                            .find(|c| c.id == guardian_id)
+                        {
+                            contact.is_guardian = true;
+                            tracing::info!(
+                                "Demo: Updated contact {} is_guardian=true",
+                                guardian_id
+                            );
+                        }
+                        let _ = core.emit(&*CONTACTS_SIGNAL, contacts_state).await;
+                    }
+                }
+
+                // Update RECOVERY_SIGNAL to add guardian to recovery state
+                if let Ok(core) = self.app_core.try_read() {
+                    if let Ok(mut recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
+                        // Check if guardian already exists
+                        let exists = recovery_state.guardians.iter().any(|g| g.id == guardian_id);
+                        if !exists {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+
+                            recovery_state.guardians.push(Guardian {
+                                id: guardian_id.clone(),
+                                name: guardian_name,
+                                status: GuardianStatus::Active,
+                                added_at: now,
+                                last_seen: Some(now),
+                            });
+                            recovery_state.guardian_count = recovery_state.guardians.len() as u32;
+
+                            tracing::info!(
+                                "Demo: Added {} to guardians list (total: {})",
+                                guardian_id,
+                                recovery_state.guardian_count
+                            );
+                        }
+                        let _ = core.emit(&*RECOVERY_SIGNAL, recovery_state).await;
+                    }
+                }
             }
 
             AgentResponse::EmitEvent(_event) => {
@@ -288,8 +338,8 @@ impl DemoSignalCoordinator {
         let id_str = authority_id.to_string();
         if id_str.contains("alice") || id_str.ends_with("01") {
             "Alice".to_string()
-        } else if id_str.contains("charlie") || id_str.ends_with("02") {
-            "Charlie".to_string()
+        } else if id_str.contains("carol") || id_str.ends_with("02") {
+            "Carol".to_string()
         } else {
             format!("Agent-{}", &id_str[..8.min(id_str.len())])
         }

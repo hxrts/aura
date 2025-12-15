@@ -8,7 +8,7 @@ use crate::{AuthorityId, ContextId};
 use serde::{Deserialize, Serialize};
 
 /// Resource scope for authority-based authorization
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceScope {
     /// Operations on an authority's state
     Authority {
@@ -28,7 +28,7 @@ pub enum ResourceScope {
 }
 
 /// Operations that can be performed on an authority
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AuthorityOp {
     /// Update the commitment tree structure
     UpdateTree,
@@ -49,7 +49,7 @@ pub enum AuthorityOp {
 }
 
 /// Operations within a relational context
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ContextOp {
     /// Add a binding to the context
     AddBinding,

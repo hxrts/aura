@@ -129,7 +129,7 @@ let code = generate_choreography_code_with_dynamic_roles(&choreo, &local_types);
 // Runtime binding
 let mut runtime = ConsensusRuntime::new();
 runtime.bind_role_count("Followers", 5)?;
-runtime.map_followers_instances(vec!["alice", "bob", "charlie", "dave", "eve"])?;
+runtime.map_followers_instances(vec!["alice", "bob", "carol", "dave", "eve"])?;
 ```
 
 Symbolic parameters `[N]` enable compile-time role count flexibility. Runtime binding maps symbolic counts to concrete participant numbers. Instance mapping assigns specific identities to role positions.

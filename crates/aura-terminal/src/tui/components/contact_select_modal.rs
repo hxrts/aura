@@ -5,6 +5,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 use crate::tui::types::Contact;
 
@@ -57,104 +58,103 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: border_color,
+            overflow: Overflow::Hidden,
         ) {
+            // Header
             View(
-                width: Percent(50.0),
-                max_height: Percent(60.0),
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
-                border_style: BorderStyle::Round,
-                border_color: border_color,
+                width: 100pct,
+                padding: 2,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Header
-                View(
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                ) {
-                    Text(
-                        content: title,
-                        weight: Weight::Bold,
-                        color: Theme::PRIMARY,
-                    )
-                }
+                Text(
+                    content: title,
+                    weight: Weight::Bold,
+                    color: Theme::PRIMARY,
+                )
+            }
 
-                // Body - contact list
-                View(
-                    padding: 2,
-                    flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
-                    overflow: Overflow::Scroll,
-                ) {
-                    #(if contacts.is_empty() {
-                        vec![element! {
-                            View {
-                                Text(content: "No contacts available", color: Theme::TEXT_MUTED)
+            // Body - contact list
+            View(
+                width: 100pct,
+                padding: 2,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Scroll,
+            ) {
+                #(if contacts.is_empty() {
+                    vec![element! {
+                        View {
+                            Text(content: "No contacts available", color: Theme::TEXT_MUTED)
+                        }
+                    }]
+                } else {
+                    contacts.iter().enumerate().map(|(idx, contact)| {
+                        let is_selected = idx == selected_index;
+                        // Use consistent list item colors
+                        let bg = if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL };
+                        let text_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL };
+                        let pointer_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::PRIMARY };
+                        let name = contact.petname.clone();
+                        let id = contact.id.clone();
+                        let pointer = if is_selected { "▸ " } else { "  " }.to_string();
+                        element! {
+                            View(
+                                key: id,
+                                flex_direction: FlexDirection::Row,
+                                background_color: bg,
+                                padding_left: 1,
+                            ) {
+                                Text(content: pointer, color: pointer_color)
+                                Text(content: name, color: text_color)
                             }
-                        }]
-                    } else {
-                        contacts.iter().enumerate().map(|(idx, contact)| {
-                            let is_selected = idx == selected_index;
-                            // Use consistent list item colors
-                            let bg = if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL };
-                            let text_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL };
-                            let pointer_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::PRIMARY };
-                            let name = contact.petname.clone();
-                            let id = contact.id.clone();
-                            let pointer = if is_selected { "▸ " } else { "  " }.to_string();
-                            element! {
-                                View(
-                                    key: id,
-                                    flex_direction: FlexDirection::Row,
-                                    background_color: bg,
-                                    padding_left: 1,
-                                ) {
-                                    Text(content: pointer, color: pointer_color)
-                                    Text(content: name, color: text_color)
-                                }
-                            }
-                        }).collect()
+                        }
+                    }).collect()
+                })
+
+                // Error message (if any)
+                #(if !error.is_empty() {
+                    Some(element! {
+                        View(margin_top: 1) {
+                            Text(content: error.clone(), color: Theme::ERROR)
+                        }
                     })
+                } else {
+                    None
+                })
+            }
 
-                    // Error message (if any)
-                    #(if !error.is_empty() {
-                        Some(element! {
-                            View(margin_top: 1) {
-                                Text(content: error.clone(), color: Theme::ERROR)
-                            }
-                        })
-                    } else {
-                        None
-                    })
+            // Footer with key hints
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                padding: 2,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                View(flex_direction: FlexDirection::Row, gap: 2) {
+                    Text(content: "Esc", color: Theme::SECONDARY)
+                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
                 }
-
-                // Footer with key hints
-                View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "Esc", color: Theme::SECONDARY)
-                        Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                    }
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "↑↓", color: Theme::SECONDARY)
-                        Text(content: "Navigate", color: Theme::TEXT_MUTED)
-                    }
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "Enter", color: Theme::SECONDARY)
-                        Text(content: "Select", color: Theme::TEXT_MUTED)
-                    }
+                View(flex_direction: FlexDirection::Row, gap: 2) {
+                    Text(content: "↑↓", color: Theme::SECONDARY)
+                    Text(content: "Navigate", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: 2) {
+                    Text(content: "Enter", color: Theme::SECONDARY)
+                    Text(content: "Select", color: Theme::TEXT_MUTED)
                 }
             }
         }
@@ -244,7 +244,7 @@ mod tests {
         let contacts = vec![
             Contact::new("c1", "Alice").with_status(ContactStatus::Active),
             Contact::new("c2", "Bob").with_status(ContactStatus::Active),
-            Contact::new("c3", "Charlie").with_status(ContactStatus::Active),
+            Contact::new("c3", "Carol").with_status(ContactStatus::Active),
         ];
 
         state.show("Invite to Block", contacts);

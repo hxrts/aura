@@ -82,6 +82,7 @@ pub mod admin;
 pub mod amp;
 pub mod authority;
 pub mod chat;
+pub mod cli_output;
 pub mod context;
 pub mod handler_context;
 pub mod init;
@@ -97,6 +98,9 @@ pub mod threshold;
 #[cfg(feature = "terminal")]
 pub mod tui;
 pub mod version;
+
+// Re-export CLI output types
+pub use cli_output::{CliOutput, CliOutputBuilder, OutputLine};
 
 // Re-export for convenience
 pub use handler_context::HandlerContext;
@@ -164,35 +168,56 @@ impl CliHandler {
     }
 
     /// Handle init command through effects
-    pub async fn handle_init(&self, num_devices: u32, threshold: u32, output: &Path) -> Result<()> {
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
+    pub async fn handle_init(
+        &self,
+        num_devices: u32,
+        threshold: u32,
+        output_dir: &Path,
+    ) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        init::handle_init(&ctx, num_devices, threshold, output).await
+        let output = init::handle_init(&ctx, num_devices, threshold, output_dir).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle status command through effects
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_status(&self, config_path: &Path) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        status::handle_status(&ctx, config_path).await
+        let output = status::handle_status(&ctx, config_path).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle node command through effects
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_node(&self, port: u16, daemon: bool, config_path: &Path) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        node::handle_node(&ctx, port, daemon, config_path).await
+        let output = node::handle_node(&ctx, port, daemon, config_path).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle threshold command through effects
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_threshold(&self, configs: &str, threshold: u32, mode: &str) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        threshold::handle_threshold(&ctx, configs, threshold, mode).await
+        let output = threshold::handle_threshold(&ctx, configs, threshold, mode).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle scenarios command through effects (requires development feature)
@@ -205,38 +230,56 @@ impl CliHandler {
     }
 
     /// Handle version command through effects
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_version(&self) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        version::handle_version(&ctx).await
+        let output = version::handle_version(&ctx).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle snapshot maintenance commands.
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_snapshot(&self, action: &SnapshotAction) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        snapshot::handle_snapshot(&ctx, action).await
+        let output = snapshot::handle_snapshot(&ctx, action).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle admin maintenance commands.
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_admin(&self, action: &AdminAction) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        admin::handle_admin(&ctx, action).await
+        let output = admin::handle_admin(&ctx, action).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle guardian recovery commands
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_recovery(&self, action: &RecoveryAction) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        recovery::handle_recovery(&ctx, action).await
+        let output = recovery::handle_recovery(&ctx, action).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle invitation commands
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_invitation(&self, action: &InvitationAction) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
@@ -247,39 +290,57 @@ impl CliHandler {
             self.device_id,
             Some(&*self.agent),
         );
-        invite::handle_invitation(&ctx, action).await
+        let output = invite::handle_invitation(&ctx, action).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle authority management commands
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_authority(&self, command: &AuthorityCommands) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        authority::handle_authority(&ctx, command).await
+        let output = authority::handle_authority(&ctx, command).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle context inspection commands
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_context(&self, action: &ContextAction) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        context::handle_context(&ctx, action).await
+        let output = context::handle_context(&ctx, action).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle OTA upgrade commands
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_ota(&self, action: &OtaAction) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        ota::handle_ota(&ctx, action).await
+        let output = ota::handle_ota(&ctx, action).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle AMP commands routed through the effect system.
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_amp(&self, action: &AmpAction) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        amp::handle_amp(&ctx, action).await
+        let output = amp::handle_amp(&ctx, action).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle chat commands
@@ -291,11 +352,15 @@ impl CliHandler {
     }
 
     /// Handle sync commands (daemon mode by default)
+    ///
+    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_sync(&self, action: &SyncAction) -> Result<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
-        sync::handle_sync(&ctx, action).await
+        let output = sync::handle_sync(&ctx, action).await?;
+        output.render();
+        Ok(())
     }
 
     /// Handle demo commands (requires development feature)

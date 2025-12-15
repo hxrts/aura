@@ -168,7 +168,8 @@ verbose() { [ "$VERBOSE" = true ] && echo -e "${BLUE}  ↳${NC} $1" || true; }
 EFFECT_HANDLER_ALLOWLIST="crates/aura-effects/src/"
 
 # Test infrastructure (Layer 8) - mocks and test harnesses
-TEST_ALLOWLIST="crates/aura-testkit/|/tests/|/examples/|benches/"
+# Also includes /testing/ directories which are L8-style test infrastructure in other layers
+TEST_ALLOWLIST="crates/aura-testkit/|/tests/|/testing/|/examples/|benches/"
 
 # Rendezvous LAN discovery (UDP sockets are platform-specific and intentionally live here)
 LAN_DISCOVERY_ALLOWLIST="crates/aura-rendezvous/src/lan_discovery.rs"
@@ -332,8 +333,27 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   fs_pattern="std::fs::|std::io::File|std::io::BufReader|std::io::BufWriter"
   fs_hits=$(rg --no-heading "$fs_pattern" crates -g "*.rs" || true)
   filtered_fs=$(filter_common_allowlist "$fs_hits" "$RUNTIME_ALLOWLIST|$APP_NATIVE_STORAGE_ALLOWLIST|$TUI_BOOTSTRAP_ALLOWLIST")
+  # Additional filter: skip lines in files after #[cfg(test)] (inline test modules)
+  if [ -n "$filtered_fs" ]; then
+    filtered_fs_final=""
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      file_path="${line%%:*}"
+      # Skip if file contains #[cfg(test)] and this line is in the test module
+      if [ -f "$file_path" ] && grep -q "#\[cfg(test)\]" "$file_path" 2>/dev/null; then
+        match_line_text="${line#*:}"
+        match_line_num=$(grep -n "$match_line_text" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
+        cfg_test_line=$(grep -n "#\[cfg(test)\]" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
+        if [ -n "$match_line_num" ] && [ -n "$cfg_test_line" ] && [ "$match_line_num" -gt "$cfg_test_line" ]; then
+          continue  # Skip - this is in a test module
+        fi
+      fi
+      filtered_fs_final="${filtered_fs_final}${line}"$'\n'
+    done <<< "$filtered_fs"
+    filtered_fs="$filtered_fs_final"
+  fi
   emit_hits "Direct std::fs usage (should use StorageEffects)" "$filtered_fs"
-  verbose "Allowed: aura-effects/src/, aura-simulator/src/handlers/, aura-agent/src/runtime/, aura-app/src/core/app.rs (cfg-gated), aura-terminal/src/handlers/tui.rs (bootstrap), tests/"
+  verbose "Allowed: aura-effects/src/, aura-simulator/src/handlers/, aura-agent/src/runtime/, aura-app/src/core/app.rs (cfg-gated), aura-terminal/src/handlers/tui.rs (bootstrap), tests/, testing/, #[cfg(test)] modules"
 
   # Check for direct std::net usage outside handler layers (should use NetworkEffects)
   # Allowed: effect handler impls (network.rs), runtime assembly, tests

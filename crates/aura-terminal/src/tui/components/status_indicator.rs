@@ -148,3 +148,130 @@ pub fn ProgressDots(props: &ProgressDotsProps) -> impl Into<AnyElement<'static>>
         }
     }
 }
+
+/// Sync status for the indicator
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SyncIndicatorStatus {
+    /// Not yet synced
+    #[default]
+    LocalOnly,
+    /// Currently syncing
+    Syncing,
+    /// Fully synced
+    Synced,
+    /// Sync failed
+    Failed,
+}
+
+impl SyncIndicatorStatus {
+    /// Get the icon for this sync status
+    pub fn icon(&self) -> &'static str {
+        match self {
+            SyncIndicatorStatus::LocalOnly => Icons::OFFLINE, // Empty circle
+            SyncIndicatorStatus::Syncing => Icons::PENDING,   // Hourglass/loading
+            SyncIndicatorStatus::Synced => Icons::ONLINE,     // Filled circle
+            SyncIndicatorStatus::Failed => Icons::CROSS,      // X mark
+        }
+    }
+
+    /// Get the color for this sync status
+    pub fn color(&self) -> Color {
+        match self {
+            SyncIndicatorStatus::LocalOnly => Theme::TEXT_MUTED,
+            SyncIndicatorStatus::Syncing => Theme::WARNING,
+            SyncIndicatorStatus::Synced => Theme::SUCCESS,
+            SyncIndicatorStatus::Failed => Theme::ERROR,
+        }
+    }
+}
+
+/// Props for SyncStatusIndicator
+#[derive(Default, Props)]
+pub struct SyncStatusIndicatorProps {
+    /// The sync status to display
+    pub status: SyncIndicatorStatus,
+    /// Optional label text
+    pub label: String,
+    /// Show icon only (no label)
+    pub icon_only: bool,
+    /// Show progress (e.g., "2/3 peers")
+    pub progress: Option<(usize, usize)>,
+}
+
+/// A sync status indicator with icon, optional label, and optional progress
+#[component]
+pub fn SyncStatusIndicator(props: &SyncStatusIndicatorProps) -> impl Into<AnyElement<'static>> {
+    let icon = props.status.icon();
+    let color = props.status.color();
+    let label = props.label.clone();
+    let show_label = !props.icon_only && !label.is_empty();
+
+    // Build progress text if provided
+    let progress_text = props
+        .progress
+        .map(|(current, total)| format!("{}/{}", current, total));
+
+    element! {
+        View(flex_direction: FlexDirection::Row, align_items: AlignItems::Center, gap: Spacing::XS) {
+            Text(content: icon, color: color)
+            #(if show_label {
+                Some(element! {
+                    Text(content: label, color: Theme::TEXT)
+                })
+            } else {
+                None
+            })
+            #(progress_text.map(|text| {
+                element! {
+                    Text(content: text, color: Theme::TEXT_MUTED)
+                }
+            }))
+        }
+    }
+}
+
+/// Props for DeliveryStatusIndicator
+#[derive(Default, Props)]
+pub struct DeliveryStatusIndicatorProps {
+    /// Whether the message is still being sent
+    pub sending: bool,
+    /// Whether the message was sent (network acknowledged)
+    pub sent: bool,
+    /// Whether the message was delivered to recipient
+    pub delivered: bool,
+    /// Whether the message was read by recipient
+    pub read: bool,
+    /// Whether delivery failed
+    pub failed: bool,
+}
+
+/// A delivery status indicator (checkmarks for message delivery)
+///
+/// Shows the appropriate icon based on delivery state:
+/// - Sending: hourglass
+/// - Sent: single gray check
+/// - Delivered: double gray check
+/// - Read: double blue check
+/// - Failed: red X
+#[component]
+pub fn DeliveryStatusIndicator(
+    props: &DeliveryStatusIndicatorProps,
+) -> impl Into<AnyElement<'static>> {
+    let (icon, color) = if props.failed {
+        (Icons::CROSS, Theme::ERROR)
+    } else if props.read {
+        (Icons::CHECK_DOUBLE, Theme::INFO) // Blue for read
+    } else if props.delivered {
+        (Icons::CHECK_DOUBLE, Theme::TEXT_MUTED) // Gray for delivered
+    } else if props.sent {
+        (Icons::CHECK, Theme::TEXT_MUTED) // Single gray check
+    } else if props.sending {
+        (Icons::PENDING, Theme::TEXT_MUTED)
+    } else {
+        (Icons::PENDING, Theme::TEXT_MUTED) // Default to pending
+    };
+
+    element! {
+        Text(content: icon, color: color)
+    }
+}

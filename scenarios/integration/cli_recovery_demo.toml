@@ -1,7 +1,7 @@
 # CLI Recovery Demo - Bob's Journey
 #
 # Complete scenario mirroring Bob's recovery demo workflow:
-# 1. Alice & Charlie pre-setup with existing accounts
+# 1. Alice & Carol pre-setup with existing accounts
 # 2. Bob onboarding with guardian setup 
 # 3. Group chat establishment and messaging
 # 4. Bob's account data loss simulation
@@ -11,13 +11,13 @@
 
 [metadata]
 name = "cli_recovery_demo"
-description = "Complete CLI recovery demo scenario - Bob's journey with Alice & Charlie"
+description = "Complete CLI recovery demo scenario - Bob's journey with Alice & Carol"
 version = "1.0.0"
 author = "Aura UX Demo Team"
 tags = ["demo", "recovery", "cli", "e2e", "multi-actor", "chat"]
 
 [setup]
-participants = 3  # Alice, Bob, Charlie
+participants = 3  # Alice, Bob, Carol
 threshold = 2     # 2-of-3 guardian setup
 seed = 2024       # Deterministic demo
 chat_enabled = true
@@ -32,34 +32,34 @@ partition_simulation = true   # Enable account data loss simulation
 # Demo-specific configuration
 bob_as_protagonist = true
 alice_as_primary_guardian = true
-charlie_as_secondary_guardian = true
+carol_as_secondary_guardian = true
 message_history_validation = true
 account_loss_simulation = true
 
-# Phase 1: Pre-Demo Setup (Alice & Charlie preparation)
+# Phase 1: Pre-Demo Setup (Alice & Carol preparation)
 [[phases]]
-name = "alice_charlie_setup"
-description = "Alice and Charlie set up their accounts before Bob joins"
+name = "alice_carol_setup"
+description = "Alice and Carol set up their accounts before Bob joins"
 timeout_seconds = 10
 actions = [
     { type = "run_choreography", choreography = "account_creation", participants = ["alice"], threshold = 1 },
-    { type = "run_choreography", choreography = "account_creation", participants = ["charlie"], threshold = 1 },
+    { type = "run_choreography", choreography = "account_creation", participants = ["carol"], threshold = 1 },
     { type = "verify_property", property = "alice_account_ready", expected = true },
-    { type = "verify_property", property = "charlie_account_ready", expected = true }
+    { type = "verify_property", property = "carol_account_ready", expected = true }
 ]
 
 # Phase 2: Bob's Onboarding Journey
 [[phases]]
 name = "bob_onboarding"
-description = "Bob creates account and receives guardian invitations from Alice & Charlie"
+description = "Bob creates account and receives guardian invitations from Alice & Carol"
 timeout_seconds = 15
 actions = [
     { type = "run_choreography", choreography = "account_creation", participants = ["bob"], threshold = 1 },
     { type = "run_choreography", choreography = "guardian_request", participants = ["bob", "alice"], requester = "bob", guardian = "alice" },
     { type = "run_choreography", choreography = "guardian_accept", participants = ["alice", "bob"], guardian = "alice", protege = "bob" },
-    { type = "run_choreography", choreography = "guardian_request", participants = ["bob", "charlie"], requester = "bob", guardian = "charlie" },
-    { type = "run_choreography", choreography = "guardian_accept", participants = ["charlie", "bob"], guardian = "charlie", protege = "bob" },
-    { type = "run_choreography", choreography = "guardian_authority_configuration", participants = ["alice", "bob", "charlie"], threshold = 2 },
+    { type = "run_choreography", choreography = "guardian_request", participants = ["bob", "carol"], requester = "bob", guardian = "carol" },
+    { type = "run_choreography", choreography = "guardian_accept", participants = ["carol", "bob"], guardian = "carol", protege = "bob" },
+    { type = "run_choreography", choreography = "guardian_authority_configuration", participants = ["alice", "bob", "carol"], threshold = 2 },
     { type = "verify_property", property = "bob_guardians_configured", expected = true },
     { type = "verify_property", property = "guardian_relationships_established", expected = true }
 ]
@@ -67,12 +67,12 @@ actions = [
 # Phase 3: Group Chat Establishment
 [[phases]]
 name = "group_chat_setup"
-description = "Alice creates group chat and invites Bob & Charlie"
+description = "Alice creates group chat and invites Bob & Carol"
 timeout_seconds = 10
 actions = [
-    { type = "run_choreography", choreography = "chat_group_creation", participants = ["alice"], creator = "alice", group_name = "Alice, Bob & Charlie" },
+    { type = "run_choreography", choreography = "chat_group_creation", participants = ["alice"], creator = "alice", group_name = "Alice, Bob & Carol" },
     { type = "run_choreography", choreography = "chat_group_invitation", participants = ["alice", "bob"], group_admin = "alice", invitee = "bob" },
-    { type = "run_choreography", choreography = "chat_group_invitation", participants = ["alice", "charlie"], group_admin = "alice", invitee = "charlie" },
+    { type = "run_choreography", choreography = "chat_group_invitation", participants = ["alice", "carol"], group_admin = "alice", invitee = "carol" },
     { type = "verify_property", property = "group_chat_created", expected = true },
     { type = "verify_property", property = "all_members_joined", expected = true }
 ]
@@ -85,7 +85,7 @@ timeout_seconds = 20
 actions = [
     { type = "run_choreography", choreography = "chat_message", participants = ["alice"], sender = "alice", message = "Welcome to our group, Bob!" },
     { type = "run_choreography", choreography = "chat_message", participants = ["bob"], sender = "bob", message = "Thanks Alice! Great to be here." },
-    { type = "run_choreography", choreography = "chat_message", participants = ["charlie"], sender = "charlie", message = "Hey everyone! This chat system is awesome." },
+    { type = "run_choreography", choreography = "chat_message", participants = ["carol"], sender = "carol", message = "Hey everyone! This chat system is awesome." },
     { type = "run_choreography", choreography = "chat_message", participants = ["alice"], sender = "alice", message = "Bob, you should backup your account soon" },
     { type = "run_choreography", choreography = "chat_message", participants = ["bob"], sender = "bob", message = "I'll do that right after this demo!" },
     { type = "verify_property", property = "message_history_available", expected = true },
@@ -107,13 +107,13 @@ actions = [
 # Phase 6: Recovery Initiation
 [[phases]]
 name = "recovery_initiation"
-description = "Bob initiates guardian recovery with Alice & Charlie's help"
+description = "Bob initiates guardian recovery with Alice & Carol's help"
 timeout_seconds = 15
 actions = [
     { type = "run_choreography", choreography = "guardian_recovery_request", participants = ["bob"], requester = "bob" },
     { type = "run_choreography", choreography = "guardian_recovery_validation", participants = ["alice", "bob"], guardian = "alice", protege = "bob" },
-    { type = "run_choreography", choreography = "guardian_recovery_validation", participants = ["charlie", "bob"], guardian = "charlie", protege = "bob" },
-    { type = "run_choreography", choreography = "guardian_recovery_coordination", participants = ["alice", "bob", "charlie"], threshold = 2 },
+    { type = "run_choreography", choreography = "guardian_recovery_validation", participants = ["carol", "bob"], guardian = "carol", protege = "bob" },
+    { type = "run_choreography", choreography = "guardian_recovery_coordination", participants = ["alice", "bob", "carol"], threshold = 2 },
     { type = "verify_property", property = "recovery_request_validated", expected = true },
     { type = "verify_property", property = "guardian_approval_threshold_met", expected = true }
 ]
@@ -124,7 +124,7 @@ name = "account_restoration"
 description = "Bob's account and chat history are restored"
 timeout_seconds = 20
 actions = [
-    { type = "run_choreography", choreography = "threshold_key_recovery", participants = ["alice", "bob", "charlie"], threshold = 2, target = "bob" },
+    { type = "run_choreography", choreography = "threshold_key_recovery", participants = ["alice", "bob", "carol"], threshold = 2, target = "bob" },
     { type = "run_choreography", choreography = "chat_history_sync", participants = ["bob"], target = "bob" },
     { type = "verify_property", property = "bob_account_restored", expected = true },
     { type = "verify_property", property = "bob_chat_history_restored", expected = true },
@@ -137,9 +137,9 @@ name = "post_recovery_messaging"
 description = "Verify Bob can resume normal chat operations"
 timeout_seconds = 10
 actions = [
-    { type = "run_choreography", choreography = "chat_message", participants = ["bob"], sender = "bob", message = "I'm back! Thanks Alice and Charlie for helping me recover." },
+    { type = "run_choreography", choreography = "chat_message", participants = ["bob"], sender = "bob", message = "I'm back! Thanks Alice and Carol for helping me recover." },
     { type = "run_choreography", choreography = "chat_message", participants = ["alice"], sender = "alice", message = "Welcome back Bob! Guardian recovery really works!" },
-    { type = "run_choreography", choreography = "chat_message", participants = ["charlie"], sender = "charlie", message = "Amazing! You can see all our previous messages too." },
+    { type = "run_choreography", choreography = "chat_message", participants = ["carol"], sender = "carol", message = "Amazing! You can see all our previous messages too." },
     { type = "verify_property", property = "bob_can_send_messages", expected = true },
     { type = "verify_property", property = "bob_can_see_full_history", expected = true },
     { type = "verify_property", property = "group_functionality_restored", expected = true }
@@ -152,14 +152,14 @@ property_type = "safety"
 description = "Alice's account is properly initialized"
 
 [[properties]]
-name = "charlie_account_ready"
+name = "carol_account_ready"
 property_type = "safety"
-description = "Charlie's account is properly initialized"
+description = "Carol's account is properly initialized"
 
 [[properties]]
 name = "bob_guardians_configured"
 property_type = "safety"
-description = "Bob has Alice and Charlie configured as guardians"
+description = "Bob has Alice and Carol configured as guardians"
 
 [[properties]]
 name = "guardian_relationships_established"
@@ -174,7 +174,7 @@ description = "Group chat is created with all participants"
 [[properties]]
 name = "all_members_joined"
 property_type = "liveness"
-description = "Alice, Bob, and Charlie are all in the group chat"
+description = "Alice, Bob, and Carol are all in the group chat"
 
 [[properties]]
 name = "message_history_available"

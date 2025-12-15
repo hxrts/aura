@@ -55,12 +55,12 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
             height: 100pct,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+
         ) {
             View(
                 width: Percent(70.0),
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
+                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
                 border_color: Theme::SUCCESS,
             ) {
@@ -98,7 +98,7 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
                     // Code box
                     View(
                         flex_direction: FlexDirection::Column,
-                        background_color: Theme::BG_DARK,
+
                         border_style: BorderStyle::Round,
                         border_color: Theme::PRIMARY,
                         padding: 2,

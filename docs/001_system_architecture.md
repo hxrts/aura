@@ -525,7 +525,7 @@ View types aggregate reactive state for screens. Views subscribe to journal fact
 
 The effect bridge connects the TUI to the real effect system. Commands dispatch asynchronously. Results return via channel. Events stream from the effect system to the TUI.
 
-Demo mode compiles only with the development feature flag. The simulator automates Alice and Charlie while Bob is human-controlled. Production builds exclude simulator dependencies. See [Terminal User Interface](115_tui.md) for component details.
+Demo mode compiles only with the development feature flag. The simulator automates Alice and Carol while Bob is human-controlled. Production builds exclude simulator dependencies. See [Terminal User Interface](115_tui.md) for component details.
 
 ## Documents That Reference This Guide
 

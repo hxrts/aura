@@ -11,7 +11,7 @@ use std::collections::HashMap;
 /// Test the complete CLI recovery demo scenario
 /// 
 /// This test mirrors the workflow defined in scenarios/integration/cli_recovery_demo.toml:
-/// 1. Alice & Charlie setup
+/// 1. Alice & Carol setup
 /// 2. Bob onboarding with guardian setup
 /// 3. Group chat establishment and messaging
 /// 4. Bob's account data loss simulation  
@@ -20,12 +20,12 @@ use std::collections::HashMap;
 async fn test_complete_cli_recovery_demo() {
     let handler = SimulationScenarioHandler::new(2024); // Deterministic demo seed
 
-    // Phase 1: Setup chat group (Alice creates, adds Bob & Charlie)
+    // Phase 1: Setup chat group (Alice creates, adds Bob & Carol)
     let group_id = handler
         .create_chat_group(
-            "Alice, Bob & Charlie",
+            "Alice, Bob & Carol",
             "alice",
-            vec!["bob".to_string(), "charlie".to_string()],
+            vec!["bob".to_string(), "carol".to_string()],
         )
         .expect("Should create chat group successfully");
 
@@ -37,7 +37,7 @@ async fn test_complete_cli_recovery_demo() {
     let messages = vec![
         ("alice", "Welcome to our group, Bob!"),
         ("bob", "Thanks Alice! Great to be here."),
-        ("charlie", "Hey everyone! This chat system is awesome."),
+        ("carol", "Hey everyone! This chat system is awesome."),
         ("alice", "Bob, you should backup your account soon"),
         ("bob", "I'll do that right after this demo!"),
     ];
@@ -79,7 +79,7 @@ async fn test_complete_cli_recovery_demo() {
     handler
         .initiate_guardian_recovery(
             "bob",
-            vec!["alice".to_string(), "charlie".to_string()],
+            vec!["alice".to_string(), "carol".to_string()],
             2, // 2-of-3 threshold
         )
         .expect("Should initiate guardian recovery");
@@ -113,9 +113,9 @@ async fn test_complete_cli_recovery_demo() {
 
     // Phase 7: Post-recovery messaging (Bob can participate again)
     let post_recovery_messages = vec![
-        ("bob", "I'm back! Thanks Alice and Charlie for helping me recover."),
+        ("bob", "I'm back! Thanks Alice and Carol for helping me recover."),
         ("alice", "Welcome back Bob! Guardian recovery really works!"),
-        ("charlie", "Amazing! You can see all our previous messages too."),
+        ("carol", "Amazing! You can see all our previous messages too."),
     ];
 
     for (sender, message) in &post_recovery_messages {
@@ -198,17 +198,17 @@ async fn test_multi_actor_chat_dynamics() {
         .unwrap();
     
     let group2_id = handler
-        .create_chat_group("Group 2", "bob", vec!["charlie".to_string()])
+        .create_chat_group("Group 2", "bob", vec!["carol".to_string()])
         .unwrap();
 
     let group3_id = handler
-        .create_chat_group("All Friends", "alice", vec!["bob".to_string(), "charlie".to_string()])
+        .create_chat_group("All Friends", "alice", vec!["bob".to_string(), "carol".to_string()])
         .unwrap();
 
     // Send messages in different groups
     handler.send_chat_message(&group1_id, "alice", "Alice to Bob").unwrap();
-    handler.send_chat_message(&group2_id, "bob", "Bob to Charlie").unwrap();
-    handler.send_chat_message(&group3_id, "charlie", "Charlie to all").unwrap();
+    handler.send_chat_message(&group2_id, "bob", "Bob to Carol").unwrap();
+    handler.send_chat_message(&group3_id, "carol", "Carol to all").unwrap();
 
     // Verify stats
     let stats = handler.get_chat_stats().unwrap();
@@ -229,7 +229,7 @@ async fn test_multi_actor_chat_dynamics() {
     assert_eq!(*bob_loss_count, 3, "Bob should lose access to messages from all groups he's in");
 
     // Recovery should restore access to all groups
-    handler.initiate_guardian_recovery("bob", vec!["alice".to_string(), "charlie".to_string()], 2).unwrap();
+    handler.initiate_guardian_recovery("bob", vec!["alice".to_string(), "carol".to_string()], 2).unwrap();
     handler.verify_recovery_success("bob", vec!["all_groups_restored".to_string()]).unwrap();
 
     let post_recovery_validation = handler.validate_message_history("bob", 3, true).unwrap();
@@ -259,7 +259,7 @@ async fn test_guardian_recovery_failure_scenarios() {
     // Test: Valid recovery setup and completion
     let valid_result = handler.initiate_guardian_recovery(
         "bob",
-        vec!["alice".to_string(), "charlie".to_string(), "dave".to_string()],
+        vec!["alice".to_string(), "carol".to_string(), "dave".to_string()],
         2 // 2-of-3
     );
     assert!(valid_result.is_ok(), "Should succeed with sufficient guardians");

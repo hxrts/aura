@@ -9,19 +9,25 @@
 //! component automatically, triggering re-renders when data changes.
 //!
 //! Uses `aura_app::signal_defs::CHAT_SIGNAL` with `ReactiveEffects::subscribe()`.
+//!
+//! ## Pure View Component
+//!
+//! This screen is a pure view that renders based on props from TuiState.
+//! All event handling is done by the parent TuiShell (IoApp) via the state machine.
 
 use iocraft::prelude::*;
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use aura_app::signal_defs::CHAT_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::{
-    ChannelInfoModal, ChatCreateModal, ChatCreateState, MessageBubble, MessageInput, TextInputModal,
+    ChannelInfoModal, ChatCreateModal, MessageBubble, MessageInput, TextInputModal,
 };
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{is_nav_key_press, navigate_list, InputThrottle, NavKey, NavThrottle};
+use crate::tui::layout::dim;
+use crate::tui::props::ChatViewProps;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Channel, Message};
 
@@ -39,87 +45,6 @@ pub type RetryMessageCallback = Arc<dyn Fn(String, String, String) + Send + Sync
 
 /// Callback type for setting channel topic (channel_id, topic)
 pub type SetTopicCallback = Arc<dyn Fn(String, String) + Send + Sync>;
-
-/// State for topic editing modal
-#[derive(Clone, Debug, Default)]
-pub struct TopicModalState {
-    /// Whether the modal is visible
-    pub visible: bool,
-    /// Current input value
-    pub value: String,
-    /// Channel ID being edited
-    pub channel_id: String,
-    /// Error message if any
-    pub error: String,
-}
-
-impl TopicModalState {
-    /// Show the modal with the current topic
-    pub fn show(&mut self, channel_id: &str, current_topic: &str) {
-        self.visible = true;
-        self.channel_id = channel_id.to_string();
-        self.value = current_topic.to_string();
-        self.error.clear();
-    }
-
-    /// Hide the modal
-    pub fn hide(&mut self) {
-        self.visible = false;
-        self.value.clear();
-        self.channel_id.clear();
-        self.error.clear();
-    }
-
-    /// Push a character to the input
-    pub fn push_char(&mut self, c: char) {
-        self.value.push(c);
-    }
-
-    /// Delete the last character
-    pub fn backspace(&mut self) {
-        self.value.pop();
-    }
-}
-
-/// State for channel info modal
-#[derive(Clone, Debug, Default)]
-pub struct ChannelInfoModalState {
-    /// Whether the modal is visible
-    pub visible: bool,
-    /// Channel ID being shown
-    pub channel_id: String,
-    /// Channel name
-    pub channel_name: String,
-    /// Channel topic
-    pub topic: String,
-    /// Participants in the channel
-    pub participants: Vec<String>,
-}
-
-impl ChannelInfoModalState {
-    /// Show the modal with channel info
-    pub fn show(&mut self, channel_id: &str, channel_name: &str, topic: Option<&str>) {
-        self.visible = true;
-        self.channel_id = channel_id.to_string();
-        self.channel_name = channel_name.to_string();
-        self.topic = topic.unwrap_or("").to_string();
-        self.participants.clear(); // Will be populated by callback
-    }
-
-    /// Set the participants list
-    pub fn set_participants(&mut self, participants: Vec<String>) {
-        self.participants = participants;
-    }
-
-    /// Hide the modal
-    pub fn hide(&mut self) {
-        self.visible = false;
-        self.channel_id.clear();
-        self.channel_name.clear();
-        self.topic.clear();
-        self.participants.clear();
-    }
-}
 
 /// Format a timestamp (ms since epoch) as a human-readable time string
 fn format_timestamp(ts_ms: u64) -> String {
@@ -140,9 +65,6 @@ fn format_timestamp(ts_ms: u64) -> String {
         String::new()
     }
 }
-
-/// Input text shared between render and event handler (thread-safe)
-type SharedText = Arc<RwLock<String>>;
 
 /// Which panel is focused
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -218,52 +140,24 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
     }
 }
 
-/// Props for MessageList
-#[allow(dead_code)] // Retained for future refactoring - ChatScreen currently renders inline
-#[derive(Default, Props)]
-pub struct MessageListProps {
-    pub messages: Vec<Message>,
-}
-
-/// A list of messages in the chat area
-#[component]
-pub fn MessageList(props: &MessageListProps) -> impl Into<AnyElement<'static>> {
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
-            border_style: BorderStyle::Round,
-            border_color: Theme::BORDER,
-            padding: Spacing::PANEL_PADDING,
-        ) {
-            #(props.messages.iter().map(|msg| {
-                let id = msg.id.clone();
-                let sender = msg.sender.clone();
-                let content = msg.content.clone();
-                let ts = msg.timestamp.clone();
-                let status = msg.delivery_status;
-                element! {
-                    MessageBubble(
-                        key: id,
-                        sender: sender,
-                        content: content,
-                        timestamp: ts,
-                        is_own: msg.is_own,
-                        delivery_status: status,
-                    )
-                }
-            }))
-        }
-    }
-}
-
 /// Props for ChatScreen
+///
+/// ## Compile-Time Safety
+///
+/// The `view` field is a required struct that embeds all view state from TuiState.
+/// This makes it a **compile-time error** to forget any view state field.
 #[derive(Default, Props)]
 pub struct ChatScreenProps {
+    // === Domain data (from reactive signals) ===
     pub channels: Vec<Channel>,
     pub messages: Vec<Message>,
-    /// Initial selected channel index
-    pub initial_channel_index: usize,
+
+    // === View state from TuiState (REQUIRED - compile-time enforced) ===
+    /// All view state extracted from TuiState via `extract_chat_view_props()`.
+    /// This is a single struct field so forgetting any view state is a compile error.
+    pub view: ChatViewProps,
+
+    // === Callbacks (still needed for effect dispatch) ===
     /// Callback when sending a message (channel_id, content)
     pub on_send: Option<SendCallback>,
     /// Callback when selecting a channel (channel_id)
@@ -276,7 +170,12 @@ pub struct ChatScreenProps {
     pub on_set_topic: Option<SetTopicCallback>,
 }
 
-/// The main chat screen component with keyboard navigation
+/// The main chat screen component
+///
+/// ## Pure View Component
+///
+/// This screen is a pure view that renders based on props from TuiState.
+/// All event handling is done by the parent TuiShell (IoApp) via the state machine.
 ///
 /// ## Reactive Updates
 ///
@@ -285,9 +184,6 @@ pub struct ChatScreenProps {
 /// - New messages arrive
 /// - Channels are created/updated
 /// - The selected channel changes
-///
-/// This uses iocraft's `use_future` hook to spawn an async task that subscribes
-/// to futures-signals and updates local State<T> when the signal emits.
 #[component]
 pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     // Try to get AppCoreContext for reactive signal subscription
@@ -312,15 +208,8 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
             let mut reactive_messages = reactive_messages.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // Get a subscription to the chat signal via ReactiveEffects
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*CHAT_SIGNAL)
-                };
-
-                // Subscribe to signal updates - this runs indefinitely until component unmounts
-                while let Ok(chat_state) = stream.recv().await {
-                    // Convert aura-app ChatState to TUI types
+                // Helper closure to convert ChatState to TUI types
+                let convert_chat_state = |chat_state: &aura_app::views::ChatState| {
                     let channels: Vec<Channel> = chat_state
                         .channels
                         .iter()
@@ -335,7 +224,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         .messages
                         .iter()
                         .map(|m| {
-                            // Convert timestamp from u64 ms to human-readable string
                             let ts_str = format_timestamp(m.timestamp);
                             Message::new(&m.id, &m.sender_name, &m.content)
                                 .with_timestamp(ts_str)
@@ -343,7 +231,29 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         })
                         .collect();
 
-                    // Update reactive state - this triggers re-render
+                    (channels, messages)
+                };
+
+                // FIRST: Read current signal value to catch up on any changes
+                // that happened while this screen was unmounted
+                {
+                    let core = app_core.read().await;
+                    if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
+                        let (channels, messages) = convert_chat_state(&chat_state);
+                        reactive_channels.set(channels);
+                        reactive_messages.set(messages);
+                    }
+                }
+
+                // THEN: Subscribe for future updates
+                let mut stream = {
+                    let core = app_core.read().await;
+                    core.subscribe(&*CHAT_SIGNAL)
+                };
+
+                // Subscribe to signal updates - this runs indefinitely until component unmounts
+                while let Ok(chat_state) = stream.recv().await {
+                    let (channels, messages) = convert_chat_state(&chat_state);
                     reactive_channels.set(channels);
                     reactive_messages.set(messages);
                 }
@@ -354,380 +264,19 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Use reactive state for rendering (updated by signal or initialized from props)
     let channels = reactive_channels.read().clone();
     let messages = reactive_messages.read().clone();
-    let channel_count = channels.len();
-    let on_send = props.on_send.clone();
-    let on_channel_select = props.on_channel_select.clone();
 
-    // State for channel selection (usize is Copy, so use_state works)
-    let mut channel_idx = hooks.use_state(|| props.initial_channel_index);
-
-    // State for focus (ChatFocus is Copy)
-    let mut focus = hooks.use_state(|| ChatFocus::Channels);
-
-    // Modal state for creating new channels
-    let create_modal_state = hooks.use_state(ChatCreateState::new);
-
-    // Topic modal state
-    let topic_modal_state = hooks.use_state(TopicModalState::default);
-
-    // Channel info modal state
-    let channel_info_state = hooks.use_state(ChannelInfoModalState::default);
-
-    // Input text state - use Arc<RwLock> for thread-safe sharing
-    // Use use_state to persist across renders
-    let input_text: SharedText = hooks
-        .use_state(|| Arc::new(RwLock::new(String::new())))
-        .read()
-        .clone();
-    let input_text_for_handler = input_text.clone();
-
-    // Version counter to trigger rerenders when input changes
-    let input_version = hooks.use_state(|| 0usize);
-
-    // Get current channel ID for sending
-    let current_channel_id = channels
-        .get(channel_idx.get())
-        .map(|c| c.id.clone())
-        .unwrap_or_default();
-
-    // Clone channels for use in event handler
-    let channels_for_handler = channels.clone();
-
-    // Throttle for navigation keys - persists across renders
-    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
-
-    // Throttle for text input - persists across renders
-    let mut input_throttle = hooks.use_ref(InputThrottle::new);
-
-    // Clone create callback for event handler
-    let on_create_channel = props.on_create_channel.clone();
-    let on_retry_message = props.on_retry_message.clone();
-    let on_set_topic = props.on_set_topic.clone();
-
-    // Message index for selecting failed messages to retry
-    let message_idx = hooks.use_state(|| 0usize);
-
-    // Clone messages for event handler
-    let messages_for_handler = messages.clone();
-
-    // Handle keyboard events
-    hooks.use_terminal_events({
-        let input_text = input_text_for_handler;
-        let current_channel_id = current_channel_id.clone();
-        let on_send = on_send.clone();
-        let on_channel_select = on_channel_select.clone();
-        let on_create_channel = on_create_channel.clone();
-        let on_retry_message = on_retry_message.clone();
-        let on_set_topic = on_set_topic.clone();
-        let mut create_modal_state = create_modal_state.clone();
-        let mut topic_modal_state = topic_modal_state.clone();
-        let mut channel_info_state = channel_info_state.clone();
-        let channels = channels_for_handler;
-        let messages_for_retry = messages_for_handler;
-        let mut input_version = input_version.clone();
-        move |event| {
-            // Check if any modal is visible
-            let create_modal_visible = create_modal_state.read().visible;
-            let topic_modal_visible = topic_modal_state.read().visible;
-            let channel_info_visible = channel_info_state.read().visible;
-            let modal_visible = create_modal_visible || topic_modal_visible || channel_info_visible;
-            let current_focus = focus.get();
-
-            // Handle navigation keys first (only in normal mode, not in modal or input mode)
-            if !modal_visible && current_focus != ChatFocus::Input {
-                if let Some(nav_key) = is_nav_key_press(&event) {
-                    if nav_throttle.write().try_navigate() {
-                        match nav_key {
-                            // Horizontal: cycle focus between panels
-                            NavKey::Left => {
-                                let new_focus = match current_focus {
-                                    ChatFocus::Channels => ChatFocus::Input,
-                                    ChatFocus::Messages => ChatFocus::Channels,
-                                    ChatFocus::Input => ChatFocus::Messages,
-                                };
-                                focus.set(new_focus);
-                            }
-                            NavKey::Right => {
-                                let new_focus = match current_focus {
-                                    ChatFocus::Channels => ChatFocus::Messages,
-                                    ChatFocus::Messages => ChatFocus::Input,
-                                    ChatFocus::Input => ChatFocus::Channels,
-                                };
-                                focus.set(new_focus);
-                            }
-                            // Vertical: navigate within channel list when focused
-                            NavKey::Up | NavKey::Down => {
-                                if current_focus == ChatFocus::Channels && channel_count > 0 {
-                                    let new_idx =
-                                        navigate_list(channel_idx.get(), channel_count, nav_key);
-                                    channel_idx.set(new_idx);
-                                    if let Some(ref callback) = on_channel_select {
-                                        if let Some(ch) = channels.get(new_idx) {
-                                            callback(ch.id.clone());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    return;
-                }
-            }
-
-            match event {
-                TerminalEvent::Key(KeyEvent {
-                    code,
-                    modifiers,
-                    kind: KeyEventKind::Press,
-                    ..
-                }) => {
-                    if channel_info_visible {
-                        // Handle channel info modal keys
-                        match code {
-                            KeyCode::Esc => {
-                                // Close modal
-                                let mut state = channel_info_state.read().clone();
-                                state.hide();
-                                channel_info_state.set(state);
-                            }
-                            KeyCode::Char('t') => {
-                                // Open topic editing from info modal
-                                let info_state = channel_info_state.read().clone();
-                                // Close info modal
-                                let mut state = channel_info_state.read().clone();
-                                state.hide();
-                                channel_info_state.set(state);
-                                // Open topic modal with channel info
-                                let mut state = topic_modal_state.read().clone();
-                                state.show(&info_state.channel_id, &info_state.topic);
-                                topic_modal_state.set(state);
-                            }
-                            _ => {}
-                        }
-                    } else if topic_modal_visible {
-                        // Handle topic modal keys
-                        match code {
-                            KeyCode::Esc => {
-                                // Close modal
-                                let mut state = topic_modal_state.read().clone();
-                                state.hide();
-                                topic_modal_state.set(state);
-                            }
-                            KeyCode::Enter => {
-                                // Submit topic
-                                let state = topic_modal_state.read().clone();
-                                if let Some(ref callback) = on_set_topic {
-                                    callback(state.channel_id.clone(), state.value.clone());
-                                }
-                                // Close modal
-                                let mut state = topic_modal_state.read().clone();
-                                state.hide();
-                                topic_modal_state.set(state);
-                            }
-                            KeyCode::Backspace => {
-                                // Delete character (with throttle)
-                                if input_throttle.write().try_input() {
-                                    let mut state = topic_modal_state.read().clone();
-                                    state.backspace();
-                                    topic_modal_state.set(state);
-                                }
-                            }
-                            KeyCode::Char(c) => {
-                                // Add character (with throttle)
-                                if input_throttle.write().try_input() {
-                                    let mut state = topic_modal_state.read().clone();
-                                    state.push_char(c);
-                                    topic_modal_state.set(state);
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else if create_modal_visible {
-                        // Handle create channel modal keys
-                        match code {
-                            KeyCode::Esc => {
-                                // Close modal
-                                let mut state = create_modal_state.read().clone();
-                                state.hide();
-                                create_modal_state.set(state);
-                            }
-                            KeyCode::Tab => {
-                                // Switch field
-                                let mut state = create_modal_state.read().clone();
-                                state.next_field();
-                                create_modal_state.set(state);
-                            }
-                            KeyCode::BackTab => {
-                                // Switch field backwards
-                                let mut state = create_modal_state.read().clone();
-                                state.prev_field();
-                                create_modal_state.set(state);
-                            }
-                            KeyCode::Enter => {
-                                // Submit
-                                let state = create_modal_state.read().clone();
-                                if state.can_submit() {
-                                    if let Some(ref callback) = on_create_channel {
-                                        let name = state.get_name().to_string();
-                                        let topic = state.get_topic().map(|s| s.to_string());
-                                        callback(name, topic);
-                                    }
-                                    // Close modal
-                                    let mut state = create_modal_state.read().clone();
-                                    state.hide();
-                                    create_modal_state.set(state);
-                                }
-                            }
-                            KeyCode::Backspace => {
-                                // Delete character (with throttle)
-                                if input_throttle.write().try_input() {
-                                    let mut state = create_modal_state.read().clone();
-                                    state.pop_char();
-                                    create_modal_state.set(state);
-                                }
-                            }
-                            KeyCode::Char(c) => {
-                                // Add character (with throttle)
-                                if input_throttle.write().try_input() {
-                                    let mut state = create_modal_state.read().clone();
-                                    state.push_char(c);
-                                    create_modal_state.set(state);
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else if focus.get() == ChatFocus::Input {
-                        // Insert mode: only handle Escape, Enter, Backspace, and character input
-                        match code {
-                            // Escape exits insert mode back to channels
-                            KeyCode::Esc => {
-                                focus.set(ChatFocus::Channels);
-                            }
-                            // Shift+Enter adds newline, plain Enter sends message
-                            KeyCode::Enter => {
-                                if modifiers.contains(KeyModifiers::SHIFT) {
-                                    // Shift+Enter: add newline
-                                    if let Ok(mut guard) = input_text.write() {
-                                        guard.push('\n');
-                                    }
-                                    input_version.set(input_version.get().wrapping_add(1));
-                                } else {
-                                    // Plain Enter: send message
-                                    if let Ok(text) = input_text.read() {
-                                        let text = text.clone();
-                                        if !text.is_empty() {
-                                            if let Some(ref callback) = on_send {
-                                                callback(current_channel_id.clone(), text);
-                                            }
-                                            if let Ok(mut guard) = input_text.write() {
-                                                guard.clear();
-                                            }
-                                            input_version.set(input_version.get().wrapping_add(1));
-                                        }
-                                    }
-                                }
-                            }
-                            // Backspace removes last character (with throttle)
-                            KeyCode::Backspace => {
-                                if input_throttle.write().try_input() {
-                                    if let Ok(mut guard) = input_text.write() {
-                                        guard.pop();
-                                    }
-                                    input_version.set(input_version.get().wrapping_add(1));
-                                }
-                            }
-                            // Character input (including "/" for commands) with throttle
-                            KeyCode::Char(c) => {
-                                if !modifiers.contains(KeyModifiers::CONTROL)
-                                    && input_throttle.write().try_input()
-                                {
-                                    if let Ok(mut guard) = input_text.write() {
-                                        guard.push(c);
-                                    }
-                                    input_version.set(input_version.get().wrapping_add(1));
-                                }
-                            }
-                            // All other keys ignored in insert mode
-                            _ => {}
-                        }
-                    } else {
-                        // Normal mode: navigation and hotkeys
-                        // First handle hotkeys that shouldn't be captured by nav detection
-                        match code {
-                            // 'i' enters insert mode
-                            KeyCode::Char('i') => {
-                                focus.set(ChatFocus::Input);
-                            }
-                            // 'n' opens new channel modal
-                            KeyCode::Char('n') => {
-                                let mut state = create_modal_state.read().clone();
-                                state.show();
-                                create_modal_state.set(state);
-                            }
-                            // 'r' retries failed message (when in messages focus)
-                            KeyCode::Char('r') => {
-                                if focus.get() == ChatFocus::Messages {
-                                    // Find the current message and retry if it's failed
-                                    let msg_idx = message_idx.get();
-                                    if let Some(msg) = messages_for_retry.get(msg_idx) {
-                                        use crate::tui::types::DeliveryStatus;
-                                        if msg.delivery_status == DeliveryStatus::Failed {
-                                            if let Some(ref callback) = on_retry_message {
-                                                callback(
-                                                    msg.id.clone(),
-                                                    current_channel_id.clone(),
-                                                    msg.content.clone(),
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            // 't' opens topic editing modal (when in channels focus)
-                            KeyCode::Char('t') => {
-                                if focus.get() == ChatFocus::Channels {
-                                    // Get current channel's topic (or empty string)
-                                    let current_topic = channels
-                                        .get(channel_idx.get())
-                                        .and_then(|c| c.topic.as_ref())
-                                        .map(|t| t.as_str())
-                                        .unwrap_or("");
-                                    let mut state = topic_modal_state.read().clone();
-                                    state.show(&current_channel_id, current_topic);
-                                    topic_modal_state.set(state);
-                                }
-                            }
-                            // 'o' opens channel info modal (when in channels focus)
-                            KeyCode::Char('o') => {
-                                if focus.get() == ChatFocus::Channels {
-                                    if let Some(ch) = channels.get(channel_idx.get()) {
-                                        let mut state = channel_info_state.read().clone();
-                                        state.show(&ch.id, &ch.name, ch.topic.as_deref());
-                                        // Set default participants (You + placeholder for others)
-                                        // Full participant list can be loaded via ListParticipants command
-                                        state.set_participants(vec!["You".to_string()]);
-                                        channel_info_state.set(state);
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    });
-
-    // Read input text for display (using version to ensure fresh read)
-    let _ = input_version.get(); // Force dependency on version
-    let display_input_text = input_text.read().map(|g| g.clone()).unwrap_or_default();
-
-    let current_channel_idx = channel_idx.get();
-    let current_focus = focus.get();
+    // === Pure view: Use props.view from TuiState instead of local state ===
+    let current_focus = props.view.focus;
+    let current_channel_idx = props.view.selected_channel;
+    let display_input_text = props.view.input_buffer.clone();
+    let input_focused = props.view.insert_mode || current_focus == ChatFocus::Input;
     let channels_focused = current_focus == ChatFocus::Channels;
     let messages_focused = current_focus == ChatFocus::Messages;
-    let input_focused = current_focus == ChatFocus::Input;
+
+    // Modal visibility from props.view
+    let is_create_modal_visible = props.view.create_modal_visible;
+    let is_topic_modal_visible = props.view.topic_modal_visible;
+    let is_channel_info_visible = props.view.info_modal_visible;
 
     // Message list border color based on focus
     let msg_border = if messages_focused {
@@ -736,25 +285,22 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         Theme::BORDER
     };
 
-    // Check if modals are visible
-    let is_create_modal_visible = create_modal_state.read().visible;
-    let is_topic_modal_visible = topic_modal_state.read().visible;
-    let is_channel_info_visible = channel_info_state.read().visible;
+    // === Pure view: No use_terminal_events ===
+    // All event handling is done by IoApp (the shell) via the state machine.
+    // This component is purely presentational.
 
+    // Layout: Main content (22 rows) + MessageInput (3 rows) = 25 = MIDDLE_HEIGHT
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            width: 100pct,
-            height: 100pct,
-            flex_grow: 1.0,
-            flex_shrink: 1.0,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Main content area
+            // Main content area - fixed 22 rows
             View(
                 flex_direction: FlexDirection::Row,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
+                height: 22,
                 overflow: Overflow::Hidden,
                 gap: Spacing::XS,
             ) {
@@ -767,6 +313,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 View(
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
+                    height: 22,
                     border_style: BorderStyle::Round,
                     border_color: msg_border,
                     padding: Spacing::PANEL_PADDING,
@@ -792,41 +339,43 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 }
             }
 
-            // Message input
-            MessageInput(
-                value: display_input_text,
-                placeholder: "Type a message...".to_string(),
-                focused: input_focused,
-                reply_to: None::<String>,
-                sending: false,
-            )
+            // Message input (3 rows) - full width
+            View(height: 3, width: dim::TOTAL_WIDTH) {
+                MessageInput(
+                    value: display_input_text,
+                    placeholder: "Type a message...".to_string(),
+                    focused: input_focused,
+                    reply_to: None::<String>,
+                    sending: false,
+                )
+            }
 
-            // Create channel modal (overlay)
+            // Create channel modal (overlay) - uses props.view from TuiState
             ChatCreateModal(
                 visible: is_create_modal_visible,
                 focused: is_create_modal_visible,
-                name: create_modal_state.read().name.clone(),
-                topic: create_modal_state.read().topic.clone(),
-                active_field: create_modal_state.read().active_field,
-                error: create_modal_state.read().error.clone().unwrap_or_default(),
-                creating: create_modal_state.read().creating,
+                name: props.view.create_modal_name.clone(),
+                topic: props.view.create_modal_topic.clone(),
+                active_field: props.view.create_modal_active_field,
+                error: String::new(),
+                creating: false,
             )
 
-            // Topic editing modal (overlay)
+            // Topic editing modal (overlay) - uses props.view from TuiState
             TextInputModal(
                 visible: is_topic_modal_visible,
                 title: "Set Channel Topic".to_string(),
-                value: topic_modal_state.read().value.clone(),
+                value: props.view.topic_modal_value.clone(),
                 placeholder: "Enter topic...".to_string(),
-                error: topic_modal_state.read().error.clone(),
+                error: String::new(),
             )
 
-            // Channel info modal (overlay)
+            // Channel info modal (overlay) - uses props.view from TuiState
             ChannelInfoModal(
                 visible: is_channel_info_visible,
-                channel_name: channel_info_state.read().channel_name.clone(),
-                topic: channel_info_state.read().topic.clone(),
-                participants: channel_info_state.read().participants.clone(),
+                channel_name: props.view.info_modal_channel_name.clone(),
+                topic: props.view.info_modal_topic.clone(),
+                participants: vec!["You".to_string()],
             )
         }
     }
@@ -853,12 +402,10 @@ pub async fn run_chat_screen() -> std::io::Result<()> {
             .own(false),
     ];
 
-    let initial_idx: usize = 0;
     element! {
         ChatScreen(
             channels: channels,
             messages: messages,
-            initial_channel_index: initial_idx,
         )
     }
     .fullscreen()

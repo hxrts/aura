@@ -1,57 +1,20 @@
 //! # Settings Screen
 //!
 //! Account settings with editable profile and configuration modals.
+//!
+//! ## Pure View Component
+//!
+//! This screen is a pure view that renders based on props from TuiState.
+//! All event handling is done by the parent TuiShell (IoApp) via the state machine.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use crate::tui::components::{
-    ConfirmModal, TextInputModal, TextInputState, ThresholdModal, ThresholdState,
-};
-use crate::tui::navigation::{is_nav_key_press, InputThrottle, NavKey, NavThrottle, TwoPanelFocus};
+use crate::tui::components::{ConfirmModal, TextInputModal, ThresholdModal};
+use crate::tui::layout::dim;
+use crate::tui::props::SettingsViewProps;
 use crate::tui::theme::Theme;
 use crate::tui::types::{Device, MfaPolicy, SettingsSection};
-
-// =============================================================================
-// State Types
-// =============================================================================
-
-/// State for device removal confirmation modal
-#[derive(Debug, Clone)]
-pub struct ConfirmRemoveState {
-    pub visible: bool,
-    pub device_id: String,
-    pub device_name: String,
-    pub confirm_focused: bool,
-}
-
-impl ConfirmRemoveState {
-    pub fn new() -> Self {
-        Self {
-            visible: false,
-            device_id: String::new(),
-            device_name: String::new(),
-            confirm_focused: false,
-        }
-    }
-
-    pub fn show(&mut self, device_id: &str, device_name: &str) {
-        self.visible = true;
-        self.device_id = device_id.to_string();
-        self.device_name = device_name.to_string();
-        self.confirm_focused = false;
-    }
-
-    pub fn hide(&mut self) {
-        self.visible = false;
-        self.device_id.clear();
-        self.device_name.clear();
-    }
-
-    pub fn toggle_focus(&mut self) {
-        self.confirm_focused = !self.confirm_focused;
-    }
-}
 
 // =============================================================================
 // Callback Types
@@ -103,14 +66,28 @@ fn MenuItem(props: &MenuItemProps) -> impl Into<AnyElement<'static>> {
 // Settings Screen Props
 // =============================================================================
 
+/// Props for SettingsScreen
+///
+/// ## Compile-Time Safety
+///
+/// The `view` field is a required struct that embeds all view state from TuiState.
+/// This makes it a **compile-time error** to forget any view state field.
 #[derive(Default, Props)]
 pub struct SettingsScreenProps {
+    // === Domain data ===
     pub display_name: String,
     pub threshold_k: u8,
     pub threshold_n: u8,
     pub contact_count: usize,
     pub devices: Vec<Device>,
     pub mfa_policy: MfaPolicy,
+
+    // === View state from TuiState (REQUIRED - compile-time enforced) ===
+    /// All view state extracted from TuiState via `extract_settings_view_props()`.
+    /// This is a single struct field so forgetting any view state is a compile error.
+    pub view: SettingsViewProps,
+
+    // === Callbacks ===
     pub on_update_mfa: Option<MfaCallback>,
     pub on_update_nickname: Option<UpdateNicknameCallback>,
     pub on_update_threshold: Option<UpdateThresholdCallback>,
@@ -122,360 +99,43 @@ pub struct SettingsScreenProps {
 // Settings Screen Component
 // =============================================================================
 
+/// The settings screen
+///
+/// ## Pure View Component
+///
+/// This screen is a pure view that renders based on props from TuiState.
+/// All event handling is done by the parent TuiShell (IoApp) via the state machine.
 #[component]
-pub fn SettingsScreen(
-    props: &SettingsScreenProps,
-    mut hooks: Hooks,
-) -> impl Into<AnyElement<'static>> {
-    // State
-    let mut section = hooks.use_state(|| SettingsSection::Profile);
-    let mut panel_focus = hooks.use_state(|| TwoPanelFocus::List);
-    let mut device_index = hooks.use_state(|| 0usize);
-    let mut mfa_policy = hooks.use_state(|| props.mfa_policy);
-
-    // Modal states
-    let initial_display_name = props.display_name.clone();
-    let mut edit_name_state = hooks.use_ref(TextInputState::new);
-    let mut edit_name_version = hooks.use_state(|| 0usize);
-
-    let initial_threshold_k = props.threshold_k;
-    let initial_threshold_n = props.threshold_n;
-    let mut threshold_state = hooks.use_ref(ThresholdState::new);
-    let mut threshold_version = hooks.use_state(|| 0usize);
-
-    let mut device_add_state = hooks.use_ref(TextInputState::new);
-    let mut device_add_version = hooks.use_state(|| 0usize);
-
-    let mut confirm_remove_state = hooks.use_ref(ConfirmRemoveState::new);
-    let mut confirm_remove_version = hooks.use_state(|| 0usize);
-
-    let mut input_throttle = hooks.use_ref(InputThrottle::new);
-    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
-
-    // Current values
-    let current_section = section.get();
-    let current_focus = panel_focus.get();
-    let is_list_focused = current_focus == TwoPanelFocus::List;
-    let current_device_index = device_index.get();
-    let current_mfa = mfa_policy.get();
+pub fn SettingsScreen(props: &SettingsScreenProps) -> impl Into<AnyElement<'static>> {
+    // === Pure view: Use props.view from TuiState instead of local state ===
+    let current_section = props.view.section;
+    let is_list_focused = true; // Default to list focused (no panel_focus in SettingsViewProps)
+    let current_device_index = props.view.selected_index;
+    let current_mfa = props.view.mfa_policy;
     let devices = props.devices.clone();
     let display_name = props.display_name.clone();
     let threshold_k = props.threshold_k;
     let threshold_n = props.threshold_n;
 
-    // Callbacks
-    let on_update_mfa = props.on_update_mfa.clone();
-    let on_update_nickname = props.on_update_nickname.clone();
-    let on_update_threshold = props.on_update_threshold.clone();
-    let on_add_device = props.on_add_device.clone();
-    let on_remove_device = props.on_remove_device.clone();
+    // Modal visibility from props.view
+    let modal_visible = props.view.nickname_modal_visible;
+    let modal_value = props.view.nickname_modal_value.clone();
 
-    // Modal render state
-    let modal_visible = edit_name_state.read().visible;
-    let modal_value = edit_name_state.read().value.clone();
-    let modal_error = edit_name_state.read().error.clone().unwrap_or_default();
-    let modal_submitting = edit_name_state.read().submitting;
+    let threshold_modal_visible = props.view.threshold_modal_visible;
+    let threshold_modal_k = props.view.threshold_modal_k;
+    let threshold_modal_n = props.view.threshold_modal_n;
+    let threshold_modal_has_changed = threshold_modal_k != props.threshold_k;
 
-    let threshold_modal_visible = threshold_state.read().visible;
-    let threshold_modal_k = threshold_state.read().threshold_k;
-    let threshold_modal_n = threshold_state.read().threshold_n;
-    let threshold_modal_has_changed = threshold_state.read().has_changed();
-    let threshold_modal_error = threshold_state.read().error.clone().unwrap_or_default();
-    let threshold_modal_submitting = threshold_state.read().submitting;
+    let device_modal_visible = props.view.add_device_modal_visible;
+    let device_modal_value = props.view.add_device_modal_name.clone();
 
-    let device_modal_visible = device_add_state.read().visible;
-    let device_modal_value = device_add_state.read().value.clone();
-    let device_modal_error = device_add_state.read().error.clone().unwrap_or_default();
-    let device_modal_submitting = device_add_state.read().submitting;
+    let confirm_remove_visible = props.view.confirm_remove_modal_visible;
+    let confirm_remove_device_name = props.view.confirm_remove_modal_device_name.clone();
+    let confirm_remove_focused = props.view.confirm_remove_modal_confirm_focused;
 
-    let confirm_remove_visible = confirm_remove_state.read().visible;
-    let confirm_remove_device_name = confirm_remove_state.read().device_name.clone();
-    let confirm_remove_focused = confirm_remove_state.read().confirm_focused;
-
-    // Event handling
-    hooks.use_terminal_events({
-        let device_count = devices.len();
-        let devices_for_closure = devices.clone();
-        move |event| {
-            let name_modal_open = edit_name_state.read().visible;
-            let threshold_modal_open = threshold_state.read().visible;
-            let device_modal_open = device_add_state.read().visible;
-            let confirm_modal_open = confirm_remove_state.read().visible;
-
-            // Handle name modal
-            if name_modal_open {
-                match event {
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Esc, ..
-                    }) => {
-                        edit_name_state.write().hide();
-                        edit_name_version.set(edit_name_version.get() + 1);
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Enter,
-                        ..
-                    }) => {
-                        if edit_name_state.read().can_submit() {
-                            let new_name = edit_name_state.read().value.clone();
-                            edit_name_state.write().start_submitting();
-                            if let Some(ref cb) = on_update_nickname {
-                                cb(new_name);
-                            }
-                            edit_name_state.write().hide();
-                            edit_name_version.set(edit_name_version.get() + 1);
-                        }
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Backspace,
-                        ..
-                    }) => {
-                        edit_name_state.write().pop_char();
-                        edit_name_version.set(edit_name_version.get() + 1);
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Char(c),
-                        ..
-                    }) => {
-                        if input_throttle.write().try_input() {
-                            edit_name_state.write().push_char(c);
-                            edit_name_version.set(edit_name_version.get() + 1);
-                        }
-                    }
-                    _ => {}
-                }
-                return;
-            }
-
-            // Handle threshold modal
-            if threshold_modal_open {
-                match event {
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Esc, ..
-                    }) => {
-                        threshold_state.write().hide();
-                        threshold_version.set(threshold_version.get() + 1);
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Enter,
-                        ..
-                    }) => {
-                        if threshold_state.read().can_submit() {
-                            let new_k = threshold_state.read().threshold_k;
-                            let n = threshold_state.read().threshold_n;
-                            threshold_state.write().start_submitting();
-                            if let Some(ref cb) = on_update_threshold {
-                                cb(new_k, n);
-                            }
-                            threshold_state.write().hide();
-                            threshold_version.set(threshold_version.get() + 1);
-                        }
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Left,
-                        ..
-                    }) => {
-                        threshold_state.write().decrement();
-                        threshold_version.set(threshold_version.get() + 1);
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Right,
-                        ..
-                    }) => {
-                        threshold_state.write().increment();
-                        threshold_version.set(threshold_version.get() + 1);
-                    }
-                    _ => {}
-                }
-                return;
-            }
-
-            // Handle device add modal
-            if device_modal_open {
-                match event {
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Esc, ..
-                    }) => {
-                        device_add_state.write().hide();
-                        device_add_version.set(device_add_version.get() + 1);
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Enter,
-                        ..
-                    }) => {
-                        if device_add_state.read().can_submit() {
-                            let name = device_add_state.read().value.clone();
-                            device_add_state.write().start_submitting();
-                            if let Some(ref cb) = on_add_device {
-                                cb(name);
-                            }
-                            device_add_state.write().hide();
-                            device_add_version.set(device_add_version.get() + 1);
-                        }
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Backspace,
-                        ..
-                    }) => {
-                        device_add_state.write().pop_char();
-                        device_add_version.set(device_add_version.get() + 1);
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Char(c),
-                        ..
-                    }) => {
-                        if input_throttle.write().try_input() {
-                            device_add_state.write().push_char(c);
-                            device_add_version.set(device_add_version.get() + 1);
-                        }
-                    }
-                    _ => {}
-                }
-                return;
-            }
-
-            // Handle confirm modal
-            if confirm_modal_open {
-                match event {
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Esc, ..
-                    }) => {
-                        confirm_remove_state.write().hide();
-                        confirm_remove_version.set(confirm_remove_version.get() + 1);
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Enter,
-                        ..
-                    }) => {
-                        if confirm_remove_state.read().confirm_focused {
-                            let id = confirm_remove_state.read().device_id.clone();
-                            if let Some(ref cb) = on_remove_device {
-                                cb(id);
-                            }
-                        }
-                        confirm_remove_state.write().hide();
-                        confirm_remove_version.set(confirm_remove_version.get() + 1);
-                    }
-                    TerminalEvent::Key(KeyEvent {
-                        code: KeyCode::Tab | KeyCode::Left | KeyCode::Right,
-                        ..
-                    }) => {
-                        confirm_remove_state.write().toggle_focus();
-                        confirm_remove_version.set(confirm_remove_version.get() + 1);
-                    }
-                    _ => {}
-                }
-                return;
-            }
-
-            // Handle navigation
-            if let Some(nav_key) = is_nav_key_press(&event) {
-                if nav_throttle.write().try_navigate() {
-                    let focus = panel_focus.get();
-                    match nav_key {
-                        NavKey::Left | NavKey::Right => {
-                            panel_focus.set(focus.navigate(nav_key));
-                        }
-                        NavKey::Up => {
-                            if focus == TwoPanelFocus::List {
-                                section.set(section.get().prev());
-                            } else if section.get() == SettingsSection::Devices && device_count > 0
-                            {
-                                let idx = device_index.get();
-                                device_index.set(if idx == 0 { device_count - 1 } else { idx - 1 });
-                            }
-                        }
-                        NavKey::Down => {
-                            if focus == TwoPanelFocus::List {
-                                section.set(section.get().next());
-                            } else if section.get() == SettingsSection::Devices && device_count > 0
-                            {
-                                let idx = device_index.get();
-                                device_index.set(if idx >= device_count - 1 { 0 } else { idx + 1 });
-                            }
-                        }
-                    }
-                }
-                return;
-            }
-
-            // Handle action keys
-            match event {
-                TerminalEvent::Key(KeyEvent {
-                    code: KeyCode::Enter,
-                    ..
-                }) => {
-                    if panel_focus.get() == TwoPanelFocus::Detail {
-                        match section.get() {
-                            SettingsSection::Profile => {
-                                edit_name_state.write().show(
-                                    "Edit Display Name",
-                                    &initial_display_name,
-                                    "Enter your display name...",
-                                    None,
-                                );
-                                edit_name_version.set(edit_name_version.get() + 1);
-                            }
-                            SettingsSection::Threshold if initial_threshold_n > 0 => {
-                                threshold_state
-                                    .write()
-                                    .show(initial_threshold_k, initial_threshold_n);
-                                threshold_version.set(threshold_version.get() + 1);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                TerminalEvent::Key(KeyEvent {
-                    code: KeyCode::Char(' '),
-                    ..
-                }) => {
-                    if panel_focus.get() == TwoPanelFocus::Detail
-                        && section.get() == SettingsSection::Mfa
-                    {
-                        let new_policy = mfa_policy.get().next();
-                        mfa_policy.set(new_policy);
-                        if let Some(ref cb) = on_update_mfa {
-                            cb(new_policy);
-                        }
-                    }
-                }
-                TerminalEvent::Key(KeyEvent {
-                    code: KeyCode::Char('a'),
-                    ..
-                }) => {
-                    if panel_focus.get() == TwoPanelFocus::Detail
-                        && section.get() == SettingsSection::Devices
-                    {
-                        device_add_state.write().show(
-                            "Add Device",
-                            "",
-                            "Enter device name...",
-                            None,
-                        );
-                        device_add_version.set(device_add_version.get() + 1);
-                    }
-                }
-                TerminalEvent::Key(KeyEvent {
-                    code: KeyCode::Char('d'),
-                    ..
-                }) => {
-                    if panel_focus.get() == TwoPanelFocus::Detail
-                        && section.get() == SettingsSection::Devices
-                        && device_count > 0
-                    {
-                        let idx = device_index.get();
-                        if let Some(device) = devices_for_closure.get(idx) {
-                            if !device.is_current {
-                                confirm_remove_state.write().show(&device.id, &device.name);
-                                confirm_remove_version.set(confirm_remove_version.get() + 1);
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    });
+    // === Pure view: No use_terminal_events ===
+    // All event handling is done by IoApp (the shell) via the state machine.
+    // This component is purely presentational.
 
     // Build detail content
     let detail_lines: Vec<(String, Color)> = match current_section {
@@ -598,10 +258,11 @@ pub fn SettingsScreen(
         Theme::BORDER
     };
 
+    // Layout: Full 25 rows for content (no input bar on this screen)
     element! {
-        View(flex_direction: FlexDirection::Column, width: 100pct, height: 100pct) {
-            // Main row layout
-            View(flex_direction: FlexDirection::Row, flex_grow: 1.0, gap: 1) {
+        View(flex_direction: FlexDirection::Column, width: dim::TOTAL_WIDTH, height: dim::MIDDLE_HEIGHT, overflow: Overflow::Hidden) {
+            // Main row layout - full 25 rows
+            View(flex_direction: FlexDirection::Row, height: dim::MIDDLE_HEIGHT, gap: 1, overflow: Overflow::Hidden) {
                 // Left panel: Section list (fixed width in characters)
                 View(
                     flex_direction: FlexDirection::Column,
@@ -609,7 +270,6 @@ pub fn SettingsScreen(
                     border_color: list_border,
                     padding: 1,
                     width: 28,
-                    flex_shrink: 0.0,
                 ) {
                     Text(content: "Settings", weight: Weight::Bold, color: Theme::PRIMARY)
                     View(flex_direction: FlexDirection::Column, margin_top: 1) {
@@ -620,16 +280,17 @@ pub fn SettingsScreen(
                     }
                 }
 
-                // Right panel: Detail view (flex grow)
+                // Right panel: Detail view (remaining width ~51 chars)
                 View(
                     flex_direction: FlexDirection::Column,
                     border_style: BorderStyle::Round,
                     border_color: detail_border,
                     padding: 1,
                     flex_grow: 1.0,
+                    overflow: Overflow::Hidden,
                 ) {
                     Text(content: current_section.title(), weight: Weight::Bold, color: Theme::PRIMARY)
-                    View(flex_direction: FlexDirection::Column, margin_top: 1) {
+                    View(flex_direction: FlexDirection::Column, margin_top: 1, overflow: Overflow::Scroll) {
                         #(detail_lines.iter().map(|(text, color)| {
                             let t = text.clone();
                             let c = *color;
@@ -641,15 +302,15 @@ pub fn SettingsScreen(
                 }
             }
 
-            // Modals
+            // Modals - rendered from TuiState props
             TextInputModal(
                 visible: modal_visible,
                 focused: modal_visible,
                 title: "Edit Display Name".to_string(),
                 value: modal_value,
                 placeholder: "Enter your display name...".to_string(),
-                error: modal_error,
-                submitting: modal_submitting,
+                error: String::new(),
+                submitting: false,
             )
             ThresholdModal(
                 visible: threshold_modal_visible,
@@ -657,8 +318,8 @@ pub fn SettingsScreen(
                 threshold_k: threshold_modal_k,
                 threshold_n: threshold_modal_n,
                 has_changed: threshold_modal_has_changed,
-                error: threshold_modal_error,
-                submitting: threshold_modal_submitting,
+                error: String::new(),
+                submitting: false,
             )
             TextInputModal(
                 visible: device_modal_visible,
@@ -666,8 +327,8 @@ pub fn SettingsScreen(
                 title: "Add Device".to_string(),
                 value: device_modal_value,
                 placeholder: "Enter device name...".to_string(),
-                error: device_modal_error,
-                submitting: device_modal_submitting,
+                error: String::new(),
+                submitting: false,
             )
             ConfirmModal(
                 visible: confirm_remove_visible,

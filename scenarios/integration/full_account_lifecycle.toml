@@ -21,7 +21,7 @@ name = "account_creation"
 description = "Create threshold account"
 timeout_seconds = 5
 actions = [
-    { type = "run_choreography", choreography = "account_creation", participants = ["alice_phone", "alice_laptop", "bob", "charlie", "dave"], threshold = 3 }
+    { type = "run_choreography", choreography = "account_creation", participants = ["alice_phone", "alice_laptop", "bob", "carol", "dave"], threshold = 3 }
 ]
 
 [[phases]]
@@ -29,7 +29,7 @@ name = "guardian_setup"
 description = "Configure guardians for recovery"
 timeout_seconds = 5
 actions = [
-    { type = "run_choreography", choreography = "guardian_configuration", participants = ["alice_phone", "bob", "charlie", "dave"], threshold = 3 }
+    { type = "run_choreography", choreography = "guardian_configuration", participants = ["alice_phone", "bob", "carol", "dave"], threshold = 3 }
 ]
 
 [[phases]]
@@ -62,7 +62,7 @@ name = "recovery_initiation"
 description = "Initiate guardian recovery"
 timeout_seconds = 10
 actions = [
-    { type = "run_choreography", choreography = "guardian_recovery", participants = ["alice_laptop", "bob", "charlie", "dave"], threshold = 2 }
+    { type = "run_choreography", choreography = "guardian_recovery", participants = ["alice_laptop", "bob", "carol", "dave"], threshold = 2 }
 ]
 
 [[phases]]

@@ -74,7 +74,7 @@ impl DemoHandler {
     /// The TUI code is IDENTICAL for demo and production - only the backend differs.
     async fn handle_tui_demo(scenario_arg: DemoScenarioArg) -> Result<(), AuraError> {
         // Map scenario arg to appropriate demo configuration
-        // Each scenario configures different behavior for Alice/Charlie peer agents
+        // Each scenario configures different behavior for Alice/Carol peer agents
         let (data_dir, device_id, scenario_name) = match scenario_arg {
             DemoScenarioArg::HappyPath => {
                 // Happy path - guardians respond quickly

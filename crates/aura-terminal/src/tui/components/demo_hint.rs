@@ -1,6 +1,8 @@
 //! # Demo Hint Component
 //!
-//! Displays contextual hints for demo mode, including invite codes for Alice and Charlie.
+//! Displays contextual hints for demo mode, including contact invite codes for Alice and Carol.
+//! These codes add Alice/Carol as contacts. Guardian requests are sent in-band from the
+//! Recovery page after someone is a contact.
 
 use iocraft::prelude::*;
 
@@ -26,7 +28,7 @@ pub fn DemoHintBar(props: &DemoHintBarProps) -> impl Into<AnyElement<'static>> {
             flex_direction: FlexDirection::Row,
             width: 100pct,
             padding: Spacing::XS,
-            background_color: Theme::BG_DARK,
+
             border_style: BorderStyle::Round,
             border_color: Theme::WARNING,
         ) {
@@ -52,13 +54,13 @@ pub fn DemoHintBar(props: &DemoHintBarProps) -> impl Into<AnyElement<'static>> {
     }
 }
 
-/// Props for the full demo hint panel that shows both Alice and Charlie codes
+/// Props for the full demo hint panel that shows both Alice and Carol codes
 #[derive(Default, Props)]
 pub struct DemoInviteCodesProps {
     /// Alice's invite code
     pub alice_code: String,
-    /// Charlie's invite code
-    pub charlie_code: String,
+    /// Carol's invite code
+    pub carol_code: String,
     /// Whether to show the panel (only in demo mode)
     pub visible: bool,
 }
@@ -72,7 +74,7 @@ fn format_code_lines(code: &str, line_width: usize) -> Vec<String> {
         .collect()
 }
 
-/// A modal showing both Alice and Charlie invite codes
+/// A modal showing both Alice and Carol invite codes
 #[component]
 pub fn DemoInviteCodes(props: &DemoInviteCodesProps) -> impl Into<AnyElement<'static>> {
     if !props.visible {
@@ -81,7 +83,7 @@ pub fn DemoInviteCodes(props: &DemoInviteCodesProps) -> impl Into<AnyElement<'st
 
     // Break long codes into chunks for display (50 chars per line to fit in modal)
     let alice_lines = format_code_lines(&props.alice_code, 50);
-    let charlie_lines = format_code_lines(&props.charlie_code, 50);
+    let carol_lines = format_code_lines(&props.carol_code, 50);
 
     element! {
         View(
@@ -90,25 +92,25 @@ pub fn DemoInviteCodes(props: &DemoInviteCodesProps) -> impl Into<AnyElement<'st
             height: 100pct,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+
         ) {
             View(
                 flex_direction: FlexDirection::Column,
                 width: Percent(70.0),
-                background_color: Theme::BG_DARK,
+                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
                 border_color: Theme::WARNING,
                 padding: Spacing::MD,
             ) {
                 // Header
                 Text(
-                    content: "DEMO MODE - Guardian Invite Codes",
+                    content: "DEMO MODE - Contact Invite Codes",
                     color: Theme::WARNING,
                     weight: Weight::Bold,
                 )
                 View(margin_top: Spacing::XS) {
                     Text(
-                        content: "Go to Invitations (5) and Import (i) these codes:",
+                        content: "Go to Invitations (5) and Import (i) to add contacts:",
                         color: Theme::TEXT_MUTED,
                     )
                 }
@@ -119,7 +121,7 @@ pub fn DemoInviteCodes(props: &DemoInviteCodesProps) -> impl Into<AnyElement<'st
                     View(
                         margin_top: Spacing::XS,
                         padding: Spacing::XS,
-                        background_color: Theme::BG_DARK,
+
                         border_style: BorderStyle::Round,
                         border_color: Theme::BORDER,
                     ) {
@@ -134,18 +136,18 @@ pub fn DemoInviteCodes(props: &DemoInviteCodesProps) -> impl Into<AnyElement<'st
                     }
                 }
 
-                // Charlie section
+                // Carol section
                 View(flex_direction: FlexDirection::Column, margin_top: Spacing::MD) {
-                    Text(content: "Charlie:", color: Theme::TEXT, weight: Weight::Bold)
+                    Text(content: "Carol:", color: Theme::TEXT, weight: Weight::Bold)
                     View(
                         margin_top: Spacing::XS,
                         padding: Spacing::XS,
-                        background_color: Theme::BG_DARK,
+
                         border_style: BorderStyle::Round,
                         border_color: Theme::BORDER,
                     ) {
                         View(flex_direction: FlexDirection::Column) {
-                            #(charlie_lines.iter().map(|line| {
+                            #(carol_lines.iter().map(|line| {
                                 let line_content = line.clone();
                                 element! {
                                     Text(content: line_content, color: Theme::PRIMARY)

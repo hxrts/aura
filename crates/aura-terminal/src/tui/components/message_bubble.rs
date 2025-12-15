@@ -29,10 +29,10 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
     let content = props.content.clone();
     let timestamp = props.timestamp.clone();
 
-    let (bg, border_color, align) = if props.is_own {
-        (Theme::MSG_OWN, Theme::PRIMARY, AlignItems::FlexEnd)
+    let (border_color, align) = if props.is_own {
+        (Theme::PRIMARY, AlignItems::FlexEnd)
     } else {
-        (Theme::MSG_OTHER, Theme::BORDER, AlignItems::FlexStart)
+        (Theme::BORDER, AlignItems::FlexStart)
     };
 
     // Status icon for own messages based on delivery status
@@ -40,7 +40,8 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
         match props.delivery_status {
             DeliveryStatus::Sending => Some((Icons::PENDING, Theme::TEXT_MUTED)),
             DeliveryStatus::Sent => Some((Icons::CHECK, Theme::TEXT_MUTED)),
-            DeliveryStatus::Delivered => Some((Icons::CHECK_DOUBLE, Theme::SUCCESS)),
+            DeliveryStatus::Delivered => Some((Icons::CHECK_DOUBLE, Theme::TEXT_MUTED)), // Gray double check
+            DeliveryStatus::Read => Some((Icons::CHECK_DOUBLE, Theme::INFO)), // Blue double check
             DeliveryStatus::Failed => Some((Icons::CROSS, Theme::ERROR)),
         }
     } else {
@@ -55,7 +56,6 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
             View(
                 flex_direction: FlexDirection::Column,
                 max_width: 70pct,
-                background_color: bg,
                 border_style: BorderStyle::Round,
                 border_color: border_color,
                 padding: Spacing::PANEL_PADDING,
@@ -98,17 +98,18 @@ pub fn CompactMessage(props: &CompactMessageProps) -> impl Into<AnyElement<'stat
     let content = props.content.clone();
     let timestamp = props.timestamp.clone();
 
-    let bg = if props.is_own {
-        Theme::MSG_OWN
+    let border_color = if props.is_own {
+        Theme::PRIMARY
     } else {
-        Theme::MSG_OTHER
+        Theme::BORDER
     };
 
     element! {
         View(
             flex_direction: FlexDirection::Row,
             max_width: 70pct,
-            background_color: bg,
+            border_style: BorderStyle::Round,
+            border_color: border_color,
             padding_left: Spacing::PANEL_PADDING,
             padding_right: Spacing::PANEL_PADDING,
             margin_bottom: 1u32,

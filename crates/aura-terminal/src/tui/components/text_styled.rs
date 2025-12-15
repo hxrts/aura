@@ -129,41 +129,20 @@ pub struct BadgeProps {
     pub style: TextStyle,
 }
 
-/// A small badge/tag with background
+/// A small badge/tag with colored border
 #[component]
 pub fn Badge(props: &BadgeProps) -> impl Into<AnyElement<'static>> {
     let text = props.text.clone();
-    let fg = props.style.color();
-    let bg = match props.style {
-        TextStyle::Success => Theme::SUCCESS,
-        TextStyle::Warning => Theme::WARNING,
-        TextStyle::Error => Theme::ERROR,
-        TextStyle::Info => Theme::INFO,
-        TextStyle::Primary => Theme::PRIMARY,
-        _ => Theme::BG_DARK,
-    };
-    let text_color = if matches!(
-        props.style,
-        TextStyle::Success
-            | TextStyle::Warning
-            | TextStyle::Error
-            | TextStyle::Info
-            | TextStyle::Primary
-    ) {
-        Theme::BG_DARK
-    } else {
-        fg
-    };
+    let color = props.style.color();
 
     element! {
         View(
             padding_left: 1,
             padding_right: 1,
-            background_color: bg,
             border_style: BorderStyle::Round,
-            border_color: fg,
+            border_color: color,
         ) {
-            Text(content: text, color: text_color, weight: Weight::Bold)
+            Text(content: text, color: color, weight: Weight::Bold)
         }
     }
 }

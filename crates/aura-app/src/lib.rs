@@ -145,8 +145,8 @@ pub use crate::core::{
 // Runtime bridge (for dependency inversion)
 pub use crate::queries::Query;
 pub use crate::runtime_bridge::{
-    BoxedRuntimeBridge, OfflineRuntimeBridge, RendezvousStatus, RuntimeBridge, RuntimeStatus,
-    SyncStatus,
+    BoxedRuntimeBridge, LanPeerInfo, OfflineRuntimeBridge, RendezvousStatus, RuntimeBridge,
+    RuntimeStatus, SyncStatus,
 };
 pub use crate::views::{
     BlockState, Channel, ChannelType, ChatState, ContactsState, InvitationsState, Message,

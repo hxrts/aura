@@ -63,6 +63,10 @@ pub enum AuraError {
         /// Error message describing the internal error
         message: String,
     },
+
+    /// Terminal operation error
+    #[error("Terminal error: {0}")]
+    Terminal(String),
 }
 
 impl AuraError {
@@ -136,6 +140,11 @@ impl AuraError {
         }
     }
 
+    /// Create a terminal error
+    pub fn terminal(message: impl Into<String>) -> Self {
+        Self::Terminal(message.into())
+    }
+
     /// Create a coordination failed error
     pub fn coordination_failed(message: impl Into<String>) -> Self {
         Self::Internal {
@@ -173,6 +182,7 @@ impl AuraError {
             Self::Serialization { .. } => "serialization",
             Self::Storage { .. } => "storage",
             Self::Internal { .. } => "internal",
+            Self::Terminal(_) => "terminal",
         }
     }
 }

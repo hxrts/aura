@@ -450,8 +450,8 @@ mod usage_examples {
         println!("1. DETERMINISTIC DEVICE IDS:");
         let alice = test_device_id(b"alice");
         let bob = test_device_id(b"bob");
-        let charlie = test_device_id(b"charlie");
-        println!("   ✓ Created deterministic devices: Alice, Bob, Charlie");
+        let carol = test_device_id(b"carol");
+        println!("   ✓ Created deterministic devices: Alice, Bob, Carol");
 
         // Best Practice 2: Set appropriate timeouts
         println!("2. APPROPRIATE TIMEOUTS:");
@@ -483,7 +483,7 @@ mod usage_examples {
 
         // Poor conditions
         let poor = NetworkCondition::poor();
-        network.set_conditions(bob, charlie, poor).await;
+        network.set_conditions(bob, carol, poor).await;
         println!("   ✓ Poor conditions: 200ms latency, 5% loss");
 
         // Best Practice 5: Validate test framework itself

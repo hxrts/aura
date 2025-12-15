@@ -572,6 +572,55 @@ impl RendezvousManager {
         peers.retain(|_, peer| now_ms.saturating_sub(peer.discovered_at_ms) < max_age_ms);
     }
 
+    /// Trigger an on-demand discovery refresh
+    ///
+    /// For LAN discovery, this starts the LAN discovery service if not already running.
+    pub async fn trigger_discovery(&self) -> Result<(), String> {
+        // Start LAN discovery if not running and enabled
+        if self.config.lan_discovery.enabled && !self.is_lan_discovery_running().await {
+            self.start_lan_discovery().await?;
+        }
+
+        Ok(())
+    }
+
+    /// Send an invitation to a LAN peer
+    ///
+    /// This method uses the LAN transport to send an invitation code directly
+    /// to a peer discovered on the local network.
+    pub async fn send_lan_invitation(
+        &self,
+        _peer_authority: &AuthorityId,
+        peer_address: &str,
+        invitation_code: &str,
+    ) -> Result<(), String> {
+        // Parse the peer address
+        let addr: std::net::SocketAddr = peer_address
+            .parse()
+            .map_err(|e| format!("Invalid peer address: {}", e))?;
+
+        // Get the LAN discovery service for sending
+        let lan_guard = self.lan_discovery.read().await;
+        if let Some(lan) = lan_guard.as_ref() {
+            // Use the LAN socket to send the invitation code
+            // The invitation is sent as a simple UDP packet
+            let message = format!("AURA_INV:{}", invitation_code);
+            let socket = lan.socket();
+            socket
+                .send_to(message.as_bytes(), addr)
+                .await
+                .map_err(|e| format!("Failed to send invitation: {}", e))?;
+
+            tracing::info!(
+                address = %addr,
+                "Sent LAN invitation"
+            );
+            Ok(())
+        } else {
+            Err("LAN discovery not running".to_string())
+        }
+    }
+
     // ========================================================================
     // Accessors
     // ========================================================================

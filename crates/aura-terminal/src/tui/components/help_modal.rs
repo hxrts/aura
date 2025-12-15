@@ -5,6 +5,7 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::layout::dim;
 use crate::tui::screens::get_help_commands_for_screen;
 use crate::tui::theme::Theme;
 
@@ -102,60 +103,59 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: Theme::PRIMARY,
+            overflow: Overflow::Hidden,
         ) {
+            // Header
             View(
-                width: Percent(75.0),
-                max_height: Percent(85.0),
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
-                border_style: BorderStyle::Round,
-                border_color: Theme::PRIMARY,
+                width: 100pct,
+                padding: 1,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Header
-                View(
-                    padding: 1,
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::Center,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                ) {
-                    Text(
-                        content: header_text,
-                        weight: Weight::Bold,
-                        color: Theme::PRIMARY,
-                    )
-                }
+                Text(
+                    content: header_text,
+                    weight: Weight::Bold,
+                    color: Theme::PRIMARY,
+                )
+            }
 
-                // Body - display grouped commands in grid
-                View(
-                    padding: 2,
-                    flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
-                    overflow: Overflow::Hidden,
-                ) {
-                    #(category_elements)
-                }
+            // Body - display grouped commands in grid
+            View(
+                width: 100pct,
+                padding: 2,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+            ) {
+                #(category_elements)
+            }
 
-                // Footer
-                View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::Center,
-                    padding: 1,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: " / ", color: Theme::TEXT_MUTED)
-                    Text(content: "?", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: " close", color: Theme::TEXT_MUTED)
-                }
+            // Footer
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
+                Text(content: " / ", color: Theme::TEXT_MUTED)
+                Text(content: "?", weight: Weight::Bold, color: Theme::SECONDARY)
+                Text(content: " close", color: Theme::TEXT_MUTED)
             }
         }
     }

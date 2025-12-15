@@ -89,6 +89,50 @@ pub enum ChatDelta {
         /// Identifier of the removed message.
         message_id: String,
     },
+    /// A message was delivered to a recipient's device
+    ///
+    /// This delta is emitted when we learn that a message has been
+    /// successfully received by the recipient (before they read it).
+    /// Used for showing "delivered" status indicators (double checkmark).
+    MessageDelivered {
+        /// Channel containing the message.
+        channel_id: String,
+        /// Identifier of the delivered message.
+        message_id: String,
+        /// AuthorityId string of the recipient who received the message.
+        recipient_id: String,
+        /// Optional device that received the message.
+        device_id: Option<String>,
+        /// Unix epoch milliseconds when the message was delivered.
+        delivered_at: u64,
+    },
+    /// A message was read by a recipient
+    ///
+    /// This delta is emitted when a recipient has viewed the message.
+    /// Used for showing "read" status indicators (blue checkmarks).
+    MessageRead {
+        /// Channel containing the message.
+        channel_id: String,
+        /// Identifier of the read message.
+        message_id: String,
+        /// AuthorityId string of the reader.
+        reader_id: String,
+        /// Unix epoch milliseconds when the message was read.
+        read_at: u64,
+    },
+    /// Delivery receipt was acknowledged by sender
+    ///
+    /// This delta is emitted when the sender acknowledges a delivery receipt,
+    /// closing the delivery receipt loop. Primarily used for internal state
+    /// management and garbage collection.
+    DeliveryAcknowledged {
+        /// Channel containing the message.
+        channel_id: String,
+        /// Identifier of the acknowledged message.
+        message_id: String,
+        /// Unix epoch milliseconds when the acknowledgment was sent.
+        acknowledged_at: u64,
+    },
 }
 
 /// View reducer for chat facts.
@@ -149,7 +193,42 @@ impl ViewDeltaReducer for ChatViewReducer {
                 timestamp: sent_at.ts_ms,
                 reply_to,
             }),
-            ChatFact::MessageRead { .. } => None, // Handled separately if needed
+            ChatFact::MessageRead {
+                channel_id,
+                message_id,
+                reader_id,
+                read_at,
+                ..
+            } => Some(ChatDelta::MessageRead {
+                channel_id: format!("{:?}", channel_id),
+                message_id,
+                reader_id: format!("{:?}", reader_id),
+                read_at: read_at.ts_ms,
+            }),
+            ChatFact::MessageDelivered {
+                channel_id,
+                message_id,
+                recipient_id,
+                device_id,
+                delivered_at,
+                ..
+            } => Some(ChatDelta::MessageDelivered {
+                channel_id: format!("{:?}", channel_id),
+                message_id,
+                recipient_id: format!("{:?}", recipient_id),
+                device_id,
+                delivered_at: delivered_at.ts_ms,
+            }),
+            ChatFact::DeliveryAcknowledged {
+                channel_id,
+                message_id,
+                acknowledged_at,
+                ..
+            } => Some(ChatDelta::DeliveryAcknowledged {
+                channel_id: format!("{:?}", channel_id),
+                message_id,
+                acknowledged_at: acknowledged_at.ts_ms,
+            }),
         };
 
         delta.map(|d| vec![d.into_view_delta()]).unwrap_or_default()

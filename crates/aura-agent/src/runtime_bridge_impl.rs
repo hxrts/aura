@@ -6,7 +6,7 @@
 
 use crate::core::AuraAgent;
 use async_trait::async_trait;
-use aura_app::runtime_bridge::{RendezvousStatus, RuntimeBridge, SyncStatus};
+use aura_app::runtime_bridge::{LanPeerInfo, RendezvousStatus, RuntimeBridge, SyncStatus};
 use aura_app::IntentError;
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, ThresholdSigningEffects};
@@ -144,6 +144,52 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
     }
 
+    async fn trigger_discovery(&self) -> Result<(), IntentError> {
+        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+            // Trigger an on-demand discovery refresh
+            rendezvous.trigger_discovery().await.map_err(|e| {
+                IntentError::internal_error(format!("Failed to trigger discovery: {}", e))
+            })
+        } else {
+            Err(IntentError::no_agent("Rendezvous service not available"))
+        }
+    }
+
+    // =========================================================================
+    // LAN Discovery
+    // =========================================================================
+
+    async fn get_lan_peers(&self) -> Vec<LanPeerInfo> {
+        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+            rendezvous
+                .list_lan_discovered_peers()
+                .await
+                .into_iter()
+                .map(|peer| LanPeerInfo {
+                    authority_id: peer.authority_id,
+                    address: peer.source_addr.to_string(),
+                    discovered_at_ms: peer.discovered_at_ms,
+                    // RendezvousDescriptor doesn't have display_name; use None for now
+                    display_name: None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    async fn send_lan_invitation(
+        &self,
+        _peer: &LanPeerInfo,
+        _invitation_code: &str,
+    ) -> Result<(), IntentError> {
+        // LAN invitation sending is not yet implemented in RendezvousManager
+        // Future: Add direct peer-to-peer invitation exchange over LAN
+        Err(IntentError::internal_error(
+            "LAN invitation sending not yet implemented",
+        ))
+    }
+
     // =========================================================================
     // Threshold Signing
     // =========================================================================
@@ -211,6 +257,50 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .sign(context)
             .await
             .map_err(|e| IntentError::internal_error(format!("Threshold signing failed: {}", e)))
+    }
+
+    async fn rotate_guardian_keys(
+        &self,
+        threshold_k: u16,
+        total_n: u16,
+        guardian_ids: &[String],
+    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
+        let authority = self.agent.authority_id();
+        let signing_service = self.agent.threshold_signing().await;
+
+        // Rotate keys to a new threshold configuration
+        // The service returns (new_epoch, key_packages, public_key_bytes)
+        // where public_key_bytes is already serialized
+        signing_service
+            .rotate_keys(&authority, threshold_k, total_n, guardian_ids)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to rotate guardian keys: {}", e))
+            })
+    }
+
+    async fn commit_guardian_key_rotation(&self, new_epoch: u64) -> Result<(), IntentError> {
+        let authority = self.agent.authority_id();
+        let signing_service = self.agent.threshold_signing().await;
+
+        signing_service
+            .commit_key_rotation(&authority, new_epoch)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to commit key rotation: {}", e))
+            })
+    }
+
+    async fn rollback_guardian_key_rotation(&self, failed_epoch: u64) -> Result<(), IntentError> {
+        let authority = self.agent.authority_id();
+        let signing_service = self.agent.threshold_signing().await;
+
+        signing_service
+            .rollback_key_rotation(&authority, failed_epoch)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to rollback key rotation: {}", e))
+            })
     }
 
     // =========================================================================

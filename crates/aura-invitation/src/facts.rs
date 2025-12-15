@@ -99,16 +99,62 @@ pub enum InvitationFact {
         /// Timestamp when invitation was cancelled (uses unified time system)
         cancelled_at: PhysicalTime,
     },
+
+    // =========================================================================
+    // Consensus-Based Ceremony Facts
+    // =========================================================================
+    /// Ceremony initiated by sender
+    CeremonyInitiated {
+        /// Unique ceremony identifier
+        ceremony_id: String,
+        /// Authority initiating the ceremony
+        sender: String,
+        /// Timestamp in milliseconds
+        timestamp_ms: u64,
+    },
+
+    /// Acceptance received from acceptor
+    CeremonyAcceptanceReceived {
+        /// Ceremony identifier
+        ceremony_id: String,
+        /// Timestamp in milliseconds
+        timestamp_ms: u64,
+    },
+
+    /// Ceremony committed (relationship established)
+    CeremonyCommitted {
+        /// Ceremony identifier
+        ceremony_id: String,
+        /// Resulting relationship identifier
+        relationship_id: String,
+        /// Timestamp in milliseconds
+        timestamp_ms: u64,
+    },
+
+    /// Ceremony aborted
+    CeremonyAborted {
+        /// Ceremony identifier
+        ceremony_id: String,
+        /// Reason for abortion
+        reason: String,
+        /// Timestamp in milliseconds
+        timestamp_ms: u64,
+    },
 }
 
 impl InvitationFact {
-    /// Extract the invitation_id from any variant
+    /// Extract the invitation_id from any variant (returns empty for ceremony facts)
     pub fn invitation_id(&self) -> &str {
         match self {
             InvitationFact::Sent { invitation_id, .. } => invitation_id,
             InvitationFact::Accepted { invitation_id, .. } => invitation_id,
             InvitationFact::Declined { invitation_id, .. } => invitation_id,
             InvitationFact::Cancelled { invitation_id, .. } => invitation_id,
+            // Ceremony facts use ceremony_id, not invitation_id
+            InvitationFact::CeremonyInitiated { ceremony_id, .. } => ceremony_id,
+            InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => ceremony_id,
+            InvitationFact::CeremonyCommitted { ceremony_id, .. } => ceremony_id,
+            InvitationFact::CeremonyAborted { ceremony_id, .. } => ceremony_id,
         }
     }
 
@@ -119,6 +165,11 @@ impl InvitationFact {
             InvitationFact::Accepted { accepted_at, .. } => accepted_at.ts_ms,
             InvitationFact::Declined { declined_at, .. } => declined_at.ts_ms,
             InvitationFact::Cancelled { cancelled_at, .. } => cancelled_at.ts_ms,
+            // Ceremony facts already store ms
+            InvitationFact::CeremonyInitiated { timestamp_ms, .. } => *timestamp_ms,
+            InvitationFact::CeremonyAcceptanceReceived { timestamp_ms, .. } => *timestamp_ms,
+            InvitationFact::CeremonyCommitted { timestamp_ms, .. } => *timestamp_ms,
+            InvitationFact::CeremonyAborted { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 
@@ -213,7 +264,11 @@ impl DomainFact for InvitationFact {
             // In practice, these would lookup the original context from the Sent fact
             InvitationFact::Accepted { .. }
             | InvitationFact::Declined { .. }
-            | InvitationFact::Cancelled { .. } => {
+            | InvitationFact::Cancelled { .. }
+            | InvitationFact::CeremonyInitiated { .. }
+            | InvitationFact::CeremonyAcceptanceReceived { .. }
+            | InvitationFact::CeremonyCommitted { .. }
+            | InvitationFact::CeremonyAborted { .. } => {
                 // Return a deterministic placeholder - actual context comes from lookup
                 ContextId::new_from_entropy([0u8; 32])
             }
@@ -270,6 +325,23 @@ impl FactReducer for InvitationFactReducer {
             InvitationFact::Cancelled { invitation_id, .. } => (
                 "invitation-cancelled".to_string(),
                 invitation_id.as_bytes().to_vec(),
+            ),
+            // Ceremony facts
+            InvitationFact::CeremonyInitiated { ceremony_id, .. } => (
+                "ceremony-initiated".to_string(),
+                ceremony_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => (
+                "ceremony-acceptance-received".to_string(),
+                ceremony_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::CeremonyCommitted { ceremony_id, .. } => (
+                "ceremony-committed".to_string(),
+                ceremony_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::CeremonyAborted { ceremony_id, .. } => (
+                "ceremony-aborted".to_string(),
+                ceremony_id.as_bytes().to_vec(),
             ),
         };
 

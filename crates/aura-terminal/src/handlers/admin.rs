@@ -1,6 +1,7 @@
 //! Admin maintenance commands (replacement, fork controls).
+//! Returns structured `CliOutput` for testability.
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::{anyhow, Result};
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::{AccountId, AuthorityId};
@@ -12,8 +13,10 @@ use crate::AdminAction;
 
 /// Handle admin-related maintenance commands.
 ///
+/// Returns `CliOutput` instead of printing directly.
+///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_admin(ctx: &HandlerContext<'_>, action: &AdminAction) -> Result<()> {
+pub async fn handle_admin(ctx: &HandlerContext<'_>, action: &AdminAction) -> Result<CliOutput> {
     match action {
         AdminAction::Replace {
             account,
@@ -28,14 +31,16 @@ async fn replace_admin(
     account: &str,
     new_admin: &str,
     activation_epoch: u64,
-) -> Result<()> {
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let account_id: AccountId = account.parse().map_err(|e: uuid::Error| anyhow!(e))?;
     let new_admin_id: AuthorityId = new_admin.parse().map_err(|e: uuid::Error| anyhow!(e))?;
 
-    println!(
+    output.println(format!(
         "Replacing admin for account {} with {} (activation epoch {})",
         account_id, new_admin_id, activation_epoch
-    );
+    ));
 
     // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
     let authority_id = AuthorityId(ctx.device_id().0);
@@ -86,9 +91,10 @@ async fn replace_admin(
         .await
         .map_err(|e| anyhow!("Failed to persist admin replacement fact: {}", e))?;
 
-    println!(
+    output.println(format!(
         "Admin replacement recorded; new admin {} activates at epoch {}",
         new_admin_id, activation_epoch
-    );
-    Ok(())
+    ));
+
+    Ok(output)
 }

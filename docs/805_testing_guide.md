@@ -582,6 +582,251 @@ criterion_group!(benches, benchmark_operation);
 criterion_main!(benches);
 ```
 
+## TUI/CLI Deterministic Testing
+
+The TUI and CLI are tested using a deterministic state machine approach that enables fast, reliable testing without PTY automation.
+
+### Architecture
+
+The TUI is modeled as a pure state machine:
+```
+TuiState × TerminalEvent → (TuiState, Vec<TuiCommand>)
+```
+
+This enables:
+- **Deterministic tests**: Same inputs always produce same outputs
+- **Fast execution**: ~1ms per test (vs seconds for PTY tests)
+- **Quint verification**: Formal model checking of TUI invariants
+- **Generative testing**: Automated state space exploration
+
+### Test Types
+
+**1. State Machine Unit Tests** (`tests/tui_deterministic.rs`):
+```rust
+use aura_terminal::testing::{TestTui, event_builders::*};
+
+#[test]
+fn test_screen_navigation() {
+    let mut tui = TestTui::new();
+
+    tui.assert_screen(Screen::Block);
+    tui.send_event(char('2'));  // Navigate to Chat
+    tui.assert_screen(Screen::Chat);
+}
+
+#[test]
+fn test_insert_mode() {
+    let mut tui = TestTui::new();
+
+    tui.send_event(char('i'));  // Enter insert mode
+    tui.assert_insert_mode();
+
+    tui.send_event(escape());   // Exit insert mode
+    tui.assert_normal_mode();
+}
+```
+
+**2. Property-Based Tests** (proptest):
+```rust
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_escape_exits_insert_mode(screen in 0..7u8) {
+        let mut tui = TestTui::new();
+        tui.send_event(char((b'1' + screen) as char));
+        tui.send_event(char('i'));
+        tui.send_event(escape());
+        tui.assert_normal_mode();
+    }
+
+    #[test]
+    fn prop_transitions_are_deterministic(events in prop::collection::vec(any_event(), 0..50)) {
+        let mut tui1 = TestTui::new();
+        let mut tui2 = TestTui::new();
+
+        for event in &events {
+            tui1.send_event(event.clone());
+            tui2.send_event(event.clone());
+        }
+
+        assert_eq!(tui1.state(), tui2.state());
+    }
+}
+```
+
+**3. ITF Trace Replay** (`tests/itf_trace_replay.rs`):
+```rust
+use aura_terminal::testing::itf_replay::ITFTraceReplayer;
+
+#[test]
+fn test_replay_quint_trace() {
+    let replayer = ITFTraceReplayer::new();
+    let result = replayer
+        .replay_trace_file("verification/quint/tui_trace.itf.json")
+        .expect("Failed to replay trace");
+
+    assert!(result.all_states_match);
+}
+```
+
+**4. Generative Testing** (Quint-generated traces):
+```rust
+#[test]
+#[ignore] // Run with: cargo test --ignored
+fn test_generative_replay() {
+    // Generate 100 samples × 50 steps from Quint model
+    // quint run --max-samples=100 --max-steps=50 --out-itf=trace.json
+
+    let replayer = ITFTraceReplayer::new();
+    let result = replayer.replay_trace_file("trace.json").unwrap();
+    assert!(result.all_states_match);
+}
+```
+
+### Running TUI Tests
+
+```bash
+# Fast deterministic tests (recommended)
+cargo test --package aura-terminal --test tui_deterministic
+
+# ITF trace replay tests
+cargo test --package aura-terminal --features testing --test itf_trace_replay
+
+# Generative tests (slower, more thorough)
+cargo test --package aura-terminal --features testing --test itf_trace_replay -- --ignored
+
+# Legacy PTY tests (deprecated, may be flaky)
+cargo test --package aura-terminal --test tui_e2e
+```
+
+### Quint Model Verification
+
+The TUI state machine has a formal Quint specification at `verification/quint/tui_state_machine.qnt` that:
+- Defines screens, modals, and state transitions
+- Specifies invariants (e.g., insert mode only on valid screens)
+- Enables model checking via Apalache
+
+```bash
+# Run Quint tests
+quint test verification/quint/tui_state_machine.qnt
+
+# Verify invariants with Apalache
+quint verify --max-steps=5 --invariant=allInvariants verification/quint/tui_state_machine.qnt
+
+# Generate ITF trace for replay
+quint run --max-samples=100 --out-itf=trace.itf.json verification/quint/tui_state_machine.qnt
+```
+
+### CLI Test Harness
+
+The CLI has a deterministic test harness in `src/testing/cli.rs`:
+
+```rust
+use aura_terminal::testing::cli::CliTestHarness;
+
+#[tokio::test]
+async fn test_cli_version() {
+    let harness = CliTestHarness::new().await;
+    harness.exec_version();
+    harness.assert_stdout_contains("aura");
+}
+```
+
+### CLI Thin Shell Pattern with CliOutput
+
+CLI handlers use a "thin shell" pattern where business logic returns structured `CliOutput` instead of printing directly. This enables unit testing without stdout capture.
+
+**Architecture**:
+```
+CLI Args → Handler (returns CliOutput) → render() → stdout/stderr
+```
+
+**Handler Pattern**:
+```rust
+use crate::handlers::{CliOutput, HandlerContext};
+use anyhow::Result;
+
+/// Handler returns structured output, not Result<()>
+pub async fn handle_status(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
+    // Build structured output
+    output.section("Account Status");
+    output.kv("Authority", ctx.effect_context().authority_id().to_string());
+    output.kv("Device", ctx.device_id().to_string());
+
+    // Error messages go to stderr
+    if some_error_condition {
+        output.eprintln("Warning: configuration issue detected");
+    }
+
+    Ok(output)
+}
+```
+
+**CliOutput API**:
+```rust
+let mut output = CliOutput::new();
+
+// Stdout methods
+output.println("Normal message");           // Single line
+output.section("Title");                    // "=== Title ==="
+output.kv("Key", "Value");                  // "Key: Value"
+output.blank();                             // Empty line
+output.table(&["Col1", "Col2"], &rows);     // Formatted table
+
+// Stderr method
+output.eprintln("Error message");           // Goes to stderr
+
+// Rendering (called by CliHandler wrapper)
+output.render();                            // Prints to actual stdout/stderr
+```
+
+**Testing Handlers**:
+```rust
+use aura_terminal::handlers::{CliOutput, HandlerContext};
+
+#[tokio::test]
+async fn test_status_handler() {
+    // Setup mock context
+    let ctx = create_test_handler_context().await;
+
+    // Call handler - returns structured output, no stdout pollution
+    let output = status::handle_status(&ctx).await.unwrap();
+
+    // Assert on structured output
+    let stdout = output.stdout_lines();
+    assert!(stdout.iter().any(|line| line.contains("Authority")));
+    assert!(output.stderr_lines().is_empty());
+}
+
+#[test]
+fn test_cli_output_formatting() {
+    let mut output = CliOutput::new();
+    output.section("Test");
+    output.kv("Name", "Alice");
+
+    let lines = output.stdout_lines();
+    assert_eq!(lines[0], "=== Test ===");
+    assert_eq!(lines[1], "Name: Alice");
+}
+```
+
+**Benefits**:
+- **Testable**: Assert on structured output without capturing stdout
+- **Deterministic**: Same inputs produce same CliOutput
+- **Separated concerns**: Logic produces data, render() handles I/O
+- **Consistent formatting**: Shared methods ensure uniform output style
+
+### Best Practices
+
+1. **Prefer deterministic tests** over PTY tests for all TUI logic
+2. **Use property tests** to verify invariants hold across inputs
+3. **Run generative tests** periodically to find edge cases
+4. **Keep Quint model in sync** with Rust implementation
+5. **Add new transitions to both** Quint spec and Rust tests
+
 ## Summary
 
 Aura's testing infrastructure provides:
@@ -591,6 +836,7 @@ Aura's testing infrastructure provides:
 - **Real Effect Handlers** - Tests use actual implementations, not mocks
 - **Property Testing** - Validate invariants with proptest
 - **Integration Testing** - End-to-end protocol validation
+- **TUI State Machine Testing** - Deterministic tests with Quint verification
 
 The testing approach emphasizes simplicity and fidelity to production code. Tests use the same stateless effect handlers as production, ensuring high confidence in test results.
 

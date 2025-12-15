@@ -1157,6 +1157,81 @@ impl AppCore {
         }
         false
     }
+
+    // =========================================================================
+    // Guardian Key Rotation Operations
+    // =========================================================================
+
+    /// Rotate guardian keys for a new threshold configuration
+    ///
+    /// This generates new FROST threshold keys for the given guardian configuration.
+    /// The operation creates keys at a new epoch without invalidating the old keys
+    /// until `commit_guardian_key_rotation` is called.
+    ///
+    /// # Arguments
+    /// * `threshold_k` - Minimum signers required (k)
+    /// * `total_n` - Total number of guardians (n)
+    /// * `guardian_ids` - IDs of contacts who will become guardians
+    ///
+    /// # Returns
+    /// A tuple of (new_epoch, key_packages, public_key_package) on success
+    ///
+    /// # Errors
+    /// Returns `IntentError::NoAgent` if no runtime is configured.
+    pub async fn rotate_guardian_keys(
+        &self,
+        threshold_k: u16,
+        total_n: u16,
+        guardian_ids: &[String],
+    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| IntentError::no_agent("rotate_guardian_keys requires a runtime"))?;
+
+        runtime
+            .rotate_guardian_keys(threshold_k, total_n, guardian_ids)
+            .await
+    }
+
+    /// Commit a guardian key rotation after successful ceremony
+    ///
+    /// Called when all guardians have accepted and stored their key shares.
+    /// This makes the new epoch authoritative.
+    ///
+    /// # Arguments
+    /// * `new_epoch` - The epoch that should become active
+    ///
+    /// # Errors
+    /// Returns `IntentError::NoAgent` if no runtime is configured.
+    pub async fn commit_guardian_key_rotation(&self, new_epoch: u64) -> Result<(), IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("commit_guardian_key_rotation requires a runtime")
+        })?;
+
+        runtime.commit_guardian_key_rotation(new_epoch).await
+    }
+
+    /// Rollback a guardian key rotation after ceremony failure
+    ///
+    /// Called when the ceremony fails (guardian declined, user cancelled, or timeout).
+    /// This discards the new epoch's keys and keeps the previous configuration active.
+    ///
+    /// # Arguments
+    /// * `failed_epoch` - The epoch that should be discarded
+    ///
+    /// # Errors
+    /// Returns `IntentError::NoAgent` if no runtime is configured.
+    pub async fn rollback_guardian_key_rotation(
+        &self,
+        failed_epoch: u64,
+    ) -> Result<(), IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("rollback_guardian_key_rotation requires a runtime")
+        })?;
+
+        runtime.rollback_guardian_key_rotation(failed_epoch).await
+    }
 }
 
 // =============================================================================

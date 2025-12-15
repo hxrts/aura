@@ -4,6 +4,7 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 
 /// Props for AccountSetupModal
@@ -49,68 +50,74 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         return element! {
             View(
                 position: Position::Absolute,
-                width: 100pct,
-                height: 100pct,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                background_color: Theme::OVERLAY,
+                top: 0u16,
+                left: 0u16,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
+                flex_direction: FlexDirection::Column,
+                background_color: Theme::BG_MODAL,
+                border_style: BorderStyle::Round,
+                border_color: if success { Theme::SUCCESS } else { Theme::ERROR },
+                overflow: Overflow::Hidden,
             ) {
+                // Header
                 View(
-                    width: Percent(60.0),
+                    width: 100pct,
+                    padding: 2,
                     flex_direction: FlexDirection::Column,
-                    background_color: Theme::BG_DARK,
-                    border_style: BorderStyle::Round,
-                    border_color: if success { Theme::SUCCESS } else { Theme::ERROR },
+                    align_items: AlignItems::Center,
+                    border_style: BorderStyle::Single,
+                    border_edges: Edges::Bottom,
+                    border_color: Theme::BORDER,
                 ) {
-                    // Header
-                    View(
-                        padding: 2,
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        border_style: BorderStyle::Single,
-                        border_edges: Edges::Bottom,
-                        border_color: Theme::BORDER,
-                    ) {
-                        Text(
-                            content: if success { "Account Created" } else { "Account Creation Failed" },
-                            weight: Weight::Bold,
-                            color: status_color,
-                        )
-                    }
+                    Text(
+                        content: if success { "Account Created" } else { "Account Creation Failed" },
+                        weight: Weight::Bold,
+                        color: status_color,
+                    )
+                }
 
-                    // Status content
-                    View(padding: 3, flex_direction: FlexDirection::Column, align_items: AlignItems::Center) {
-                        View(flex_direction: FlexDirection::Row, gap: 2) {
-                            Text(content: status_icon, color: status_color, weight: Weight::Bold)
-                            Text(content: status_text, color: status_color)
-                        }
-                        #(if success {
-                            Some(element! {
-                                View(margin_top: 2) {
-                                    Text(
-                                        content: format!("Welcome, {}!", display_name),
-                                        color: Theme::TEXT_MUTED,
-                                    )
-                                }
-                            })
-                        } else {
-                            None
+                // Status content
+                View(
+                    width: 100pct,
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    padding: 3,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                ) {
+                    View(flex_direction: FlexDirection::Row, gap: 2) {
+                        Text(content: status_icon, color: status_color, weight: Weight::Bold)
+                        Text(content: status_text, color: status_color)
+                    }
+                    #(if success {
+                        Some(element! {
+                            View(margin_top: 2) {
+                                Text(
+                                    content: format!("Welcome, {}!", display_name),
+                                    color: Theme::TEXT_MUTED,
+                                )
+                            }
                         })
-                    }
+                    } else {
+                        None
+                    })
+                }
 
-                    // Footer
-                    View(
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::Center,
-                        padding: 2,
-                        border_style: BorderStyle::Single,
-                        border_edges: Edges::Top,
-                        border_color: Theme::BORDER,
-                    ) {
-                        View(flex_direction: FlexDirection::Row, gap: 1) {
-                            Text(content: "Enter", color: Theme::SECONDARY)
-                            Text(content: if success { "to continue" } else { "to try again" }, color: Theme::TEXT_MUTED)
-                        }
+                // Footer
+                View(
+                    width: 100pct,
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    padding: 2,
+                    border_style: BorderStyle::Single,
+                    border_edges: Edges::Top,
+                    border_color: Theme::BORDER,
+                ) {
+                    View(flex_direction: FlexDirection::Row, gap: 1) {
+                        Text(content: "Enter", color: Theme::SECONDARY)
+                        Text(content: if success { "to continue" } else { "to try again" }, color: Theme::TEXT_MUTED)
                     }
                 }
             }
@@ -122,41 +129,46 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         return element! {
             View(
                 position: Position::Absolute,
-                width: 100pct,
-                height: 100pct,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                background_color: Theme::OVERLAY,
+                top: 0u16,
+                left: 0u16,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
+                flex_direction: FlexDirection::Column,
+                background_color: Theme::BG_MODAL,
+                border_style: BorderStyle::Round,
+                border_color: Theme::PRIMARY,
+                overflow: Overflow::Hidden,
             ) {
+                // Header
                 View(
-                    width: Percent(60.0),
+                    width: 100pct,
+                    padding: 2,
                     flex_direction: FlexDirection::Column,
-                    background_color: Theme::BG_DARK,
-                    border_style: BorderStyle::Round,
-                    border_color: Theme::PRIMARY,
+                    align_items: AlignItems::Center,
+                    border_style: BorderStyle::Single,
+                    border_edges: Edges::Bottom,
+                    border_color: Theme::BORDER,
                 ) {
-                    // Header
-                    View(
-                        padding: 2,
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        border_style: BorderStyle::Single,
-                        border_edges: Edges::Bottom,
-                        border_color: Theme::BORDER,
-                    ) {
-                        Text(
-                            content: "Creating Account",
-                            weight: Weight::Bold,
-                            color: Theme::PRIMARY,
-                        )
-                    }
+                    Text(
+                        content: "Creating Account",
+                        weight: Weight::Bold,
+                        color: Theme::PRIMARY,
+                    )
+                }
 
-                    // Creating content
-                    View(padding: 3, flex_direction: FlexDirection::Column, align_items: AlignItems::Center) {
-                        Text(content: "Generating FROST threshold keys...", color: Theme::TEXT_MUTED)
-                        View(margin_top: 1) {
-                            Text(content: "Please wait...", color: Theme::TEXT_MUTED)
-                        }
+                // Creating content
+                View(
+                    width: 100pct,
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    padding: 3,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                ) {
+                    Text(content: "Generating FROST threshold keys...", color: Theme::TEXT_MUTED)
+                    View(margin_top: 1) {
+                        Text(content: "Please wait...", color: Theme::TEXT_MUTED)
                     }
                 }
             }
@@ -187,102 +199,105 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: Theme::PRIMARY,
+            overflow: Overflow::Hidden,
         ) {
+            // Welcome header
             View(
-                width: Percent(60.0),
+                width: 100pct,
+                padding: 2,
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
-                border_style: BorderStyle::Round,
-                border_color: Theme::PRIMARY,
+                align_items: AlignItems::Center,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Welcome header
-                View(
-                    padding: 2,
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                ) {
+                Text(
+                    content: "Welcome to Aura",
+                    weight: Weight::Bold,
+                    color: Theme::PRIMARY,
+                )
+                View(margin_top: 1) {
                     Text(
-                        content: "Welcome to Aura",
-                        weight: Weight::Bold,
-                        color: Theme::PRIMARY,
-                    )
-                    View(margin_top: 1) {
-                        Text(
-                            content: "Create your threshold identity",
-                            color: Theme::TEXT_MUTED,
-                        )
-                    }
-                }
-
-                // Form content
-                View(padding: 2, flex_direction: FlexDirection::Column) {
-                    // Description
-                    View(margin_bottom: 2) {
-                        Text(
-                            content: "Your account uses FROST threshold signatures for security.",
-                            color: Theme::TEXT_MUTED,
-                        )
-                    }
-                    Text(
-                        content: "This creates a single-device account. Add guardians later",
+                        content: "Create your threshold identity",
                         color: Theme::TEXT_MUTED,
                     )
+                }
+            }
+
+            // Form content
+            View(
+                width: 100pct,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                padding: 2,
+                flex_direction: FlexDirection::Column,
+            ) {
+                // Description
+                View(margin_bottom: 2) {
                     Text(
-                        content: "in Settings to enable social recovery.",
+                        content: "Your account uses FROST threshold signatures for security.",
                         color: Theme::TEXT_MUTED,
                     )
-
-                    // Display name input
-                    View(margin_top: 2, flex_direction: FlexDirection::Column) {
-                        Text(content: "Display Name *", color: Theme::TEXT_MUTED)
-                        View(
-                            margin_top: 1,
-                            border_style: BorderStyle::Round,
-                            border_color: border_color,
-                            padding_left: 1,
-                            padding_right: 1,
-                            padding_top: 0,
-                            padding_bottom: 0,
-                        ) {
-                            Text(content: placeholder, color: text_color)
-                        }
-                    }
                 }
+                Text(
+                    content: "This creates a single-device account. Add guardians later",
+                    color: Theme::TEXT_MUTED,
+                )
+                Text(
+                    content: "in Settings to enable social recovery.",
+                    color: Theme::TEXT_MUTED,
+                )
 
-                // Footer with hints and button
-                View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    View(flex_direction: FlexDirection::Row, gap: 1) {
-                        Text(content: "Enter", color: Theme::SECONDARY)
-                        Text(content: "to create", color: Theme::TEXT_MUTED)
-                    }
+                // Display name input
+                View(margin_top: 2, flex_direction: FlexDirection::Column) {
+                    Text(content: "Display Name *", color: Theme::TEXT_MUTED)
                     View(
-                        padding_left: 2,
-                        padding_right: 2,
-                        background_color: if can_submit { Theme::PRIMARY } else { Theme::BG_DARK },
+                        margin_top: 1,
                         border_style: BorderStyle::Round,
-                        border_color: if can_submit { Theme::PRIMARY } else { Theme::BORDER },
+                        border_color: border_color,
+                        padding_left: 1,
+                        padding_right: 1,
+                        padding_top: 0,
+                        padding_bottom: 0,
                     ) {
-                        Text(
-                            content: "Create Account",
-                            color: if can_submit { Theme::BG_DARK } else { Theme::TEXT_MUTED },
-                        )
+                        Text(content: placeholder, color: text_color)
                     }
+                }
+            }
+
+            // Footer with hints and button
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                padding: 2,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "Enter", color: Theme::SECONDARY)
+                    Text(content: "to create", color: Theme::TEXT_MUTED)
+                }
+                View(
+                    padding_left: 2,
+                    padding_right: 2,
+                    border_style: BorderStyle::Round,
+                    border_color: if can_submit { Theme::PRIMARY } else { Theme::BORDER },
+                ) {
+                    Text(
+                        content: "Create Account",
+                        color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                    )
                 }
             }
         }

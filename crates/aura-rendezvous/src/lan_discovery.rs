@@ -447,6 +447,11 @@ impl LanDiscoveryService {
         *guard = None;
     }
 
+    /// Get a reference to the UDP socket for direct sending
+    pub fn socket(&self) -> &Arc<UdpSocket> {
+        &self.socket
+    }
+
     /// Start both announcer and listener
     ///
     /// Returns handles for both tasks

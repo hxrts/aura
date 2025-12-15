@@ -92,12 +92,12 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
             height: 100pct,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+
         ) {
             View(
                 width: Percent(50.0),
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
+                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
                 border_color: border_color,
             ) {
@@ -123,7 +123,7 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                     }
                     View(
                         flex_direction: FlexDirection::Column,
-                        background_color: Theme::BG_DARK,
+
                         border_style: BorderStyle::Round,
                         border_color: if active_field == 0 { Theme::PRIMARY } else { Theme::BORDER },
                         padding: 1,
@@ -141,7 +141,7 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                     }
                     View(
                         flex_direction: FlexDirection::Column,
-                        background_color: Theme::BG_DARK,
+
                         border_style: BorderStyle::Round,
                         border_color: if active_field == 1 { Theme::PRIMARY } else { Theme::BORDER },
                         padding: 1,

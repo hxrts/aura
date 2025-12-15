@@ -15,7 +15,7 @@ pub struct TuiArgs {
     /// Device ID to use for this session
     pub device_id: Option<String>,
 
-    /// Run in demo mode with simulated Alice and Charlie peer agents.
+    /// Run in demo mode with simulated Alice and Carol peer agents.
     /// Uses a real agent runtime with deterministic simulation.
     pub demo: bool,
 }
@@ -32,7 +32,7 @@ pub fn tui_parser() -> impl Parser<TuiArgs> {
         .argument::<String>("DEVICE")
         .optional();
     let demo = long("demo")
-        .help("Run with simulated Alice/Charlie peers for recovery demo")
+        .help("Run with simulated Alice/Carol peers for recovery demo")
         .switch();
     construct!(TuiArgs {
         data_dir,

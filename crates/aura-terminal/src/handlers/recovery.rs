@@ -2,8 +2,10 @@
 //!
 //! Commands for managing guardian-based account recovery.
 //! Uses the authority model - guardians are identified by AuthorityId.
+//!
+//! Returns structured `CliOutput` for testability.
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::Result;
 use aura_authenticate::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{JournalEffects, StorageEffects};
@@ -37,11 +39,13 @@ fn timestamp_ms(ts: &TimeStamp) -> u64 {
 
 /// Handle recovery action requests from CLI
 ///
-/// Processes recovery operations including starting recovery, submitting approvals,
-/// and handling recovery responses based on the action type.
+/// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_recovery(ctx: &HandlerContext<'_>, action: &RecoveryAction) -> Result<()> {
+pub async fn handle_recovery(
+    ctx: &HandlerContext<'_>,
+    action: &RecoveryAction,
+) -> Result<CliOutput> {
     match action {
         RecoveryAction::Start {
             account,
@@ -95,14 +99,17 @@ async fn start_recovery(
     priority: &str,
     dispute_hours: u64,
     justification: Option<&str>,
-) -> Result<()> {
-    println!("Starting {} recovery for account: {}", priority, account);
-    println!("Guardians: {}", guardians);
-    println!("Threshold: {}", threshold);
-    println!("Dispute window: {} hours", dispute_hours);
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
+    output.section(&format!("Starting {} recovery", priority));
+    output.kv("Account", account);
+    output.kv("Guardians", guardians);
+    output.kv("Threshold", threshold.to_string());
+    output.kv("Dispute window", format!("{} hours", dispute_hours));
 
     if let Some(just) = justification {
-        println!("Justification: {}", just);
+        output.kv("Justification", just);
     }
 
     // Parse account ID as authority
@@ -155,7 +162,7 @@ async fn start_recovery(
         guardians: guardian_set.clone(),
     };
 
-    println!("Executing recovery protocol via proper coordinator...");
+    output.println("Executing recovery protocol via proper coordinator...");
 
     // Convert to the new recovery protocol format
     let commitment = Hash32::new(hash::hash(
@@ -223,11 +230,11 @@ async fn start_recovery(
             )
         })?;
 
-    println!(
-        "Recovery request stored for guardians at storage key: {}",
-        storage_key
-    );
-    println!("Share the stored request key with guardians and ask them to run `aura recovery approve --request-file {}`", request_path);
+    output.kv("Recovery request stored at", &storage_key);
+    output.println(format!(
+        "Share the stored request key with guardians and ask them to run `aura recovery approve --request-file {}`",
+        request_path
+    ));
 
     // Update journal with recovery initiation using proper effects
     let recovery_fact_key = format!("recovery_initiated.{}", account_authority);
@@ -254,18 +261,19 @@ async fn start_recovery(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to persist journal: {}", e))?;
 
-    println!("Recovery initiated successfully via protocol coordinator.");
-    println!(
-        "Recovery fact recorded in journal with key: {}",
-        recovery_fact_key
-    );
-    println!("Guardians will be notified via network effects.");
+    output.blank();
+    output.println("Recovery initiated successfully via protocol coordinator.");
+    output.kv("Recovery fact recorded with key", recovery_fact_key);
+    output.println("Guardians will be notified via network effects.");
 
-    Ok(())
+    Ok(output)
 }
 
-async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Result<()> {
-    println!("Approving recovery from: {}", request_file.display());
+async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
+    output.section("Approving Recovery");
+    output.kv("Request file", request_file.display().to_string());
 
     // Read and parse recovery request file via StorageEffects
     let file_key = format!("recovery_request:{}", request_file.display());
@@ -289,17 +297,14 @@ async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Resu
     let recovery_request: RecoveryRequest = serde_json::from_str(&request_content)
         .map_err(|e| anyhow::anyhow!("Failed to parse recovery request: {}", e))?;
 
-    println!(
-        "Loaded recovery request for account: {}",
-        recovery_request.account_id
-    );
-    println!("Initiator: {}", recovery_request.initiator_id);
-    println!("Required threshold: {}", recovery_request.threshold);
+    output.kv("Account", recovery_request.account_id.to_string());
+    output.kv("Initiator", recovery_request.initiator_id.to_string());
+    output.kv("Required threshold", recovery_request.threshold.to_string());
 
     // Check if justification exists
     let justification_text = &recovery_request.context.justification;
     if !justification_text.is_empty() {
-        println!("Justification: {}", justification_text);
+        output.kv("Justification", justification_text);
     }
 
     // Get current authority from context
@@ -317,24 +322,27 @@ async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Resu
         })?;
 
     let label = guardian_profile.label.as_deref().unwrap_or("Guardian");
-    println!(
-        "Approving as guardian: {} ({})",
-        label, guardian_profile.authority_id
+    output.kv(
+        "Approving as",
+        format!("{} ({})", label, guardian_profile.authority_id),
     );
 
     // Execute guardian approval through choreographic system
-    println!("Executing guardian approval workflow...");
+    output.println("Executing guardian approval workflow...");
 
     // Generate real guardian approval using FROST threshold signing
     let approval_result =
         generate_guardian_approval(ctx, &recovery_request, guardian_profile).await?;
 
-    println!("Guardian approval completed successfully!");
-    println!(
-        "Approval timestamp (ms): {}",
-        timestamp_ms(&approval_result.timestamp)
+    output.println("Guardian approval completed successfully!");
+    output.kv(
+        "Approval timestamp (ms)",
+        timestamp_ms(&approval_result.timestamp).to_string(),
     );
-    println!("Key share size: {} bytes", approval_result.key_share.len());
+    output.kv(
+        "Key share size",
+        format!("{} bytes", approval_result.key_share.len()),
+    );
 
     // Build recovery share and evidence for downstream aggregation
     let share = aura_recovery::types::RecoveryShare {
@@ -401,17 +409,20 @@ async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Resu
         .await
         .map_err(|e| anyhow::anyhow!("Failed to persist approval response: {}", e))?;
 
-    println!("Guardian approval saved at storage key: {}", response_path);
-    println!("Share count contributed: 1/{}", recovery_request.threshold);
+    output.kv("Guardian approval saved at", &response_path);
+    output.kv(
+        "Share count contributed",
+        format!("1/{}", recovery_request.threshold),
+    );
 
-    Ok(())
+    Ok(output)
 }
 
-async fn get_status(ctx: &HandlerContext<'_>) -> Result<()> {
-    println!("Checking recovery status");
+async fn get_status(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
 
-    // Query Journal for active recovery sessions
-    println!("Querying Journal for active recovery sessions...");
+    output.section("Recovery Status");
+    output.println("Querying Journal for active recovery sessions...");
 
     // Query Journal for recovery-related facts using proper JournalEffects
     let current_journal = ctx
@@ -444,14 +455,21 @@ async fn get_status(ctx: &HandlerContext<'_>) -> Result<()> {
         .collect();
 
     let report = recovery_status::format_recovery_status(&active_recoveries, &completed_facts);
-    println!("{}", report);
+    output.println(report);
 
-    Ok(())
+    Ok(output)
 }
 
-async fn dispute_recovery(ctx: &HandlerContext<'_>, evidence: &str, reason: &str) -> Result<()> {
-    println!("Filing dispute for evidence: {}", evidence);
-    println!("Reason: {}", reason);
+async fn dispute_recovery(
+    ctx: &HandlerContext<'_>,
+    evidence: &str,
+    reason: &str,
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
+    output.section("Filing Recovery Dispute");
+    output.kv("Evidence ID", evidence);
+    output.kv("Reason", reason);
 
     // Parse evidence identifier
     let _ = uuid::Uuid::parse_str(evidence)
@@ -468,10 +486,8 @@ async fn dispute_recovery(ctx: &HandlerContext<'_>, evidence: &str, reason: &str
     // Use caller authority as disputing guardian
     let guardian_authority = ctx.effect_context().authority_id();
 
-    println!("Filing dispute as guardian {}", guardian_authority);
-
-    // Validate that dispute window is still open
-    println!("Validating dispute window and guardian eligibility...");
+    output.kv("Filing as guardian", guardian_authority.to_string());
+    output.println("Validating dispute window and guardian eligibility...");
 
     // Get current journal state via proper JournalEffects
     let dispute_journal = ctx
@@ -523,10 +539,7 @@ async fn dispute_recovery(ctx: &HandlerContext<'_>, evidence: &str, reason: &str
         filed_at_ms: current_timestamp,
     };
 
-    println!(
-        "Created dispute record with timestamp: {}",
-        dispute.filed_at_ms
-    );
+    output.kv("Dispute timestamp", dispute.filed_at_ms.to_string());
 
     // Store dispute in Journal using proper JournalEffects API
     let dispute_key = format!("recovery_dispute.{}.{}", evidence, dispute.guardian_id);
@@ -557,16 +570,11 @@ async fn dispute_recovery(ctx: &HandlerContext<'_>, evidence: &str, reason: &str
         .await
         .map_err(|e| anyhow::anyhow!("Failed to persist journal: {}", e))?;
 
-    println!("Dispute recorded in Journal with key: {}", dispute_key);
+    output.kv("Dispute recorded with key", &dispute_key);
+    output.blank();
+    output.println("Dispute filed successfully!");
 
-    println!("  Evidence ID: {}", evidence);
-    println!("  Guardian ID: {}", guardian_authority);
-    println!("  Reason: {}", reason);
-    println!("  Filed at: {}", dispute.filed_at_ms);
-
-    println!("Dispute filed successfully!");
-
-    Ok(())
+    Ok(output)
 }
 
 /// Generate real guardian approval for recovery request using FROST threshold signing
@@ -583,11 +591,6 @@ async fn generate_guardian_approval(
     // Create recovery message to sign
     let recovery_message = serde_json::to_vec(&request)
         .map_err(|e| anyhow::anyhow!("Failed to serialize recovery request: {}", e))?;
-
-    println!(
-        "Generating guardian approval for guardian {} and recovery {}",
-        guardian.authority_id, request.account_id
-    );
 
     // Deterministic partial signature derived from the recovery message hash.
     let partial_sig_bytes: Vec<u8> = hash::hash(&recovery_message).to_vec();

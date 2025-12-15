@@ -42,8 +42,10 @@
 pub mod errors;
 
 // Application effects implementation (Layer 2 pattern)
+pub mod effect_policy;
 pub mod effects;
 pub mod flow_budget;
+pub mod proposals;
 
 // Legacy capability system removed - Phase 4 of authorization unification complete
 // Use Biscuit tokens via BiscuitTokenManager instead
@@ -94,3 +96,15 @@ pub use storage_authorization::{
 
 /// Type alias for capability meet operation results
 pub type CapResult<T> = Result<T, WotError>;
+
+// Re-export effect policy types
+pub use effect_policy::{
+    ApprovalThreshold, CapabilityRequirement, CeremonyType, EffectDecision, EffectPolicy,
+    EffectPolicyRegistry, EffectTiming, OperationType, SecurityLevel,
+};
+
+// Re-export proposal types for deferred operations
+pub use proposals::{
+    ProposalFact, ProposalFactDelta, ProposalFactReducer, ProposalFailureReason, ProposalState,
+    ProposalStatus, PROPOSAL_FACT_TYPE_ID,
+};

@@ -1,6 +1,7 @@
 //! Snapshot maintenance command handler.
+//! Returns structured `CliOutput` for testability.
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::Result;
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::AuthorityId;
@@ -12,15 +13,22 @@ use crate::SnapshotAction;
 
 /// Dispatch snapshot-related CLI actions.
 ///
+/// Returns `CliOutput` instead of printing directly.
+///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_snapshot(ctx: &HandlerContext<'_>, action: &SnapshotAction) -> Result<()> {
+pub async fn handle_snapshot(
+    ctx: &HandlerContext<'_>,
+    action: &SnapshotAction,
+) -> Result<CliOutput> {
     match action {
         SnapshotAction::Propose => propose_snapshot(ctx).await,
     }
 }
 
-async fn propose_snapshot(ctx: &HandlerContext<'_>) -> Result<()> {
-    println!("Starting snapshot proposal…");
+async fn propose_snapshot(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
+    output.println("Starting snapshot proposal...");
 
     // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
     let authority_id = AuthorityId(ctx.device_id().0);
@@ -66,7 +74,7 @@ async fn propose_snapshot(ctx: &HandlerContext<'_>) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to persist snapshot fact: {}", e))?;
 
-    println!("Snapshot proposal recorded with key {}", fact_key);
+    output.kv("Snapshot proposal recorded with key", fact_key);
 
-    Ok(())
+    Ok(output)
 }

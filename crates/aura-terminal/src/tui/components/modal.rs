@@ -1,9 +1,11 @@
 //! # Modal Components
 //!
-//! Centered modal dialog overlays
+//! Modal dialog overlays that exactly fill the middle panel region (80×25).
+//! All modals use fixed dimensions matching the middle screen panel.
 
 use iocraft::prelude::*;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 
 /// Props for ConfirmModal
@@ -45,81 +47,90 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
         props.cancel_text.clone()
     };
 
-    let confirm_bg = if props.confirm_focused {
+    let confirm_border = if props.confirm_focused {
         Theme::PRIMARY
     } else {
-        Theme::BG_DARK
+        Theme::BORDER
     };
     let confirm_fg = if props.confirm_focused {
-        Theme::BG_DARK
+        Theme::PRIMARY
     } else {
-        Theme::TEXT
+        Theme::TEXT_MUTED
     };
-    let cancel_bg = if !props.confirm_focused {
+    let cancel_border = if !props.confirm_focused {
         Theme::SECONDARY
     } else {
-        Theme::BG_DARK
+        Theme::BORDER
     };
     let cancel_fg = if !props.confirm_focused {
-        Theme::BG_DARK
+        Theme::SECONDARY
     } else {
-        Theme::TEXT
+        Theme::TEXT_MUTED
     };
 
+    // Modal fills parent container (already positioned at middle panel)
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: Theme::BORDER_FOCUS,
+            overflow: Overflow::Hidden,
         ) {
+            // Title bar
             View(
-                width: Percent(40.0),
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
-                border_style: BorderStyle::Round,
-                border_color: Theme::BORDER_FOCUS,
+                width: 100pct,
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Title bar
+                Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
+            }
+            // Message
+            View(
+                width: 100pct,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                padding: 1,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+            ) {
+                Text(content: message, color: Theme::TEXT)
+            }
+            // Buttons
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::End,
+                gap: 2,
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
                 View(
-                    padding: 1,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
+                    padding_left: 2,
+                    padding_right: 2,
+                    border_style: BorderStyle::Round,
+                    border_color: cancel_border,
                 ) {
-                    Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
+                    Text(content: cancel_text, color: cancel_fg)
                 }
-                // Message
-                View(padding: 1) {
-                    Text(content: message, color: Theme::TEXT)
-                }
-                // Buttons
                 View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::End,
-                    gap: 2,
-                    padding: 1,
+                    padding_left: 2,
+                    padding_right: 2,
+                    border_style: BorderStyle::Round,
+                    border_color: confirm_border,
                 ) {
-                    View(
-                        padding_left: 2,
-                        padding_right: 2,
-                        background_color: cancel_bg,
-                        border_style: BorderStyle::Round,
-                        border_color: Theme::BORDER,
-                    ) {
-                        Text(content: cancel_text, color: cancel_fg)
-                    }
-                    View(
-                        padding_left: 2,
-                        padding_right: 2,
-                        background_color: confirm_bg,
-                        border_style: BorderStyle::Round,
-                        border_color: Theme::BORDER,
-                    ) {
-                        Text(content: confirm_text, color: confirm_fg)
-                    }
+                    Text(content: confirm_text, color: confirm_fg)
                 }
             }
         }
@@ -162,52 +173,58 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
         Theme::TEXT
     };
 
+    // Modal fills parent container (already positioned at middle panel)
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: Theme::BORDER_FOCUS,
+            overflow: Overflow::Hidden,
         ) {
+            // Title bar
             View(
-                width: Percent(50.0),
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
-                border_style: BorderStyle::Round,
-                border_color: Theme::BORDER_FOCUS,
+                width: 100pct,
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Title bar
+                Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
+            }
+            // Label + Input
+            View(
+                width: 100pct,
+                padding: 1,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                gap: 1,
+            ) {
+                Text(content: label, color: Theme::TEXT_MUTED)
                 View(
-                    padding: 1,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
+                    border_style: BorderStyle::Round,
+                    border_color: Theme::BORDER_FOCUS,
+                    padding_left: 1,
+                    padding_right: 1,
                 ) {
-                    Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
+                    Text(content: display_text, color: text_color)
                 }
-                // Label + Input
-                View(padding: 1, flex_direction: FlexDirection::Column, gap: 1) {
-                    Text(content: label, color: Theme::TEXT_MUTED)
-                    View(
-                        border_style: BorderStyle::Round,
-                        border_color: Theme::BORDER_FOCUS,
-                        padding_left: 1,
-                        padding_right: 1,
-                    ) {
-                        Text(content: display_text, color: text_color)
-                    }
-                }
-                // Hints
-                View(
-                    padding: 1,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    Text(content: "Enter to confirm · Esc to cancel", color: Theme::TEXT_MUTED)
-                }
+            }
+            // Hints
+            View(
+                width: 100pct,
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                Text(content: "Enter to confirm · Esc to cancel", color: Theme::TEXT_MUTED)
             }
         }
     }

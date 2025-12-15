@@ -21,7 +21,7 @@ name = "epoch1_establishment"
 description = "Establish session epoch 1"
 timeout_seconds = 2
 actions = [
-    { type = "run_choreography", choreography = "session_establishment", participants = ["alice", "bob", "charlie"], threshold = 2 }
+    { type = "run_choreography", choreography = "session_establishment", participants = ["alice", "bob", "carol"], threshold = 2 }
 ]
 
 [[phases]]
@@ -38,7 +38,7 @@ name = "epoch_transition"
 description = "Transition to epoch 2"
 timeout_seconds = 2
 actions = [
-    { type = "run_choreography", choreography = "epoch_increment", participants = ["alice", "bob", "charlie"], threshold = 2 }
+    { type = "run_choreography", choreography = "epoch_increment", participants = ["alice", "bob", "carol"], threshold = 2 }
 ]
 
 [[phases]]

@@ -1,6 +1,6 @@
 //! # Demo Simulator
 //!
-//! Coordinates simulated peer agents (Alice, Charlie) for demo mode.
+//! Coordinates simulated peer agents (Alice, Carol) for demo mode.
 //!
 //! The simulator runs alongside the TUI, processing events for the simulated
 //! agents and routing their responses back to the TUI.
@@ -14,7 +14,7 @@ use aura_core::identifiers::AuthorityId;
 
 use super::{AgentFactory, AgentResponse, SimulatedAgent, SimulatedBridge};
 
-/// Demo simulator that manages Alice and Charlie peer agents
+/// Demo simulator that manages Alice and Carol peer agents
 pub struct DemoSimulator {
     /// Simulation seed for determinism
     seed: u64,
@@ -22,13 +22,13 @@ pub struct DemoSimulator {
     /// Alice agent
     alice: Arc<Mutex<SimulatedAgent>>,
 
-    /// Charlie agent
-    charlie: Arc<Mutex<SimulatedAgent>>,
+    /// Carol agent
+    carol: Arc<Mutex<SimulatedAgent>>,
 
     /// Bridge for routing events between TUI and agents
     bridge: Arc<SimulatedBridge>,
 
-    /// Response sender for agents (used by Alice/Charlie to send responses)
+    /// Response sender for agents (used by Alice/Carol to send responses)
     #[allow(dead_code)]
     response_tx: mpsc::UnboundedSender<(AuthorityId, AgentResponse)>,
 
@@ -42,8 +42,8 @@ pub struct DemoSimulator {
 impl DemoSimulator {
     /// Create a new demo simulator with the given seed
     pub async fn new(seed: u64) -> anyhow::Result<Self> {
-        // Create Alice and Charlie agents
-        let (alice, charlie) = AgentFactory::create_demo_agents(seed).await?;
+        // Create Alice and Carol agents
+        let (alice, carol) = AgentFactory::create_demo_agents(seed).await?;
 
         // Get Bob's authority ID - MUST match how TUI derives it in handle_tui_launch()
         // The TUI uses device_id_str = "demo:bob" and computes:
@@ -66,20 +66,20 @@ impl DemoSimulator {
 
         // Set up response channels for agents
         let mut alice = alice;
-        let mut charlie = charlie;
+        let mut carol = carol;
         alice.set_response_channel(response_tx.clone());
-        charlie.set_response_channel(response_tx.clone());
+        carol.set_response_channel(response_tx.clone());
 
-        // Configure Alice and Charlie as guardians for Bob
-        // This is the "pre-setup" state for the demo - Alice and Charlie
+        // Configure Alice and Carol as guardians for Bob
+        // This is the "pre-setup" state for the demo - Alice and Carol
         // are already Bob's guardians when the demo starts
         alice.add_guardian_for(bob_authority, bob_context);
-        charlie.add_guardian_for(bob_authority, bob_context);
+        carol.add_guardian_for(bob_authority, bob_context);
 
         Ok(Self {
             seed,
             alice: Arc::new(Mutex::new(alice)),
-            charlie: Arc::new(Mutex::new(charlie)),
+            carol: Arc::new(Mutex::new(carol)),
             bridge: Arc::new(bridge),
             response_tx,
             event_loop_handle: None,
@@ -97,9 +97,9 @@ impl DemoSimulator {
         self.alice.lock().await.authority_id()
     }
 
-    /// Get Charlie's authority ID
-    pub async fn charlie_authority(&self) -> AuthorityId {
-        self.charlie.lock().await.authority_id()
+    /// Get Carol's authority ID
+    pub async fn carol_authority(&self) -> AuthorityId {
+        self.carol.lock().await.authority_id()
     }
 
     /// Get the bridge for connecting to the TUI
@@ -125,7 +125,7 @@ impl DemoSimulator {
     pub async fn start(&mut self) -> anyhow::Result<()> {
         // Start both agents
         self.alice.lock().await.start().await?;
-        self.charlie.lock().await.start().await?;
+        self.carol.lock().await.start().await?;
 
         // Create shutdown channel
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -136,7 +136,7 @@ impl DemoSimulator {
 
         // Clone references for the event loop
         let alice = self.alice.clone();
-        let charlie = self.charlie.clone();
+        let carol = self.carol.clone();
         let bridge = self.bridge.clone();
 
         // Spawn event processing loop
@@ -158,7 +158,7 @@ impl DemoSimulator {
                             Ok(agent_event) => {
                                 // Route event to both agents
                                 let mut alice_guard = alice.lock().await;
-                                let mut charlie_guard = charlie.lock().await;
+                                let mut carol_guard = carol.lock().await;
 
                                 // Process event in Alice
                                 if let Ok(responses) = alice_guard.process_event(&agent_event).await {
@@ -167,10 +167,10 @@ impl DemoSimulator {
                                     }
                                 }
 
-                                // Process event in Charlie
-                                if let Ok(responses) = charlie_guard.process_event(&agent_event).await {
+                                // Process event in Carol
+                                if let Ok(responses) = carol_guard.process_event(&agent_event).await {
                                     for response in responses {
-                                        tracing::debug!("Charlie response: {:?}", response);
+                                        tracing::debug!("Carol response: {:?}", response);
                                     }
                                 }
 
@@ -194,7 +194,7 @@ impl DemoSimulator {
         self.event_loop_handle = Some(handle);
 
         tracing::info!(
-            "Demo simulator started with seed {} - Alice and Charlie are online",
+            "Demo simulator started with seed {} - Alice and Carol are online",
             self.seed
         );
 
@@ -215,7 +215,7 @@ impl DemoSimulator {
 
         // Stop agents
         self.alice.lock().await.stop().await?;
-        self.charlie.lock().await.stop().await?;
+        self.carol.lock().await.stop().await?;
 
         tracing::info!("Demo simulator stopped");
         Ok(())
@@ -225,11 +225,11 @@ impl DemoSimulator {
     pub async fn get_statistics(&self) -> Vec<super::AgentStatistics> {
         vec![
             self.alice.lock().await.get_statistics(),
-            self.charlie.lock().await.get_statistics(),
+            self.carol.lock().await.get_statistics(),
         ]
     }
 
-    /// Get the number of connected peers (always 2 for demo: Alice + Charlie)
+    /// Get the number of connected peers (always 2 for demo: Alice + Carol)
     pub fn peer_count(&self) -> usize {
         2
     }
@@ -264,7 +264,7 @@ mod tests {
         let stats = simulator.get_statistics().await;
         assert_eq!(stats.len(), 2);
         assert!(stats.iter().any(|s| s.name == "Alice"));
-        assert!(stats.iter().any(|s| s.name == "Charlie"));
+        assert!(stats.iter().any(|s| s.name == "Carol"));
 
         simulator.stop().await.unwrap();
     }

@@ -90,6 +90,7 @@
 
 // pub mod capability; // Removed - replaced by biscuit_evaluator
 pub mod deltas;
+pub mod effect_policy_guard;
 pub mod effect_system_trait;
 // pub mod evaluation; // Legacy capability evaluation removed - use BiscuitAuthorizationBridge instead
 pub mod execution;
@@ -362,6 +363,11 @@ pub use privacy::*;
 // Re-export Biscuit guard types
 pub use biscuit_evaluator::{BiscuitGuardEvaluator, GuardError, GuardResult};
 pub use capability_guard::{CapabilityGuard, CapabilityGuardExt};
+
+// Re-export effect policy guard types
+pub use effect_policy_guard::{
+    EffectPolicyError, EffectPolicyExt, EffectPolicyGuard, EffectPolicyResult,
+};
 
 // Re-export pure executor functions for choreography integration
 pub use pure_executor::{

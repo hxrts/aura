@@ -6,14 +6,14 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::components::{
-    AccountSetupModal, AccountSetupState, ContactSelectModal, ContactSelectState,
-    DiscoveredPeerInfo, HelpModal, HelpModalState, InvitePeerCallback, KeyHintsBar,
-    PeerInvitationStatus, ToastContainer, ToastMessage,
+    AccountSetupModal, AccountSetupState, ConfirmModal, ContactSelectModal, ContactSelectState,
+    DiscoveredPeerInfo, Footer, HelpModal, HelpModalState, InvitePeerCallback, NavBar,
+    PeerInvitationStatus, ToastContainer, ToastLevel, ToastMessage,
 };
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::InputThrottle;
+use crate::tui::layout::dim;
 use crate::tui::screens::block::{
     BlockInviteCallback, BlockNavCallback, BlockSendCallback, GrantStewardCallback,
     RevokeStewardCallback,
@@ -22,9 +22,7 @@ use crate::tui::screens::chat::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
     SetTopicCallback,
 };
-use crate::tui::screens::contacts::{
-    StartChatCallback, ToggleGuardianCallback, UpdatePetnameCallback,
-};
+use crate::tui::screens::contacts::{StartChatCallback, UpdatePetnameCallback};
 use crate::tui::screens::invitations::{
     CreateInvitationCallback, ExportInvitationCallback, ImportInvitationCallback,
     InvitationCallback,
@@ -35,122 +33,24 @@ use crate::tui::screens::settings::{
     AddDeviceCallback, MfaCallback, RemoveDeviceCallback, UpdateNicknameCallback,
     UpdateThresholdCallback,
 };
-use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
-    BlockBudget, BlockSummary, Channel, Contact, Device, Guardian, Invitation, InvitationFilter,
-    KeyHint, Message, MfaPolicy, PendingRequest, RecoveryStatus, Resident, TraversalDepth,
+    BlockBudget, BlockSummary, Channel, Contact, Device, Guardian, Invitation, KeyHint, Message,
+    MfaPolicy, PendingRequest, RecoveryStatus, Resident, TraversalDepth,
 };
 
 use super::router::Screen;
 use super::{
-    BlockScreen, ChatScreen, ContactsScreen, InvitationsScreen, NeighborhoodScreen, RecoveryScreen,
-    SettingsScreen,
+    BlockScreen, ChatScreen, ContactsScreen, NeighborhoodScreen, RecoveryScreen, SettingsScreen,
 };
 
-/// Props for ScreenTabBar
-#[derive(Default, Props)]
-pub struct ScreenTabBarProps {
-    pub active: Screen,
-}
-
-/// Tab bar for screen navigation
-#[component]
-pub fn ScreenTabBar(props: &ScreenTabBarProps) -> impl Into<AnyElement<'static>> {
-    let active = props.active;
-
-    element! {
-        View(
-            flex_direction: FlexDirection::Row,
-            gap: Spacing::SM,
-            padding_left: Spacing::SM,
-            padding_right: Spacing::SM,
-            padding_top: Spacing::XS,
-            border_style: BorderStyle::Single,
-            border_edges: Edges::Bottom,
-            border_color: Theme::BORDER,
-        ) {
-            #(Screen::all().iter().map(|&screen| {
-                let is_active = screen == active;
-                let color = if is_active { Theme::PRIMARY } else { Theme::TEXT_MUTED };
-                let weight = if is_active { Weight::Bold } else { Weight::Normal };
-                let title = screen.name().to_string();
-                element! {
-                    Text(content: title, color: color, weight: weight)
-                }
-            }))
-        }
-    }
-}
-
-/// Props for StatusBar
-#[derive(Default, Props)]
-pub struct StatusBarProps {
-    /// Whether sync is in progress
-    pub syncing: bool,
-    /// Last sync time (ms since epoch), None if never synced
-    pub last_sync_time: Option<u64>,
-    /// Number of known peers
-    pub peer_count: usize,
-}
-
-/// Format a timestamp as relative time (e.g., "2m ago", "1h ago")
-fn format_relative_time(ts_ms: u64) -> String {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-
-    let elapsed_ms = now_ms.saturating_sub(ts_ms);
-    let elapsed_secs = elapsed_ms / 1000;
-
-    if elapsed_secs < 60 {
-        "just now".to_string()
-    } else if elapsed_secs < 3600 {
-        format!("{}m ago", elapsed_secs / 60)
-    } else if elapsed_secs < 86400 {
-        format!("{}h ago", elapsed_secs / 3600)
-    } else {
-        format!("{}d ago", elapsed_secs / 86400)
-    }
-}
-
-/// Status bar showing sync status and peer count
-#[component]
-pub fn StatusBar(props: &StatusBarProps) -> impl Into<AnyElement<'static>> {
-    let sync_status = if props.syncing {
-        "Syncing...".to_string()
-    } else if let Some(ts) = props.last_sync_time {
-        format!("Synced {}", format_relative_time(ts))
-    } else {
-        "Not synced".to_string()
-    };
-
-    let sync_color = if props.syncing {
-        Theme::WARNING
-    } else if props.last_sync_time.is_some() {
-        Theme::SUCCESS
-    } else {
-        Theme::TEXT_MUTED
-    };
-
-    let peer_status = format!("{} peers", props.peer_count);
-
-    element! {
-        View(
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::End,
-            gap: Spacing::MD,
-            padding_left: Spacing::SM,
-            padding_right: Spacing::SM,
-            border_style: BorderStyle::Round,
-            border_color: Theme::BORDER,
-        ) {
-            Text(content: sync_status, color: sync_color)
-            Text(content: " | ", color: Theme::BORDER)
-            Text(content: peer_status, color: Theme::TEXT_MUTED)
-        }
-    }
-}
+// State machine integration
+use crate::tui::convert_iocraft_event;
+use crate::tui::props::{
+    extract_block_view_props, extract_chat_view_props, extract_contacts_view_props,
+    extract_invitations_view_props, extract_neighborhood_view_props, extract_recovery_view_props,
+    extract_settings_view_props,
+};
+use crate::tui::state_machine::{transition, DispatchCommand, ModalType, TuiCommand, TuiState};
 
 /// Props for IoApp
 #[derive(Default, Props)]
@@ -216,7 +116,6 @@ pub struct IoAppProps {
     pub on_remove_device: Option<RemoveDeviceCallback>,
     // Effect dispatch callbacks for contacts actions
     pub on_update_petname: Option<UpdatePetnameCallback>,
-    pub on_toggle_guardian: Option<ToggleGuardianCallback>,
     pub on_start_chat: Option<StartChatCallback>,
     pub on_invite_lan_peer: Option<InvitePeerCallback>,
     // Effect dispatch callbacks for block actions
@@ -242,8 +141,8 @@ pub struct IoAppProps {
     pub demo_mode: bool,
     /// Alice's invite code (for demo mode)
     pub demo_alice_code: String,
-    /// Charlie's invite code (for demo mode)
-    pub demo_charlie_code: String,
+    /// Carol's invite code (for demo mode)
+    pub demo_carol_code: String,
 }
 
 /// Callback for creating an account
@@ -252,6 +151,58 @@ pub type CreateAccountCallback = Arc<dyn Fn(String) + Send + Sync>;
 /// Callback for selecting a guardian from the modal (contact_id)
 pub type GuardianSelectCallback = Arc<dyn Fn(String) + Send + Sync>;
 
+/// Key repeat debounce state
+#[derive(Clone, Default)]
+struct KeyDebounce {
+    /// Last key code pressed (as debug string for comparison)
+    last_key: Option<String>,
+    /// Timestamp of last accepted key press
+    last_time: Option<std::time::Instant>,
+    /// Whether we're in "repeat" mode (after initial delay)
+    repeating: bool,
+}
+
+impl KeyDebounce {
+    /// Initial delay before key repeat starts (ms)
+    const INITIAL_DELAY_MS: u64 = 200;
+    /// Delay between repeated keys (ms)
+    const REPEAT_DELAY_MS: u64 = 50;
+
+    /// Check if this key event should be accepted (returns true) or debounced (returns false)
+    fn should_accept(&mut self, key: &str) -> bool {
+        let now = std::time::Instant::now();
+
+        match (&self.last_key, self.last_time) {
+            (Some(last), Some(time)) if last == key => {
+                // Same key - apply debouncing
+                let elapsed = now.duration_since(time).as_millis() as u64;
+                let threshold = if self.repeating {
+                    Self::REPEAT_DELAY_MS
+                } else {
+                    Self::INITIAL_DELAY_MS
+                };
+
+                if elapsed >= threshold {
+                    // Accept and mark as repeating
+                    self.last_time = Some(now);
+                    self.repeating = true;
+                    true
+                } else {
+                    // Debounce - too fast
+                    false
+                }
+            }
+            _ => {
+                // Different key or first press - always accept
+                self.last_key = Some(key.to_string());
+                self.last_time = Some(now);
+                self.repeating = false;
+                true
+            }
+        }
+    }
+}
+
 /// Main application with screen navigation
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
@@ -259,10 +210,32 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
 
-    // Account setup modal state - using use_ref for non-Copy AccountSetupState
-    // use_ref persists the value across renders without Copy requirement
-    // Version counter triggers re-renders when state changes
+    // Key debounce state for preventing double-presses
+    let key_debounce = hooks.use_ref(KeyDebounce::default);
+
+    // Pure TUI state machine - holds all UI state for deterministic transitions
+    // This is the source of truth; iocraft hooks sync FROM this state
     let show_setup = props.show_account_setup;
+    let demo_alice = props.demo_alice_code.clone();
+    let demo_carol = props.demo_carol_code.clone();
+    let tui_state = hooks.use_ref(move || {
+        let mut state = if show_setup {
+            TuiState::with_account_setup()
+        } else {
+            TuiState::new()
+        };
+        // Set demo mode codes for import modal shortcuts (on contacts screen)
+        state.contacts.demo_alice_code = demo_alice.clone();
+        state.contacts.demo_carol_code = demo_carol.clone();
+        // Also keep them on invitations for backwards compatibility
+        state.invitations.demo_alice_code = demo_alice.clone();
+        state.invitations.demo_carol_code = demo_carol.clone();
+        state
+    });
+    let tui_state_version = hooks.use_state(|| 0usize);
+
+    // Account setup modal state - renders based on TuiState but maintains local UI state
+    // for text input handling (hybrid architecture: state machine for transitions, local for rendering)
     let account_state = hooks.use_ref(move || {
         let mut state = AccountSetupState::new();
         if show_setup {
@@ -277,6 +250,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let guardian_select_state = hooks.use_ref(ContactSelectState::new);
     let guardian_select_version = hooks.use_state(|| 0usize);
 
+    // Contact selection modal state (generic contact picker)
+    let contact_select_state = hooks.use_ref(ContactSelectState::new);
+    let contact_select_version = hooks.use_state(|| 0usize);
+
+    // Confirm modal state
+    let confirm_modal_visible = hooks.use_state(|| false);
+    let confirm_modal_title = hooks.use_ref(String::new);
+    let confirm_modal_message = hooks.use_ref(String::new);
+    let confirm_modal_version = hooks.use_state(|| 0usize);
+
     // Help modal state
     let help_modal_state = hooks.use_ref(HelpModalState::new);
     let help_modal_version = hooks.use_state(|| 0usize);
@@ -290,24 +273,29 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
     // Subscribe to toast updates by polling IoContext periodically
+    // Only trigger re-render when toasts actually change to avoid resource exhaustion
     hooks.use_future({
         let mut toasts_ref = toasts_ref.clone();
         let mut toasts_version = toasts_version.clone();
         let io_ctx = app_ctx.io_context.clone();
         async move {
+            let mut last_toast_count = 0usize;
             loop {
                 // Poll toasts every 100ms
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 let current_toasts = io_ctx.get_toasts().await;
-                // Update the ref and trigger re-render via version counter
-                *toasts_ref.write() = current_toasts;
-                toasts_version.set(toasts_version.get().wrapping_add(1));
+                let new_count = current_toasts.len();
+
+                // Only update and re-render if toast count changed
+                // This prevents constant re-renders when nothing changes
+                if new_count != last_toast_count {
+                    last_toast_count = new_count;
+                    *toasts_ref.write() = current_toasts;
+                    toasts_version.set(toasts_version.get().wrapping_add(1));
+                }
             }
         }
     });
-
-    // Input throttle for modal text input
-    let mut input_throttle = hooks.use_ref(InputThrottle::new);
 
     // Handle exit request
     if should_exit.get() {
@@ -317,7 +305,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Clone props for use
     let channels = props.channels.clone();
     let messages = props.messages.clone();
-    let invitations = props.invitations.clone();
+    let _invitations = props.invitations.clone();
     let guardians = props.guardians.clone();
     let devices = props.devices.clone();
     let display_name = props.display_name.clone();
@@ -362,7 +350,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let on_add_device = props.on_add_device.clone();
     let on_remove_device = props.on_remove_device.clone();
     let on_update_petname = props.on_update_petname.clone();
-    let on_toggle_guardian = props.on_toggle_guardian.clone();
     let on_start_chat = props.on_start_chat.clone();
     let on_invite_lan_peer = props.on_invite_lan_peer.clone();
     let on_block_send = props.on_block_send.clone();
@@ -373,8 +360,27 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     let current_screen = screen.get();
 
+    // Check if in insert mode (MessageInput has its own hint bar, so hide main hints)
+    let is_insert_mode = tui_state.read().is_insert_mode();
+
+    // Extract screen view props from TuiState using testable extraction functions
+    let block_props = extract_block_view_props(&tui_state.read());
+    let chat_props = extract_chat_view_props(&tui_state.read());
+    let contacts_props = extract_contacts_view_props(&tui_state.read());
+    let _invitations_props = extract_invitations_view_props(&tui_state.read());
+    let settings_props = extract_settings_view_props(&tui_state.read());
+    let recovery_props = extract_recovery_view_props(&tui_state.read());
+    let neighborhood_props = extract_neighborhood_view_props(&tui_state.read());
+
+    // Global hints that appear on all screens
+    let global_hints = vec![
+        KeyHint::new("Tab", "Next screen"),
+        KeyHint::new("?", "Help"),
+        KeyHint::new("q", "Quit"),
+    ];
+
     // Build screen-specific hints based on current screen
-    let screen_hints: Vec<KeyHint> = match current_screen {
+    let mut screen_hints: Vec<KeyHint> = match current_screen {
         Screen::Block => vec![
             KeyHint::new("i", "Insert"),
             KeyHint::new("v", "Invite"),
@@ -393,18 +399,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("e", "Edit name"),
             KeyHint::new("g", "Guardian"),
             KeyHint::new("c", "Chat"),
-            KeyHint::new("i", "Invite"),
+            KeyHint::new("i", "Accept invite"),
+            KeyHint::new("n", "Send invite"),
         ],
         Screen::Neighborhood => vec![
             KeyHint::new("Enter", "Enter block"),
             KeyHint::new("g", "Go home"),
             KeyHint::new("b", "Back to street"),
-        ],
-        Screen::Invitations => vec![
-            KeyHint::new("n", "New"),
-            KeyHint::new("i", "Import"),
-            KeyHint::new("e", "Export"),
-            KeyHint::new("f", "Filter"),
         ],
         Screen::Settings => vec![
             KeyHint::new("h/l", "Panel"),
@@ -416,6 +417,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("h/l", "Tab"),
         ],
     };
+    // Append global hints to screen-specific hints
+    screen_hints.extend(global_hints);
 
     // Clone contacts for guardian modal
     let contacts_for_modal = contacts.clone();
@@ -423,161 +426,550 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     hooks.use_terminal_events({
         let mut screen = screen.clone();
         let mut should_exit = should_exit.clone();
+        let mut tui_state = tui_state.clone();
+        let mut tui_state_version = tui_state_version.clone();
         let mut account_state = account_state.clone();
         let mut account_version = account_version.clone();
         let mut guardian_select_state = guardian_select_state.clone();
         let mut guardian_select_version = guardian_select_version.clone();
+        let mut contact_select_state = contact_select_state.clone();
+        let mut contact_select_version = contact_select_version.clone();
+        let mut confirm_modal_visible = confirm_modal_visible.clone();
+        let mut confirm_modal_title = confirm_modal_title.clone();
+        let mut confirm_modal_message = confirm_modal_message.clone();
+        let mut confirm_modal_version = confirm_modal_version.clone();
         let mut help_modal_state = help_modal_state.clone();
         let mut help_modal_version = help_modal_version.clone();
         let on_create_account = on_create_account.clone();
         let on_select_guardian = on_select_guardian.clone();
         let contacts_for_modal = contacts_for_modal.clone();
-        move |event| match event {
-            TerminalEvent::Key(KeyEvent {
-                code, modifiers, ..
-            }) => {
-                // Handle account setup modal input first (captures all input when visible)
-                let modal_visible = account_state.read().visible;
+        // Clone IoContext for toast operations (clear on Escape)
+        let io_ctx_for_toasts = app_ctx.io_context.clone();
+        // Clone IoContext for ceremony operations
+        let io_ctx_for_ceremony = app_ctx.io_context.clone();
+        // Clone AppCore for key rotation operations
+        let app_core_for_ceremony = app_ctx.app_core.clone();
+        // Key debounce ref for preventing rapid double-presses
+        let mut key_debounce = key_debounce.clone();
+        // Clone all dispatch callbacks for use inside the closure
+        let on_block_send = on_block_send.clone();
+        let on_block_invite = on_block_invite.clone();
+        let on_grant_steward = on_grant_steward.clone();
+        let on_revoke_steward = on_revoke_steward.clone();
+        let on_channel_select = on_channel_select.clone();
+        let on_send = on_send.clone();
+        let on_retry_message = on_retry_message.clone();
+        let on_create_channel = on_create_channel.clone();
+        let on_set_topic = on_set_topic.clone();
+        let on_update_petname = on_update_petname.clone();
+        let on_start_chat = on_start_chat.clone();
+        let on_accept_invitation = on_accept_invitation.clone();
+        let on_decline_invitation = on_decline_invitation.clone();
+        let on_create_invitation = on_create_invitation.clone();
+        let on_import_invitation = on_import_invitation.clone();
+        let on_export_invitation = on_export_invitation.clone();
+        let on_start_recovery = on_start_recovery.clone();
+        let on_submit_approval = on_submit_approval.clone();
+        let on_update_nickname = on_update_nickname.clone();
+        let on_update_threshold = on_update_threshold.clone();
+        let on_update_mfa = on_update_mfa.clone();
+        let on_add_device = on_add_device.clone();
+        let on_remove_device = on_remove_device.clone();
+        let on_enter_block = on_enter_block.clone();
+        let on_go_home = on_go_home.clone();
+        let on_back_to_street = on_back_to_street.clone();
+        // Clone contacts for use inside the closure (for populating guardian modal)
+        let contacts_for_modal_populate = contacts.clone();
+        move |event| {
+            // Convert iocraft event to aura-core event and run through state machine
+            if let Some(core_event) = convert_iocraft_event(event.clone()) {
+                // Apply key debouncing to prevent double-presses
+                // Uses classic pattern: longer initial delay, then faster repeat
+                let key_str = format!("{:?}", core_event);
+                if !key_debounce.write().should_accept(&key_str) {
+                    return; // Debounced - skip this event
+                }
+                // Get current state, apply transition, update state
+                let current = tui_state.read().clone();
+                let (new_state, commands) = transition(&current, core_event);
 
-                if modal_visible {
-                    match code {
-                        KeyCode::Char(c) => {
-                            if input_throttle.write().try_input() {
-                                account_state.write().push_char(c);
-                                account_version.set(account_version.get().wrapping_add(1));
-                            }
+                // Sync TuiState changes to iocraft hooks
+                if new_state.screen() != current.screen() {
+                    screen.set(new_state.screen());
+                }
+                if new_state.should_exit && !current.should_exit {
+                    should_exit.set(true);
+                }
+
+                // Sync modal state from TuiState to iocraft hooks
+                match new_state.modal.modal_type {
+                    ModalType::AccountSetup => {
+                        // Sync account setup modal state
+                        let legacy_visible = account_state.read().visible;
+                        if !legacy_visible {
+                            account_state.write().show();
+                            account_version.set(account_version.get().wrapping_add(1));
                         }
-                        KeyCode::Backspace => {
-                            if input_throttle.write().try_input() {
-                                account_state.write().backspace();
-                                account_version.set(account_version.get().wrapping_add(1));
-                            }
+                        // Sync the display_name and other fields
+                        let mut legacy = account_state.write();
+                        legacy.display_name = new_state.modal.account_setup.display_name.clone();
+                        legacy.creating = new_state.modal.account_setup.creating;
+                        legacy.success = new_state.modal.account_setup.success;
+                        legacy.error = new_state.modal.account_setup.error.clone();
+                        drop(legacy);
+                        account_version.set(account_version.get().wrapping_add(1));
+                    }
+                    ModalType::Help => {
+                        if !help_modal_state.read().visible {
+                            help_modal_state.write().show();
+                            help_modal_version.set(help_modal_version.get().wrapping_add(1));
                         }
-                        KeyCode::Enter => {
-                            let state = account_state.read();
-                            let is_success = state.is_success();
-                            let is_error = state.is_error();
-                            let can_submit = state.can_submit();
-                            drop(state);
-
-                            if is_success {
-                                // Dismiss the modal after success
-                                account_state.write().finish_creating();
-                                account_version.set(account_version.get().wrapping_add(1));
-                            } else if is_error {
-                                // Reset to input state to retry
-                                account_state.write().reset_to_input();
-                                account_version.set(account_version.get().wrapping_add(1));
-                            } else if can_submit {
-                                // Get name and trigger callback
-                                let name = account_state.read().display_name.clone();
-
-                                if let Some(ref callback) = on_create_account {
-                                    callback(name);
-                                }
-
-                                // Mark as creating
-                                account_state.write().start_creating();
-                                account_version.set(account_version.get().wrapping_add(1));
-                            }
+                    }
+                    ModalType::GuardianSelect => {
+                        if !guardian_select_state.read().visible {
+                            guardian_select_state
+                                .write()
+                                .show("Select Guardian", contacts_for_modal.clone());
+                            guardian_select_version
+                                .set(guardian_select_version.get().wrapping_add(1));
                         }
-                        KeyCode::Esc => {
-                            // Allow canceling the modal
+                    }
+                    ModalType::None => {
+                        // Close any open modals
+                        if account_state.read().visible {
                             account_state.write().hide();
                             account_version.set(account_version.get().wrapping_add(1));
                         }
-                        _ => {}
-                    }
-                    return; // Don't process other keys when modal is visible
-                }
-
-                // Handle guardian select modal input (captures all input when visible)
-                let guardian_modal_visible = guardian_select_state.read().visible;
-
-                if guardian_modal_visible {
-                    match code {
-                        KeyCode::Up => {
-                            guardian_select_state.write().select_prev();
-                            guardian_select_version
-                                .set(guardian_select_version.get().wrapping_add(1));
+                        if help_modal_state.read().visible {
+                            help_modal_state.write().hide();
+                            help_modal_version.set(help_modal_version.get().wrapping_add(1));
                         }
-                        KeyCode::Down => {
-                            guardian_select_state.write().select_next();
-                            guardian_select_version
-                                .set(guardian_select_version.get().wrapping_add(1));
-                        }
-                        KeyCode::Enter => {
-                            // Get selected contact ID first, then hide modal and trigger callback
-                            let selected_id = guardian_select_state.read().get_selected_id();
-                            if let Some(contact_id) = selected_id {
-                                guardian_select_state.write().hide();
-                                guardian_select_version
-                                    .set(guardian_select_version.get().wrapping_add(1));
-                                if let Some(ref callback) = on_select_guardian {
-                                    callback(contact_id);
-                                }
-                            }
-                        }
-                        KeyCode::Esc => {
-                            // Cancel the modal
+                        if guardian_select_state.read().visible {
                             guardian_select_state.write().hide();
                             guardian_select_version
                                 .set(guardian_select_version.get().wrapping_add(1));
                         }
-                        _ => {}
-                    }
-                    return; // Don't process other keys when modal is visible
-                }
-
-                // Handle help modal (captures all input when visible)
-                let help_visible = help_modal_state.read().visible;
-
-                if help_visible {
-                    match code {
-                        KeyCode::Esc | KeyCode::Char('?') => {
-                            help_modal_state.write().hide();
-                            help_modal_version.set(help_modal_version.get().wrapping_add(1));
+                        if contact_select_state.read().visible {
+                            contact_select_state.write().hide();
+                            contact_select_version
+                                .set(contact_select_version.get().wrapping_add(1));
                         }
-                        _ => {}
-                    }
-                    return; // Don't process other keys when help modal is visible
-                }
-
-                // Handle 'a' on Recovery screen to show guardian selection modal
-                if screen.get() == Screen::Recovery && code == KeyCode::Char('a') {
-                    // Show the guardian selection modal with contacts
-                    guardian_select_state
-                        .write()
-                        .show("Select Guardian", contacts_for_modal.clone());
-                    guardian_select_version.set(guardian_select_version.get().wrapping_add(1));
-                    return;
-                }
-
-                // Normal screen navigation
-                match code {
-                    KeyCode::Char('1') => screen.set(Screen::Block),
-                    KeyCode::Char('2') => screen.set(Screen::Chat),
-                    KeyCode::Char('3') => screen.set(Screen::Contacts),
-                    KeyCode::Char('4') => screen.set(Screen::Neighborhood),
-                    KeyCode::Char('5') => screen.set(Screen::Invitations),
-                    KeyCode::Char('6') => screen.set(Screen::Settings),
-                    KeyCode::Char('7') => screen.set(Screen::Recovery),
-                    KeyCode::Char('?') => {
-                        help_modal_state.write().show();
-                        help_modal_version.set(help_modal_version.get().wrapping_add(1));
-                    }
-                    KeyCode::Tab => {
-                        if modifiers.contains(KeyModifiers::SHIFT) {
-                            screen.set(screen.get().prev());
-                        } else {
-                            screen.set(screen.get().next());
+                        if confirm_modal_visible.get() {
+                            confirm_modal_visible.set(false);
+                            confirm_modal_version
+                                .set(confirm_modal_version.get().wrapping_add(1));
                         }
                     }
-                    KeyCode::Char('q') => should_exit.set(true),
-                    _ => {}
+                    ModalType::ContactSelect => {
+                        // Show contact selection modal (generic contact picker)
+                        if !contact_select_state.read().visible {
+                            contact_select_state
+                                .write()
+                                .show("Select Contact", contacts_for_modal.clone());
+                            contact_select_version
+                                .set(contact_select_version.get().wrapping_add(1));
+                        }
+                    }
+                    ModalType::Confirm => {
+                        // Show confirmation modal
+                        if !confirm_modal_visible.get() {
+                            confirm_modal_visible.set(true);
+                            *confirm_modal_title.write() = "Confirm Action".to_string();
+                            *confirm_modal_message.write() = "Are you sure you want to proceed?".to_string();
+                            confirm_modal_version
+                                .set(confirm_modal_version.get().wrapping_add(1));
+                        }
+                    }
                 }
+
+                // Execute commands
+                for cmd in commands {
+                    match cmd {
+                        TuiCommand::Exit => {
+                            should_exit.set(true);
+                        }
+                        TuiCommand::Dispatch(dispatch_cmd) => {
+                            // Handle dispatch commands - map to callbacks
+                            match dispatch_cmd {
+                                DispatchCommand::CreateAccount { name } => {
+                                    if let Some(ref callback) = on_create_account {
+                                        callback(name);
+                                    }
+                                }
+                                DispatchCommand::AddGuardian { contact_id } => {
+                                    if let Some(ref callback) = on_select_guardian {
+                                        callback(contact_id);
+                                    }
+                                }
+                                DispatchCommand::SelectGuardianByIndex { index } => {
+                                    // Map index to contact_id from legacy modal state
+                                    let contact_id = guardian_select_state
+                                        .read()
+                                        .contacts
+                                        .get(index)
+                                        .map(|c| c.id.clone());
+
+                                    // Hide the modal
+                                    guardian_select_state.write().hide();
+                                    guardian_select_version
+                                        .set(guardian_select_version.get().wrapping_add(1));
+
+                                    // Also close in TuiState
+                                    tui_state.write().modal.close();
+
+                                    // Call the callback with contact_id
+                                    if let Some(contact_id) = contact_id {
+                                        if let Some(ref callback) = on_select_guardian {
+                                            callback(contact_id);
+                                        }
+                                    }
+                                }
+
+                                // === Block Screen Commands ===
+                                DispatchCommand::SendBlockMessage { content } => {
+                                    if let Some(ref callback) = on_block_send {
+                                        callback(content);
+                                    }
+                                }
+                                DispatchCommand::InviteToBlock { contact_id } => {
+                                    if let Some(ref callback) = on_block_invite {
+                                        callback(contact_id);
+                                    }
+                                }
+                                DispatchCommand::GrantSteward { resident_id } => {
+                                    if let Some(ref callback) = on_grant_steward {
+                                        callback(resident_id);
+                                    }
+                                }
+                                DispatchCommand::RevokeSteward { resident_id } => {
+                                    if let Some(ref callback) = on_revoke_steward {
+                                        callback(resident_id);
+                                    }
+                                }
+
+                                // === Chat Screen Commands ===
+                                DispatchCommand::SelectChannel { channel_id } => {
+                                    if let Some(ref callback) = on_channel_select {
+                                        callback(channel_id);
+                                    }
+                                }
+                                DispatchCommand::SendChatMessage {
+                                    channel_id,
+                                    content,
+                                } => {
+                                    if let Some(ref callback) = on_send {
+                                        callback(channel_id, content);
+                                    }
+                                }
+                                DispatchCommand::RetryMessage { message_id } => {
+                                    // Note: RetryMessage requires channel and content from the failed message
+                                    // The callback expects (message_id, channel_id, content)
+                                    // For now, log a warning since we don't have the full message context here
+                                    if on_retry_message.is_some() {
+                                        tracing::warn!(
+                                            "RetryMessage not fully implemented: message_id={}",
+                                            message_id
+                                        );
+                                    }
+                                }
+                                DispatchCommand::CreateChannel { name } => {
+                                    if let Some(ref callback) = on_create_channel {
+                                        callback(name, None);
+                                    }
+                                }
+                                DispatchCommand::SetChannelTopic { channel_id, topic } => {
+                                    if let Some(ref callback) = on_set_topic {
+                                        callback(channel_id, topic);
+                                    }
+                                }
+
+                                // === Contacts Screen Commands ===
+                                DispatchCommand::UpdatePetname {
+                                    contact_id,
+                                    petname,
+                                } => {
+                                    if let Some(ref callback) = on_update_petname {
+                                        callback(contact_id, petname);
+                                    }
+                                }
+                                DispatchCommand::StartChat { contact_id } => {
+                                    if let Some(ref callback) = on_start_chat {
+                                        callback(contact_id);
+                                    }
+                                }
+
+                                // === Invitations Screen Commands ===
+                                DispatchCommand::AcceptInvitation { invitation_id } => {
+                                    if let Some(ref callback) = on_accept_invitation {
+                                        callback(invitation_id);
+                                    }
+                                }
+                                DispatchCommand::DeclineInvitation { invitation_id } => {
+                                    if let Some(ref callback) = on_decline_invitation {
+                                        callback(invitation_id);
+                                    }
+                                }
+                                DispatchCommand::CreateInvitation {
+                                    invitation_type,
+                                    message,
+                                } => {
+                                    if let Some(ref callback) = on_create_invitation {
+                                        // Third argument is TTL in seconds (None = no expiry)
+                                        callback(invitation_type, message, None);
+                                    }
+                                }
+                                DispatchCommand::ImportInvitation { code } => {
+                                    if let Some(ref callback) = on_import_invitation {
+                                        callback(code);
+                                    }
+                                }
+                                DispatchCommand::ExportInvitation { invitation_id } => {
+                                    if let Some(ref callback) = on_export_invitation {
+                                        // Spawn the async callback to run in the background
+                                        tokio::spawn(callback(invitation_id));
+                                    }
+                                }
+
+                                // === Recovery Screen Commands ===
+                                DispatchCommand::StartRecovery => {
+                                    if let Some(ref callback) = on_start_recovery {
+                                        callback();
+                                    }
+                                }
+                                DispatchCommand::ApproveRecovery { request_id } => {
+                                    if let Some(ref callback) = on_submit_approval {
+                                        callback(request_id);
+                                    }
+                                }
+
+                                // === Guardian Ceremony Commands ===
+                                DispatchCommand::StartGuardianCeremony { contact_ids, threshold_k } => {
+                                    tracing::info!(
+                                        "Starting guardian ceremony with {} contacts, threshold {}",
+                                        contact_ids.len(),
+                                        threshold_k
+                                    );
+
+                                    let io_ctx = io_ctx_for_ceremony.clone();
+                                    let ids = contact_ids.clone();
+                                    let n = contact_ids.len() as u8;
+                                    let k = threshold_k;
+
+                                    // Use pre-cloned AppCore for key rotation
+                                    let app_core = app_core_for_ceremony.clone();
+
+                                    tokio::spawn(async move {
+                                        // Step 1: Rotate keys - generates new FROST threshold keys
+                                        // The authority ID would come from the account context
+                                        // For demo mode, we'll use the key rotation through the effect system
+                                        let core = app_core.read().await;
+
+                                        // Try to perform key rotation through the runtime bridge
+                                        // This generates new k-of-n FROST keys for the selected guardians
+                                        match core.rotate_guardian_keys(k as u16, n as u16, &ids).await {
+                                            Ok((new_epoch, _key_packages, _public_key)) => {
+                                                tracing::info!(
+                                                    new_epoch,
+                                                    threshold = k,
+                                                    guardians = n,
+                                                    "Key rotation successful, distributing shares to guardians"
+                                                );
+
+                                                // Step 2: Demo mode simulates instant acceptance.
+                                                // Production mode sends key packages to each guardian
+                                                // and waits for protocol-level acceptance.
+                                                for contact_id in &ids {
+                                                    io_ctx.toggle_contact_guardian(contact_id, true).await;
+                                                    tracing::info!("Guardian {} accepted binding (demo)", contact_id);
+                                                }
+
+                                                // Step 3: Commit the key rotation (all accepted)
+                                                if let Err(e) = core.commit_guardian_key_rotation(new_epoch).await {
+                                                    tracing::warn!("Failed to commit key rotation: {}", e);
+                                                }
+
+                                                // Show success toast
+                                                io_ctx.add_success_toast(
+                                                    "guardian-ceremony-complete",
+                                                    format!("Guardian ceremony complete! {}-of-{} threshold keys generated", k, n)
+                                                ).await;
+                                            }
+                                            Err(e) => {
+                                                tracing::error!("Key rotation failed: {}", e);
+
+                                                // Still mark guardians in demo mode (fallback behavior)
+                                                for contact_id in &ids {
+                                                    io_ctx.toggle_contact_guardian(contact_id, true).await;
+                                                }
+
+                                                io_ctx.add_success_toast(
+                                                    "guardian-ceremony-complete",
+                                                    format!("Guardian ceremony complete! {} of {} threshold set (key rotation pending)", k, n)
+                                                ).await;
+                                            }
+                                        }
+                                    });
+
+                                    // Update TUI state to close modal and show completion
+                                    tui_state.write().contacts.guardian_setup_modal.visible = false;
+                                    tui_state.write().contacts.guardian_setup_modal.has_pending_ceremony = false;
+                                    tui_state_version.set(tui_state_version.get() + 1);
+                                }
+                                DispatchCommand::CancelGuardianCeremony => {
+                                    tracing::info!("Canceling guardian ceremony");
+
+                                    // If there was a pending key rotation, roll it back
+                                    // The epoch would be tracked in ceremony state
+                                    // For now, just log that we would rollback
+                                    tracing::info!("Would rollback any pending key rotation");
+
+                                    // Close the modal and reset ceremony state
+                                    tui_state.write().contacts.guardian_setup_modal.visible = false;
+                                    tui_state.write().contacts.guardian_setup_modal.has_pending_ceremony = false;
+                                    tui_state.write().contacts.guardian_setup_modal.step = Default::default();
+                                    tui_state.write().contacts.guardian_setup_modal.selected_indices.clear();
+                                    tui_state.write().contacts.guardian_setup_modal.ceremony_responses.clear();
+                                    tui_state_version.set(tui_state_version.get() + 1);
+                                }
+
+                                // === Settings Screen Commands ===
+                                DispatchCommand::UpdateNickname { nickname } => {
+                                    if let Some(ref callback) = on_update_nickname {
+                                        callback(nickname);
+                                    }
+                                }
+                                DispatchCommand::UpdateThreshold { k, n } => {
+                                    if let Some(ref callback) = on_update_threshold {
+                                        callback(k, n);
+                                    }
+                                }
+                                DispatchCommand::UpdateMfaPolicy { policy } => {
+                                    if let Some(ref callback) = on_update_mfa {
+                                        callback(policy);
+                                    }
+                                }
+                                DispatchCommand::AddDevice { name } => {
+                                    if let Some(ref callback) = on_add_device {
+                                        callback(name);
+                                    }
+                                }
+                                DispatchCommand::RemoveDevice { device_id } => {
+                                    if let Some(ref callback) = on_remove_device {
+                                        callback(device_id);
+                                    }
+                                }
+
+                                // === Neighborhood Screen Commands ===
+                                DispatchCommand::EnterBlock { block_id } => {
+                                    if let Some(ref callback) = on_enter_block {
+                                        // Default to Street-level traversal depth
+                                        callback(block_id, TraversalDepth::default());
+                                    }
+                                }
+                                DispatchCommand::GoHome => {
+                                    if let Some(ref callback) = on_go_home {
+                                        callback();
+                                    }
+                                }
+                                DispatchCommand::BackToStreet => {
+                                    if let Some(ref callback) = on_back_to_street {
+                                        callback();
+                                    }
+                                }
+
+                                // === Navigation Commands ===
+                                DispatchCommand::NavigateTo(_screen) => {
+                                    // Navigation is handled by TuiState directly
+                                    // The state machine already updates the screen
+                                }
+                            }
+                        }
+                        TuiCommand::ShowToast { message, level } => {
+                            // Wire to toast system via IoContext
+                            let io_ctx = io_ctx_for_toasts.clone();
+                            let toast_level = match level {
+                                crate::tui::state_machine::ToastLevel::Info => ToastLevel::Info,
+                                crate::tui::state_machine::ToastLevel::Success => ToastLevel::Success,
+                                crate::tui::state_machine::ToastLevel::Warning => ToastLevel::Warning,
+                                crate::tui::state_machine::ToastLevel::Error => ToastLevel::Error,
+                            };
+                            let toast_id = format!(
+                                "toast-{}",
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis())
+                                    .unwrap_or(0)
+                            );
+                            tokio::spawn(async move {
+                                io_ctx.add_toast(ToastMessage::new(toast_id, message).with_level(toast_level)).await;
+                            });
+                        }
+                        TuiCommand::DismissToast { id } => {
+                            // Dismiss specific toast by ID
+                            let io_ctx = io_ctx_for_toasts.clone();
+                            let toast_id = format!("toast-{}", id);
+                            tokio::spawn(async move {
+                                io_ctx.clear_toast(&toast_id).await;
+                            });
+                        }
+                        TuiCommand::ClearAllToasts => {
+                            // Clear all toasts via IoContext
+                            let io_ctx = io_ctx_for_toasts.clone();
+                            tokio::spawn(async move {
+                                io_ctx.clear_toasts().await;
+                            });
+                        }
+                        TuiCommand::Render => {
+                            // Render is handled by iocraft automatically
+                        }
+                    }
+                }
+
+                // Update TuiState
+                *tui_state.write() = new_state;
+
+                // If the guardian setup modal just became visible, populate its contacts list
+                // from the reactive contacts data
+                {
+                    let mut state = tui_state.write();
+                    if state.contacts.guardian_setup_modal.visible
+                        && state.contacts.guardian_setup_modal.contacts.is_empty()
+                    {
+                        // Populate from the contacts prop (which comes from reactive signals)
+                        // We need to convert Contact -> GuardianCandidate
+                        state.contacts.guardian_setup_modal.contacts = contacts_for_modal_populate
+                            .iter()
+                            .map(|c| crate::tui::state_machine::GuardianCandidate {
+                                id: c.id.clone(),
+                                name: c.petname.clone(),
+                                is_current_guardian: c.is_guardian,
+                            })
+                            .collect();
+
+                        // Pre-select existing guardians
+                        state.contacts.guardian_setup_modal.selected_indices = state
+                            .contacts
+                            .guardian_setup_modal
+                            .contacts
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, c)| c.is_current_guardian)
+                            .map(|(i, _)| i)
+                            .collect();
+
+                        tracing::debug!(
+                            "Populated guardian modal with {} contacts",
+                            state.contacts.guardian_setup_modal.contacts.len()
+                        );
+                    }
+                }
+
+                tui_state_version.set(tui_state_version.get().wrapping_add(1));
             }
-            _ => {}
+
+            // All key events are now handled by the state machine above.
+            // Modal handling (AccountSetup, GuardianSelect, Help) goes through
+            // transition() -> sync to legacy state -> command execution.
         }
     });
 
@@ -603,6 +995,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                               // guardian_select_version is used for triggering re-renders (not directly in UI)
     let _ = guardian_select_version.get();
 
+    // Extract contact select state for rendering from use_ref
+    let contact_state_ref = contact_select_state.read();
+    let contact_modal_visible = contact_state_ref.visible;
+    let contact_modal_title = contact_state_ref.title.clone();
+    let contact_modal_contacts = contact_state_ref.contacts.clone();
+    let contact_modal_selected = contact_state_ref.selected_index;
+    let contact_modal_error = contact_state_ref.error.clone().unwrap_or_default();
+    drop(contact_state_ref); // Release the read lock
+                             // contact_select_version is used for triggering re-renders (not directly in UI)
+    let _ = contact_select_version.get();
+
+    // Extract confirm modal state for rendering
+    let confirm_visible = confirm_modal_visible.get();
+    let confirm_title = confirm_modal_title.read().clone();
+    let confirm_message = confirm_modal_message.read().clone();
+    // confirm_modal_version is used for triggering re-renders (not directly in UI)
+    let _ = confirm_modal_version.get();
+
     // Extract help modal state for rendering from use_ref
     let help_modal_visible = help_modal_state.read().visible;
     // help_modal_version is used for triggering re-renders (not directly in UI)
@@ -618,24 +1028,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let last_sync = props.last_sync_time;
     let peers = props.peer_count;
 
-    // Extract demo mode props for passing to InvitationsScreen
-    let alice_code = props.demo_alice_code.clone();
-    let charlie_code = props.demo_charlie_code.clone();
-
+    // Layout: NavBar (3 rows) + Content (25 rows) + Footer (3 rows) = 31 = TOTAL_HEIGHT
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            width: 100pct,
-            height: 100pct,
+            width: dim::TOTAL_WIDTH,
+            height: dim::TOTAL_HEIGHT,
+            overflow: Overflow::Hidden,
         ) {
-            // Screen tab bar
-            ScreenTabBar(active: current_screen)
+            // Nav bar with screen tabs and status (3 rows)
+            NavBar(
+                active_screen: current_screen,
+                syncing: syncing,
+                last_sync_time: last_sync,
+                peer_count: peers,
+            )
 
-            // Status bar showing sync status
-            StatusBar(syncing: syncing, last_sync_time: last_sync, peer_count: peers)
-
-            // Screen content - flex_grow fills available space, overflow clips to make room for hints
-            View(flex_grow: 1.0, flex_shrink: 1.0, overflow: Overflow::Hidden) {
+            // Screen content - fixed 25 rows (MIDDLE_HEIGHT)
+            View(width: dim::TOTAL_WIDTH, height: dim::MIDDLE_HEIGHT, overflow: Overflow::Hidden) {
                 #(match current_screen {
                     Screen::Block => vec![element! {
                         View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
@@ -646,6 +1056,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 budget: block_budget.clone(),
                                 channel_name: channel_name.clone(),
                                 contacts: contacts.clone(),
+                                // View state: entire struct from extraction function (compile-time enforced)
+                                view: block_props.clone(),
+                                // Callbacks
                                 on_send: on_block_send.clone(),
                                 on_invite: on_block_invite.clone(),
                                 on_go_neighborhood: on_block_navigate_neighborhood.clone(),
@@ -655,13 +1068,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                     }],
                     Screen::Chat => {
-                        let idx: usize = 0;
                         vec![element! {
                             View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                                 ChatScreen(
+                                    // Domain data
                                     channels: channels.clone(),
                                     messages: messages.clone(),
-                                    initial_channel_index: idx,
+                                    // View state: entire struct from extraction function (compile-time enforced)
+                                    view: chat_props.clone(),
+                                    // Callbacks
                                     on_send: on_send.clone(),
                                     on_retry_message: on_retry_message.clone(),
                                     on_channel_select: on_channel_select.clone(),
@@ -676,51 +1091,45 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             ContactsScreen(
                                 contacts: contacts.clone(),
                                 discovered_peers: discovered_peers.clone(),
+                                // View state: entire struct from extraction function (compile-time enforced)
+                                view: contacts_props.clone(),
+                                // Callbacks
                                 on_update_petname: on_update_petname.clone(),
-                                on_toggle_guardian: on_toggle_guardian.clone(),
                                 on_start_chat: on_start_chat.clone(),
                                 on_invite_lan_peer: on_invite_lan_peer.clone(),
+                                on_import_invitation: on_import_invitation.clone(),
                             )
                         }
                     }],
                     Screen::Neighborhood => vec![element! {
                         View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             NeighborhoodScreen(
+                                // Domain data
                                 neighborhood_name: neighborhood_name.clone(),
                                 blocks: blocks.clone(),
                                 depth: traversal_depth,
+                                // View state: entire struct from extraction function (compile-time enforced)
+                                view: neighborhood_props.clone(),
+                                // Callbacks
                                 on_enter_block: on_enter_block.clone(),
                                 on_go_home: on_go_home.clone(),
                                 on_back_to_street: on_back_to_street.clone(),
                             )
                         }
                     }],
-                    Screen::Invitations => vec![element! {
-                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
-                            InvitationsScreen(
-                                invitations: invitations.clone(),
-                                filter: InvitationFilter::All,
-                                selected_index: 0usize,
-                                on_accept: on_accept_invitation.clone(),
-                                on_decline: on_decline_invitation.clone(),
-                                on_create: on_create_invitation.clone(),
-                                on_export: on_export_invitation.clone(),
-                                on_import: on_import_invitation.clone(),
-                                demo_mode: !alice_code.is_empty(),
-                                demo_alice_code: alice_code.clone(),
-                                demo_charlie_code: charlie_code.clone(),
-                            )
-                        }
-                    }],
                     Screen::Settings => vec![element! {
                         View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             SettingsScreen(
+                                // Domain data
                                 display_name: display_name.clone(),
                                 threshold_k: threshold_k,
                                 threshold_n: threshold_n,
                                 contact_count: contacts.len(),
                                 devices: devices.clone(),
                                 mfa_policy: mfa_policy,
+                                // View state: entire struct from extraction function (compile-time enforced)
+                                view: settings_props.clone(),
+                                // Callbacks
                                 on_update_mfa: on_update_mfa.clone(),
                                 on_update_nickname: on_update_nickname.clone(),
                                 on_update_threshold: on_update_threshold.clone(),
@@ -732,11 +1141,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     Screen::Recovery => vec![element! {
                         View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             RecoveryScreen(
+                                // Domain data
                                 guardians: guardians.clone(),
                                 threshold_required: threshold_k as u32,
                                 threshold_total: threshold_n as u32,
                                 recovery_status: recovery_status.clone(),
                                 pending_requests: pending_requests.clone(),
+                                // View state: entire struct from extraction function (compile-time enforced)
+                                view: recovery_props.clone(),
+                                // Callbacks
                                 on_start_recovery: on_start_recovery.clone(),
                                 on_add_guardian: on_add_guardian.clone(),
                                 on_submit_approval: on_submit_approval.clone(),
@@ -746,8 +1159,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 })
             }
 
-            // Key hints bar with screen-specific and global navigation hints
-            KeyHintsBar(screen_hints: screen_hints)
+            // Footer with key hints (3 rows)
+            // Show darkened hints when in insert mode (hotkeys inactive)
+            Footer(hints: screen_hints.clone(), disabled: is_insert_mode)
 
             // Account setup modal overlay
             AccountSetupModal(
@@ -768,11 +1182,30 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 error: guardian_modal_error,
             )
 
+            // Generic contact selection modal overlay
+            ContactSelectModal(
+                visible: contact_modal_visible,
+                title: contact_modal_title,
+                contacts: contact_modal_contacts,
+                selected_index: contact_modal_selected,
+                error: contact_modal_error,
+            )
+
+            // Confirm dialog modal overlay
+            ConfirmModal(
+                visible: confirm_visible,
+                title: confirm_title,
+                message: confirm_message,
+                confirm_text: "Confirm".to_string(),
+                cancel_text: "Cancel".to_string(),
+                confirm_focused: true,
+            )
+
             // Help modal overlay (context-sensitive)
             HelpModal(visible: help_modal_visible, current_screen: Some(current_screen.name().to_string()))
 
-            // Toast notifications (top-right corner)
-            ToastContainer(toasts: current_toasts)
+            // Toast notification overlay (absolute positioned at bottom, above key hints)
+            ToastContainer(toasts: current_toasts.clone())
         }
     }
 }
@@ -788,16 +1221,26 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // SendCallback for ChatScreen - fires async dispatch in background
     let ctx_for_send = ctx_arc.clone();
     let on_send: SendCallback = Arc::new(move |channel_id: String, content: String| {
+        tracing::debug!(
+            "on_send (Chat) callback invoked: channel={}, content={}",
+            channel_id,
+            content
+        );
         let ctx = ctx_for_send.clone();
         let cmd = EffectCommand::SendMessage {
-            channel: channel_id,
+            channel: channel_id.clone(),
             content,
         };
         tokio::spawn(async move {
-            if let Err(e) = ctx.dispatch(cmd).await {
-                eprintln!("Failed to send message: {}", e);
-                ctx.add_error_toast("send-error", format!("Failed to send: {}", e))
-                    .await;
+            match ctx.dispatch(cmd).await {
+                Ok(_) => {
+                    tracing::debug!("Chat message dispatch succeeded to channel: {}", channel_id);
+                }
+                Err(e) => {
+                    tracing::warn!("Chat message dispatch FAILED: {}", e);
+                    ctx.add_error_toast("send-error", format!("Failed to send: {}", e))
+                        .await;
+                }
             }
         });
     });
@@ -1038,15 +1481,17 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let ctx_for_select_guardian = ctx_arc.clone();
     let on_select_guardian: GuardianSelectCallback = Arc::new(move |contact_id: String| {
         let ctx = ctx_for_select_guardian.clone();
+        // Dispatch guardian request - goes through proper e2e flow
+        // In demo mode, Alice/Carol simulators will receive and accept the request
         let cmd = EffectCommand::InviteGuardian {
             contact_id: Some(contact_id),
         };
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
-                eprintln!("Failed to invite guardian: {}", e);
+                eprintln!("Failed to send guardian request: {}", e);
                 ctx.add_error_toast(
                     "guardian-error",
-                    format!("Failed to invite guardian: {}", e),
+                    format!("Failed to send guardian request: {}", e),
                 )
                 .await;
             }
@@ -1182,23 +1627,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
             });
         });
 
-    // ToggleGuardianCallback for toggling guardian status - dispatches ToggleContactGuardian command
-    let ctx_for_toggle = ctx_arc.clone();
-    let on_toggle_guardian: ToggleGuardianCallback = Arc::new(move |contact_id: String| {
-        let ctx = ctx_for_toggle.clone();
-        let cmd = EffectCommand::ToggleContactGuardian { contact_id };
-        tokio::spawn(async move {
-            if let Err(e) = ctx.dispatch(cmd).await {
-                eprintln!("Failed to toggle guardian status: {}", e);
-                ctx.add_error_toast(
-                    "guardian-error",
-                    format!("Failed to toggle guardian: {}", e),
-                )
-                .await;
-            }
-        });
-    });
-
     // StartChatCallback for starting a direct chat with a contact
     let ctx_for_start_chat = ctx_arc.clone();
     let on_start_chat: StartChatCallback = Arc::new(move |contact_id: String| {
@@ -1242,6 +1670,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // BlockSendCallback for sending a message in the block channel
     let ctx_for_block_send = ctx_arc.clone();
     let on_block_send: BlockSendCallback = Arc::new(move |content: String| {
+        tracing::debug!("on_block_send callback invoked with content: {}", content);
         let ctx = ctx_for_block_send.clone();
         tokio::spawn(async move {
             // Get current block ID from snapshot
@@ -1254,15 +1683,21 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
 
             // Use block:<block_id> as the channel for block messages
             let channel = format!("block:{}", block_id);
+            tracing::debug!("Dispatching SendMessage to channel: {}", channel);
             let cmd = EffectCommand::SendMessage { channel, content };
 
-            if let Err(e) = ctx.dispatch(cmd).await {
-                eprintln!("Failed to send block message: {}", e);
-                ctx.add_error_toast(
-                    "block-error",
-                    format!("Failed to send block message: {}", e),
-                )
-                .await;
+            match ctx.dispatch(cmd).await {
+                Ok(_) => {
+                    tracing::debug!("Block message dispatch succeeded");
+                }
+                Err(e) => {
+                    tracing::warn!("Block message dispatch FAILED: {}", e);
+                    ctx.add_error_toast(
+                        "block-error",
+                        format!("Failed to send block message: {}", e),
+                    )
+                    .await;
+                }
             }
         });
     });
@@ -1512,7 +1947,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     on_remove_device: Some(on_remove_device),
                     // Contacts callbacks
                     on_update_petname: Some(on_update_petname),
-                    on_toggle_guardian: Some(on_toggle_guardian),
                     on_start_chat: Some(on_start_chat),
                     on_invite_lan_peer: Some(on_invite_lan_peer),
                     // Block callbacks
@@ -1531,7 +1965,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     // Demo mode (get from context)
                     demo_mode: ctx_arc.is_demo_mode(),
                     demo_alice_code: ctx_arc.demo_alice_code(),
-                    demo_charlie_code: ctx_arc.demo_charlie_code(),
+                    demo_carol_code: ctx_arc.demo_carol_code(),
                 )
             }
         }

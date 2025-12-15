@@ -76,6 +76,16 @@ pub enum OpResponse {
         /// Mode flags that were applied
         flags: String,
     },
+    /// Display name/nickname updated
+    NicknameUpdated {
+        /// The new display name
+        name: String,
+    },
+    /// MFA policy updated
+    MfaPolicyUpdated {
+        /// Whether MFA is now required
+        require_mfa: bool,
+    },
 }
 
 /// Error from an operational command
@@ -302,7 +312,8 @@ impl OperationalHandler {
             EffectCommand::DiscoverPeers => {
                 // Trigger peer discovery via rendezvous
                 // Currently this is implicit in the rendezvous service
-                // TODO: Add explicit trigger_discovery() to RuntimeBridge
+                // NOTE: Explicit trigger_discovery() could be added to RuntimeBridge
+                // for on-demand discovery refresh.
                 tracing::info!("Peer discovery triggered");
 
                 // For now, return the currently discovered peers
@@ -320,8 +331,8 @@ impl OperationalHandler {
 
             EffectCommand::ListLanPeers => {
                 // LAN peer discovery - currently not exposed via RuntimeBridge
-                // TODO: Add get_lan_peers() to RuntimeBridge trait
-                // For now, return empty list with info message
+                // NOTE: get_lan_peers() needs to be added to RuntimeBridge trait
+                // to expose mDNS/LAN discovery results from aura-rendezvous.
                 tracing::info!("LAN peer discovery not yet implemented in runtime");
                 Some(Ok(OpResponse::List(vec![])))
             }
@@ -335,8 +346,8 @@ impl OperationalHandler {
                 // 2. Export the invitation code
                 // 3. Send the code to the peer's address via LAN transport
                 //
-                // Currently, LAN transport is not exposed via RuntimeBridge.
-                // TODO: Add send_lan_invitation() to RuntimeBridge trait
+                // NOTE: LAN transport for invitation delivery needs send_lan_invitation()
+                // added to RuntimeBridge. Currently falls back to exporting code for manual sharing.
                 tracing::info!(
                     "Inviting LAN peer: authority={} at address={}",
                     authority_id,
@@ -568,14 +579,16 @@ impl OperationalHandler {
             // =========================================================================
             // Settings Commands
             // =========================================================================
-            EffectCommand::UpdateMfaPolicy { require_mfa: _ } => {
-                // Update MFA policy setting
-                Some(Ok(OpResponse::Ok))
+            EffectCommand::UpdateMfaPolicy { require_mfa } => {
+                // Return the MFA policy update so IoContext can update its state
+                Some(Ok(OpResponse::MfaPolicyUpdated {
+                    require_mfa: *require_mfa,
+                }))
             }
 
-            EffectCommand::UpdateNickname { name: _ } => {
-                // Update display nickname
-                Some(Ok(OpResponse::Ok))
+            EffectCommand::UpdateNickname { name } => {
+                // Return the nickname update so IoContext can update its state
+                Some(Ok(OpResponse::NicknameUpdated { name: name.clone() }))
             }
 
             EffectCommand::SetChannelMode { channel, flags } => {
@@ -778,30 +791,54 @@ impl OperationalHandler {
                 // Get current chat state and add a message
                 // Note: Full implementation would use Intent::SendMessage
                 // For now, emit signal update to refresh UI
-                if let Ok(core) = self.app_core.try_read() {
-                    if let Ok(mut chat_state) = core.read(&*CHAT_SIGNAL).await {
-                        // Create a placeholder message
-                        let message = aura_app::views::chat::Message {
-                            id: format!("msg-{}", uuid::Uuid::new_v4()),
-                            channel_id: dm_channel_id.clone(),
-                            sender_id: "self".to_string(),
-                            sender_name: "You".to_string(),
-                            content: content.clone(),
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as u64,
-                            reply_to: None,
-                            is_own: true,
-                            is_read: true,
+                let core = self.app_core.read().await;
+                if let Ok(mut chat_state) = core.read(&*CHAT_SIGNAL).await {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+
+                    // Ensure the DM channel exists (create if needed)
+                    if !chat_state.channels.iter().any(|c| c.id == dm_channel_id) {
+                        let dm_channel = Channel {
+                            id: dm_channel_id.clone(),
+                            name: format!("DM with {}", &target[..8.min(target.len())]),
+                            topic: Some(format!("Direct messages with {}", target)),
+                            channel_type: ChannelType::DirectMessage,
+                            unread_count: 0,
+                            is_dm: true,
+                            member_count: 2, // Self + target
+                            last_message: None,
+                            last_message_time: None,
+                            last_activity: now,
                         };
-
-                        // Apply message to state
-                        chat_state.apply_message(dm_channel_id.clone(), message);
-
-                        // Emit updated state
-                        let _ = core.emit(&*CHAT_SIGNAL, chat_state).await;
+                        chat_state.add_channel(dm_channel);
+                        tracing::info!("Created DM channel: {}", dm_channel_id);
                     }
+
+                    // Select this channel so messages are visible
+                    // (apply_message only adds to messages list when channel is selected)
+                    chat_state.selected_channel_id = Some(dm_channel_id.clone());
+
+                    // Create the message with deterministic ID based on channel and timestamp
+                    let message = aura_app::views::chat::Message {
+                        id: format!("msg-{}-{}", dm_channel_id, now),
+                        channel_id: dm_channel_id.clone(),
+                        sender_id: "self".to_string(),
+                        sender_name: "You".to_string(),
+                        content: content.clone(),
+                        timestamp: now,
+                        reply_to: None,
+                        is_own: true,
+                        is_read: true,
+                    };
+
+                    // Apply message to state (updates channel metadata and adds to messages
+                    // list if this channel is currently selected)
+                    chat_state.apply_message(dm_channel_id.clone(), message);
+
+                    // Emit updated state
+                    let _ = core.emit(&*CHAT_SIGNAL, chat_state).await;
                 }
 
                 Some(Ok(OpResponse::Data(format!(
@@ -853,19 +890,17 @@ impl OperationalHandler {
                 };
 
                 // Add channel to ChatState and select it
-                if let Ok(core) = self.app_core.try_read() {
-                    if let Ok(mut chat_state) = core.read(&*CHAT_SIGNAL).await {
-                        // Add the DM channel (add_channel avoids duplicates)
-                        chat_state.add_channel(dm_channel);
+                let core = self.app_core.read().await;
+                if let Ok(mut chat_state) = core.read(&*CHAT_SIGNAL).await {
+                    // Add the DM channel (add_channel avoids duplicates)
+                    chat_state.add_channel(dm_channel);
 
-                        // Select this channel
-                        chat_state.selected_channel_id = Some(dm_channel_id.clone());
-                        chat_state.messages.clear(); // Clear messages for new selection
+                    // Select this channel (don't clear messages - retain history)
+                    chat_state.selected_channel_id = Some(dm_channel_id.clone());
 
-                        // Emit updated state
-                        let _ = core.emit(&*CHAT_SIGNAL, chat_state).await;
-                        tracing::info!("DM channel created and selected: {}", dm_channel_id);
-                    }
+                    // Emit updated state
+                    let _ = core.emit(&*CHAT_SIGNAL, chat_state).await;
+                    tracing::info!("DM channel created and selected: {}", dm_channel_id);
                 }
 
                 Some(Ok(OpResponse::Data(format!(

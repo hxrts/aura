@@ -1253,6 +1253,113 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             .await
             .ok()
     }
+
+    async fn rotate_keys(
+        &self,
+        authority: &AuthorityId,
+        new_threshold: u16,
+        new_total_participants: u16,
+        guardian_ids: &[String],
+    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
+        tracing::info!(
+            ?authority,
+            new_threshold,
+            new_total_participants,
+            num_guardians = guardian_ids.len(),
+            "Rotating threshold keys via AuraEffectSystem"
+        );
+
+        // Validate inputs
+        if guardian_ids.len() != new_total_participants as usize {
+            return Err(AuraError::invalid(format!(
+                "Guardian count ({}) must match total_participants ({})",
+                guardian_ids.len(),
+                new_total_participants
+            )));
+        }
+
+        // For now, use epoch 1 for rotated keys (epoch 0 is bootstrap)
+        // Proper epoch tracking would require persistent state
+        let new_epoch = 1u64;
+
+        // Generate new threshold keys
+        let key_result = if new_threshold >= 2 {
+            self.crypto_handler
+                .frost_rotate_keys(&[], 0, new_threshold, new_total_participants)
+                .await?
+        } else {
+            let result = self
+                .crypto_handler
+                .generate_signing_keys(new_threshold, new_total_participants)
+                .await?;
+            aura_core::effects::crypto::FrostKeyGenResult {
+                key_packages: result.key_packages,
+                public_key_package: result.public_key_package,
+            }
+        };
+
+        // Store guardian key packages
+        let caps = vec![
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+        for (guardian_id, key_package) in guardian_ids.iter().zip(key_result.key_packages.iter()) {
+            let location = SecureStorageLocation::with_sub_key(
+                "guardian_shares",
+                format!("{}/{}", authority, new_epoch),
+                guardian_id,
+            );
+            self.secure_storage_handler
+                .secure_store(&location, key_package, &caps)
+                .await?;
+        }
+
+        // Store public key package
+        let pub_location = SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority),
+            format!("{}", new_epoch),
+        );
+        self.secure_storage_handler
+            .secure_store(&pub_location, &key_result.public_key_package, &caps)
+            .await?;
+
+        Ok((
+            new_epoch,
+            key_result.key_packages,
+            key_result.public_key_package,
+        ))
+    }
+
+    async fn commit_key_rotation(
+        &self,
+        authority: &AuthorityId,
+        new_epoch: u64,
+    ) -> Result<(), AuraError> {
+        tracing::info!(
+            ?authority,
+            new_epoch,
+            "Committing key rotation via AuraEffectSystem"
+        );
+        // In a full implementation, this would update epoch state
+        // For now, the rotation is already stored and usable
+        Ok(())
+    }
+
+    async fn rollback_key_rotation(
+        &self,
+        authority: &AuthorityId,
+        failed_epoch: u64,
+    ) -> Result<(), AuraError> {
+        tracing::warn!(
+            ?authority,
+            failed_epoch,
+            "Rolling back key rotation via AuraEffectSystem"
+        );
+        // In a full implementation, this would delete the failed epoch's keys
+        // For now, we just don't use them (they remain orphaned)
+        Ok(())
+    }
 }
 
 // Time helper implementations (compat)
@@ -1261,22 +1368,22 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
 #[async_trait]
 impl ConsoleEffects for AuraEffectSystem {
     async fn log_info(&self, message: &str) -> Result<(), AuraError> {
-        println!("INFO: {}", message);
+        tracing::info!("{}", message);
         Ok(())
     }
 
     async fn log_warn(&self, message: &str) -> Result<(), AuraError> {
-        println!("WARN: {}", message);
+        tracing::warn!("{}", message);
         Ok(())
     }
 
     async fn log_error(&self, message: &str) -> Result<(), AuraError> {
-        eprintln!("ERROR: {}", message);
+        tracing::error!("{}", message);
         Ok(())
     }
 
     async fn log_debug(&self, message: &str) -> Result<(), AuraError> {
-        println!("DEBUG: {}", message);
+        tracing::debug!("{}", message);
         Ok(())
     }
 }
@@ -1431,8 +1538,14 @@ impl SystemEffects for AuraEffectSystem {
     }
 
     async fn log(&self, level: &str, component: &str, message: &str) -> Result<(), SystemError> {
-        // Mock implementation
-        println!("[{}] {}: {}", level.to_uppercase(), component, message);
+        // Use tracing instead of println to avoid corrupting TUI
+        match level.to_lowercase().as_str() {
+            "error" => tracing::error!(component = component, "{}", message),
+            "warn" => tracing::warn!(component = component, "{}", message),
+            "debug" => tracing::debug!(component = component, "{}", message),
+            "trace" => tracing::trace!(component = component, "{}", message),
+            _ => tracing::info!(component = component, "{}", message),
+        }
         Ok(())
     }
 
@@ -1443,8 +1556,14 @@ impl SystemEffects for AuraEffectSystem {
         message: &str,
         _context: HashMap<String, String>,
     ) -> Result<(), SystemError> {
-        // Mock implementation that logs without additional context data
-        println!("[{}] {}: {}", level.to_uppercase(), component, message);
+        // Use tracing instead of println to avoid corrupting TUI
+        match level.to_lowercase().as_str() {
+            "error" => tracing::error!(component = component, "{}", message),
+            "warn" => tracing::warn!(component = component, "{}", message),
+            "debug" => tracing::debug!(component = component, "{}", message),
+            "trace" => tracing::trace!(component = component, "{}", message),
+            _ => tracing::info!(component = component, "{}", message),
+        }
         Ok(())
     }
 

@@ -73,6 +73,7 @@ pub mod storage;
 pub mod supertraits;
 pub mod sync; // Anti-entropy synchronization
 pub mod system;
+pub mod terminal; // Terminal I/O for deterministic TUI/CLI testing
 pub mod threshold; // Unified threshold signing
 pub mod time;
 pub mod transport;
@@ -196,6 +197,11 @@ pub use supertraits::{
     SnapshotEffects, TreeEffects,
 };
 pub use system::{SystemEffects, SystemError};
+pub use terminal::{
+    Cell, Color, CursorPosition, CursorShape, KeyCode, KeyEvent, KeyEventKind, Modifiers,
+    MouseButton, MouseEvent, MouseEventKind, Style, TerminalEffects, TerminalError, TerminalEvent,
+    TerminalFrame, TerminalInputEffects, TerminalOutputEffects,
+};
 #[cfg(feature = "simulation")]
 pub use testing::{TestingEffects, TestingError};
 pub use time::{
@@ -326,6 +332,9 @@ pub enum EffectType {
 
     /// Datalog query execution and subscriptions
     Query,
+
+    /// Terminal I/O for TUI/CLI
+    Terminal,
 }
 
 impl std::fmt::Display for EffectType {
@@ -355,6 +364,7 @@ impl std::fmt::Display for EffectType {
             Self::PropertyChecking => write!(f, "property_checking"),
             Self::ChaosCoordination => write!(f, "chaos_coordination"),
             Self::Query => write!(f, "query"),
+            Self::Terminal => write!(f, "terminal"),
         }
     }
 }
@@ -387,6 +397,7 @@ impl EffectType {
             Self::PropertyChecking,
             Self::ChaosCoordination,
             Self::Query,
+            Self::Terminal,
         ]
     }
 }

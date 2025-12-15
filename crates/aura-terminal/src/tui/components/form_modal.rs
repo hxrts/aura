@@ -168,12 +168,12 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
             height: 100pct,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+
         ) {
             View(
                 width: Percent(60.0),
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
+                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER_FOCUS,
             ) {
@@ -227,13 +227,12 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
                         View(
                             padding_left: 2,
                             padding_right: 2,
-                            background_color: if can_submit { Theme::PRIMARY } else { Theme::BG_DARK },
                             border_style: BorderStyle::Round,
                             border_color: if can_submit { Theme::PRIMARY } else { Theme::BORDER },
                         ) {
                             Text(
                                 content: submit_text,
-                                color: if can_submit { Theme::BG_DARK } else { Theme::TEXT_MUTED },
+                                color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
                             )
                         }
                     }

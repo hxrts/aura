@@ -1,19 +1,29 @@
 //! Status Command Handler
 //!
 //! Effect-based implementation of the status command.
+//! Returns structured `CliOutput` for testability.
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::Result;
 use aura_core::effects::StorageEffects;
 use std::path::Path;
 
 /// Handle status display through effects
 ///
+/// Returns `CliOutput` instead of printing directly, enabling:
+/// - Unit testing without capturing stdout
+/// - Consistent output formatting
+/// - Clear separation of logic from I/O
+///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_status(ctx: &HandlerContext<'_>, config_path: &Path) -> Result<()> {
+pub async fn handle_status(ctx: &HandlerContext<'_>, config_path: &Path) -> Result<CliOutput> {
     let effects = ctx.effects();
+    let mut output = CliOutput::new();
 
-    println!("Account status for config: {}", config_path.display());
+    output.println(format!(
+        "Account status for config: {}",
+        config_path.display()
+    ));
 
     let config_key = config_path.display().to_string();
 
@@ -21,7 +31,7 @@ pub async fn handle_status(ctx: &HandlerContext<'_>, config_path: &Path) -> Resu
     let config_exists = effects.exists(&config_key).await.unwrap_or(false);
 
     if !config_exists {
-        eprintln!("Config file not found: {}", config_path.display());
+        output.eprintln(format!("Config file not found: {}", config_path.display()));
         return Err(anyhow::anyhow!(
             "Config file not found: {}",
             config_path.display()
@@ -29,17 +39,15 @@ pub async fn handle_status(ctx: &HandlerContext<'_>, config_path: &Path) -> Resu
     }
 
     // Read and parse config through storage effects
-    match read_config_through_effects(ctx, &config_key).await {
+    match read_config_through_effects(ctx, &config_key, &mut output).await {
         Ok(config) => {
-            display_status_info(ctx, &config).await;
-            Ok(())
+            format_status_info(&config, &mut output);
+            Ok(output)
         }
         Err(e) => {
-            eprintln!("Failed to read config: {}", e);
-
-            // Show basic status anyway
-            display_default_status(ctx).await;
-            Ok(())
+            output.eprintln(format!("Failed to read config: {}", e));
+            format_default_status(&mut output);
+            Ok(output)
         }
     }
 }
@@ -48,6 +56,7 @@ pub async fn handle_status(ctx: &HandlerContext<'_>, config_path: &Path) -> Resu
 async fn read_config_through_effects(
     ctx: &HandlerContext<'_>,
     config_key: &str,
+    output: &mut CliOutput,
 ) -> Result<DeviceConfig> {
     let effects = ctx.effects();
 
@@ -64,33 +73,33 @@ async fn read_config_through_effects(
     let config: DeviceConfig = toml::from_str(&config_str)
         .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
 
-    println!("Configuration loaded successfully");
+    output.println("Configuration loaded successfully");
 
     Ok(config)
 }
 
-/// Display status information through console effects
-async fn display_status_info(_ctx: &HandlerContext<'_>, config: &DeviceConfig) {
-    println!("=== Account Status ===");
-    println!("Device ID: {}", config.device_id);
-    println!("Status: Active");
-    println!("Total Devices: {}", config.total_devices);
-    println!("Threshold: {}", config.threshold);
+/// Format status information into output (pure function)
+fn format_status_info(config: &DeviceConfig, output: &mut CliOutput) {
+    output.section("Account Status");
+    output.kv("Device ID", &config.device_id);
+    output.kv("Status", "Active");
+    output.kv("Total Devices", config.total_devices.to_string());
+    output.kv("Threshold", config.threshold.to_string());
 
     if let Some(network) = &config.network {
-        println!("Default Port: {}", network.default_port);
+        output.kv("Default Port", network.default_port.to_string());
     }
 
-    println!("=== End Status ===");
+    output.println("=== End Status ===");
 }
 
-/// Display default status when config can't be read
-async fn display_default_status(_ctx: &HandlerContext<'_>) {
-    println!("=== Account Status (Default) ===");
-    println!("Status: Unknown (config unreadable)");
-    println!("Devices: Unknown");
-    println!("Threshold: Unknown");
-    println!("=== End Status ===");
+/// Format default status when config can't be read (pure function)
+fn format_default_status(output: &mut CliOutput) {
+    output.section("Account Status (Default)");
+    output.kv("Status", "Unknown (config unreadable)");
+    output.kv("Devices", "Unknown");
+    output.kv("Threshold", "Unknown");
+    output.println("=== End Status ===");
 }
 
 /// Device configuration structure for parsing
@@ -112,4 +121,41 @@ struct NetworkConfig {
     /// Parsed but not yet used - reserved for future retry configuration
     #[allow(dead_code)]
     max_retries: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_status_info() {
+        let config = DeviceConfig {
+            device_id: "device-123".into(),
+            threshold: 2,
+            total_devices: 3,
+            network: Some(NetworkConfig {
+                default_port: 8080,
+                timeout: 30,
+                max_retries: 3,
+            }),
+        };
+
+        let mut output = CliOutput::new();
+        format_status_info(&config, &mut output);
+
+        let lines = output.stdout_lines();
+        assert!(lines.iter().any(|l| l.contains("Device ID: device-123")));
+        assert!(lines.iter().any(|l| l.contains("Threshold: 2")));
+        assert!(lines.iter().any(|l| l.contains("Total Devices: 3")));
+        assert!(lines.iter().any(|l| l.contains("Default Port: 8080")));
+    }
+
+    #[test]
+    fn test_format_default_status() {
+        let mut output = CliOutput::new();
+        format_default_status(&mut output);
+
+        let lines = output.stdout_lines();
+        assert!(lines.iter().any(|l| l.contains("Unknown")));
+    }
 }

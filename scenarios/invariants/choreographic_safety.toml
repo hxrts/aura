@@ -21,7 +21,7 @@ name = "protocol_execution"
 description = "Execute choreographic protocol"
 timeout_seconds = 5
 actions = [
-    { type = "run_choreography", choreography = "multi_round_protocol", participants = ["alice", "bob", "charlie"], threshold = 2 }
+    { type = "run_choreography", choreography = "multi_round_protocol", participants = ["alice", "bob", "carol"], threshold = 2 }
 ]
 
 [[phases]]

@@ -1,6 +1,6 @@
 [
   {
-    "content": "SendMessage::channel_id=context-e3b0c442-98fc-1c14-9afb-f4c8996fb924&content=Hello Alice and Charlie! This is Bob.&reply_to=None",
+    "content": "SendMessage::channel_id=context-e3b0c442-98fc-1c14-9afb-f4c8996fb924&content=Hello Alice and Carol! This is Bob.&reply_to=None",
     "timestamp": {
       "OrderClock": [
         7,

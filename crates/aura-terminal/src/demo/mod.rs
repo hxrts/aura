@@ -3,7 +3,7 @@
 //!
 //! Provides demo modes for showcasing Aura's capabilities.
 //!
-//! The demo architecture uses the simulator to instantiate agents (Alice, Charlie)
+//! The demo architecture uses the simulator to instantiate agents (Alice, Carol)
 //! that the user (Bob) interacts with through the TUI. The demo layer is thin,
 //! simply providing initialization of the simulation configuration and guided flows
 //! with contextual tips.
@@ -22,7 +22,7 @@
 //!
 //! ## Submodules
 //!
-//! - `simulator`: The DemoSimulator coordinator that manages Alice/Charlie agents
+//! - `simulator`: The DemoSimulator coordinator that manages Alice/Carol agents
 //! - `hints`: Demo mode hints and invite code generation
 
 pub mod hints;
@@ -149,7 +149,7 @@ pub enum AgentResponse {
 /// through relational contexts and ceremonies. Does NOT start with any
 /// special roles - guardianship is assumed through the binding ceremony.
 pub struct SimulatedAgent {
-    /// Display name (e.g., "Alice", "Charlie")
+    /// Display name (e.g., "Alice", "Carol")
     name: String,
 
     /// Authority ID for this agent
@@ -676,7 +676,7 @@ pub struct AgentStatistics {
 pub struct AgentFactory;
 
 impl AgentFactory {
-    /// Create Alice and Charlie agents for demo
+    /// Create Alice and Carol agents for demo
     pub async fn create_demo_agents(seed: u64) -> anyhow::Result<(SimulatedAgent, SimulatedAgent)> {
         let alice_config = AgentConfig {
             seed,
@@ -695,9 +695,9 @@ impl AgentFactory {
             },
         };
 
-        let charlie_config = AgentConfig {
+        let carol_config = AgentConfig {
             seed: seed + 1,
-            response_delay_ms: (2000, 4000), // Charlie is more deliberate
+            response_delay_ms: (2000, 4000), // Carol is more deliberate
             approval_probability: 0.95,      // Also reliable
             message_frequency_ms: 20000,
             verbose_logging: true,
@@ -709,9 +709,9 @@ impl AgentFactory {
         };
 
         let alice = SimulatedAgent::new("Alice".to_string(), alice_config).await?;
-        let charlie = SimulatedAgent::new("Charlie".to_string(), charlie_config).await?;
+        let carol = SimulatedAgent::new("Carol".to_string(), carol_config).await?;
 
-        Ok((alice, charlie))
+        Ok((alice, carol))
     }
 
     /// Create agents with custom configs
@@ -754,7 +754,7 @@ struct RecoverySessionState {
 /// Bridge that connects TUI EffectCommands to simulated agents
 ///
 /// This is the key integration point - it routes commands from Bob's TUI
-/// to the simulated Alice and Charlie agents, and routes their responses
+/// to the simulated Alice and Carol agents, and routes their responses
 /// back to the TUI as AuraEvents.
 pub struct SimulatedBridge {
     /// Channel to send events to agents
@@ -843,7 +843,7 @@ impl SimulatedBridge {
         self.agent_event_tx.subscribe()
     }
 
-    /// Send an agent event to Alice/Charlie
+    /// Send an agent event to Alice/Carol
     ///
     /// Used by the TUI event forwarder to route events from Bob's TUI
     /// to the simulated agents.
@@ -941,6 +941,21 @@ impl SimulatedBridge {
                     context_id,
                 };
                 let _ = self.agent_event_tx.send(event);
+            }
+            EffectCommand::InviteGuardian { contact_id } => {
+                // Bob invited a contact to become a guardian - trigger ceremony
+                if let Some(contact_id) = contact_id {
+                    let context_id = ids::context_id(&format!("demo-guardian-{}", contact_id));
+                    tracing::info!(
+                        "Demo: Bob inviting {} to be guardian, initiating ceremony",
+                        contact_id
+                    );
+                    let event = AgentEvent::GuardianCeremonyStarted {
+                        account: self.bob_authority,
+                        context_id,
+                    };
+                    let _ = self.agent_event_tx.send(event);
+                }
             }
             _ => {
                 // Other commands don't need agent routing

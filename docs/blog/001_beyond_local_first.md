@@ -1,8 +1,6 @@
-# Beyond Local First
+# Beyond Local-First
 
-**How Aura Extends the Local-First Vision**
-
-The Local-First movement reframed collaboration by proving that real-time, multi-device software does not have to rely on centralized servers. Its core insight is that data should live primarily on the user’s own devices, with the network acting as a helper rather than a gatekeeper. CRDTs, offline-first UX, and user agency over data push us toward a healthier relationship with our tools.
+The [Local-First](https://www.inkandswitch.com/essay/local-first/) movement reframed collaboration by proving that real-time, multi-device software does not have to rely on centralized servers. Its core insight is that data should live primarily on the user’s own devices, with the network acting as a helper rather than a gatekeeper. CRDTs, offline-first UX, and user agency over data push us toward a healthier relationship with our tools.
 
 Aura builds on the same dissatisfaction with cloud dependency, but arrives at a different destination. Where Local-First keeps authority on the device, Aura treats the social graph as the computational substrate. The device loses its status as the privileged anchor of trust. Instead, identity, state, and availability emerge from a network of peers who collectively maintain each other’s presence and continuity.
 

@@ -383,6 +383,254 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             .get(authority)
             .map(|s| s.public_key_package.clone())
     }
+
+    async fn rotate_keys(
+        &self,
+        authority: &AuthorityId,
+        new_threshold: u16,
+        new_total_participants: u16,
+        guardian_ids: &[String],
+    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
+        tracing::info!(
+            ?authority,
+            new_threshold,
+            new_total_participants,
+            num_guardians = guardian_ids.len(),
+            "Rotating threshold keys for guardian ceremony"
+        );
+
+        // Validate inputs
+        if guardian_ids.len() != new_total_participants as usize {
+            return Err(AuraError::invalid(format!(
+                "Guardian count ({}) must match total_participants ({})",
+                guardian_ids.len(),
+                new_total_participants
+            )));
+        }
+
+        // Get current state to determine new epoch
+        let current_epoch = self
+            .contexts
+            .read()
+            .await
+            .get(authority)
+            .map(|s| s.epoch)
+            .unwrap_or(0);
+
+        let new_epoch = current_epoch + 1;
+
+        let effects = self.effects.read().await;
+
+        // Generate new threshold keys using FROST
+        // For threshold >= 2, this uses FROST DKG
+        // For threshold == 1 with max_signers == 1, this uses Ed25519
+        let key_result = if new_threshold >= 2 {
+            // Use frost_rotate_keys for threshold configurations
+            // Note: The old_shares parameter is for potential future resharing;
+            // currently we do a fresh DKG which produces a new group public key
+            effects
+                .frost_rotate_keys(&[], 0, new_threshold, new_total_participants)
+                .await
+                .map_err(|e| AuraError::internal(format!("FROST key rotation failed: {}", e)))?
+        } else {
+            // Single-signer mode (shouldn't happen for guardian ceremony, but handle it)
+            let result = effects
+                .generate_signing_keys(new_threshold, new_total_participants)
+                .await
+                .map_err(|e| AuraError::internal(format!("Key generation failed: {}", e)))?;
+
+            aura_core::effects::crypto::FrostKeyGenResult {
+                key_packages: result.key_packages,
+                public_key_package: result.public_key_package,
+            }
+        };
+
+        // Store each key package indexed by guardian
+        // Note: In a real deployment, these would be encrypted with each guardian's
+        // public key before storage. For demo mode, we store them directly.
+        for (i, (guardian_id, key_package)) in guardian_ids
+            .iter()
+            .zip(key_result.key_packages.iter())
+            .enumerate()
+        {
+            let signer_index = (i + 1) as u16; // 1-indexed
+            let _ = signer_index; // Used for logging below
+
+            // Store at: guardian_shares/<authority>/<epoch>/<guardian_id>
+            let location = SecureStorageLocation::with_sub_key(
+                "guardian_shares",
+                format!("{}/{}", authority, new_epoch),
+                guardian_id,
+            );
+
+            effects
+                .secure_store(
+                    &location,
+                    key_package,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await
+                .map_err(|e| {
+                    AuraError::internal(format!(
+                        "Failed to store key package for guardian {}: {}",
+                        guardian_id, e
+                    ))
+                })?;
+
+            tracing::debug!(
+                ?authority,
+                guardian_id,
+                signer_index,
+                new_epoch,
+                "Stored guardian key package"
+            );
+        }
+
+        // Store the public key package at the new epoch
+        let pubkey_location = SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority),
+            format!("{}", new_epoch),
+        );
+
+        effects
+            .secure_store(
+                &pubkey_location,
+                &key_result.public_key_package,
+                &[SecureStorageCapability::Read],
+            )
+            .await
+            .map_err(|e| {
+                AuraError::internal(format!("Failed to store public key package: {}", e))
+            })?;
+
+        // Don't update the in-memory context yet - wait for commit
+        // The old epoch remains active until commit_key_rotation is called
+
+        tracing::info!(
+            ?authority,
+            new_epoch,
+            new_threshold,
+            new_total_participants,
+            "Key rotation prepared - awaiting ceremony completion"
+        );
+
+        Ok((
+            new_epoch,
+            key_result.key_packages,
+            key_result.public_key_package,
+        ))
+    }
+
+    async fn commit_key_rotation(
+        &self,
+        authority: &AuthorityId,
+        new_epoch: u64,
+    ) -> Result<(), AuraError> {
+        tracing::info!(
+            ?authority,
+            new_epoch,
+            "Committing key rotation after successful ceremony"
+        );
+
+        // Load the public key package for the new epoch
+        let effects = self.effects.read().await;
+
+        let pubkey_location = SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority),
+            format!("{}", new_epoch),
+        );
+
+        let public_key_package = effects
+            .secure_retrieve(&pubkey_location, &[SecureStorageCapability::Read])
+            .await
+            .map_err(|e| {
+                AuraError::internal(format!(
+                    "Failed to load public key package for epoch {}: {}",
+                    new_epoch, e
+                ))
+            })?;
+
+        // Count guardians to determine threshold config
+        // We need to inspect the stored guardian shares
+        // For now, we'll require the caller to provide this info via a different mechanism
+        // or we can store metadata alongside the keys
+
+        // Update in-memory context to use the new epoch
+        // Note: For a full implementation, we'd need to know the new threshold config
+        // For demo mode, we'll use a reasonable default based on guardian count
+        let mut contexts = self.contexts.write().await;
+
+        if let Some(state) = contexts.get_mut(authority) {
+            let old_epoch = state.epoch;
+            state.epoch = new_epoch;
+            state.public_key_package = public_key_package;
+            // Note: threshold config should be updated based on ceremony parameters
+            // For now, keep existing config - caller should update if needed
+
+            tracing::info!(
+                ?authority,
+                old_epoch,
+                new_epoch,
+                "Key rotation committed - new epoch is now active"
+            );
+        } else {
+            return Err(AuraError::internal(format!(
+                "No signing context found for authority {:?}",
+                authority
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn rollback_key_rotation(
+        &self,
+        authority: &AuthorityId,
+        failed_epoch: u64,
+    ) -> Result<(), AuraError> {
+        tracing::warn!(
+            ?authority,
+            failed_epoch,
+            "Rolling back key rotation after ceremony failure"
+        );
+
+        let effects = self.effects.read().await;
+
+        // Delete the public key package for the failed epoch
+        let pubkey_location = SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority),
+            format!("{}", failed_epoch),
+        );
+
+        // Note: SecureStorageEffects doesn't have a delete method currently
+        // For now, we just don't commit the rotation - the old keys remain active
+        // The failed epoch's keys will be orphaned but not used
+        //
+        // In a production system, we'd want to:
+        // 1. Delete the guardian_shares/<authority>/<failed_epoch>/* entries
+        // 2. Delete the threshold_pubkey/<authority>/<failed_epoch> entry
+        // 3. Notify guardians to delete their shares
+
+        tracing::info!(
+            ?authority,
+            failed_epoch,
+            "Key rotation rolled back - previous epoch remains active"
+        );
+
+        // Note: The in-memory context was never updated (we wait for commit),
+        // so no in-memory rollback is needed
+
+        // For now, just acknowledge - actual cleanup would require delete capability
+        let _ = (effects, pubkey_location); // silence unused warnings
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

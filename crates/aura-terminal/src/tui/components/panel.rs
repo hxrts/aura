@@ -74,9 +74,10 @@ pub fn Panel(props: &PanelProps) -> impl Into<AnyElement<'static>> {
                             View(
                                 padding_left: 1,
                                 padding_right: 1,
-                                background_color: badge_color,
+                                border_style: BorderStyle::Round,
+                                border_color: badge_color,
                             ) {
-                                Text(content: b, color: Theme::BG_DARK, weight: Weight::Bold)
+                                Text(content: b, color: badge_color, weight: Weight::Bold)
                             }
                         }))
                     }

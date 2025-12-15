@@ -83,6 +83,10 @@ pub mod ids;
 #[cfg(feature = "terminal")]
 pub mod tui;
 
+// Testing utilities for deterministic TUI testing
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
 // Demo module requires simulator - only available with development feature
 #[cfg(feature = "development")]
 pub mod demo;

@@ -11,19 +11,17 @@
 //! Uses `aura_app::signal_defs::BLOCK_SIGNAL` with `ReactiveEffects::subscribe()`.
 
 use iocraft::prelude::*;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use aura_app::signal_defs::BLOCK_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
-use crate::tui::components::{ContactSelectModal, ContactSelectState, MessageInput};
+use crate::tui::components::{ContactSelectModal, MessageInput};
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{is_nav_key_press, navigate_list, InputThrottle, NavKey, NavThrottle};
+use crate::tui::layout::dim;
+use crate::tui::props::BlockViewProps;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{BlockBudget, Contact, Message, Resident};
-
-/// Input text shared between render and event handler (thread-safe)
-type SharedText = Arc<RwLock<String>>;
 
 /// Which panel is focused
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -31,6 +29,8 @@ pub enum BlockFocus {
     /// Residents list is focused (normal mode)
     #[default]
     Residents,
+    /// Messages panel is focused
+    Messages,
     /// Message input is focused (insert mode)
     Input,
 }
@@ -225,8 +225,14 @@ pub fn StorageBudgetPanel(props: &StorageBudgetPanelProps) -> impl Into<AnyEleme
 }
 
 /// Props for BlockScreen
+///
+/// ## Compile-Time Safety
+///
+/// The `view` field is a required struct that embeds all view state from TuiState.
+/// This makes it a **compile-time error** to forget any view state field.
 #[derive(Default, Props)]
 pub struct BlockScreenProps {
+    // === Domain data (from reactive signals) ===
     pub block_name: String,
     pub residents: Vec<Resident>,
     pub messages: Vec<Message>,
@@ -234,6 +240,13 @@ pub struct BlockScreenProps {
     pub channel_name: String,
     /// Available contacts for invite modal
     pub contacts: Vec<Contact>,
+
+    // === View state from TuiState (REQUIRED - compile-time enforced) ===
+    /// All view state extracted from TuiState via `extract_block_view_props()`.
+    /// This is a single struct field so forgetting any view state is a compile error.
+    pub view: BlockViewProps,
+
+    // === Callbacks (still needed for effect dispatch) ===
     /// Callback when sending a message (receives message content)
     pub on_send: Option<BlockSendCallback>,
     /// Callback when inviting someone to the block (receives contact_id)
@@ -279,6 +292,11 @@ fn convert_budget(
 
 /// The block screen (homepage)
 ///
+/// ## Pure View Component
+///
+/// This screen is a pure view that renders based on props from TuiState.
+/// All event handling is done by the parent TuiShell (IoApp) via the state machine.
+///
 /// ## Reactive Updates
 ///
 /// When `AppCoreContext` is available in the context tree, this component will
@@ -314,15 +332,8 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
             let mut reactive_budget = reactive_budget.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // Get a subscription to the block signal via ReactiveEffects
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*BLOCK_SIGNAL)
-                };
-
-                // Subscribe to signal updates - runs until component unmounts
-                while let Ok(block_state) = stream.recv().await {
-                    // Use the block id as a proxy for "my_id" since we don't have access to identity
+                // Helper closure to convert BlockState to TUI types
+                let convert_block_state = |block_state: &aura_app::views::BlockState| {
                     let my_id = &block_state.id;
 
                     let residents: Vec<Resident> = block_state
@@ -333,7 +344,31 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
 
                     let budget = convert_budget(&block_state.storage, block_state.resident_count);
 
-                    reactive_block_name.set(block_state.name.clone());
+                    (block_state.name.clone(), residents, budget)
+                };
+
+                // FIRST: Read current signal value to catch up on any changes
+                // that happened while this screen was unmounted
+                {
+                    let core = app_core.read().await;
+                    if let Ok(block_state) = core.read(&*BLOCK_SIGNAL).await {
+                        let (name, residents, budget) = convert_block_state(&block_state);
+                        reactive_block_name.set(name);
+                        reactive_residents.set(residents);
+                        reactive_budget.set(budget);
+                    }
+                }
+
+                // THEN: Subscribe for future updates
+                let mut stream = {
+                    let core = app_core.read().await;
+                    core.subscribe(&*BLOCK_SIGNAL)
+                };
+
+                // Subscribe to signal updates - runs until component unmounts
+                while let Ok(block_state) = stream.recv().await {
+                    let (name, residents, budget) = convert_block_state(&block_state);
+                    reactive_block_name.set(name);
                     reactive_residents.set(residents);
                     reactive_budget.set(budget);
                 }
@@ -345,296 +380,67 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let residents = reactive_residents.read().clone();
     let budget = reactive_budget.read().clone();
 
-    // Messages come from props (would need chat signal integration)
+    // Messages come from props
     let messages = props.messages.clone();
     let channel_name = props.channel_name.clone();
 
-    let resident_index = hooks.use_state(|| 0usize);
-    let focus = hooks.use_state(|| BlockFocus::Residents);
-    let invite_modal_state = hooks.use_state(ContactSelectState::new);
+    // === Pure view: Use props.view from TuiState instead of local state ===
+    let current_focus = props.view.focus;
+    let current_resident_index = props.view.selected_resident;
+    let is_invite_modal_visible = props.view.invite_modal_open;
+    let display_input_text = props.view.input_buffer.clone();
+    let input_focused = props.view.insert_mode || current_focus == BlockFocus::Input;
 
-    // Input text state - use Arc<RwLock> for thread-safe sharing
-    let input_text: SharedText = hooks
-        .use_state(|| Arc::new(RwLock::new(String::new())))
-        .read()
-        .clone();
-    let input_text_for_handler = input_text.clone();
-
-    // Version counter to trigger rerenders when input changes
-    let input_version = hooks.use_state(|| 0usize);
-
-    // Get contacts from props
+    // Get contacts from props for modal
     let contacts = props.contacts.clone();
+    let invite_selection = props.view.invite_selection;
 
-    // Check focus and modal state
-    let is_invite_modal_visible = invite_modal_state.read().visible;
+    // === Pure view: No use_terminal_events ===
+    // All event handling is done by IoApp (the shell) via the state machine.
+    // This component is purely presentational.
 
-    let current_resident_index = resident_index.get();
-
-    // Clone callbacks for event handler
-    let on_send = props.on_send.clone();
-    let on_invite = props.on_invite.clone();
-    let on_go_neighborhood = props.on_go_neighborhood.clone();
-    let on_grant_steward = props.on_grant_steward.clone();
-    let on_revoke_steward = props.on_revoke_steward.clone();
-
-    let resident_count = residents.len();
-
-    // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
-
-    // Throttle for text input - persists across renders
-    let mut input_throttle = hooks.use_ref(InputThrottle::new);
-
-    // Clone residents for event handler to access selected resident
-    let residents_for_handler = residents.clone();
-
-    hooks.use_terminal_events({
-        let input_text = input_text_for_handler;
-        let mut resident_index = resident_index.clone();
-        let mut focus = focus.clone();
-        let mut invite_modal_state = invite_modal_state.clone();
-        let contacts_for_modal = contacts.clone();
-        let mut input_version = input_version.clone();
-        let residents = residents_for_handler;
-        move |event| {
-            let current_focus = focus.get();
-            let is_invite_modal_visible = invite_modal_state.read().visible;
-
-            // Check for navigation keys first (only in modal or normal mode, not in input mode)
-            // This prevents vim-style nav keys (h,j,k,l) from being consumed when typing
-            if is_invite_modal_visible || current_focus != BlockFocus::Input {
-                if let Some(nav_key) = is_nav_key_press(&event) {
-                    if is_invite_modal_visible {
-                        // Modal navigation
-                        match nav_key {
-                            NavKey::Up => {
-                                let mut state = invite_modal_state.read().clone();
-                                state.select_prev();
-                                invite_modal_state.set(state);
-                            }
-                            NavKey::Down => {
-                                let mut state = invite_modal_state.read().clone();
-                                state.select_next();
-                                invite_modal_state.set(state);
-                            }
-                            _ => {}
-                        }
-                        return;
-                    }
-
-                    if nav_throttle.write().try_navigate() {
-                        match nav_key {
-                            // Horizontal: toggle between Residents and Input (wrap around)
-                            NavKey::Left | NavKey::Right => {
-                                let new_focus = match current_focus {
-                                    BlockFocus::Residents => BlockFocus::Input,
-                                    BlockFocus::Input => BlockFocus::Residents,
-                                };
-                                focus.set(new_focus);
-                            }
-                            // Vertical: navigate residents list when focused on Residents
-                            NavKey::Up | NavKey::Down => {
-                                if current_focus == BlockFocus::Residents && resident_count > 0 {
-                                    let new_idx = navigate_list(
-                                        resident_index.get(),
-                                        resident_count,
-                                        nav_key,
-                                    );
-                                    resident_index.set(new_idx);
-                                }
-                            }
-                        }
-                    }
-                    return;
-                }
-            }
-
-            // Handle other key events (only Press, not Repeat or Release)
-            match event {
-                TerminalEvent::Key(KeyEvent {
-                    code,
-                    modifiers,
-                    kind: KeyEventKind::Press,
-                    ..
-                }) => {
-                    if is_invite_modal_visible {
-                        // Invite modal key handling
-                        match code {
-                            KeyCode::Esc => {
-                                let mut state = invite_modal_state.read().clone();
-                                state.hide();
-                                invite_modal_state.set(state);
-                            }
-                            KeyCode::Enter => {
-                                let state = invite_modal_state.read().clone();
-                                if state.can_select() {
-                                    if let Some(contact_id) = state.get_selected_id() {
-                                        if let Some(ref callback) = on_invite {
-                                            callback(contact_id);
-                                        }
-                                    }
-                                }
-                                let mut state = invite_modal_state.read().clone();
-                                state.hide();
-                                invite_modal_state.set(state);
-                            }
-                            _ => {}
-                        }
-                    } else if current_focus == BlockFocus::Input {
-                        // Insert mode: handle Escape, Enter, Backspace, and character input
-                        match code {
-                            // Escape exits insert mode back to residents
-                            KeyCode::Esc => {
-                                focus.set(BlockFocus::Residents);
-                            }
-                            // Shift+Enter adds newline, plain Enter sends message
-                            KeyCode::Enter => {
-                                if modifiers.contains(KeyModifiers::SHIFT) {
-                                    // Shift+Enter: add newline
-                                    if let Ok(mut guard) = input_text.write() {
-                                        guard.push('\n');
-                                    }
-                                    input_version.set(input_version.get().wrapping_add(1));
-                                } else {
-                                    // Plain Enter: send message
-                                    if let Ok(text) = input_text.read() {
-                                        let text = text.clone();
-                                        if !text.is_empty() {
-                                            if let Some(ref callback) = on_send {
-                                                callback(text);
-                                            }
-                                            if let Ok(mut guard) = input_text.write() {
-                                                guard.clear();
-                                            }
-                                            input_version.set(input_version.get().wrapping_add(1));
-                                        }
-                                    }
-                                }
-                            }
-                            // Backspace removes last character (with throttle)
-                            KeyCode::Backspace => {
-                                if input_throttle.write().try_input() {
-                                    if let Ok(mut guard) = input_text.write() {
-                                        guard.pop();
-                                    }
-                                    input_version.set(input_version.get().wrapping_add(1));
-                                }
-                            }
-                            // Character input (with throttle)
-                            KeyCode::Char(c) => {
-                                if !modifiers.contains(KeyModifiers::CONTROL)
-                                    && input_throttle.write().try_input()
-                                {
-                                    if let Ok(mut guard) = input_text.write() {
-                                        guard.push(c);
-                                    }
-                                    input_version.set(input_version.get().wrapping_add(1));
-                                }
-                            }
-                            // All other keys ignored in insert mode
-                            _ => {}
-                        }
-                    } else {
-                        // Normal mode key handling (non-navigation keys)
-                        match code {
-                            // 'i' enters insert mode
-                            KeyCode::Char('i') => {
-                                focus.set(BlockFocus::Input);
-                            }
-                            // Invite - show modal with contacts
-                            KeyCode::Char('v') => {
-                                let mut state = invite_modal_state.read().clone();
-                                state.show("Invite to Block", contacts_for_modal.clone());
-                                invite_modal_state.set(state);
-                            }
-                            // Go to neighborhood
-                            KeyCode::Char('n') => {
-                                if let Some(ref callback) = on_go_neighborhood {
-                                    callback();
-                                }
-                            }
-                            // Grant steward role to selected resident
-                            KeyCode::Char('g') => {
-                                if !residents.is_empty() {
-                                    let idx = resident_index.get();
-                                    if let Some(resident) = residents.get(idx) {
-                                        if let Some(ref callback) = on_grant_steward {
-                                            callback(resident.id.clone());
-                                        }
-                                    }
-                                }
-                            }
-                            // Revoke steward role from selected resident
-                            KeyCode::Char('r') => {
-                                if !residents.is_empty() {
-                                    let idx = resident_index.get();
-                                    if let Some(resident) = residents.get(idx) {
-                                        if let Some(ref callback) = on_revoke_steward {
-                                            callback(resident.id.clone());
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    });
-
-    // Read input text for display (using version to ensure fresh read)
-    let _ = input_version.get(); // Force dependency on version
-    let display_input_text = input_text.read().map(|g| g.clone()).unwrap_or_default();
-
-    let current_focus = focus.get();
-    let input_focused = current_focus == BlockFocus::Input;
-    let modal_state = invite_modal_state.read().clone();
-
+    // Layout: Main content (22 rows) + MessageInput (3 rows) = 25 = MIDDLE_HEIGHT
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            width: 100pct,
-            height: 100pct,
-            flex_grow: 1.0,
-            flex_shrink: 1.0,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Main content - constrained height with overflow hidden
+            // Main content - fixed 22 rows for sidebar + messages
             View(
                 flex_direction: FlexDirection::Row,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
+                height: 22,
                 overflow: Overflow::Hidden,
                 gap: Spacing::XS,
             ) {
-                // Sidebar (30%) - overflow scroll allows internal scrolling
-                View(width: 30pct, flex_direction: FlexDirection::Column, flex_shrink: 1.0, overflow: Overflow::Scroll, gap: 0) {
+                // Sidebar (24 chars = 30% of 80) - overflow scroll allows internal scrolling
+                View(width: 24, flex_direction: FlexDirection::Column, overflow: Overflow::Scroll, gap: 0) {
                     ResidentList(residents: residents, selected_index: current_resident_index)
                     StorageBudgetPanel(budget: budget)
                 }
-                // Messages (70%)
-                View(flex_grow: 1.0, overflow: Overflow::Hidden) {
+                // Messages (remaining width ~55 chars)
+                View(flex_grow: 1.0, height: 22, overflow: Overflow::Hidden) {
                     BlockMessagesPanel(messages: messages, channel_name: channel_name)
                 }
             }
 
-            // Message input (always visible, like Chat screen)
-            MessageInput(
-                value: display_input_text,
-                placeholder: "Type a message...".to_string(),
-                focused: input_focused,
-                reply_to: None::<String>,
-                sending: false,
-            )
+            // Message input (3 rows)
+            View(height: 3) {
+                MessageInput(
+                    value: display_input_text,
+                    placeholder: "Type a message...".to_string(),
+                    focused: input_focused,
+                    reply_to: None::<String>,
+                    sending: false,
+                )
+            }
 
             // Invite modal overlay (shown when modal is visible)
             ContactSelectModal(
-                title: modal_state.title.clone(),
-                contacts: modal_state.contacts.clone(),
-                selected_index: modal_state.selected_index,
+                title: "Invite to Block".to_string(),
+                contacts: contacts,
+                selected_index: invite_selection,
                 visible: is_invite_modal_visible,
             )
         }

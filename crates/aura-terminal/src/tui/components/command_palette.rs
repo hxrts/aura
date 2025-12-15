@@ -47,10 +47,11 @@ pub struct CommandItemProps {
 #[component]
 pub fn CommandItem(props: &CommandItemProps) -> impl Into<AnyElement<'static>> {
     let cmd = &props.command;
-    let bg = if props.is_selected {
-        Theme::BG_SELECTED
+    let pointer = if props.is_selected { "▸ " } else { "  " };
+    let name_color = if props.is_selected {
+        Theme::PRIMARY
     } else {
-        Theme::BG_DARK
+        Theme::TEXT
     };
 
     let name = cmd.name.clone();
@@ -61,12 +62,12 @@ pub fn CommandItem(props: &CommandItemProps) -> impl Into<AnyElement<'static>> {
         View(
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::SpaceBetween,
-            background_color: bg,
             padding_left: 1,
             padding_right: 1,
         ) {
+            Text(content: pointer, color: Theme::PRIMARY)
             View(flex_direction: FlexDirection::Row, gap: 2) {
-                Text(content: name, color: Theme::TEXT)
+                Text(content: name, color: name_color)
                 Text(content: description, color: Theme::TEXT_MUTED)
             }
             #(if !shortcut.is_empty() {
@@ -130,13 +131,13 @@ pub fn CommandPalette(props: &CommandPaletteProps) -> impl Into<AnyElement<'stat
             justify_content: JustifyContent::FlexStart,
             align_items: AlignItems::Center,
             padding_top: 5,
-            background_color: Theme::OVERLAY,
+
         ) {
             View(
                 width: Percent(60.0),
                 max_height: Percent(70.0),
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
+                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER_FOCUS,
             ) {

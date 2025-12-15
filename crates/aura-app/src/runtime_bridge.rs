@@ -75,6 +75,19 @@ pub struct RuntimeStatus {
     pub is_authenticated: bool,
 }
 
+/// Information about a peer discovered via LAN (mDNS/UDP broadcast)
+#[derive(Debug, Clone)]
+pub struct LanPeerInfo {
+    /// Authority ID of the discovered peer
+    pub authority_id: AuthorityId,
+    /// Network address (IP:port)
+    pub address: String,
+    /// When this peer was discovered (ms since epoch)
+    pub discovered_at_ms: u64,
+    /// Display name if available from the descriptor
+    pub display_name: Option<String>,
+}
+
 /// Bridge trait for runtime operations
 ///
 /// This trait defines the interface between the pure application core (`aura-app`)
@@ -130,6 +143,34 @@ pub trait RuntimeBridge: Send + Sync {
     /// Get rendezvous status
     async fn get_rendezvous_status(&self) -> RendezvousStatus;
 
+    /// Trigger an on-demand discovery refresh
+    ///
+    /// This initiates an immediate discovery cycle rather than waiting
+    /// for the next scheduled discovery interval.
+    async fn trigger_discovery(&self) -> Result<(), IntentError>;
+
+    // =========================================================================
+    // LAN Discovery
+    // =========================================================================
+
+    /// Get list of peers discovered via LAN (mDNS/UDP broadcast)
+    ///
+    /// Returns peers that have been discovered on the local network.
+    /// These are typically more immediately reachable than peers from
+    /// internet rendezvous.
+    async fn get_lan_peers(&self) -> Vec<LanPeerInfo>;
+
+    /// Send an invitation to a LAN peer
+    ///
+    /// Sends an invitation code directly to a peer discovered on the LAN.
+    /// This bypasses the need for manual code sharing when peers are on
+    /// the same local network.
+    async fn send_lan_invitation(
+        &self,
+        peer: &LanPeerInfo,
+        invitation_code: &str,
+    ) -> Result<(), IntentError>;
+
     // =========================================================================
     // Threshold Signing
     // =========================================================================
@@ -158,6 +199,38 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         context: SigningContext,
     ) -> Result<ThresholdSignature, IntentError>;
+
+    /// Rotate guardian keys for a new threshold configuration
+    ///
+    /// Generates new FROST threshold keys for the given guardian configuration.
+    /// The operation creates keys at a new epoch without invalidating the old keys
+    /// until `commit_guardian_key_rotation` is called.
+    ///
+    /// # Arguments
+    /// * `threshold_k` - Minimum signers required (k)
+    /// * `total_n` - Total number of guardians (n)
+    /// * `guardian_ids` - IDs of contacts who will become guardians
+    ///
+    /// # Returns
+    /// A tuple of (new_epoch, key_packages, public_key_package) on success
+    async fn rotate_guardian_keys(
+        &self,
+        threshold_k: u16,
+        total_n: u16,
+        guardian_ids: &[String],
+    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError>;
+
+    /// Commit a guardian key rotation after successful ceremony
+    ///
+    /// Called when all guardians have accepted and stored their key shares.
+    /// This makes the new epoch authoritative.
+    async fn commit_guardian_key_rotation(&self, new_epoch: u64) -> Result<(), IntentError>;
+
+    /// Rollback a guardian key rotation after ceremony failure
+    ///
+    /// Called when the ceremony fails (guardian declined, user cancelled, or timeout).
+    /// This discards the new epoch's keys and keeps the previous configuration active.
+    async fn rollback_guardian_key_rotation(&self, failed_epoch: u64) -> Result<(), IntentError>;
 
     // =========================================================================
     // Invitation Operations
@@ -236,6 +309,26 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         RendezvousStatus::default()
     }
 
+    async fn trigger_discovery(&self) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Discovery not available in offline mode",
+        ))
+    }
+
+    async fn get_lan_peers(&self) -> Vec<LanPeerInfo> {
+        Vec::new()
+    }
+
+    async fn send_lan_invitation(
+        &self,
+        _peer: &LanPeerInfo,
+        _invitation_code: &str,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "LAN invitation not available in offline mode",
+        ))
+    }
+
     async fn sign_tree_op(&self, _op: &TreeOp) -> Result<AttestedOp, IntentError> {
         Err(IntentError::no_agent(
             "Threshold signing not available in offline mode",
@@ -266,6 +359,29 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<ThresholdSignature, IntentError> {
         Err(IntentError::no_agent(
             "Threshold signing not available in offline mode",
+        ))
+    }
+
+    async fn rotate_guardian_keys(
+        &self,
+        _threshold_k: u16,
+        _total_n: u16,
+        _guardian_ids: &[String],
+    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
+        Err(IntentError::no_agent(
+            "Key rotation not available in offline mode",
+        ))
+    }
+
+    async fn commit_guardian_key_rotation(&self, _new_epoch: u64) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Key rotation not available in offline mode",
+        ))
+    }
+
+    async fn rollback_guardian_key_rotation(&self, _failed_epoch: u64) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Key rotation not available in offline mode",
         ))
     }
 

@@ -9,6 +9,11 @@
 //! component automatically, triggering re-renders when data changes.
 //!
 //! Uses `aura_app::signal_defs::NEIGHBORHOOD_SIGNAL` with `ReactiveEffects::subscribe()`.
+//!
+//! ## Pure View Component
+//!
+//! This screen is a pure view that renders based on props from TuiState.
+//! All event handling is done by the parent TuiShell (IoApp) via the state machine.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
@@ -17,7 +22,8 @@ use aura_app::signal_defs::NEIGHBORHOOD_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{is_nav_key_press, navigate_grid, NavThrottle};
+use crate::tui::layout::dim;
+use crate::tui::props::NeighborhoodViewProps;
 use crate::tui::theme::Theme;
 use crate::tui::types::{BlockSummary, TraversalDepth};
 
@@ -209,11 +215,24 @@ pub fn TraversalInfo(props: &TraversalInfoProps) -> impl Into<AnyElement<'static
 }
 
 /// Props for NeighborhoodScreen
+///
+/// ## Compile-Time Safety
+///
+/// The `view` field is a required struct that embeds all view state from TuiState.
+/// This makes it a **compile-time error** to forget any view state field.
 #[derive(Default, Props)]
 pub struct NeighborhoodScreenProps {
+    // === Domain data (from reactive signals) ===
     pub neighborhood_name: String,
     pub blocks: Vec<BlockSummary>,
     pub depth: TraversalDepth,
+
+    // === View state from TuiState (REQUIRED - compile-time enforced) ===
+    /// All view state extracted from TuiState via `extract_neighborhood_view_props()`.
+    /// This is a single struct field so forgetting any view state is a compile error.
+    pub view: NeighborhoodViewProps,
+
+    // === Callbacks ===
     /// Callback when entering a block (block_id, depth)
     pub on_enter_block: Option<NavigationCallback>,
     /// Callback when going home
@@ -244,6 +263,11 @@ fn convert_traversal_depth(depth: u32) -> TraversalDepth {
 }
 
 /// The neighborhood screen
+///
+/// ## Pure View Component
+///
+/// This screen is a pure view that renders based on props from TuiState.
+/// All event handling is done by the parent TuiShell (IoApp) via the state machine.
 ///
 /// ## Reactive Updates
 ///
@@ -280,7 +304,39 @@ pub fn NeighborhoodScreen(
             let mut reactive_depth = reactive_depth.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // Get a subscription to the neighborhood signal via ReactiveEffects
+                // Helper closure to convert NeighborhoodState to TUI types
+                let convert_neighborhood_state =
+                    |neighborhood_state: &aura_app::views::NeighborhoodState| {
+                        let home_id = &neighborhood_state.home_block_id;
+
+                        let blocks: Vec<BlockSummary> = neighborhood_state
+                            .neighbors
+                            .iter()
+                            .map(|n| convert_neighbor_block(n, home_id))
+                            .collect();
+
+                        let depth = neighborhood_state
+                            .position
+                            .as_ref()
+                            .map(|p| convert_traversal_depth(p.depth))
+                            .unwrap_or(TraversalDepth::Interior);
+
+                        (neighborhood_state.home_block_name.clone(), blocks, depth)
+                    };
+
+                // FIRST: Read current signal value to catch up on any changes
+                // that happened while this screen was unmounted
+                {
+                    let core = app_core.read().await;
+                    if let Ok(neighborhood_state) = core.read(&*NEIGHBORHOOD_SIGNAL).await {
+                        let (name, blocks, depth) = convert_neighborhood_state(&neighborhood_state);
+                        reactive_neighborhood_name.set(name);
+                        reactive_blocks.set(blocks);
+                        reactive_depth.set(depth);
+                    }
+                }
+
+                // THEN: Subscribe for future updates
                 let mut stream = {
                     let core = app_core.read().await;
                     core.subscribe(&*NEIGHBORHOOD_SIGNAL)
@@ -288,21 +344,8 @@ pub fn NeighborhoodScreen(
 
                 // Subscribe to signal updates - runs until component unmounts
                 while let Ok(neighborhood_state) = stream.recv().await {
-                    let home_id = &neighborhood_state.home_block_id;
-
-                    let blocks: Vec<BlockSummary> = neighborhood_state
-                        .neighbors
-                        .iter()
-                        .map(|n| convert_neighbor_block(n, home_id))
-                        .collect();
-
-                    let depth = neighborhood_state
-                        .position
-                        .as_ref()
-                        .map(|p| convert_traversal_depth(p.depth))
-                        .unwrap_or(TraversalDepth::Interior);
-
-                    reactive_neighborhood_name.set(neighborhood_state.home_block_name.clone());
+                    let (name, blocks, depth) = convert_neighborhood_state(&neighborhood_state);
+                    reactive_neighborhood_name.set(name);
                     reactive_blocks.set(blocks);
                     reactive_depth.set(depth);
                 }
@@ -315,86 +358,28 @@ pub fn NeighborhoodScreen(
     let blocks = reactive_blocks.read().clone();
     let depth = reactive_depth.get();
 
-    let mut selected = hooks.use_state(|| 0usize);
+    // === Pure view: Use props.view from TuiState instead of local state ===
+    let current_selected = props.view.selected_index;
 
-    let current_selected = selected.get();
-    let count = blocks.len();
-    // 2 columns in the grid
-    const GRID_COLS: usize = 2;
+    // === Pure view: No use_terminal_events ===
+    // All event handling is done by IoApp (the shell) via the state machine.
+    // This component is purely presentational.
 
-    // Clone callbacks for event handler
-    let on_enter_block = props.on_enter_block.clone();
-    let on_go_home = props.on_go_home.clone();
-    let on_back_to_street = props.on_back_to_street.clone();
-    let blocks_for_handler = blocks.clone();
-
-    // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
-
-    hooks.use_terminal_events({
-        move |event| {
-            // Handle navigation keys first (2D grid navigation)
-            if let Some(nav_key) = is_nav_key_press(&event) {
-                if nav_throttle.write().try_navigate() && count > 0 {
-                    let new_idx = navigate_grid(selected.get(), GRID_COLS, count, nav_key);
-                    selected.set(new_idx);
-                }
-                return;
-            }
-
-            // Handle other keys
-            match event {
-                TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                    // Enter block - navigate into the selected block
-                    KeyCode::Enter => {
-                        if let Some(ref callback) = on_enter_block {
-                            if let Some(block) = blocks_for_handler.get(selected.get()) {
-                                if block.can_enter {
-                                    callback(block.id.clone(), TraversalDepth::Interior);
-                                }
-                            }
-                        }
-                    }
-                    // Go home - navigate to home block
-                    KeyCode::Char('g') => {
-                        if let Some(ref callback) = on_go_home {
-                            callback();
-                        }
-                    }
-                    // Back to street - zoom out to street view
-                    KeyCode::Char('b') => {
-                        if let Some(ref callback) = on_back_to_street {
-                            callback();
-                        }
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
-    });
-
+    // Layout: TraversalInfo (6 rows) + BlockGrid (19 rows) = 25 = MIDDLE_HEIGHT
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            width: 100pct,
-            height: 100pct,
-            flex_grow: 1.0,
-            flex_shrink: 1.0,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Main content
-            View(
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                overflow: Overflow::Hidden,
-                gap: 0,
-            ) {
-                // Traversal info
+            // Traversal info panel (6 rows: 2 border + 4 content)
+            View(height: 6) {
                 TraversalInfo(depth: depth, neighborhood_name: neighborhood_name)
+            }
 
-                // Block grid
+            // Block grid (remaining 19 rows)
+            View(height: 19, overflow: Overflow::Hidden) {
                 BlockGrid(blocks: blocks, selected_index: current_selected)
             }
         }

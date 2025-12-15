@@ -1,33 +1,34 @@
 //! Authority inspection CLI commands
+//!
+//! Returns structured `CliOutput` for testability.
+
 use crate::cli::authority::AuthorityCommands;
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::Result;
-use aura_core::effects::{ConsoleEffects, PhysicalTimeEffects, StorageEffects};
+use aura_core::effects::{PhysicalTimeEffects, StorageEffects};
 use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 /// Handle authority inspection commands
 ///
+/// Returns `CliOutput` instead of printing directly.
+///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_authority(ctx: &HandlerContext<'_>, command: &AuthorityCommands) -> Result<()> {
+pub async fn handle_authority(
+    ctx: &HandlerContext<'_>,
+    command: &AuthorityCommands,
+) -> Result<CliOutput> {
     match command {
         AuthorityCommands::Create { threshold } => {
-            create_authority(ctx, threshold.unwrap_or(1) as u32).await?;
+            create_authority(ctx, threshold.unwrap_or(1) as u32).await
         }
-        AuthorityCommands::Status { authority_id } => {
-            show_authority(ctx, authority_id).await?;
-        }
-        AuthorityCommands::List => {
-            list_authorities(ctx).await?;
-        }
+        AuthorityCommands::Status { authority_id } => show_authority(ctx, authority_id).await,
+        AuthorityCommands::List => list_authorities(ctx).await,
         AuthorityCommands::AddDevice {
             authority_id,
             public_key,
-        } => {
-            add_device(ctx, authority_id, public_key).await?;
-        }
+        } => add_device(ctx, authority_id, public_key).await,
     }
-    Ok(())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,7 +39,9 @@ struct AuthorityRecord {
     created_ms: u64,
 }
 
-async fn create_authority(ctx: &HandlerContext<'_>, threshold: u32) -> Result<()> {
+async fn create_authority(ctx: &HandlerContext<'_>, threshold: u32) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let effects = ctx.effects();
     let effect_ctx = ctx.effect_context();
 
@@ -63,44 +66,40 @@ async fn create_authority(ctx: &HandlerContext<'_>, threshold: u32) -> Result<()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to persist authority: {}", e))?;
 
-    ConsoleEffects::log_info(
-        effects,
-        &format!(
-            "Created authority {} with threshold {}",
-            authority_id, threshold
-        ),
-    )
-    .await?;
-    Ok(())
+    output.kv("Created authority", authority_id.to_string());
+    output.kv("Threshold", threshold.to_string());
+
+    Ok(output)
 }
 
-async fn show_authority(ctx: &HandlerContext<'_>, authority_id: &AuthorityId) -> Result<()> {
+async fn show_authority(ctx: &HandlerContext<'_>, authority_id: &AuthorityId) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let effects = ctx.effects();
 
     let key = format!("authority:{}", authority_id);
     if let Some(bytes) = effects.retrieve(&key).await? {
         let record: AuthorityRecord = serde_json::from_slice(&bytes)?;
-        ConsoleEffects::log_info(
-            effects,
-            &format!(
-                "Authority {} — threshold {}, devices: {}",
-                record.authority_id,
-                record.threshold,
+        output.kv("Authority", record.authority_id.to_string());
+        output.kv("Threshold", record.threshold.to_string());
+        output.kv(
+            "Devices",
+            if record.devices.is_empty() {
+                "(none)".to_string()
+            } else {
                 record.devices.join(", ")
-            ),
-        )
-        .await?;
+            },
+        );
     } else {
-        ConsoleEffects::log_error(
-            effects,
-            &format!("Authority {} not found in storage", authority_id),
-        )
-        .await?;
+        output.eprintln(format!("Authority {} not found in storage", authority_id));
     }
-    Ok(())
+
+    Ok(output)
 }
 
-async fn list_authorities(ctx: &HandlerContext<'_>) -> Result<()> {
+async fn list_authorities(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let effects = ctx.effects();
 
     let keys = effects
@@ -108,21 +107,24 @@ async fn list_authorities(ctx: &HandlerContext<'_>) -> Result<()> {
         .await
         .unwrap_or_default();
     if keys.is_empty() {
-        ConsoleEffects::log_info(effects, "No authorities stored yet").await?;
+        output.println("No authorities stored yet");
     } else {
-        ConsoleEffects::log_info(effects, &format!("Stored authorities ({}):", keys.len())).await?;
+        output.section(&format!("Stored authorities ({})", keys.len()));
         for key in keys {
-            ConsoleEffects::log_info(effects, &format!("- {}", key)).await?;
+            output.println(format!("  - {}", key));
         }
     }
-    Ok(())
+
+    Ok(output)
 }
 
 async fn add_device(
     ctx: &HandlerContext<'_>,
     authority_id: &AuthorityId,
     public_key: &str,
-) -> Result<()> {
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let effects = ctx.effects();
 
     let key = format!("authority:{}", authority_id);
@@ -142,14 +144,8 @@ async fn add_device(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to update authority {}: {}", authority_id, e))?;
 
-    ConsoleEffects::log_info(
-        effects,
-        &format!(
-            "Added device key to authority {} ({} devices total)",
-            authority_id,
-            record.devices.len()
-        ),
-    )
-    .await?;
-    Ok(())
+    output.kv("Added device to authority", authority_id.to_string());
+    output.kv("Total devices", record.devices.len().to_string());
+
+    Ok(output)
 }

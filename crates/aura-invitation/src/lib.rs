@@ -76,6 +76,12 @@ pub mod service;
 /// with guard annotations for capability and flow budget enforcement.
 pub mod protocol;
 
+/// Consensus-based invitation ceremony
+///
+/// Provides `InvitationCeremonyExecutor` for safe, atomic invitation acceptance
+/// with prestate binding and consensus guarantees.
+pub mod invitation_ceremony;
+
 /// Domain fact types for invitation state changes
 pub mod facts;
 
@@ -150,6 +156,12 @@ pub use protocol::{
     GuardianAccept, GuardianConfirm, GuardianDecline, GuardianInvitationState, GuardianRequest,
     InvitationAck, InvitationExchangeState, InvitationOffer, InvitationResponse,
     EXCHANGE_PROTOCOL_ID, GUARDIAN_PROTOCOL_ID, PROTOCOL_NAMESPACE, PROTOCOL_VERSION,
+};
+
+// Re-export consensus-based ceremony types
+pub use invitation_ceremony::{
+    AcceptanceProposal, AcceptanceResponse, CeremonyStatus, InvitationCeremonyEffects,
+    InvitationCeremonyExecutor, InvitationCeremonyId, InvitationCeremonyState,
 };
 
 // Re-export guard types

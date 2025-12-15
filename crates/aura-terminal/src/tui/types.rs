@@ -83,6 +83,12 @@ impl Channel {
 }
 
 /// Message delivery status
+///
+/// Tracks the delivery lifecycle of a message:
+/// Sending → Sent → Delivered → Read
+///
+/// The status transitions as the message propagates through the network
+/// and is received/read by recipients.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DeliveryStatus {
     /// Message is being sent to the network
@@ -90,8 +96,10 @@ pub enum DeliveryStatus {
     /// Message was sent and acknowledged by the network
     #[default]
     Sent,
-    /// Message was delivered to all recipients
+    /// Message was delivered to recipient's device (before read)
     Delivered,
+    /// Message was read by the recipient
+    Read,
     /// Message delivery failed (with retry available)
     Failed,
 }
@@ -101,8 +109,9 @@ impl DeliveryStatus {
     pub fn indicator(&self) -> &'static str {
         match self {
             DeliveryStatus::Sending => "⏳",   // Hourglass
-            DeliveryStatus::Sent => "✓",       // Single check
-            DeliveryStatus::Delivered => "✓✓", // Double check
+            DeliveryStatus::Sent => "✓",       // Single check (gray)
+            DeliveryStatus::Delivered => "✓✓", // Double check (gray)
+            DeliveryStatus::Read => "✓✓",      // Double check (blue) - color applied separately
             DeliveryStatus::Failed => "✗",     // X mark
         }
     }
@@ -113,7 +122,104 @@ impl DeliveryStatus {
             DeliveryStatus::Sending => "Sending...",
             DeliveryStatus::Sent => "Sent",
             DeliveryStatus::Delivered => "Delivered",
+            DeliveryStatus::Read => "Read",
             DeliveryStatus::Failed => "Failed",
+        }
+    }
+
+    /// Whether the message has reached the recipient's device
+    pub fn is_delivered(&self) -> bool {
+        matches!(self, DeliveryStatus::Delivered | DeliveryStatus::Read)
+    }
+
+    /// Whether the message has been read by the recipient
+    pub fn is_read(&self) -> bool {
+        matches!(self, DeliveryStatus::Read)
+    }
+
+    /// Whether the message is still pending (not yet confirmed delivered)
+    pub fn is_pending(&self) -> bool {
+        matches!(self, DeliveryStatus::Sending | DeliveryStatus::Sent)
+    }
+}
+
+/// Synchronization status for items that sync across devices/peers
+///
+/// This is a UI-level view state, not a journal fact. It tracks whether
+/// local state has been synchronized with peers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SyncStatus {
+    /// Not yet synced to any peers
+    #[default]
+    LocalOnly,
+    /// Currently syncing with peers
+    Syncing {
+        /// Number of peers successfully synced
+        peers_synced: usize,
+        /// Total number of peers to sync with
+        peers_total: usize,
+    },
+    /// Successfully synced to all required peers
+    Synced,
+    /// Sync failed
+    SyncFailed {
+        /// Error message describing the failure
+        error: String,
+    },
+}
+
+impl SyncStatus {
+    /// Get the status indicator character
+    pub fn indicator(&self) -> &'static str {
+        match self {
+            SyncStatus::LocalOnly => "○",         // Empty circle
+            SyncStatus::Syncing { .. } => "◐",    // Half-filled circle
+            SyncStatus::Synced => "●",            // Filled circle
+            SyncStatus::SyncFailed { .. } => "⊗", // Circle with X
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> String {
+        match self {
+            SyncStatus::LocalOnly => "Local only".to_string(),
+            SyncStatus::Syncing {
+                peers_synced,
+                peers_total,
+            } => {
+                format!("Syncing ({}/{})", peers_synced, peers_total)
+            }
+            SyncStatus::Synced => "Synced".to_string(),
+            SyncStatus::SyncFailed { error } => format!("Sync failed: {}", error),
+        }
+    }
+
+    /// Whether the item is fully synced
+    pub fn is_synced(&self) -> bool {
+        matches!(self, SyncStatus::Synced)
+    }
+
+    /// Whether the item is currently syncing
+    pub fn is_syncing(&self) -> bool {
+        matches!(self, SyncStatus::Syncing { .. })
+    }
+
+    /// Get sync progress as a percentage (0-100)
+    pub fn progress_percent(&self) -> u8 {
+        match self {
+            SyncStatus::LocalOnly => 0,
+            SyncStatus::Syncing {
+                peers_synced,
+                peers_total,
+            } => {
+                if *peers_total == 0 {
+                    100
+                } else {
+                    ((peers_synced * 100) / peers_total).min(100) as u8
+                }
+            }
+            SyncStatus::Synced => 100,
+            SyncStatus::SyncFailed { .. } => 0,
         }
     }
 }
@@ -1118,5 +1224,268 @@ impl From<&views::StorageInfo> for BlockBudget {
             resident_count: 0, // Not part of StorageInfo
             max_residents: 8,  // Default
         }
+    }
+}
+
+// =============================================================================
+// Conflict Resolution Types
+// =============================================================================
+
+/// Type of operation that was conflicted
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ConflictOperationType {
+    /// Channel permission change
+    #[default]
+    PermissionChange,
+    /// Member removal (kick)
+    MemberRemoval,
+    /// Channel rename
+    ChannelRename,
+    /// Topic change
+    TopicChange,
+    /// Ownership transfer
+    OwnershipTransfer,
+    /// Channel mode change
+    ModeChange,
+}
+
+impl ConflictOperationType {
+    /// Human-readable label for the operation type
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PermissionChange => "Permission change",
+            Self::MemberRemoval => "Member removal",
+            Self::ChannelRename => "Channel rename",
+            Self::TopicChange => "Topic change",
+            Self::OwnershipTransfer => "Ownership transfer",
+            Self::ModeChange => "Mode change",
+        }
+    }
+
+    /// Icon for the operation type
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::PermissionChange => "🔒",
+            Self::MemberRemoval => "👤",
+            Self::ChannelRename => "✏️",
+            Self::TopicChange => "📝",
+            Self::OwnershipTransfer => "👑",
+            Self::ModeChange => "⚙️",
+        }
+    }
+}
+
+/// Resolution action for a conflict
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ConflictResolution {
+    /// Keep the local version (what we attempted)
+    #[default]
+    KeepLocal,
+    /// Accept the remote version (what others did)
+    AcceptRemote,
+    /// Merge both changes if possible
+    Merge,
+    /// Discard both and revert to previous state
+    Revert,
+}
+
+impl ConflictResolution {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::KeepLocal => "Keep mine",
+            Self::AcceptRemote => "Accept theirs",
+            Self::Merge => "Merge both",
+            Self::Revert => "Revert all",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::KeepLocal => "Apply your change, overwriting the other",
+            Self::AcceptRemote => "Accept their change, discard yours",
+            Self::Merge => "Try to combine both changes",
+            Self::Revert => "Undo both changes, restore previous state",
+        }
+    }
+}
+
+/// A detected operation conflict
+///
+/// Represents a situation where an optimistic operation was rolled back
+/// because another admin performed a conflicting operation.
+#[derive(Clone, Debug, Default)]
+pub struct OperationConflict {
+    /// Unique identifier for this conflict
+    pub id: String,
+    /// Type of operation that conflicted
+    pub operation_type: ConflictOperationType,
+    /// Description of what we tried to do
+    pub local_action: String,
+    /// Description of what others did
+    pub remote_action: String,
+    /// Who performed the conflicting remote action
+    pub remote_actor: String,
+    /// When the conflict was detected (ms since epoch)
+    pub detected_at: u64,
+    /// Available resolution options
+    pub available_resolutions: Vec<ConflictResolution>,
+    /// Currently selected resolution (if any)
+    pub selected_resolution: Option<ConflictResolution>,
+    /// Whether the conflict has been resolved
+    pub resolved: bool,
+    /// Target entity (channel, member, etc.)
+    pub target_name: String,
+}
+
+impl OperationConflict {
+    pub fn new(id: impl Into<String>, operation_type: ConflictOperationType) -> Self {
+        Self {
+            id: id.into(),
+            operation_type,
+            available_resolutions: vec![
+                ConflictResolution::KeepLocal,
+                ConflictResolution::AcceptRemote,
+                ConflictResolution::Revert,
+            ],
+            ..Default::default()
+        }
+    }
+
+    pub fn with_local_action(mut self, action: impl Into<String>) -> Self {
+        self.local_action = action.into();
+        self
+    }
+
+    pub fn with_remote_action(
+        mut self,
+        action: impl Into<String>,
+        actor: impl Into<String>,
+    ) -> Self {
+        self.remote_action = action.into();
+        self.remote_actor = actor.into();
+        self
+    }
+
+    pub fn with_target(mut self, name: impl Into<String>) -> Self {
+        self.target_name = name.into();
+        self
+    }
+
+    pub fn with_resolutions(mut self, resolutions: Vec<ConflictResolution>) -> Self {
+        self.available_resolutions = resolutions;
+        self
+    }
+
+    /// Generate a human-readable summary of the conflict
+    pub fn summary(&self) -> String {
+        format!(
+            "{} on #{}: {} vs {}",
+            self.operation_type.label(),
+            self.target_name,
+            self.local_action,
+            self.remote_action
+        )
+    }
+
+    /// Generate a notification message for the conflict
+    pub fn notification_message(&self) -> String {
+        format!(
+            "{} was rolled back - {} already {} on #{}",
+            self.operation_type.label(),
+            self.remote_actor,
+            self.remote_action,
+            self.target_name
+        )
+    }
+}
+
+/// Confirmation status for optimistic operations
+///
+/// Tracks whether an optimistic operation has been confirmed
+/// by the required parties in a distributed ceremony.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ConfirmationStatus {
+    /// Applied locally, not yet sent for confirmation
+    #[default]
+    LocalOnly,
+    /// Background confirmation ceremony in progress
+    Confirming {
+        /// How many parties have confirmed
+        confirmed_count: u32,
+        /// How many parties are required
+        required_count: u32,
+    },
+    /// All required parties confirmed
+    Confirmed,
+    /// Some parties confirmed, others declined/unavailable
+    PartiallyConfirmed {
+        /// How many confirmed
+        confirmed_count: u32,
+        /// How many declined
+        declined_count: u32,
+    },
+    /// Confirmation failed - operation may need rollback
+    Unconfirmed {
+        /// Reason for failure
+        reason: String,
+    },
+    /// Operation was rolled back due to conflict
+    RolledBack {
+        /// Associated conflict (if any)
+        conflict_id: Option<String>,
+    },
+}
+
+impl ConfirmationStatus {
+    /// Status indicator icon
+    pub fn indicator(&self) -> &'static str {
+        match self {
+            Self::LocalOnly => "○",                 // Empty circle
+            Self::Confirming { .. } => "◐",         // Half-filled
+            Self::Confirmed => "●",                 // Filled circle
+            Self::PartiallyConfirmed { .. } => "◑", // Partial
+            Self::Unconfirmed { .. } => "⊗",        // Circle with X
+            Self::RolledBack { .. } => "⇄",         // Arrows (conflict)
+        }
+    }
+
+    /// Human-readable status label
+    pub fn label(&self) -> String {
+        match self {
+            Self::LocalOnly => "Local only".to_string(),
+            Self::Confirming {
+                confirmed_count,
+                required_count,
+            } => {
+                format!("Confirming ({}/{})", confirmed_count, required_count)
+            }
+            Self::Confirmed => "Confirmed".to_string(),
+            Self::PartiallyConfirmed {
+                confirmed_count,
+                declined_count,
+            } => {
+                format!(
+                    "Partial ({} confirmed, {} declined)",
+                    confirmed_count, declined_count
+                )
+            }
+            Self::Unconfirmed { reason } => format!("Unconfirmed: {}", reason),
+            Self::RolledBack { .. } => "Rolled back".to_string(),
+        }
+    }
+
+    /// Whether the operation is fully confirmed
+    pub fn is_confirmed(&self) -> bool {
+        matches!(self, Self::Confirmed)
+    }
+
+    /// Whether the operation is still pending confirmation
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Self::LocalOnly | Self::Confirming { .. })
+    }
+
+    /// Whether the operation failed or was rolled back
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Unconfirmed { .. } | Self::RolledBack { .. })
     }
 }

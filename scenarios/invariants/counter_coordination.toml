@@ -21,7 +21,7 @@ name = "counter_initialization"
 description = "Initialize distributed counter"
 timeout_seconds = 1
 actions = [
-    { type = "run_choreography", choreography = "counter_init", participants = ["alice", "bob", "charlie"] }
+    { type = "run_choreography", choreography = "counter_init", participants = ["alice", "bob", "carol"] }
 ]
 
 [[phases]]
@@ -31,7 +31,7 @@ timeout_seconds = 3
 actions = [
     { type = "run_choreography", choreography = "counter_increment", participants = ["alice"] },
     { type = "run_choreography", choreography = "counter_increment", participants = ["bob"] },
-    { type = "run_choreography", choreography = "counter_increment", participants = ["charlie"] }
+    { type = "run_choreography", choreography = "counter_increment", participants = ["carol"] }
 ]
 
 [[phases]]

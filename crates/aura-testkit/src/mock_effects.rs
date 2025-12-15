@@ -861,6 +861,50 @@ impl aura_core::effects::ThresholdSigningEffects for MockEffects {
     async fn public_key_package(&self, _authority: &AuthorityId) -> Option<Vec<u8>> {
         Some(vec![0u8; 32])
     }
+
+    async fn rotate_keys(
+        &self,
+        _authority: &AuthorityId,
+        new_threshold: u16,
+        new_total_participants: u16,
+        guardian_ids: &[String],
+    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
+        // Return mock key packages for each guardian
+        let key_packages: Vec<Vec<u8>> = guardian_ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let mut pkg = vec![0u8; 64];
+                pkg[0] = i as u8; // Make each package unique
+                pkg[1] = new_threshold as u8;
+                pkg[2] = new_total_participants as u8;
+                pkg
+            })
+            .collect();
+
+        let public_key_package = vec![0xAB; 32]; // Mock group public key
+        let new_epoch = 1u64;
+
+        Ok((new_epoch, key_packages, public_key_package))
+    }
+
+    async fn commit_key_rotation(
+        &self,
+        _authority: &AuthorityId,
+        _new_epoch: u64,
+    ) -> Result<(), AuraError> {
+        // Mock commit - no-op
+        Ok(())
+    }
+
+    async fn rollback_key_rotation(
+        &self,
+        _authority: &AuthorityId,
+        _failed_epoch: u64,
+    ) -> Result<(), AuraError> {
+        // Mock rollback - no-op
+        Ok(())
+    }
 }
 
 // SecureStorageEffects implementation

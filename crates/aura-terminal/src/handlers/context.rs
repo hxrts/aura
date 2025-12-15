@@ -1,7 +1,9 @@
 //! Context inspection handlers.
+//!
+//! Returns structured `CliOutput` for testability.
 
 use crate::cli::context::ContextAction;
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use anyhow::{Context as AnyhowContext, Result};
 use aura_core::hash;
 use serde::Deserialize;
@@ -10,8 +12,10 @@ use std::path::Path;
 
 /// Handle context debugging commands.
 ///
+/// Returns `CliOutput` instead of printing directly.
+///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_context(ctx: &HandlerContext<'_>, action: &ContextAction) -> Result<()> {
+pub async fn handle_context(ctx: &HandlerContext<'_>, action: &ContextAction) -> Result<CliOutput> {
     match action {
         ContextAction::Inspect {
             context,
@@ -29,48 +33,56 @@ async fn inspect_context(
     _ctx: &HandlerContext<'_>,
     context: &str,
     state_file: &Path,
-) -> Result<()> {
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let snapshot = load_context(state_file, context)?;
     let headroom = snapshot
         .flow_budget
         .limit
         .saturating_sub(snapshot.flow_budget.spent);
 
-    println!("Context: {}", snapshot.context);
-    println!(
-        "Flow budget: limit={} spent={} headroom={} epoch={}",
-        snapshot.flow_budget.limit,
-        snapshot.flow_budget.spent,
-        headroom,
-        snapshot.flow_budget.epoch
+    output.kv("Context", &snapshot.context);
+    output.kv(
+        "Flow budget",
+        format!(
+            "limit={} spent={} headroom={} epoch={}",
+            snapshot.flow_budget.limit,
+            snapshot.flow_budget.spent,
+            headroom,
+            snapshot.flow_budget.epoch
+        ),
     );
-    println!(
+
+    output.println(format!(
         "Rendezvous envelopes: {} (showing up to 5)",
         snapshot.rendezvous_envelopes.len()
-    );
+    ));
     for env in snapshot.rendezvous_envelopes.iter().take(5) {
-        println!(
-            "- {:?} via {:?} (last_seen: {})",
+        output.println(format!(
+            "  - {:?} via {:?} (last_seen: {})",
             env.role.as_deref().unwrap_or("unknown"),
             env.transport.as_deref().unwrap_or("n/a"),
             env.last_seen.as_deref().unwrap_or("n/a")
-        );
+        ));
     }
-    println!(
+
+    output.println(format!(
         "Channels: {} active (showing up to 5)",
         snapshot.channels.len()
-    );
+    ));
     for chan in snapshot.channels.iter().take(5) {
         let anonymized = anonymize(&chan.peer);
-        println!(
-            "- peer={} state={} headroom={} last_event={}",
+        output.println(format!(
+            "  - peer={} state={} headroom={} last_event={}",
             anonymized,
             chan.state.as_deref().unwrap_or("unknown"),
             chan.headroom.unwrap_or_default(),
             chan.last_event.as_deref().unwrap_or("n/a")
-        );
+        ));
     }
-    Ok(())
+
+    Ok(output)
 }
 
 async fn show_receipts(
@@ -78,39 +90,46 @@ async fn show_receipts(
     context: &str,
     state_file: &Path,
     detailed: bool,
-) -> Result<()> {
+) -> Result<CliOutput> {
+    let mut output = CliOutput::new();
+
     let snapshot = load_context(state_file, context)?;
     if snapshot.receipts.is_empty() {
-        println!("No receipts recorded for context {}", snapshot.context);
-        return Ok(());
+        output.println(format!(
+            "No receipts recorded for context {}",
+            snapshot.context
+        ));
+        return Ok(output);
     }
 
-    println!(
-        "Receipts for context {} ({} total):",
+    output.section(&format!(
+        "Receipts for context {} ({} total)",
         snapshot.context,
         snapshot.receipts.len()
-    );
+    ));
+
     for receipt in &snapshot.receipts {
         let hop = anonymize(&receipt.hop);
         if detailed {
-            println!(
-                "- hop={} cost={} epoch={} status={} chains={}",
+            output.println(format!(
+                "  - hop={} cost={} epoch={} status={} chains={}",
                 hop,
                 receipt.cost,
                 receipt.epoch,
                 receipt.status.as_deref().unwrap_or("unknown"),
                 receipt.chain_hash.as_deref().unwrap_or("n/a")
-            );
+            ));
         } else {
-            println!(
-                "- hop={} cost={} status={}",
+            output.println(format!(
+                "  - hop={} cost={} status={}",
                 hop,
                 receipt.cost,
                 receipt.status.as_deref().unwrap_or("unknown")
-            );
+            ));
         }
     }
-    Ok(())
+
+    Ok(output)
 }
 
 fn load_context(state_file: &Path, context: &str) -> Result<ContextSnapshot> {

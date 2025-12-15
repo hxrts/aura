@@ -1,6 +1,6 @@
 //! # Contacts Screen
 //!
-//! Petname management
+//! Petname management and invitations
 //!
 //! ## Reactive Signal Subscription
 //!
@@ -9,6 +9,19 @@
 //! component automatically, triggering re-renders when data changes.
 //!
 //! Uses `aura_app::signal_defs::CONTACTS_SIGNAL` with `ReactiveEffects::subscribe()`.
+//!
+//! ## Invitation Flows
+//!
+//! The contacts screen now handles both:
+//! - **Accept Invitation (i)**: Import a contact invitation code received out-of-band
+//! - **Send Invitation (n)**: Generate a new invitation code to share with others
+//!
+//! In demo mode, Ctrl+A and Ctrl+L fill Alice's and Carol's codes respectively.
+//!
+//! ## Pure View Component
+//!
+//! This screen is a pure view that renders based on props from TuiState.
+//! All event handling is done by the parent TuiShell (IoApp) via the state machine.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
@@ -17,24 +30,25 @@ use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::{
-    DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, EmptyState, InvitePeerCallback,
-    StatusIndicator, TextInputModal, TextInputState,
+    DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, EmptyState,
+    GuardianCandidateProps, GuardianSetupModal, InvitationImportModal, InvitePeerCallback,
+    StatusIndicator, TextInputModal,
 };
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{
-    is_nav_key_press, navigate_list, InputThrottle, NavKey, NavThrottle, TwoPanelFocus,
-};
+use crate::tui::layout::dim;
+use crate::tui::navigation::TwoPanelFocus;
+use crate::tui::props::ContactsViewProps;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Contact, ContactStatus};
 
 /// Callback type for updating a contact's petname (contact_id: String, new_petname: String)
 pub type UpdatePetnameCallback = Arc<dyn Fn(String, String) + Send + Sync>;
 
-/// Callback type for toggling guardian status (contact_id: String)
-pub type ToggleGuardianCallback = Arc<dyn Fn(String) + Send + Sync>;
-
 /// Callback type for starting a direct chat with a contact (contact_id: String)
 pub type StartChatCallback = Arc<dyn Fn(String) + Send + Sync>;
+
+/// Callback type for importing an invitation code (code) -> triggers import flow
+pub type ImportInvitationCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Props for ContactItem
 #[derive(Default, Props)]
@@ -216,19 +230,37 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
 }
 
 /// Props for ContactsScreen
+///
+/// ## Compile-Time Safety
+///
+/// The `view` field is a required struct that embeds all view state from TuiState.
+/// This makes it a **compile-time error** to forget any view state field, because
+/// the entire `ContactsViewProps` struct must be passed - you can't accidentally
+/// omit individual fields like `petname_modal_visible`.
 #[derive(Default, Props)]
 pub struct ContactsScreenProps {
+    // === Domain data (from reactive signals) ===
     pub contacts: Vec<Contact>,
     /// Discovered LAN peers
     pub discovered_peers: Vec<DiscoveredPeerInfo>,
+
+    // === View state from TuiState (REQUIRED - compile-time enforced) ===
+    /// All view state extracted from TuiState via `extract_contacts_view_props()`.
+    /// This is a single struct field so forgetting any view state is a compile error.
+    pub view: ContactsViewProps,
+
+    /// LAN peers selection index (local UI state, not from TuiState)
+    pub lan_peers_selection: usize,
+
+    // === Callbacks ===
     /// Callback when updating a contact's petname
     pub on_update_petname: Option<UpdatePetnameCallback>,
-    /// Callback when toggling guardian status
-    pub on_toggle_guardian: Option<ToggleGuardianCallback>,
     /// Callback when starting a direct chat with a contact
     pub on_start_chat: Option<StartChatCallback>,
     /// Callback when inviting a discovered LAN peer
     pub on_invite_lan_peer: Option<InvitePeerCallback>,
+    /// Callback when importing an invitation code
+    pub on_import_invitation: Option<ImportInvitationCallback>,
 }
 
 /// Convert aura-app contact to TUI contact
@@ -250,6 +282,11 @@ fn convert_contact(c: &aura_app::views::Contact) -> Contact {
 }
 
 /// The contacts screen
+///
+/// ## Pure View Component
+///
+/// This screen is a pure view that renders based on props from TuiState.
+/// All event handling is done by the parent TuiShell (IoApp) via the state machine.
 ///
 /// ## Reactive Updates
 ///
@@ -280,7 +317,22 @@ pub fn ContactsScreen(
             let mut reactive_contacts = reactive_contacts.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // Get a subscription to the contacts signal via ReactiveEffects
+                // FIRST: Read current signal value to catch up on any changes
+                // that happened while this screen was unmounted (e.g., contacts
+                // added via invitation import while on another screen)
+                {
+                    let core = app_core.read().await;
+                    if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
+                        let contacts: Vec<Contact> = contacts_state
+                            .contacts
+                            .iter()
+                            .map(convert_contact)
+                            .collect();
+                        reactive_contacts.set(contacts);
+                    }
+                }
+
+                // THEN: Subscribe for future updates
                 let mut stream = {
                     let core = app_core.read().await;
                     core.subscribe(&*CONTACTS_SIGNAL)
@@ -303,14 +355,8 @@ pub fn ContactsScreen(
     // Use reactive state for rendering
     let contacts = reactive_contacts.read().clone();
 
-    let mut selected = hooks.use_state(|| 0usize);
-    let mut panel_focus = hooks.use_state(|| TwoPanelFocus::List);
-
-    // Modal state for editing petnames
-    let petname_modal_state = hooks.use_state(TextInputState::new);
-
-    // LAN discovered peers state
-    let mut lan_peers_state = hooks.use_state({
+    // LAN discovered peers state (still using local state for peer data updates)
+    let lan_peers_state = hooks.use_state({
         let initial_peers = props.discovered_peers.clone();
         move || {
             let mut state = DiscoveredPeersState::new();
@@ -319,183 +365,38 @@ pub fn ContactsScreen(
         }
     });
 
-    // Update LAN peers when props change
-    {
-        let mut state = lan_peers_state.read().clone();
-        if state.peers.len() != props.discovered_peers.len() {
-            state.set_peers(props.discovered_peers.clone());
-            lan_peers_state.set(state);
-        }
-    }
-
-    let current_selected = selected.get();
-    let current_focus = panel_focus.get();
+    // === Pure view: Use props.view from TuiState instead of local state ===
+    let current_selected = props.view.selected_index;
+    let current_focus = props.view.focus;
     let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let selected_contact = contacts.get(current_selected).cloned();
 
-    // Clone callbacks for event handler
-    let on_update_petname = props.on_update_petname.clone();
-    let on_toggle_guardian = props.on_toggle_guardian.clone();
-    let on_start_chat = props.on_start_chat.clone();
-    let on_invite_lan_peer = props.on_invite_lan_peer.clone();
+    // Modal visibility from props.view
+    let is_modal_visible = props.view.petname_modal_visible;
 
-    // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
+    // === Pure view: No use_terminal_events ===
+    // All event handling is done by IoApp (the shell) via the state machine.
+    // This component is purely presentational.
 
-    // Throttle for text input - persists across renders
-    let mut input_throttle = hooks.use_ref(InputThrottle::new);
-
-    hooks.use_terminal_events({
-        let mut petname_modal_state = petname_modal_state.clone();
-        let count = contacts.len();
-        let contacts_for_handler = contacts.clone();
-        move |event| {
-            // Check if modal is visible
-            let modal_visible = petname_modal_state.read().visible;
-
-            // Handle navigation keys first (only when modal is not visible)
-            if !modal_visible {
-                if let Some(nav_key) = is_nav_key_press(&event) {
-                    if nav_throttle.write().try_navigate() {
-                        match nav_key {
-                            // Horizontal: toggle between list and detail
-                            NavKey::Left | NavKey::Right => {
-                                let new_focus = panel_focus.get().navigate(nav_key);
-                                panel_focus.set(new_focus);
-                            }
-                            // Vertical: navigate within list when list is focused
-                            NavKey::Up | NavKey::Down => {
-                                if panel_focus.get() == TwoPanelFocus::List && count > 0 {
-                                    let new_idx = navigate_list(selected.get(), count, nav_key);
-                                    selected.set(new_idx);
-                                }
-                            }
-                        }
-                    }
-                    return;
-                }
-            }
-
-            match event {
-                TerminalEvent::Key(KeyEvent { code, .. }) => {
-                    if modal_visible {
-                        // Handle modal keys
-                        match code {
-                            KeyCode::Esc => {
-                                let mut state = petname_modal_state.read().clone();
-                                state.hide();
-                                petname_modal_state.set(state);
-                            }
-                            KeyCode::Enter => {
-                                let state = petname_modal_state.read().clone();
-                                if state.can_submit() {
-                                    if let Some(ref callback) = on_update_petname {
-                                        if let Some(contact_id) = state.get_context_id() {
-                                            callback(
-                                                contact_id.to_string(),
-                                                state.get_value().to_string(),
-                                            );
-                                        }
-                                    }
-                                    // Close modal
-                                    let mut state = petname_modal_state.read().clone();
-                                    state.hide();
-                                    petname_modal_state.set(state);
-                                }
-                            }
-                            KeyCode::Backspace => {
-                                // Delete character (with throttle)
-                                if input_throttle.write().try_input() {
-                                    let mut state = petname_modal_state.read().clone();
-                                    state.pop_char();
-                                    petname_modal_state.set(state);
-                                }
-                            }
-                            KeyCode::Char(c) => {
-                                // Add character (with throttle)
-                                if input_throttle.write().try_input() {
-                                    let mut state = petname_modal_state.read().clone();
-                                    state.push_char(c);
-                                    petname_modal_state.set(state);
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        // Normal screen keys (non-navigation hotkeys)
-                        match code {
-                            KeyCode::Enter => {
-                                panel_focus.set(TwoPanelFocus::Detail);
-                            }
-                            // Edit petname - show modal with current petname
-                            KeyCode::Char('e') => {
-                                if let Some(contact) = contacts_for_handler.get(selected.get()) {
-                                    let mut state = petname_modal_state.read().clone();
-                                    state.show(
-                                        "Edit Petname",
-                                        &contact.petname,
-                                        "Enter petname...",
-                                        Some(contact.id.clone()),
-                                    );
-                                    petname_modal_state.set(state);
-                                }
-                            }
-                            // Toggle guardian - triggers callback with contact_id
-                            KeyCode::Char('g') => {
-                                if let Some(contact) = contacts_for_handler.get(selected.get()) {
-                                    if let Some(ref callback) = on_toggle_guardian {
-                                        callback(contact.id.clone());
-                                    }
-                                }
-                            }
-                            // Start chat - triggers callback with contact_id
-                            KeyCode::Char('c') => {
-                                if let Some(contact) = contacts_for_handler.get(selected.get()) {
-                                    if let Some(ref callback) = on_start_chat {
-                                        callback(contact.id.clone());
-                                    }
-                                }
-                            }
-                            // Invite discovered LAN peer
-                            KeyCode::Char('i') => {
-                                let state = lan_peers_state.read();
-                                if let Some(peer) = state.get_selected() {
-                                    if let Some(ref callback) = on_invite_lan_peer {
-                                        callback(peer.authority_id.clone(), peer.address.clone());
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    });
-
+    // Layout: Full 25 rows for content (no input bar on this screen)
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            width: 100pct,
-            height: 100pct,
-            flex_grow: 1.0,
-            flex_shrink: 1.0,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Main content: list + detail
+            // Main content: list + detail - full 25 rows
             View(
                 flex_direction: FlexDirection::Row,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
+                height: dim::MIDDLE_HEIGHT,
                 overflow: Overflow::Hidden,
                 gap: Spacing::XS,
             ) {
-                // Left column: LAN peers + contacts list (30%)
+                // Left column: LAN peers + contacts list (24 chars = 30% of 80)
                 View(
-                    width: 30pct,
+                    width: 24,
                     flex_direction: FlexDirection::Column,
-                    flex_shrink: 1.0,
                     overflow: Overflow::Hidden,
                     gap: 0,
                 ) {
@@ -506,7 +407,7 @@ pub fn ContactsScreen(
                             Some(element! {
                                 DiscoveredPeersPanel(
                                     peers: state.peers.clone(),
-                                    selected_index: state.selected_index,
+                                    selected_index: props.lan_peers_selection,
                                     focused: false,
                                 )
                             })
@@ -521,25 +422,68 @@ pub fn ContactsScreen(
                         focused: !is_detail_focused,
                     )
                 }
-                // Detail (70%)
+                // Detail (remaining width ~55 chars)
                 ContactDetail(
                     contact: selected_contact,
                     focused: is_detail_focused,
                 )
             }
 
-            // Petname edit modal (overlays everything)
-            #(if petname_modal_state.read().visible {
-                let modal_state = petname_modal_state.read().clone();
+            // Petname edit modal (overlays everything) - uses props from TuiState
+            #(if is_modal_visible {
                 Some(element! {
                     TextInputModal(
                         visible: true,
                         focused: true,
-                        title: modal_state.title.clone(),
-                        value: modal_state.value.clone(),
-                        placeholder: modal_state.placeholder.clone(),
-                        error: modal_state.error.clone().unwrap_or_default(),
-                        submitting: modal_state.submitting,
+                        title: "Edit Petname".to_string(),
+                        value: props.view.petname_modal_value.clone(),
+                        placeholder: "Enter petname...".to_string(),
+                        error: String::new(),
+                        submitting: false,
+                    )
+                })
+            } else {
+                None
+            })
+
+            // Import invitation modal (accept invitation code)
+            #(if props.view.import_modal_visible {
+                Some(element! {
+                    InvitationImportModal(
+                        visible: true,
+                        focused: true,
+                        code: props.view.import_modal_code.clone(),
+                        error: String::new(),
+                        importing: props.view.import_modal_importing,
+                        demo_mode: props.view.demo_mode,
+                    )
+                })
+            } else {
+                None
+            })
+
+            // Guardian setup modal (multi-step wizard)
+            #(if props.view.guardian_setup_modal_visible {
+                let contacts: Vec<GuardianCandidateProps> = props.view.guardian_setup_modal_contacts
+                    .iter()
+                    .map(|c| GuardianCandidateProps {
+                        id: c.id.clone(),
+                        name: c.name.clone(),
+                        is_current_guardian: c.is_current_guardian,
+                    })
+                    .collect();
+
+                Some(element! {
+                    GuardianSetupModal(
+                        visible: true,
+                        step: props.view.guardian_setup_modal_step.clone(),
+                        contacts: contacts,
+                        selected_indices: props.view.guardian_setup_modal_selected_indices.clone(),
+                        focused_index: props.view.guardian_setup_modal_focused_index,
+                        threshold_k: props.view.guardian_setup_modal_threshold_k,
+                        threshold_n: props.view.guardian_setup_modal_threshold_n,
+                        ceremony_responses: props.view.guardian_setup_modal_ceremony_responses.clone(),
+                        error: props.view.guardian_setup_modal_error.clone(),
                     )
                 })
             } else {
@@ -556,7 +500,7 @@ pub async fn run_contacts_screen() -> std::io::Result<()> {
             .with_status(ContactStatus::Active)
             .guardian(),
         Contact::new("c2", "Bob").with_status(ContactStatus::Active),
-        Contact::new("c3", "Charlie")
+        Contact::new("c3", "Carol")
             .with_status(ContactStatus::Pending)
             .with_suggestion("Charles"),
         Contact::new("c4", "Diana").with_status(ContactStatus::Blocked),

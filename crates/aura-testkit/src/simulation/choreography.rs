@@ -781,15 +781,14 @@ pub fn test_device_pair() -> ChoreographyTestHarness {
 
 /// Create a three-device test harness
 pub fn test_device_trio() -> ChoreographyTestHarness {
-    let mut harness =
-        ChoreographyTestHarness::with_labeled_devices(vec!["alice", "bob", "charlie"]);
+    let mut harness = ChoreographyTestHarness::with_labeled_devices(vec!["alice", "bob", "carol"]);
     harness
         .map_role("Alice", 0)
         .expect("Failed to map Alice role");
     harness.map_role("Bob", 1).expect("Failed to map Bob role");
     harness
-        .map_role("Charlie", 2)
-        .expect("Failed to map Charlie role");
+        .map_role("Carol", 2)
+        .expect("Failed to map Carol role");
     harness
 }
 
@@ -829,7 +828,7 @@ mod tests {
 
         assert!(harness.role_device_id("Alice").is_some());
         assert!(harness.role_device_id("Bob").is_some());
-        assert!(harness.role_device_id("Charlie").is_none());
+        assert!(harness.role_device_id("Carol").is_none());
     }
 
     #[tokio::test]

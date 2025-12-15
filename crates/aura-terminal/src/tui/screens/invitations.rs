@@ -9,6 +9,11 @@
 //! component automatically, triggering re-renders when data changes.
 //!
 //! Uses `aura_app::signal_defs::INVITATIONS_SIGNAL` with `ReactiveEffects::subscribe()`.
+//!
+//! ## Pure View Component
+//!
+//! This screen is a pure view that renders based on props from TuiState.
+//! All event handling is done by the parent TuiShell (IoApp) via the state machine.
 
 use iocraft::prelude::*;
 use std::{future::Future, pin::Pin, sync::Arc};
@@ -17,13 +22,12 @@ use aura_app::signal_defs::INVITATIONS_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::{
-    EmptyState, InvitationCodeModal, InvitationCodeState, InvitationCreateModal,
-    InvitationCreateState, InvitationImportModal, InvitationImportState,
+    EmptyState, InvitationCodeModal, InvitationCreateModal, InvitationImportModal,
 };
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{
-    is_nav_key_press, navigate_list, InputThrottle, NavKey, NavThrottle, TwoPanelFocus,
-};
+use crate::tui::layout::dim;
+use crate::tui::navigation::TwoPanelFocus;
+use crate::tui::props::InvitationsViewProps;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
     format_timestamp, Invitation, InvitationDirection, InvitationFilter, InvitationStatus,
@@ -276,11 +280,22 @@ pub fn InvitationDetail(props: &InvitationDetailProps) -> impl Into<AnyElement<'
 }
 
 /// Props for InvitationsScreen
+///
+/// ## Compile-Time Safety
+///
+/// The `view` field is a required struct that embeds all view state from TuiState.
+/// This makes it a **compile-time error** to forget any view state field.
 #[derive(Default, Props)]
 pub struct InvitationsScreenProps {
+    // === Domain data (from reactive signals) ===
     pub invitations: Vec<Invitation>,
-    pub filter: InvitationFilter,
-    pub selected_index: usize,
+
+    // === View state from TuiState (REQUIRED - compile-time enforced) ===
+    /// All view state extracted from TuiState via `extract_invitations_view_props()`.
+    /// This is a single struct field so forgetting any view state is a compile error.
+    pub view: InvitationsViewProps,
+
+    // === Callbacks (still needed for effect dispatch) ===
     /// Callback when accepting an invitation
     pub on_accept: Option<InvitationCallback>,
     /// Callback when declining an invitation
@@ -297,8 +312,8 @@ pub struct InvitationsScreenProps {
     pub demo_mode: bool,
     /// Alice's invite code for demo mode (press 'a' in import modal to fill)
     pub demo_alice_code: String,
-    /// Charlie's invite code for demo mode (press 'c' in import modal to fill)
-    pub demo_charlie_code: String,
+    /// Carol's invite code for demo mode (press 'c' in import modal to fill)
+    pub demo_carol_code: String,
 }
 
 /// Convert aura-app invitation type to TUI invitation type
@@ -358,6 +373,11 @@ fn convert_invitation(inv: &aura_app::views::Invitation) -> Invitation {
 
 /// The invitations screen
 ///
+/// ## Pure View Component
+///
+/// This screen is a pure view that renders based on props from TuiState.
+/// All event handling is done by the parent TuiShell (IoApp) via the state machine.
+///
 /// ## Reactive Updates
 ///
 /// When `AppCoreContext` is available in the context tree, this component will
@@ -379,20 +399,6 @@ pub fn InvitationsScreen(
         move || initial
     });
 
-    // State hooks must be called in consistent order - define all states first
-    let mut selected = hooks.use_state(|| props.selected_index);
-    let mut filter = hooks.use_state(|| props.filter);
-    let mut panel_focus = hooks.use_state(|| TwoPanelFocus::List);
-
-    // Modal state for creating new invitations
-    let create_modal_state = hooks.use_state(InvitationCreateState::new);
-
-    // Modal state for displaying invitation code
-    let code_modal_state = hooks.use_state(InvitationCodeState::new);
-
-    // Modal state for importing invitation code
-    let import_modal_state = hooks.use_state(InvitationImportState::new);
-
     // Subscribe to invitations signal updates if AppCoreContext is available
     // Uses the unified ReactiveEffects system from aura-core
     if let Some(ref ctx) = app_ctx {
@@ -400,7 +406,23 @@ pub fn InvitationsScreen(
             let mut reactive_invitations = reactive_invitations.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // Get a subscription to the invitations signal via ReactiveEffects
+                // FIRST: Read current signal value to catch up on any changes
+                // that happened while this screen was unmounted
+                {
+                    let core = app_core.read().await;
+                    if let Ok(invitations_state) = core.read(&*INVITATIONS_SIGNAL).await {
+                        let all_invitations: Vec<Invitation> = invitations_state
+                            .pending
+                            .iter()
+                            .chain(invitations_state.sent.iter())
+                            .chain(invitations_state.history.iter())
+                            .map(convert_invitation)
+                            .collect();
+                        reactive_invitations.set(all_invitations);
+                    }
+                }
+
+                // THEN: Subscribe for future updates
                 let mut stream = {
                     let core = app_core.read().await;
                     core.subscribe(&*INVITATIONS_SIGNAL)
@@ -423,18 +445,15 @@ pub fn InvitationsScreen(
         });
     }
 
-    // Invitation code export completion is handled through the
-    // OperationalHandler's direct response (OpResponse::InvitationCode), and
-    // the export callback updates the code modal state directly.
-
     // Use reactive state for rendering
     let all_invitations = reactive_invitations.read().clone();
 
-    let is_create_modal_visible = create_modal_state.read().visible;
-    let is_code_modal_visible = code_modal_state.read().visible;
-    let is_import_modal_visible = import_modal_state.read().visible;
+    // === Pure view: Use props.view from TuiState instead of local state ===
+    let is_create_modal_visible = props.view.create_modal_visible;
+    let is_code_modal_visible = props.view.code_modal_visible;
+    let is_import_modal_visible = props.view.import_modal_visible;
 
-    let current_filter = filter.get();
+    let current_filter = props.view.filter;
 
     // Filter invitations
     let filtered: Vec<Invitation> = all_invitations
@@ -447,347 +466,98 @@ pub fn InvitationsScreen(
         .cloned()
         .collect();
 
-    let current_selected = selected.get();
-    let current_focus = panel_focus.get();
+    let current_selected = props.view.selected_index;
+    let current_focus = props.view.focus;
     let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let selected_invitation = filtered.get(current_selected).cloned();
 
-    // Clone callbacks for event handler
-    let on_accept = props.on_accept.clone();
-    let on_decline = props.on_decline.clone();
-    let on_create = props.on_create.clone();
-    let on_export = props.on_export.clone();
-    let on_import = props.on_import.clone();
-
-    // Demo mode settings (for auto-fill shortcuts)
+    // Demo mode settings
     let demo_mode = props.demo_mode;
-    let demo_alice_code = props.demo_alice_code.clone();
-    let demo_charlie_code = props.demo_charlie_code.clone();
 
-    // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
+    // === Pure view: No use_terminal_events ===
+    // All event handling is done by IoApp (the shell) via the state machine.
+    // This component is purely presentational.
 
-    // Throttle for text input - persists across renders
-    let mut input_throttle = hooks.use_ref(InputThrottle::new);
-
-    hooks.use_terminal_events({
-        let mut create_modal_state = create_modal_state.clone();
-        let mut code_modal_state = code_modal_state.clone();
-        let mut import_modal_state = import_modal_state.clone();
-        let on_create = on_create.clone();
-        let on_export = on_export.clone();
-        let on_import = on_import.clone();
-        let count = filtered.len();
-        let filtered_for_handler = filtered.clone();
-        move |event| {
-            // Check if any modal is visible - if so, handle modal keys
-            let create_modal_visible = create_modal_state.read().visible;
-            let code_modal_visible = code_modal_state.read().visible;
-            let import_modal_visible = import_modal_state.read().visible;
-            let any_modal_visible =
-                create_modal_visible || code_modal_visible || import_modal_visible;
-
-            // Handle navigation keys first (only when no modal is visible)
-            if !any_modal_visible {
-                if let Some(nav_key) = is_nav_key_press(&event) {
-                    if nav_throttle.write().try_navigate() {
-                        match nav_key {
-                            // Horizontal: toggle between list and detail
-                            NavKey::Left | NavKey::Right => {
-                                let new_focus = panel_focus.get().navigate(nav_key);
-                                panel_focus.set(new_focus);
-                            }
-                            // Vertical: navigate within list when list is focused
-                            NavKey::Up | NavKey::Down => {
-                                if panel_focus.get() == TwoPanelFocus::List && count > 0 {
-                                    let new_idx = navigate_list(selected.get(), count, nav_key);
-                                    selected.set(new_idx);
-                                }
-                            }
-                        }
-                    }
-                    return;
-                }
-            }
-
-            match event {
-                TerminalEvent::Key(KeyEvent { code, .. }) => {
-                    if code_modal_visible {
-                        // Code modal is open - only Esc closes it
-                        if matches!(code, KeyCode::Esc) {
-                            let mut state = code_modal_state.read().clone();
-                            state.hide();
-                            code_modal_state.set(state);
-                        }
-                    } else if import_modal_visible {
-                        // Import modal is open - handle text input
-                        // In demo mode, when input is empty: 'a' fills Alice code, 'c' fills Charlie code
-                        match code {
-                            KeyCode::Esc => {
-                                // Close modal
-                                let mut state = import_modal_state.read().clone();
-                                state.hide();
-                                import_modal_state.set(state);
-                            }
-                            KeyCode::Enter => {
-                                // Submit - import invitation
-                                let state = import_modal_state.read().clone();
-                                if state.can_submit() {
-                                    if let Some(ref callback) = on_import {
-                                        callback(state.code.clone());
-                                    }
-                                    // Close modal after submit
-                                    let mut state = import_modal_state.read().clone();
-                                    state.hide();
-                                    import_modal_state.set(state);
-                                }
-                            }
-                            KeyCode::Backspace => {
-                                // Delete character (with throttle)
-                                if input_throttle.write().try_input() {
-                                    let mut state = import_modal_state.read().clone();
-                                    state.pop_char();
-                                    import_modal_state.set(state);
-                                }
-                            }
-                            KeyCode::Char(c) => {
-                                // Demo mode shortcuts don't need throttle (they fill entire code)
-                                let state = import_modal_state.read().clone();
-                                if demo_mode && state.code.is_empty() {
-                                    if c == 'a' || c == 'A' {
-                                        let mut state = state.clone();
-                                        state.code = demo_alice_code.clone();
-                                        import_modal_state.set(state);
-                                        return;
-                                    } else if c == 'c' || c == 'C' {
-                                        let mut state = state.clone();
-                                        state.code = demo_charlie_code.clone();
-                                        import_modal_state.set(state);
-                                        return;
-                                    }
-                                }
-                                // Normal character input (with throttle)
-                                if input_throttle.write().try_input() {
-                                    let mut state = state.clone();
-                                    state.push_char(c);
-                                    import_modal_state.set(state);
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else if create_modal_visible {
-                        // Create modal is open - handle modal-specific keys
-                        match code {
-                            KeyCode::Esc => {
-                                // Close modal
-                                let mut state = create_modal_state.read().clone();
-                                state.hide();
-                                create_modal_state.set(state);
-                            }
-                            KeyCode::Tab => {
-                                // Cycle invitation type
-                                let mut state = create_modal_state.read().clone();
-                                state.next_type();
-                                create_modal_state.set(state);
-                            }
-                            KeyCode::BackTab => {
-                                // Cycle invitation type backwards
-                                let mut state = create_modal_state.read().clone();
-                                state.prev_type();
-                                create_modal_state.set(state);
-                            }
-                            KeyCode::Char('t') => {
-                                // Cycle TTL
-                                let mut state = create_modal_state.read().clone();
-                                state.cycle_ttl();
-                                create_modal_state.set(state);
-                            }
-                            KeyCode::Enter => {
-                                // Submit - create invitation
-                                let state = create_modal_state.read().clone();
-                                if state.can_submit() {
-                                    if let Some(ref callback) = on_create {
-                                        let inv_type = format!("{:?}", state.invitation_type);
-                                        let message = state.get_message().map(|s| s.to_string());
-                                        let ttl = state.ttl_secs();
-                                        callback(inv_type, message, ttl);
-                                    }
-                                    // Close modal after submit
-                                    let mut state = create_modal_state.read().clone();
-                                    state.hide();
-                                    create_modal_state.set(state);
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        // Normal screen keys (non-navigation hotkeys)
-                        match code {
-                            KeyCode::Char('f') => {
-                                // Cycle filter: All -> Sent -> Received -> All
-                                filter.set(filter.get().next());
-                                selected.set(0);
-                            }
-                            KeyCode::Enter => {
-                                panel_focus.set(TwoPanelFocus::Detail);
-                            }
-                            KeyCode::Char('n') => {
-                                // Open new invitation modal
-                                let mut state = create_modal_state.read().clone();
-                                state.show();
-                                create_modal_state.set(state);
-                            }
-                            KeyCode::Char('e') => {
-                                // Export selected invitation code
-                                if let Some(callback) = on_export.clone() {
-                                    if let Some(inv) = filtered_for_handler.get(selected.get()) {
-                                        if inv.direction == InvitationDirection::Outbound {
-                                            let invitation_id = inv.id.clone();
-                                            let invitation_type =
-                                                inv.invitation_type.label().to_string();
-                                            let mut code_modal_state = code_modal_state.clone();
-                                            tokio::spawn(async move {
-                                                match callback(invitation_id.clone()).await {
-                                                    Ok(code) => {
-                                                        let mut state =
-                                                            code_modal_state.read().clone();
-                                                        state.show(
-                                                            invitation_id,
-                                                            invitation_type,
-                                                            code,
-                                                        );
-                                                        code_modal_state.set(state);
-                                                    }
-                                                    Err(err) => {
-                                                        tracing::warn!(
-                                                            "Failed to export invitation code: {}",
-                                                            err
-                                                        );
-                                                    }
-                                                }
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                            KeyCode::Char('i') => {
-                                // Open import invitation modal
-                                let mut state = import_modal_state.read().clone();
-                                state.show();
-                                import_modal_state.set(state);
-                            }
-                            KeyCode::Char('a') => {
-                                // Accept selected invitation
-                                if let Some(ref callback) = on_accept {
-                                    if let Some(inv) = filtered_for_handler.get(selected.get()) {
-                                        // Only accept received pending invitations
-                                        if inv.direction == InvitationDirection::Inbound
-                                            && inv.status == InvitationStatus::Pending
-                                        {
-                                            callback(inv.id.clone());
-                                        }
-                                    }
-                                }
-                            }
-                            KeyCode::Char('d') => {
-                                // Decline selected invitation
-                                if let Some(ref callback) = on_decline {
-                                    if let Some(inv) = filtered_for_handler.get(selected.get()) {
-                                        // Only decline received pending invitations
-                                        if inv.direction == InvitationDirection::Inbound
-                                            && inv.status == InvitationStatus::Pending
-                                        {
-                                            callback(inv.id.clone());
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    });
-
+    // Layout: FilterTabs (2 rows) + Main content (23 rows) = 25 = MIDDLE_HEIGHT
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            width: 100pct,
-            height: 100pct,
-            flex_grow: 1.0,
-            flex_shrink: 1.0,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Filter tabs
-            FilterTabs(filter: current_filter)
+            // Filter tabs (2 rows: 1 content + 1 border)
+            View(height: 2) {
+                FilterTabs(filter: current_filter)
+            }
 
-            // Main content: list + detail
+            // Main content: list + detail (23 rows)
             View(
                 flex_direction: FlexDirection::Row,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
+                height: 23,
                 overflow: Overflow::Hidden,
                 gap: Spacing::XS,
             ) {
-                // List (30%)
-                View(width: 30pct) {
+                // List (24 chars = 30% of 80)
+                View(width: 24) {
                     InvitationList(
                         invitations: filtered.clone(),
                         selected_index: current_selected,
                         focused: !is_detail_focused,
                     )
                 }
-                // Detail (75%)
+                // Detail (remaining width ~55 chars)
                 InvitationDetail(
                     invitation: selected_invitation,
                     focused: is_detail_focused,
                 )
             }
 
-            // Create invitation modal (overlays everything)
+            // Create invitation modal (overlays everything) - uses props.view from TuiState
             #(if is_create_modal_visible {
-                let modal_state = create_modal_state.read().clone();
+                // Convert type index to InvitationType
+                let invitation_type = match props.view.create_modal_type_index {
+                    0 => InvitationType::Guardian,
+                    1 => InvitationType::Contact,
+                    _ => InvitationType::Channel,
+                };
                 Some(element! {
                     InvitationCreateModal(
                         visible: true,
                         focused: true,
-                        creating: modal_state.creating,
-                        error: modal_state.error.clone().unwrap_or_default(),
-                        invitation_type: modal_state.invitation_type,
-                        message: modal_state.message.clone(),
-                        ttl_hours: modal_state.ttl_hours,
+                        creating: false,
+                        error: String::new(),
+                        invitation_type: invitation_type,
+                        message: props.view.create_modal_message.clone(),
+                        ttl_hours: props.view.create_modal_ttl_hours as u32,
                     )
                 })
             } else {
                 None
             })
 
-            // Invitation code modal (overlays everything)
+            // Invitation code modal (overlays everything) - uses props.view from TuiState
             #(if is_code_modal_visible {
-                let modal_state = code_modal_state.read().clone();
                 Some(element! {
                     InvitationCodeModal(
                         visible: true,
-                        code: modal_state.code.clone(),
-                        invitation_type: modal_state.invitation_type.clone(),
+                        code: props.view.code_modal_code.clone(),
+                        invitation_type: "Guardian".to_string(),
                     )
                 })
             } else {
                 None
             })
 
-            // Import invitation modal (overlays everything)
+            // Import invitation modal (overlays everything) - uses props.view from TuiState
             #(if is_import_modal_visible {
-                let modal_state = import_modal_state.read().clone();
                 Some(element! {
                     InvitationImportModal(
                         visible: true,
                         focused: true,
-                        code: modal_state.code.clone(),
-                        error: modal_state.error.clone().unwrap_or_default(),
-                        importing: modal_state.importing,
+                        code: props.view.import_modal_code.clone(),
+                        error: String::new(),
+                        importing: props.view.import_modal_importing,
                         demo_mode: demo_mode,
                     )
                 })
@@ -799,6 +569,7 @@ pub fn InvitationsScreen(
 }
 
 /// Run the invitations screen with sample data
+#[allow(dead_code)]
 pub async fn run_invitations_screen() -> std::io::Result<()> {
     let invitations = vec![
         Invitation::new("1", "Alice", InvitationDirection::Outbound)
@@ -807,7 +578,7 @@ pub async fn run_invitations_screen() -> std::io::Result<()> {
         Invitation::new("2", "Bob", InvitationDirection::Inbound)
             .with_status(InvitationStatus::Pending)
             .with_message("Requesting guardian access"),
-        Invitation::new("3", "Charlie", InvitationDirection::Outbound)
+        Invitation::new("3", "Carol", InvitationDirection::Outbound)
             .with_status(InvitationStatus::Accepted),
         Invitation::new("4", "Diana", InvitationDirection::Inbound)
             .with_status(InvitationStatus::Declined),
@@ -818,8 +589,6 @@ pub async fn run_invitations_screen() -> std::io::Result<()> {
     element! {
         InvitationsScreen(
             invitations: invitations,
-            filter: InvitationFilter::All,
-            selected_index: 0usize,
         )
     }
     .fullscreen()

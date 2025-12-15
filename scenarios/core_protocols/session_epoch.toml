@@ -21,7 +21,7 @@ name = "session_establishment"
 description = "Establish initial session with epoch 1"
 timeout_seconds = 3
 actions = [
-    { type = "run_choreography", choreography = "session_establishment", participants = ["alice", "bob", "charlie", "dave"], threshold = 3 }
+    { type = "run_choreography", choreography = "session_establishment", participants = ["alice", "bob", "carol", "dave"], threshold = 3 }
 ]
 
 [[phases]]
@@ -29,7 +29,7 @@ name = "presence_distribution"
 description = "Distribute initial presence tickets"
 timeout_seconds = 2
 actions = [
-    { type = "run_choreography", choreography = "presence_ticket_distribution", participants = ["alice", "bob", "charlie", "dave"] }
+    { type = "run_choreography", choreography = "presence_ticket_distribution", participants = ["alice", "bob", "carol", "dave"] }
 ]
 
 [[phases]]
@@ -37,7 +37,7 @@ name = "epoch_increment"
 description = "Increment session epoch and invalidate old tickets"
 timeout_seconds = 3
 actions = [
-    { type = "run_choreography", choreography = "epoch_increment", participants = ["alice", "bob", "charlie", "dave"], threshold = 3 }
+    { type = "run_choreography", choreography = "epoch_increment", participants = ["alice", "bob", "carol", "dave"], threshold = 3 }
 ]
 
 [[phases]]
@@ -45,7 +45,7 @@ name = "new_presence_issuance"
 description = "Issue new presence tickets for epoch 2"
 timeout_seconds = 2
 actions = [
-    { type = "run_choreography", choreography = "presence_ticket_distribution", participants = ["alice", "bob", "charlie", "dave"] },
+    { type = "run_choreography", choreography = "presence_ticket_distribution", participants = ["alice", "bob", "carol", "dave"] },
     { type = "verify_property", property = "epoch_monotonic_increase", expected = true },
     { type = "verify_property", property = "old_tickets_invalidated", expected = true }
 ]

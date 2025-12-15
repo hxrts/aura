@@ -801,11 +801,11 @@ async fn simulate_cli_recovery_demo(
     // Run guardian setup choreography via recovery coordinator using simulation effects
     run_guardian_setup_choreography(ctx, &mut steps).await?;
 
-    // Phase 1: Alice & Charlie pre-setup (log only)
+    // Phase 1: Alice & Carol pre-setup (log only)
     steps.push(SimStep {
-        phase: "alice_charlie_setup".into(),
+        phase: "alice_carol_setup".into(),
         action: "create_accounts".into(),
-        details: Some("Alice and Charlie accounts created".into()),
+        details: Some("Alice and Carol accounts created".into()),
     });
 
     // Phase 2: Requests and acceptance to become guardians
@@ -826,25 +826,25 @@ async fn simulate_cli_recovery_demo(
     });
     steps.push(SimStep {
         phase: "bob_onboarding".into(),
-        action: "guardian_request_charlie".into(),
-        details: Some("Bob requests Charlie to be guardian".into()),
+        action: "guardian_request_carol".into(),
+        details: Some("Bob requests Carol to be guardian".into()),
     });
     steps.push(SimStep {
         phase: "bob_onboarding".into(),
-        action: "guardian_accept_charlie".into(),
-        details: Some("Charlie accepts guardian responsibility".into()),
+        action: "guardian_accept_carol".into(),
+        details: Some("Carol accepts guardian responsibility".into()),
     });
     steps.push(SimStep {
         phase: "bob_onboarding".into(),
         action: "guardian_authority_configuration".into(),
-        details: Some("Alice+Charlie become guardian authority for Bob".into()),
+        details: Some("Alice+Carol become guardian authority for Bob".into()),
     });
 
     // Phase 3-4: group chat setup and initial messaging
     let group_id = handler.create_chat_group(
-        "Alice, Bob & Charlie",
+        "Alice, Bob & Carol",
         "alice",
-        vec!["bob".into(), "charlie".into()],
+        vec!["bob".into(), "carol".into()],
     )?;
     steps.push(SimStep {
         phase: "group_chat_setup".into(),
@@ -857,7 +857,7 @@ async fn simulate_cli_recovery_demo(
         ("group_messaging", "bob", "Thanks Alice! Great to be here."),
         (
             "group_messaging",
-            "charlie",
+            "carol",
             "Hey everyone! This chat system is awesome.",
         ),
         (
@@ -889,11 +889,11 @@ async fn simulate_cli_recovery_demo(
     });
 
     // Phase 6-7: recovery
-    handler.initiate_guardian_recovery("bob", vec!["alice".into(), "charlie".into()], 2)?;
+    handler.initiate_guardian_recovery("bob", vec!["alice".into(), "carol".into()], 2)?;
     steps.push(SimStep {
         phase: "recovery_initiation".into(),
         action: "initiate_guardian_recovery".into(),
-        details: Some("Alice and Charlie assist recovery".into()),
+        details: Some("Alice and Carol assist recovery".into()),
     });
 
     let recovery_success = handler.verify_recovery_success(
@@ -915,7 +915,7 @@ async fn simulate_cli_recovery_demo(
         (
             "post_recovery_messaging",
             "bob",
-            "I'm back! Thanks Alice and Charlie for helping me recover.",
+            "I'm back! Thanks Alice and Carol for helping me recover.",
         ),
         (
             "post_recovery_messaging",
@@ -924,7 +924,7 @@ async fn simulate_cli_recovery_demo(
         ),
         (
             "post_recovery_messaging",
-            "charlie",
+            "carol",
             "Amazing! You can see all our previous messages too.",
         ),
     ];
@@ -979,7 +979,7 @@ async fn run_guardian_setup_choreography(
 
     let guardians = GuardianSet::new(vec![
         GuardianProfile::with_label(crate::ids::authority_id("guardian:alice"), "alice"),
-        GuardianProfile::with_label(crate::ids::authority_id("guardian:charlie"), "charlie"),
+        GuardianProfile::with_label(crate::ids::authority_id("guardian:carol"), "carol"),
     ]);
 
     let timestamp = 0;

@@ -46,6 +46,7 @@ pub mod epochs;
 pub mod fact_sync;
 pub mod journal;
 pub mod ota;
+pub mod ota_ceremony;
 pub mod receipts;
 pub mod snapshots;
 
@@ -56,7 +57,8 @@ pub mod namespaced_sync;
 // Re-export key types for convenience
 pub use anti_entropy::{
     AntiEntropyConfig, AntiEntropyProtocol, AntiEntropyRequest, AntiEntropyResult, DigestStatus,
-    JournalDigest,
+    JournalDigest, LoggingProgressCallback, NoOpProgressCallback, SyncProgressCallback,
+    SyncProgressEvent,
 };
 
 pub use journal::{
@@ -75,6 +77,12 @@ pub use receipts::{ReceiptVerificationConfig, ReceiptVerificationProtocol, Verif
 pub use epochs::{
     EpochCommit, EpochConfig, EpochConfirmation, EpochRotation, EpochRotationCoordinator,
     EpochRotationProposal, RotationStatus,
+};
+
+pub use ota_ceremony::{
+    OTACeremonyConfig, OTACeremonyEffects, OTACeremonyExecutor, OTACeremonyFact, OTACeremonyId,
+    OTACeremonyState, OTACeremonyStatus, ReadinessCommitment,
+    UpgradeProposal as CeremonyUpgradeProposal,
 };
 
 pub use fact_sync::{FactSyncConfig, FactSyncProtocol, FactSyncResult, FactSyncStats};

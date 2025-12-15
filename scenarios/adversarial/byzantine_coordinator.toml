@@ -27,7 +27,7 @@ description = "Start FROST protocol with byzantine coordinator"
 timeout_seconds = 5
 actions = [
     { type = "inject_byzantine", participant = "alice", behavior = "conflicting_messages" },
-    { type = "run_choreography", choreography = "frost_signing", participants = ["alice", "bob", "charlie", "dave", "eve"], threshold = 3 }
+    { type = "run_choreography", choreography = "frost_signing", participants = ["alice", "bob", "carol", "dave", "eve"], threshold = 3 }
 ]
 
 [[phases]]

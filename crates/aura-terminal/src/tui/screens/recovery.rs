@@ -9,6 +9,11 @@
 //! component automatically, triggering re-renders when data changes.
 //!
 //! Uses `aura_app::signal_defs::RECOVERY_SIGNAL` with `ReactiveEffects::subscribe()`.
+//!
+//! ## Pure View Component
+//!
+//! This screen is a pure view that renders based on props from TuiState.
+//! All event handling is done by the parent TuiShell (IoApp) via the state machine.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
@@ -18,7 +23,8 @@ use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::EmptyState;
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
+use crate::tui::layout::dim;
+use crate::tui::props::RecoveryViewProps;
 use crate::tui::theme::{Icons, Spacing, Theme};
 use crate::tui::types::{
     Guardian, GuardianApproval, GuardianStatus, PendingRequest, RecoveryState, RecoveryStatus,
@@ -341,14 +347,27 @@ pub fn PendingRequestsPanel(props: &PendingRequestsPanelProps) -> impl Into<AnyE
 }
 
 /// Props for RecoveryScreen
+///
+/// ## Compile-Time Safety
+///
+/// The `view` field is a required struct that embeds all view state from TuiState.
+/// This makes it a **compile-time error** to forget any view state field.
 #[derive(Default, Props)]
 pub struct RecoveryScreenProps {
+    // === Domain data (from reactive signals) ===
     pub guardians: Vec<Guardian>,
     pub threshold_required: u32,
     pub threshold_total: u32,
     pub recovery_status: RecoveryStatus,
     /// Pending recovery requests from others (we are their guardian)
     pub pending_requests: Vec<PendingRequest>,
+
+    // === View state from TuiState (REQUIRED - compile-time enforced) ===
+    /// All view state extracted from TuiState via `extract_recovery_view_props()`.
+    /// This is a single struct field so forgetting any view state is a compile error.
+    pub view: RecoveryViewProps,
+
+    // === Callbacks ===
     /// Callback when starting recovery
     pub on_start_recovery: Option<RecoveryCallback>,
     /// Callback when adding a guardian
@@ -423,6 +442,11 @@ fn convert_recovery_status(
 
 /// The recovery screen
 ///
+/// ## Pure View Component
+///
+/// This screen is a pure view that renders based on props from TuiState.
+/// All event handling is done by the parent TuiShell (IoApp) via the state machine.
+///
 /// ## Reactive Updates
 ///
 /// When `AppCoreContext` is available in the context tree, this component will
@@ -465,7 +489,47 @@ pub fn RecoveryScreen(
             let mut reactive_pending_requests = reactive_pending_requests.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // Get a subscription to the recovery signal via ReactiveEffects
+                // Helper closure to convert RecoveryState to TUI types
+                let convert_recovery_state = |recovery_state: &aura_app::views::RecoveryState| {
+                    let guardians: Vec<Guardian> = recovery_state
+                        .guardians
+                        .iter()
+                        .map(convert_guardian)
+                        .collect();
+
+                    let status = convert_recovery_status(recovery_state, &recovery_state.guardians);
+
+                    let pending: Vec<PendingRequest> = recovery_state
+                        .pending_requests
+                        .iter()
+                        .map(|p| PendingRequest::from(p))
+                        .collect();
+
+                    (
+                        guardians,
+                        recovery_state.threshold,
+                        recovery_state.guardian_count,
+                        status,
+                        pending,
+                    )
+                };
+
+                // FIRST: Read current signal value to catch up on any changes
+                // that happened while this screen was unmounted
+                {
+                    let core = app_core.read().await;
+                    if let Ok(recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
+                        let (guardians, threshold, total, status, pending) =
+                            convert_recovery_state(&recovery_state);
+                        reactive_guardians.set(guardians);
+                        reactive_threshold_required.set(threshold);
+                        reactive_threshold_total.set(total);
+                        reactive_recovery_status.set(status);
+                        reactive_pending_requests.set(pending);
+                    }
+                }
+
+                // THEN: Subscribe for future updates
                 let mut stream = {
                     let core = app_core.read().await;
                     core.subscribe(&*RECOVERY_SIGNAL)
@@ -473,27 +537,11 @@ pub fn RecoveryScreen(
 
                 // Subscribe to signal updates - runs until component unmounts
                 while let Ok(recovery_state) = stream.recv().await {
-                    // Convert guardians
-                    let guardians: Vec<Guardian> = recovery_state
-                        .guardians
-                        .iter()
-                        .map(convert_guardian)
-                        .collect();
-
-                    // Convert recovery status
-                    let status =
-                        convert_recovery_status(&recovery_state, &recovery_state.guardians);
-
-                    // Convert pending requests (requests from others that we can approve)
-                    let pending: Vec<PendingRequest> = recovery_state
-                        .pending_requests
-                        .iter()
-                        .map(|p| PendingRequest::from(p))
-                        .collect();
-
+                    let (guardians, threshold, total, status, pending) =
+                        convert_recovery_state(&recovery_state);
                     reactive_guardians.set(guardians);
-                    reactive_threshold_required.set(recovery_state.threshold);
-                    reactive_threshold_total.set(recovery_state.guardian_count);
+                    reactive_threshold_required.set(threshold);
+                    reactive_threshold_total.set(total);
                     reactive_recovery_status.set(status);
                     reactive_pending_requests.set(pending);
                 }
@@ -508,112 +556,34 @@ pub fn RecoveryScreen(
     let recovery_status = reactive_recovery_status.read().clone();
     let pending_requests = reactive_pending_requests.read().clone();
 
-    let mut active_tab = hooks.use_state(|| RecoveryTab::Guardians);
-    let mut guardian_index = hooks.use_state(|| 0usize);
-    let mut request_index = hooks.use_state(|| 0usize);
-
-    let current_tab = active_tab.get();
-    let current_guardian_index = guardian_index.get();
-    let current_request_index = request_index.get();
-    let guardian_count = guardians.len();
+    // === Pure view: Use props.view from TuiState instead of local state ===
+    let current_tab = props.view.tab;
+    let current_guardian_index = props.view.selected_index;
+    let current_request_index = props.view.selected_index;
     let request_count = pending_requests.len();
 
-    // Clone callbacks for event handler
-    let on_start_recovery = props.on_start_recovery.clone();
-    let on_add_guardian = props.on_add_guardian.clone();
-    let on_submit_approval = props.on_submit_approval.clone();
+    // === Pure view: No use_terminal_events ===
+    // All event handling is done by IoApp (the shell) via the state machine.
+    // This component is purely presentational.
 
-    // Clone pending_requests for approval submission
-    let requests_for_approval = pending_requests.clone();
-
-    // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
-
-    hooks.use_terminal_events({
-        move |event| {
-            // Handle navigation keys first
-            if let Some(nav_key) = is_nav_key_press(&event) {
-                if nav_throttle.write().try_navigate() {
-                    match nav_key {
-                        // Horizontal: switch between tabs using prev/next
-                        NavKey::Left => {
-                            let current = active_tab.get();
-                            active_tab.set(current.prev());
-                        }
-                        NavKey::Right => {
-                            let current = active_tab.get();
-                            active_tab.set(current.next());
-                        }
-                        // Vertical: navigate within list based on active tab
-                        NavKey::Up | NavKey::Down => match active_tab.get() {
-                            RecoveryTab::Guardians if guardian_count > 0 => {
-                                let new_idx =
-                                    navigate_list(guardian_index.get(), guardian_count, nav_key);
-                                guardian_index.set(new_idx);
-                            }
-                            RecoveryTab::Requests if request_count > 0 => {
-                                let new_idx =
-                                    navigate_list(request_index.get(), request_count, nav_key);
-                                request_index.set(new_idx);
-                            }
-                            _ => {}
-                        },
-                    }
-                }
-                return;
-            }
-
-            // Handle other keys
-            match event {
-                TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                    // Add guardian - triggers callback
-                    KeyCode::Char('a') => {
-                        if let Some(ref callback) = on_add_guardian {
-                            callback();
-                        }
-                    }
-                    // Start recovery - triggers callback
-                    KeyCode::Char('s') => {
-                        if let Some(ref callback) = on_start_recovery {
-                            callback();
-                        }
-                    }
-                    // Enter: approve selected request on Requests tab
-                    KeyCode::Enter => {
-                        if active_tab.get() == RecoveryTab::Requests {
-                            if let Some(request) = requests_for_approval.get(request_index.get()) {
-                                if !request.we_approved {
-                                    if let Some(ref callback) = on_submit_approval {
-                                        callback(request.id.clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
-    });
-
+    // Layout: TabBar (2 rows) + Content (23 rows) = 25 = MIDDLE_HEIGHT
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            width: 100pct,
-            height: 100pct,
-            flex_grow: 1.0,
-            flex_shrink: 1.0,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Tab bar with pending count badge
-            TabBar(active_tab: current_tab, pending_count: request_count)
+            // Tab bar with pending count badge (2 rows: 1 content + 1 border)
+            View(height: 2) {
+                TabBar(active_tab: current_tab, pending_count: request_count)
+            }
 
-            // Content based on active tab
-            View(flex_grow: 1.0, flex_shrink: 1.0, overflow: Overflow::Hidden) {
+            // Content based on active tab (23 rows)
+            View(height: 23, overflow: Overflow::Hidden) {
                 #(match current_tab {
                     RecoveryTab::Guardians => vec![element! {
-                        View(flex_grow: 1.0) {
+                        View(height: 23) {
                             GuardiansPanel(
                                 guardians: guardians.clone(),
                                 selected_index: current_guardian_index,
@@ -623,12 +593,12 @@ pub fn RecoveryScreen(
                         }
                     }],
                     RecoveryTab::Recovery => vec![element! {
-                        View(flex_grow: 1.0) {
+                        View(height: 23) {
                             RecoveryPanel(status: recovery_status.clone())
                         }
                     }],
                     RecoveryTab::Requests => vec![element! {
-                        View(flex_grow: 1.0) {
+                        View(height: 23) {
                             PendingRequestsPanel(
                                 requests: pending_requests.clone(),
                                 selected_index: current_request_index,
@@ -650,7 +620,7 @@ pub async fn run_recovery_screen() -> std::io::Result<()> {
         Guardian::new("g2", "Bob")
             .with_status(GuardianStatus::Active)
             .with_share(),
-        Guardian::new("g3", "Charlie").with_status(GuardianStatus::Pending),
+        Guardian::new("g3", "Carol").with_status(GuardianStatus::Pending),
     ];
 
     let recovery_status = RecoveryStatus {

@@ -112,6 +112,40 @@ pub enum ChatFact {
         /// Timestamp when message was read (uses unified time system)
         read_at: PhysicalTime,
     },
+    /// Message delivered to a recipient's device
+    ///
+    /// This fact is created when a message is successfully received by the
+    /// recipient's device, before they have read it. It enables the sender
+    /// to show "delivered" status (double checkmark) in the UI.
+    MessageDelivered {
+        /// Relational context of the message
+        context_id: ContextId,
+        /// Channel containing the message
+        channel_id: ChannelId,
+        /// Message that was delivered
+        message_id: String,
+        /// Authority that the message was delivered to
+        recipient_id: AuthorityId,
+        /// Device that received the message (optional - for multi-device scenarios)
+        device_id: Option<String>,
+        /// Timestamp when message was delivered (uses unified time system)
+        delivered_at: PhysicalTime,
+    },
+    /// Delivery receipt acknowledgment from sender
+    ///
+    /// This fact is created when the sender acknowledges receipt of a
+    /// `MessageDelivered` fact. This closes the delivery receipt loop
+    /// and is used for garbage collection of pending receipts.
+    DeliveryAcknowledged {
+        /// Relational context of the message
+        context_id: ContextId,
+        /// Channel containing the message
+        channel_id: ChannelId,
+        /// Message whose delivery was acknowledged
+        message_id: String,
+        /// Timestamp when acknowledgment was sent (uses unified time system)
+        acknowledged_at: PhysicalTime,
+    },
 }
 
 impl ChatFact {
@@ -122,6 +156,10 @@ impl ChatFact {
             ChatFact::ChannelClosed { closed_at, .. } => closed_at.ts_ms,
             ChatFact::MessageSent { sent_at, .. } => sent_at.ts_ms,
             ChatFact::MessageRead { read_at, .. } => read_at.ts_ms,
+            ChatFact::MessageDelivered { delivered_at, .. } => delivered_at.ts_ms,
+            ChatFact::DeliveryAcknowledged {
+                acknowledged_at, ..
+            } => acknowledged_at.ts_ms,
         }
     }
 
@@ -213,6 +251,54 @@ impl ChatFact {
             },
         }
     }
+
+    /// Create a MessageDelivered fact with millisecond timestamp (backward compatibility)
+    ///
+    /// This fact records when a message was successfully received by the recipient's
+    /// device, before they have read it. The optional `device_id` supports multi-device
+    /// scenarios where delivery tracking is per-device.
+    pub fn message_delivered_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        recipient_id: AuthorityId,
+        device_id: Option<String>,
+        delivered_at_ms: u64,
+    ) -> Self {
+        Self::MessageDelivered {
+            context_id,
+            channel_id,
+            message_id,
+            recipient_id,
+            device_id,
+            delivered_at: PhysicalTime {
+                ts_ms: delivered_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a DeliveryAcknowledged fact with millisecond timestamp (backward compatibility)
+    ///
+    /// This fact is created when the sender acknowledges receipt of a `MessageDelivered`
+    /// fact, closing the delivery receipt loop. This enables garbage collection of
+    /// pending delivery receipts.
+    pub fn delivery_acknowledged_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        acknowledged_at_ms: u64,
+    ) -> Self {
+        Self::DeliveryAcknowledged {
+            context_id,
+            channel_id,
+            message_id,
+            acknowledged_at: PhysicalTime {
+                ts_ms: acknowledged_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
 }
 
 impl DomainFact for ChatFact {
@@ -226,6 +312,8 @@ impl DomainFact for ChatFact {
             ChatFact::ChannelClosed { context_id, .. } => *context_id,
             ChatFact::MessageSent { context_id, .. } => *context_id,
             ChatFact::MessageRead { context_id, .. } => *context_id,
+            ChatFact::MessageDelivered { context_id, .. } => *context_id,
+            ChatFact::DeliveryAcknowledged { context_id, .. } => *context_id,
         }
     }
 
@@ -278,6 +366,14 @@ impl FactReducer for ChatFactReducer {
             ChatFact::MessageRead { message_id, .. } => {
                 ("message-read".to_string(), message_id.as_bytes().to_vec())
             }
+            ChatFact::MessageDelivered { message_id, .. } => (
+                "message-delivered".to_string(),
+                message_id.as_bytes().to_vec(),
+            ),
+            ChatFact::DeliveryAcknowledged { message_id, .. } => (
+                "delivery-acknowledged".to_string(),
+                message_id.as_bytes().to_vec(),
+            ),
         };
 
         Some(RelationalBinding {
@@ -412,10 +508,156 @@ mod tests {
                 test_authority_id(),
                 0,
             ),
+            ChatFact::message_delivered_ms(
+                test_context_id(),
+                test_channel_id(),
+                "msg".to_string(),
+                test_authority_id(),
+                Some("device-1".to_string()),
+                0,
+            ),
+            ChatFact::delivery_acknowledged_ms(
+                test_context_id(),
+                test_channel_id(),
+                "msg".to_string(),
+                0,
+            ),
         ];
 
         for fact in facts {
             assert_eq!(fact.type_id(), CHAT_FACT_TYPE_ID);
         }
+    }
+
+    #[test]
+    fn test_message_delivered_fact() {
+        let fact = ChatFact::message_delivered_ms(
+            test_context_id(),
+            test_channel_id(),
+            "msg-456".to_string(),
+            test_authority_id(),
+            Some("device-abc".to_string()),
+            1234567890,
+        );
+
+        // Test serialization roundtrip
+        let bytes = fact.to_bytes();
+        let restored = ChatFact::from_bytes(&bytes);
+        assert!(restored.is_some());
+        assert_eq!(restored.unwrap(), fact);
+
+        // Test timestamp extraction
+        assert_eq!(fact.timestamp_ms(), 1234567890);
+
+        // Test context_id extraction
+        assert_eq!(fact.context_id(), test_context_id());
+
+        // Test reducer
+        let reducer = ChatFactReducer;
+        let binding = reducer.reduce(test_context_id(), CHAT_FACT_TYPE_ID, &bytes);
+        assert!(binding.is_some());
+        let binding = binding.unwrap();
+        assert!(matches!(
+            binding.binding_type,
+            RelationalBindingType::Generic(ref s) if s == "message-delivered"
+        ));
+    }
+
+    #[test]
+    fn test_message_delivered_without_device() {
+        // Test that device_id is optional
+        let fact = ChatFact::message_delivered_ms(
+            test_context_id(),
+            test_channel_id(),
+            "msg-789".to_string(),
+            test_authority_id(),
+            None, // No device_id
+            1234567890,
+        );
+
+        let bytes = fact.to_bytes();
+        let restored = ChatFact::from_bytes(&bytes);
+        assert!(restored.is_some());
+        assert_eq!(restored.unwrap(), fact);
+    }
+
+    #[test]
+    fn test_delivery_acknowledged_fact() {
+        let fact = ChatFact::delivery_acknowledged_ms(
+            test_context_id(),
+            test_channel_id(),
+            "msg-ack-123".to_string(),
+            1234567890,
+        );
+
+        // Test serialization roundtrip
+        let bytes = fact.to_bytes();
+        let restored = ChatFact::from_bytes(&bytes);
+        assert!(restored.is_some());
+        assert_eq!(restored.unwrap(), fact);
+
+        // Test timestamp extraction
+        assert_eq!(fact.timestamp_ms(), 1234567890);
+
+        // Test context_id extraction
+        assert_eq!(fact.context_id(), test_context_id());
+
+        // Test reducer
+        let reducer = ChatFactReducer;
+        let binding = reducer.reduce(test_context_id(), CHAT_FACT_TYPE_ID, &bytes);
+        assert!(binding.is_some());
+        let binding = binding.unwrap();
+        assert!(matches!(
+            binding.binding_type,
+            RelationalBindingType::Generic(ref s) if s == "delivery-acknowledged"
+        ));
+    }
+
+    #[test]
+    fn test_delivery_lifecycle_facts() {
+        // Test the complete delivery lifecycle: Sent -> Delivered -> Read -> Acknowledged
+        let context = test_context_id();
+        let channel = test_channel_id();
+        let message_id = "lifecycle-msg-001".to_string();
+        let sender = test_authority_id();
+        let recipient = AuthorityId::new_from_entropy([3u8; 32]);
+
+        // 1. Message sent
+        let sent = ChatFact::message_sent_ms(
+            context,
+            channel,
+            message_id.clone(),
+            sender,
+            "Sender".to_string(),
+            "Hello".to_string(),
+            1000,
+            None,
+        );
+        assert_eq!(sent.timestamp_ms(), 1000);
+
+        // 2. Message delivered to recipient's device
+        let delivered = ChatFact::message_delivered_ms(
+            context,
+            channel,
+            message_id.clone(),
+            recipient,
+            Some("phone-1".to_string()),
+            2000,
+        );
+        assert_eq!(delivered.timestamp_ms(), 2000);
+
+        // 3. Message read by recipient
+        let read = ChatFact::message_read_ms(context, channel, message_id.clone(), recipient, 3000);
+        assert_eq!(read.timestamp_ms(), 3000);
+
+        // 4. Sender acknowledges delivery receipt
+        let acked = ChatFact::delivery_acknowledged_ms(context, channel, message_id.clone(), 4000);
+        assert_eq!(acked.timestamp_ms(), 4000);
+
+        // All facts should have the same context
+        assert_eq!(sent.context_id(), context);
+        assert_eq!(delivered.context_id(), context);
+        assert_eq!(read.context_id(), context);
+        assert_eq!(acked.context_id(), context);
     }
 }

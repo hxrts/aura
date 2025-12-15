@@ -586,7 +586,7 @@ async fn handle_tui_launch(
 
     println!("AppCore initialized (with runtime bridge and reactive signals)");
 
-    // In demo mode, start the simulator with Alice and Charlie peer agents
+    // In demo mode, start the simulator with Alice and Carol peer agents
     // DemoSignalCoordinator handles bidirectional event routing via signals
     #[cfg(feature = "development")]
     let (mut simulator, _coordinator_handles): (
@@ -604,9 +604,9 @@ async fn handle_tui_launch(
                 .map_err(|e| AuraError::internal(format!("Failed to start simulator: {}", e)))?;
 
             let alice_id = sim.alice_authority().await;
-            let charlie_id = sim.charlie_authority().await;
+            let carol_id = sim.carol_authority().await;
             println!("Alice online: {}", alice_id);
-            println!("Charlie online: {}", charlie_id);
+            println!("Carol online: {}", carol_id);
             println!("Peers connected: {}", sim.peer_count());
 
             // Get the simulator's bridge and response receiver for signal coordinator
@@ -637,14 +637,14 @@ async fn handle_tui_launch(
     // Create IoContext with AppCore integration
     // Pass has_existing_account so the TUI knows whether to show the account setup modal
     // Also pass base_path and device_id for account file creation
-    // In demo mode, include hints with Alice/Charlie invite codes
+    // In demo mode, include hints with Alice/Carol invite codes
     #[cfg(feature = "development")]
     let ctx = match mode {
         TuiMode::Demo { seed } => {
             let hints = crate::demo::DemoHints::new(seed);
             println!("Demo hints available:");
             println!("  Alice invite code: {}", hints.alice_invite_code);
-            println!("  Charlie invite code: {}", hints.charlie_invite_code);
+            println!("  Carol invite code: {}", hints.carol_invite_code);
             IoContext::with_demo_hints(
                 app_core,
                 hints,
@@ -673,7 +673,7 @@ async fn handle_tui_launch(
     #[cfg(not(feature = "development"))]
     if matches!(mode, TuiMode::Demo { .. }) {
         println!("Note: Demo mode simulation requires the 'development' feature.");
-        println!("Running with simulation agent but without peer agents (Alice/Charlie).");
+        println!("Running with simulation agent but without peer agents (Alice/Carol).");
     }
 
     println!("Launching TUI...");

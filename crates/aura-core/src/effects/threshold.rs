@@ -112,6 +112,67 @@ pub trait ThresholdSigningEffects: Send + Sync {
     /// Returns the group public key if we have signing capability.
     /// This is needed for signature verification.
     async fn public_key_package(&self, authority: &AuthorityId) -> Option<PublicKeyPackage>;
+
+    /// Rotate threshold keys to a new configuration
+    ///
+    /// Generates new threshold keys with the specified configuration and stores them
+    /// at the next epoch. This is used for:
+    /// - Guardian setup/change (creating new threshold group)
+    /// - Upgrading from single-signer to threshold
+    /// - Changing the k-of-n configuration
+    ///
+    /// The old keys are preserved at the previous epoch for potential rollback.
+    /// Call `commit_key_rotation` after ceremony completion or `rollback_key_rotation`
+    /// if the ceremony fails.
+    ///
+    /// # Arguments
+    /// * `authority` - The authority to rotate keys for
+    /// * `new_threshold` - New minimum signers required (k)
+    /// * `new_total_participants` - New total number of key shares (n)
+    /// * `guardian_ids` - IDs of the guardians who will hold shares
+    ///
+    /// # Returns
+    /// A tuple of (new_epoch, key_packages, public_key_package) where:
+    /// - new_epoch: The epoch number for the new keys
+    /// - key_packages: One serialized key package per guardian
+    /// - public_key_package: The group public key for verification
+    async fn rotate_keys(
+        &self,
+        authority: &AuthorityId,
+        new_threshold: u16,
+        new_total_participants: u16,
+        guardian_ids: &[String],
+    ) -> Result<(u64, Vec<Vec<u8>>, PublicKeyPackage), ThresholdSigningError>;
+
+    /// Commit a pending key rotation
+    ///
+    /// Called after a successful guardian ceremony when all guardians have accepted
+    /// and stored their key shares. This makes the new epoch authoritative and
+    /// allows the old epoch's keys to be eventually cleaned up.
+    ///
+    /// # Arguments
+    /// * `authority` - The authority that was rotated
+    /// * `new_epoch` - The epoch that should become active
+    async fn commit_key_rotation(
+        &self,
+        authority: &AuthorityId,
+        new_epoch: u64,
+    ) -> Result<(), ThresholdSigningError>;
+
+    /// Rollback a pending key rotation
+    ///
+    /// Called when a guardian ceremony fails (guardian declined, user cancelled,
+    /// or timeout). This removes the new epoch's keys and reverts to the previous
+    /// configuration.
+    ///
+    /// # Arguments
+    /// * `authority` - The authority to rollback
+    /// * `failed_epoch` - The epoch that should be discarded
+    async fn rollback_key_rotation(
+        &self,
+        authority: &AuthorityId,
+        failed_epoch: u64,
+    ) -> Result<(), ThresholdSigningError>;
 }
 
 #[cfg(test)]

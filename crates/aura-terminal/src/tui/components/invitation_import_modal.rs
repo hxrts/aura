@@ -76,12 +76,12 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
             height: 100pct,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            background_color: Theme::OVERLAY,
+
         ) {
             View(
                 width: Percent(60.0),
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_DARK,
+                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
                 border_color: border_color,
             ) {
@@ -112,7 +112,7 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                     // Code input box
                     View(
                         flex_direction: FlexDirection::Column,
-                        background_color: Theme::BG_DARK,
+
                         border_style: BorderStyle::Round,
                         border_color: if props.focused { Theme::PRIMARY } else { Theme::BORDER },
                         padding: 1,
@@ -155,17 +155,17 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                             flex_direction: FlexDirection::Row,
                             justify_content: JustifyContent::Center,
                             padding: 1,
-                            background_color: Theme::BG_DARK,
+
                             border_style: BorderStyle::Single,
                             border_edges: Edges::Bottom,
                             border_color: Theme::WARNING,
                         ) {
                             Text(content: "[DEMO] ", color: Theme::WARNING, weight: Weight::Bold)
                             Text(content: "Press ", color: Theme::TEXT_MUTED)
-                            Text(content: "a", color: Theme::SECONDARY, weight: Weight::Bold)
+                            Text(content: "Ctrl+a", color: Theme::SECONDARY, weight: Weight::Bold)
                             Text(content: " for Alice's code, ", color: Theme::TEXT_MUTED)
-                            Text(content: "c", color: Theme::SECONDARY, weight: Weight::Bold)
-                            Text(content: " for Charlie's code", color: Theme::TEXT_MUTED)
+                            Text(content: "Ctrl+l", color: Theme::SECONDARY, weight: Weight::Bold)
+                            Text(content: " for Carol's code", color: Theme::TEXT_MUTED)
                         }
                     })
                 } else {

@@ -29,7 +29,7 @@ name = "commitment"
 description = "Participants generate and exchange commitments"
 timeout_seconds = 2
 actions = [
-    { type = "run_choreography", choreography = "frost_commitment", participants = ["alice", "bob", "charlie"], threshold = 2 }
+    { type = "run_choreography", choreography = "frost_commitment", participants = ["alice", "bob", "carol"], threshold = 2 }
 ]
 
 [[phases]]
@@ -37,7 +37,7 @@ name = "signing_key_generation"
 description = "Generate threshold signing key shares"
 timeout_seconds = 2
 actions = [
-    { type = "run_choreography", choreography = "frost_key_generation", participants = ["alice", "bob", "charlie"], threshold = 2 }
+    { type = "run_choreography", choreography = "frost_key_generation", participants = ["alice", "bob", "carol"], threshold = 2 }
 ]
 
 [[phases]]

@@ -11,14 +11,15 @@ pub struct CardStyle;
 
 impl CardStyle {
     /// Get background and border colors based on selection/focus state
+    /// Background is always transparent (Color::Reset) - use borders for selection indication
     pub fn colors(selected: bool, focused: bool) -> (Color, Color) {
-        // Use consistent list item colors
-        match (selected, focused) {
-            (true, true) => (Theme::LIST_BG_SELECTED, Theme::BORDER_FOCUS),
-            (true, false) => (Theme::LIST_BG_SELECTED, Theme::BORDER),
-            (false, true) => (Theme::BG_HOVER, Theme::BORDER_FOCUS),
-            (false, false) => (Color::Reset, Theme::BORDER),
-        }
+        let border = match (selected, focused) {
+            (true, true) => Theme::PRIMARY,
+            (true, false) => Theme::SECONDARY,
+            (false, true) => Theme::BORDER_FOCUS,
+            (false, false) => Theme::BORDER,
+        };
+        (Color::Reset, border)
     }
 
     /// Get text color based on selection state

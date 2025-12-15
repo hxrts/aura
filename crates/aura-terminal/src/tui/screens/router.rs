@@ -12,12 +12,10 @@ pub enum Screen {
     Block,
     /// Chat conversations
     Chat,
-    /// Contacts and petnames
+    /// Contacts, petnames, and invitations
     Contacts,
     /// Neighborhood navigation
     Neighborhood,
-    /// Invitations management
-    Invitations,
     /// Settings and preferences
     Settings,
     /// Recovery and guardians
@@ -25,29 +23,27 @@ pub enum Screen {
 }
 
 impl Screen {
-    /// Get the numeric key (1-7) for this screen
+    /// Get the numeric key (1-6) for this screen
     pub fn key_number(&self) -> u8 {
         match self {
             Screen::Block => 1,
             Screen::Chat => 2,
             Screen::Contacts => 3,
             Screen::Neighborhood => 4,
-            Screen::Invitations => 5,
-            Screen::Settings => 6,
-            Screen::Recovery => 7,
+            Screen::Settings => 5,
+            Screen::Recovery => 6,
         }
     }
 
-    /// Get screen from numeric key (1-7)
+    /// Get screen from numeric key (1-6)
     pub fn from_key(key: u8) -> Option<Self> {
         match key {
             1 => Some(Screen::Block),
             2 => Some(Screen::Chat),
             3 => Some(Screen::Contacts),
             4 => Some(Screen::Neighborhood),
-            5 => Some(Screen::Invitations),
-            6 => Some(Screen::Settings),
-            7 => Some(Screen::Recovery),
+            5 => Some(Screen::Settings),
+            6 => Some(Screen::Recovery),
             _ => None,
         }
     }
@@ -59,7 +55,6 @@ impl Screen {
             Screen::Chat => "Chat",
             Screen::Contacts => "Contacts",
             Screen::Neighborhood => "Neighborhood",
-            Screen::Invitations => "Invitations",
             Screen::Settings => "Settings",
             Screen::Recovery => "Recovery",
         }
@@ -72,7 +67,6 @@ impl Screen {
             Screen::Chat => "◊",
             Screen::Contacts => "∑",
             Screen::Neighborhood => "⊞",
-            Screen::Invitations => "✉",
             Screen::Settings => "⚙",
             Screen::Recovery => "⊗",
         }
@@ -85,7 +79,6 @@ impl Screen {
             Screen::Chat,
             Screen::Contacts,
             Screen::Neighborhood,
-            Screen::Invitations,
             Screen::Settings,
             Screen::Recovery,
         ]
@@ -97,8 +90,7 @@ impl Screen {
             Screen::Block => Screen::Chat,
             Screen::Chat => Screen::Contacts,
             Screen::Contacts => Screen::Neighborhood,
-            Screen::Neighborhood => Screen::Invitations,
-            Screen::Invitations => Screen::Settings,
+            Screen::Neighborhood => Screen::Settings,
             Screen::Settings => Screen::Recovery,
             Screen::Recovery => Screen::Block,
         }
@@ -111,8 +103,7 @@ impl Screen {
             Screen::Chat => Screen::Block,
             Screen::Contacts => Screen::Chat,
             Screen::Neighborhood => Screen::Contacts,
-            Screen::Invitations => Screen::Neighborhood,
-            Screen::Settings => Screen::Invitations,
+            Screen::Settings => Screen::Neighborhood,
             Screen::Recovery => Screen::Settings,
         }
     }
@@ -312,6 +303,6 @@ mod tests {
     fn test_screen_keys() {
         assert_eq!(Screen::Block.key_number(), 1);
         assert_eq!(Screen::from_key(1), Some(Screen::Block));
-        assert_eq!(Screen::from_key(8), None);
+        assert_eq!(Screen::from_key(7), None);
     }
 }
