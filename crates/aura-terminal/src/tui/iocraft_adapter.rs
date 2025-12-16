@@ -221,11 +221,19 @@ impl TerminalOutputEffects for IocraftTerminalAdapter {
 /// Convert iocraft TerminalEvent to our TerminalEvent
 ///
 /// This bridges between iocraft's event model and our effect trait's model.
+/// Only Press events are converted - Release and Repeat events are filtered out
+/// to prevent duplicate character input.
 pub fn convert_iocraft_event(event: iocraft::prelude::TerminalEvent) -> Option<TerminalEvent> {
     use aura_core::effects::terminal::KeyEvent as AuraKeyEvent;
 
     match event {
         iocraft::prelude::TerminalEvent::Key(key_event) => {
+            // Only process Press events - ignore Release and Repeat to avoid duplicates
+            // On Windows, crossterm sends both Press and Release events for each keystroke
+            // On some terminals, Repeat events may also be sent for held keys
+            if key_event.kind != KeyEventKind::Press {
+                return None;
+            }
             let code = convert_key_code(key_event.code);
             let modifiers = convert_modifiers(key_event.modifiers);
             Some(TerminalEvent::Key(AuraKeyEvent {

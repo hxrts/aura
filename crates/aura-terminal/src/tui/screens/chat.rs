@@ -22,9 +22,7 @@ use std::sync::Arc;
 use aura_app::signal_defs::CHAT_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
-use crate::tui::components::{
-    ChannelInfoModal, ChatCreateModal, MessageBubble, MessageInput, TextInputModal,
-};
+use crate::tui::components::{MessageBubble, MessageInput};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
@@ -273,10 +271,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let channels_focused = current_focus == ChatFocus::Channels;
     let messages_focused = current_focus == ChatFocus::Messages;
 
-    // Modal visibility from props.view
-    let is_create_modal_visible = props.view.create_modal_visible;
-    let is_topic_modal_visible = props.view.topic_modal_visible;
-    let is_channel_info_visible = props.view.info_modal_visible;
+    // NOTE: Modals have been moved to app.rs root level. See modal_frame.rs for details.
 
     // Message list border color based on focus
     let msg_border = if messages_focused {
@@ -350,33 +345,8 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 )
             }
 
-            // Create channel modal (overlay) - uses props.view from TuiState
-            ChatCreateModal(
-                visible: is_create_modal_visible,
-                focused: is_create_modal_visible,
-                name: props.view.create_modal_name.clone(),
-                topic: props.view.create_modal_topic.clone(),
-                active_field: props.view.create_modal_active_field,
-                error: String::new(),
-                creating: false,
-            )
-
-            // Topic editing modal (overlay) - uses props.view from TuiState
-            TextInputModal(
-                visible: is_topic_modal_visible,
-                title: "Set Channel Topic".to_string(),
-                value: props.view.topic_modal_value.clone(),
-                placeholder: "Enter topic...".to_string(),
-                error: String::new(),
-            )
-
-            // Channel info modal (overlay) - uses props.view from TuiState
-            ChannelInfoModal(
-                visible: is_channel_info_visible,
-                channel_name: props.view.info_modal_channel_name.clone(),
-                topic: props.view.info_modal_topic.clone(),
-                participants: vec!["You".to_string()],
-            )
+            // NOTE: All modals have been moved to app.rs root level and wrapped with ModalFrame
+            // for consistent positioning. See the "CHAT SCREEN MODALS" section in app.rs.
         }
     }
 }

@@ -30,16 +30,15 @@ use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::{
-    DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, EmptyState,
-    GuardianCandidateProps, GuardianSetupModal, InvitationCreateModal, InvitationImportModal,
-    InvitePeerCallback, StatusIndicator, TextInputModal,
+    DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, EmptyState, InvitePeerCallback,
+    StatusIndicator,
 };
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::props::ContactsViewProps;
 use crate::tui::theme::{Spacing, Theme};
-use crate::tui::types::{Contact, ContactStatus, InvitationType};
+use crate::tui::types::{Contact, ContactStatus};
 
 /// Callback type for updating a contact's petname (contact_id: String, new_petname: String)
 pub type UpdatePetnameCallback = Arc<dyn Fn(String, String) + Send + Sync>;
@@ -371,8 +370,7 @@ pub fn ContactsScreen(
     let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let selected_contact = contacts.get(current_selected).cloned();
 
-    // Modal visibility from props.view
-    let is_modal_visible = props.view.petname_modal_visible;
+    // NOTE: Modals have been moved to app.rs root level. See modal_frame.rs for details.
 
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.
@@ -429,89 +427,8 @@ pub fn ContactsScreen(
                 )
             }
 
-            // Petname edit modal (overlays everything) - uses props from TuiState
-            #(if is_modal_visible {
-                Some(element! {
-                    TextInputModal(
-                        visible: true,
-                        focused: true,
-                        title: "Edit Petname".to_string(),
-                        value: props.view.petname_modal_value.clone(),
-                        placeholder: "Enter petname...".to_string(),
-                        error: String::new(),
-                        submitting: false,
-                    )
-                })
-            } else {
-                None
-            })
-
-            // Import invitation modal (accept invitation code)
-            #(if props.view.import_modal_visible {
-                Some(element! {
-                    InvitationImportModal(
-                        visible: true,
-                        focused: true,
-                        code: props.view.import_modal_code.clone(),
-                        error: String::new(),
-                        importing: props.view.import_modal_importing,
-                        demo_mode: props.view.demo_mode,
-                    )
-                })
-            } else {
-                None
-            })
-
-            // Create invitation modal (send invitation)
-            #(if props.view.create_modal_visible {
-                // Map type_index to InvitationType
-                let invitation_type = match props.view.create_modal_type_index {
-                    0 => InvitationType::Guardian,
-                    1 => InvitationType::Contact,
-                    _ => InvitationType::Channel,
-                };
-                Some(element! {
-                    InvitationCreateModal(
-                        visible: true,
-                        focused: true,
-                        creating: props.view.create_modal_step > 0,
-                        error: String::new(),
-                        invitation_type: invitation_type,
-                        message: props.view.create_modal_message.clone(),
-                        ttl_hours: props.view.create_modal_ttl_hours as u32,
-                    )
-                })
-            } else {
-                None
-            })
-
-            // Guardian setup modal (multi-step wizard)
-            #(if props.view.guardian_setup_modal_visible {
-                let contacts: Vec<GuardianCandidateProps> = props.view.guardian_setup_modal_contacts
-                    .iter()
-                    .map(|c| GuardianCandidateProps {
-                        id: c.id.clone(),
-                        name: c.name.clone(),
-                        is_current_guardian: c.is_current_guardian,
-                    })
-                    .collect();
-
-                Some(element! {
-                    GuardianSetupModal(
-                        visible: true,
-                        step: props.view.guardian_setup_modal_step.clone(),
-                        contacts: contacts,
-                        selected_indices: props.view.guardian_setup_modal_selected_indices.clone(),
-                        focused_index: props.view.guardian_setup_modal_focused_index,
-                        threshold_k: props.view.guardian_setup_modal_threshold_k,
-                        threshold_n: props.view.guardian_setup_modal_threshold_n,
-                        ceremony_responses: props.view.guardian_setup_modal_ceremony_responses.clone(),
-                        error: props.view.guardian_setup_modal_error.clone(),
-                    )
-                })
-            } else {
-                None
-            })
+            // NOTE: All modals have been moved to app.rs root level and wrapped with ModalFrame
+            // for consistent positioning. See the "CONTACTS SCREEN MODALS" section in app.rs.
         }
     }
 }

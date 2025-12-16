@@ -9,6 +9,7 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::layout::dim;
 use crate::tui::state_machine::{GuardianCeremonyResponse, GuardianSetupStep};
 use crate::tui::theme::{Icons, Spacing, Theme};
 
@@ -56,66 +57,72 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: Theme::BORDER_FOCUS,
+            overflow: Overflow::Hidden,
         ) {
+            // Title bar
             View(
-                width: Percent(70.0),
-                max_height: Percent(80.0),
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
-                border_color: Theme::BORDER_FOCUS,
+                width: 100pct,
+                padding: Spacing::SM,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
             ) {
-                // Title bar
-                View(
-                    padding: Spacing::SM,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                ) {
-                    Text(
-                        content: "Guardian Setup",
-                        weight: Weight::Bold,
-                        color: Theme::PRIMARY,
-                    )
-                    // Step indicator
-                    #(render_step_indicator(&step))
-                }
+                Text(
+                    content: "Guardian Setup",
+                    weight: Weight::Bold,
+                    color: Theme::PRIMARY,
+                )
+                // Step indicator
+                #(render_step_indicator(&step))
+            }
 
-                // Error message if any
-                #(if !error.is_empty() {
-                    Some(element! {
-                        View(padding: Spacing::SM, background_color: Theme::ERROR) {
-                            Text(content: error.clone(), color: Theme::TEXT)
-                        }
-                    })
-                } else {
-                    None
+            // Error message if any
+            #(if !error.is_empty() {
+                Some(element! {
+                    View(width: 100pct, padding: Spacing::SM, background_color: Theme::ERROR) {
+                        Text(content: error.clone(), color: Theme::TEXT)
+                    }
                 })
+            } else {
+                None
+            })
 
-                // Content based on step
+            // Content based on step - fills available space
+            View(
+                width: 100pct,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+            ) {
                 #(match step {
                     GuardianSetupStep::SelectContacts => render_select_contacts(props),
                     GuardianSetupStep::ChooseThreshold => render_choose_threshold(props),
                     GuardianSetupStep::CeremonyInProgress => render_ceremony_progress(props),
                 })
+            }
 
-                // Footer with key hints
-                View(
-                    padding: Spacing::SM,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                    flex_direction: FlexDirection::Row,
-                    gap: 2,
-                ) {
-                    #(render_key_hints(&step))
-                }
+            // Footer with key hints
+            View(
+                width: 100pct,
+                padding: Spacing::SM,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                gap: 2,
+            ) {
+                #(render_key_hints(&step))
             }
         }
     }

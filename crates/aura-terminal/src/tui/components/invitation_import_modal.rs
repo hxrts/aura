@@ -5,6 +5,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 
 /// Callback type for modal cancel
@@ -71,126 +72,133 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
 
     element! {
         View(
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: border_color,
+            overflow: Overflow::Hidden,
         ) {
+            // Header
             View(
-                width: Percent(60.0),
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
-                border_color: border_color,
+                width: 100pct,
+                padding: 1,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Header
-                View(
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                ) {
+                Text(
+                    content: "Import Invitation",
+                    weight: Weight::Bold,
+                    color: Theme::PRIMARY,
+                )
+            }
+
+            // Body - fills available space
+            View(
+                width: 100pct,
+                padding: 2,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+            ) {
+                // Instructions
+                View(margin_bottom: 1) {
                     Text(
-                        content: "Import Invitation",
-                        weight: Weight::Bold,
-                        color: Theme::PRIMARY,
+                        content: "Paste the invitation code you received:",
+                        color: Theme::TEXT,
                     )
                 }
 
-                // Body
-                View(padding: 2, flex_direction: FlexDirection::Column) {
-                    // Instructions
-                    View(margin_bottom: 1) {
-                        Text(
-                            content: "Paste the invitation code you received:",
-                            color: Theme::TEXT,
-                        )
-                    }
-
-                    // Code input box
-                    View(
-                        flex_direction: FlexDirection::Column,
-
-                        border_style: BorderStyle::Round,
-                        border_color: if props.focused { Theme::PRIMARY } else { Theme::BORDER },
-                        padding: 1,
-                        margin_bottom: 1,
-                    ) {
-                        Text(
-                            content: code_display,
-                            color: code_color,
-                            wrap: TextWrap::Wrap,
-                        )
-                    }
-
-                    // Error message (if any)
-                    #(if !error.is_empty() {
-                        Some(element! {
-                            View(margin_bottom: 1) {
-                                Text(content: error, color: Theme::ERROR)
-                            }
-                        })
-                    } else {
-                        None
-                    })
-
-                    // Status message
-                    #(if importing {
-                        Some(element! {
-                            View(margin_top: 1) {
-                                Text(content: "Importing...", color: Theme::WARNING)
-                            }
-                        })
-                    } else {
-                        None
-                    })
+                // Code input box
+                View(
+                    width: 100pct,
+                    flex_direction: FlexDirection::Column,
+                    border_style: BorderStyle::Round,
+                    border_color: if props.focused { Theme::PRIMARY } else { Theme::BORDER },
+                    padding: 1,
+                    margin_bottom: 1,
+                ) {
+                    Text(
+                        content: code_display,
+                        color: code_color,
+                        wrap: TextWrap::Wrap,
+                    )
                 }
 
-                // Demo mode hints (only shown when code is empty and in demo mode)
-                #(if props.demo_mode && code.is_empty() {
+                // Error message (if any)
+                #(if !error.is_empty() {
                     Some(element! {
-                        View(
-                            flex_direction: FlexDirection::Row,
-                            justify_content: JustifyContent::Center,
-                            padding: 1,
-
-                            border_style: BorderStyle::Single,
-                            border_edges: Edges::Bottom,
-                            border_color: Theme::WARNING,
-                        ) {
-                            Text(content: "[DEMO] ", color: Theme::WARNING, weight: Weight::Bold)
-                            Text(content: "Press ", color: Theme::TEXT_MUTED)
-                            Text(content: "Ctrl+a", color: Theme::SECONDARY, weight: Weight::Bold)
-                            Text(content: " for Alice's code, ", color: Theme::TEXT_MUTED)
-                            Text(content: "Ctrl+l", color: Theme::SECONDARY, weight: Weight::Bold)
-                            Text(content: " for Carol's code", color: Theme::TEXT_MUTED)
+                        View(margin_bottom: 1) {
+                            Text(content: error, color: Theme::ERROR)
                         }
                     })
                 } else {
                     None
                 })
 
-                // Footer with key hints
-                View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "Esc", color: Theme::SECONDARY)
-                        Text(content: "Cancel", color: Theme::TEXT_MUTED)
+                // Status message
+                #(if importing {
+                    Some(element! {
+                        View(margin_top: 1) {
+                            Text(content: "Importing...", color: Theme::WARNING)
+                        }
+                    })
+                } else {
+                    None
+                })
+            }
+
+            // Demo mode hints (only shown when code is empty and in demo mode)
+            #(if props.demo_mode && code.is_empty() {
+                Some(element! {
+                    View(
+                        width: 100pct,
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::Center,
+                        padding: 1,
+                        border_style: BorderStyle::Single,
+                        border_edges: Edges::Bottom,
+                        border_color: Theme::WARNING,
+                    ) {
+                        Text(content: "[DEMO] ", color: Theme::WARNING, weight: Weight::Bold)
+                        Text(content: "Press ", color: Theme::TEXT_MUTED)
+                        Text(content: "Ctrl+a", color: Theme::SECONDARY, weight: Weight::Bold)
+                        Text(content: " for Alice's code, ", color: Theme::TEXT_MUTED)
+                        Text(content: "Ctrl+l", color: Theme::SECONDARY, weight: Weight::Bold)
+                        Text(content: " for Carol's code", color: Theme::TEXT_MUTED)
                     }
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "Ctrl+V", color: Theme::SECONDARY)
-                        Text(content: "Paste", color: Theme::TEXT_MUTED)
-                    }
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "Enter", color: Theme::SECONDARY)
-                        Text(content: "Import", color: Theme::TEXT_MUTED)
-                    }
+                })
+            } else {
+                None
+            })
+
+            // Footer with key hints
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                padding: 1,
+                gap: 4,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "Ctrl+V", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Paste", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Import", color: Theme::TEXT_MUTED)
                 }
             }
         }

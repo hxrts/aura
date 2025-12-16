@@ -4,6 +4,7 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::{Spacing, Theme};
 
 /// State for threshold configuration modal
@@ -151,40 +152,43 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: if props.focused { Theme::BORDER_FOCUS } else { Theme::BORDER },
+            overflow: Overflow::Hidden,
         ) {
+            // Title bar
             View(
-                width: 50,
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
-                border_color: if props.focused { Theme::BORDER_FOCUS } else { Theme::BORDER },
+                width: 100pct,
+                padding: Spacing::SM,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Title bar
-                View(
-                    padding_left: Spacing::PANEL_PADDING,
-                    padding_top: 1,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                ) {
-                    Text(
-                        content: "Configure Recovery Threshold",
-                        weight: Weight::Bold,
-                        color: Theme::PRIMARY,
-                    )
-                }
+                Text(
+                    content: "Configure Recovery Threshold",
+                    weight: Weight::Bold,
+                    color: Theme::PRIMARY,
+                )
+            }
 
-                // Content area
-                View(
-                    flex_direction: FlexDirection::Column,
-                    padding: Spacing::PANEL_PADDING,
-                    gap: 1,
-                ) {
+            // Content area - fills available space
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                padding: Spacing::PANEL_PADDING,
+                gap: 1,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                overflow: Overflow::Hidden,
+            ) {
                     // Threshold selector
                     View(
                         flex_direction: FlexDirection::Row,
@@ -283,34 +287,34 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
                     }
                 }
 
-                // Key hints
-                View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    padding: Spacing::PANEL_PADDING,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
+            // Key hints
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                padding: Spacing::SM,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "←/→", color: Theme::SECONDARY)
+                    Text(content: "Adjust", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: 2) {
                     View(flex_direction: FlexDirection::Row, gap: 1) {
-                        Text(content: "←/→", color: Theme::SECONDARY)
-                        Text(content: "Adjust", color: Theme::TEXT_MUTED)
+                        Text(content: "Esc", color: Theme::SECONDARY)
+                        Text(content: "Cancel", color: Theme::TEXT_MUTED)
                     }
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        View(flex_direction: FlexDirection::Row, gap: 1) {
-                            Text(content: "Esc", color: Theme::SECONDARY)
-                            Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                        }
-                        View(flex_direction: FlexDirection::Row, gap: 1) {
-                            Text(
-                                content: "Enter",
-                                color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
-                            )
-                            Text(
-                                content: "Save",
-                                color: if can_submit { Theme::TEXT } else { Theme::TEXT_MUTED },
-                            )
-                        }
+                    View(flex_direction: FlexDirection::Row, gap: 1) {
+                        Text(
+                            content: "Enter",
+                            color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                        )
+                        Text(
+                            content: "Save",
+                            color: if can_submit { Theme::TEXT } else { Theme::TEXT_MUTED },
+                        )
                     }
                 }
             }

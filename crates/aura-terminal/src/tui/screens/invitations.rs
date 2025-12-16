@@ -21,9 +21,9 @@ use std::{future::Future, pin::Pin, sync::Arc};
 use aura_app::signal_defs::INVITATIONS_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
-use crate::tui::components::{
-    EmptyState, InvitationCodeModal, InvitationCreateModal, InvitationImportModal,
-};
+// NOTE: Modal components (InvitationCodeModal, InvitationCreateModal, InvitationImportModal)
+// have been moved to app.rs for root-level rendering
+use crate::tui::components::EmptyState;
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
 use crate::tui::navigation::TwoPanelFocus;
@@ -449,10 +449,8 @@ pub fn InvitationsScreen(
     let all_invitations = reactive_invitations.read().clone();
 
     // === Pure view: Use props.view from TuiState instead of local state ===
-    let is_create_modal_visible = props.view.create_modal_visible;
-    let is_code_modal_visible = props.view.code_modal_visible;
-    let is_import_modal_visible = props.view.import_modal_visible;
-
+    // NOTE: Modal visibility state (create_modal_visible, code_modal_visible, import_modal_visible)
+    // is handled by app.rs which renders all modals at root level.
     let current_filter = props.view.filter;
 
     // Filter invitations
@@ -471,8 +469,7 @@ pub fn InvitationsScreen(
     let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let selected_invitation = filtered.get(current_selected).cloned();
 
-    // Demo mode settings
-    let demo_mode = props.demo_mode;
+    // NOTE: demo_mode is now passed to modals in app.rs
 
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.
@@ -513,57 +510,8 @@ pub fn InvitationsScreen(
                 )
             }
 
-            // Create invitation modal (overlays everything) - uses props.view from TuiState
-            #(if is_create_modal_visible {
-                // Convert type index to InvitationType
-                let invitation_type = match props.view.create_modal_type_index {
-                    0 => InvitationType::Guardian,
-                    1 => InvitationType::Contact,
-                    _ => InvitationType::Channel,
-                };
-                Some(element! {
-                    InvitationCreateModal(
-                        visible: true,
-                        focused: true,
-                        creating: false,
-                        error: String::new(),
-                        invitation_type: invitation_type,
-                        message: props.view.create_modal_message.clone(),
-                        ttl_hours: props.view.create_modal_ttl_hours as u32,
-                    )
-                })
-            } else {
-                None
-            })
-
-            // Invitation code modal (overlays everything) - uses props.view from TuiState
-            #(if is_code_modal_visible {
-                Some(element! {
-                    InvitationCodeModal(
-                        visible: true,
-                        code: props.view.code_modal_code.clone(),
-                        invitation_type: "Guardian".to_string(),
-                    )
-                })
-            } else {
-                None
-            })
-
-            // Import invitation modal (overlays everything) - uses props.view from TuiState
-            #(if is_import_modal_visible {
-                Some(element! {
-                    InvitationImportModal(
-                        visible: true,
-                        focused: true,
-                        code: props.view.import_modal_code.clone(),
-                        error: String::new(),
-                        importing: props.view.import_modal_importing,
-                        demo_mode: demo_mode,
-                    )
-                })
-            } else {
-                None
-            })
+            // NOTE: All modals have been moved to app.rs root level and wrapped with ModalFrame
+            // for consistent positioning. See the "INVITATIONS SCREEN MODALS" section in app.rs.
         }
     }
 }

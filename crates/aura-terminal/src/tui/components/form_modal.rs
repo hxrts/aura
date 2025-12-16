@@ -4,6 +4,7 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 
 /// A form field definition
@@ -164,30 +165,35 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: Theme::BORDER_FOCUS,
+            overflow: Overflow::Hidden,
         ) {
+            // Title bar
             View(
-                width: Percent(60.0),
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
-                border_color: Theme::BORDER_FOCUS,
+                width: 100pct,
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Title bar
-                View(
-                    padding: 1,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                ) {
-                    Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
-                }
-                // Form fields
-                View(padding: 1, flex_direction: FlexDirection::Column) {
+                Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
+            }
+            // Form fields - fills available space
+            View(
+                width: 100pct,
+                padding: 1,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+            ) {
                     #(fields.into_iter().enumerate().map(|(idx, field)| {
                         let is_focused = idx == focused_field;
                         element! {
@@ -201,16 +207,17 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
                             )
                         }
                     }))
-                }
-                // Buttons and hints
-                View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    padding: 1,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
+            }
+            // Buttons and hints
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
                     View(flex_direction: FlexDirection::Row, gap: 1) {
                         Text(content: "Tab", color: Theme::SECONDARY)
                         Text(content: "Next field", color: Theme::TEXT_MUTED)
@@ -235,7 +242,6 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
                                 color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
                             )
                         }
-                    }
                 }
             }
         }

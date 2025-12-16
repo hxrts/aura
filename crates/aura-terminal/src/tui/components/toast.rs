@@ -4,6 +4,7 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 
 /// Toast severity level
@@ -142,11 +143,11 @@ pub struct ToastContainerProps {
     pub toasts: Vec<ToastMessage>,
 }
 
-/// Container for toast notifications (renders as absolute overlay at bottom)
+/// Toast bar that replaces the nav bar when active.
 ///
-/// Displays the most recent toast as a notification bar positioned at the bottom
-/// of the screen using absolute positioning. This avoids flex layout issues.
-/// When there are no toasts, returns an empty View that doesn't affect layout.
+/// This is a regular flow component (not absolute positioned) that occupies
+/// the same NAV_HEIGHT x TOTAL_WIDTH space as the nav bar. Use conditional
+/// rendering in app.rs to show either NavBar or ToastBar, not both.
 #[component]
 pub fn ToastContainer(props: &ToastContainerProps) -> impl Into<AnyElement<'static>> {
     let toasts = props.toasts.clone();
@@ -156,44 +157,41 @@ pub fn ToastContainer(props: &ToastContainerProps) -> impl Into<AnyElement<'stat
         Some(t) => t,
         None => {
             // Return empty element - no toasts to show
+            // Note: When this returns empty, app.rs should render NavBar instead
             return element! { View {} };
         }
     };
     let icon = toast.level.icon().to_string();
     let color = toast.level.color();
 
-    // Truncate long messages
-    let message = if toast.message.len() > 80 {
-        format!("{}...", &toast.message[..77])
+    // Truncate long messages to fit in nav bar width
+    let max_msg_len = 60; // Leave room for icon and dismiss hint
+    let message = if toast.message.len() > max_msg_len {
+        format!("{}...", &toast.message[..max_msg_len - 3])
     } else {
         toast.message.clone()
     };
 
-    // Use absolute positioning to overlay at bottom of screen
-    // Position above key hints bar (which is ~3 lines: 2 hint rows + border)
+    // Regular flow component - same dimensions as nav bar
     element! {
         View(
-            position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::FlexEnd,
-            align_items: AlignItems::Stretch,
-            padding_bottom: 3,  // Space for key hints bar below
+            width: dim::TOTAL_WIDTH,
+            height: dim::NAV_HEIGHT,
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: color,
+            padding_left: 1,
+            padding_right: 1,
+            gap: 1,
+            overflow: Overflow::Hidden,
         ) {
-            View(
-                flex_direction: FlexDirection::Row,
-                width: 100pct,
-                background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
-                border_color: color,
-                padding_left: 1,
-                padding_right: 1,
-                gap: 1,
-            ) {
-                Text(content: icon, color: color, weight: Weight::Bold, wrap: TextWrap::NoWrap)
+            Text(content: icon, color: color, weight: Weight::Bold, wrap: TextWrap::NoWrap)
+            View(flex_grow: 1.0) {
                 Text(content: message, color: Theme::TEXT, wrap: TextWrap::NoWrap)
-                Text(content: "[Esc] dismiss", color: Theme::TEXT_MUTED, wrap: TextWrap::NoWrap)
             }
+            Text(content: "[Esc] dismiss", color: Theme::TEXT_MUTED, wrap: TextWrap::NoWrap)
         }
     }
 }

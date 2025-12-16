@@ -199,3 +199,56 @@ async fn create_invitation(
             .map_err(|e| anyhow!(e))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_agent::handlers::InvitationType;
+
+    fn test_shareable(invitation_type: InvitationType) -> ShareableInvitation {
+        ShareableInvitation {
+            version: 1,
+            invitation_id: "test-invitation-123".to_string(),
+            sender_id: AuthorityId::new(),
+            invitation_type,
+            message: None,
+            expires_at: None,
+        }
+    }
+
+    #[test]
+    fn test_format_invitation_type_contact_without_petname() {
+        let shareable = test_shareable(InvitationType::Contact { petname: None });
+        let result = format_invitation_type(&shareable);
+        assert_eq!(result, "Contact");
+    }
+
+    #[test]
+    fn test_format_invitation_type_contact_with_petname() {
+        let shareable = test_shareable(InvitationType::Contact {
+            petname: Some("Alice".to_string()),
+        });
+        let result = format_invitation_type(&shareable);
+        assert_eq!(result, "Contact (petname: Alice)");
+    }
+
+    #[test]
+    fn test_format_invitation_type_guardian() {
+        let subject = AuthorityId::new();
+        let shareable = test_shareable(InvitationType::Guardian {
+            subject_authority: subject,
+        });
+        let result = format_invitation_type(&shareable);
+        assert!(result.starts_with("Guardian (for: "));
+        assert!(result.contains(&subject.to_string()));
+    }
+
+    #[test]
+    fn test_format_invitation_type_channel() {
+        let shareable = test_shareable(InvitationType::Channel {
+            block_id: "block-123".to_string(),
+        });
+        let result = format_invitation_type(&shareable);
+        assert_eq!(result, "Channel (block: block-123)");
+    }
+}

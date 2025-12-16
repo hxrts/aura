@@ -102,7 +102,7 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             position: Position::Absolute,
-            top: dim::NAV_HEIGHT,
+            top: 0u16,
             left: 0u16,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,

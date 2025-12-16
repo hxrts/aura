@@ -4,6 +4,7 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 
 /// Props for ChannelInfoModal
@@ -40,35 +41,41 @@ pub fn ChannelInfoModal(props: &ChannelInfoModalProps) -> impl Into<AnyElement<'
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: Theme::PRIMARY,
+            overflow: Overflow::Hidden,
         ) {
+            // Header
             View(
-                width: Percent(60.0),
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
-                border_color: Theme::PRIMARY,
+                width: 100pct,
+                padding: 2,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Header
-                View(
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                ) {
                     Text(
                         content: format!("Channel: #{}", channel_name),
                         weight: Weight::Bold,
                         color: Theme::PRIMARY,
                     )
-                }
+            }
 
-                // Body
-                View(padding: 2, flex_direction: FlexDirection::Column, gap: 1) {
+            // Body - fills available space
+            View(
+                width: 100pct,
+                padding: 2,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                gap: 1,
+                overflow: Overflow::Hidden,
+            ) {
                     // Topic section
                     View(flex_direction: FlexDirection::Column) {
                         Text(
@@ -98,20 +105,20 @@ pub fn ChannelInfoModal(props: &ChannelInfoModalProps) -> impl Into<AnyElement<'
                             color: Theme::TEXT,
                         )
                     }
-                }
+            }
 
-                // Footer with hint
-                View(
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    Text(
-                        content: "Press Esc to close • t to edit topic",
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
+            // Footer with hint
+            View(
+                width: 100pct,
+                padding: 2,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                Text(
+                    content: "Press Esc to close • t to edit topic",
+                    color: Theme::TEXT_MUTED,
+                )
             }
         }
     }

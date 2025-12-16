@@ -10,7 +10,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use crate::tui::components::{ConfirmModal, TextInputModal, ThresholdModal};
+// NOTE: Modal components (ConfirmModal, TextInputModal, ThresholdModal) have been moved to app.rs
 use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
 use crate::tui::theme::Theme;
@@ -117,21 +117,7 @@ pub fn SettingsScreen(props: &SettingsScreenProps) -> impl Into<AnyElement<'stat
     let threshold_k = props.threshold_k;
     let threshold_n = props.threshold_n;
 
-    // Modal visibility from props.view
-    let modal_visible = props.view.nickname_modal_visible;
-    let modal_value = props.view.nickname_modal_value.clone();
-
-    let threshold_modal_visible = props.view.threshold_modal_visible;
-    let threshold_modal_k = props.view.threshold_modal_k;
-    let threshold_modal_n = props.view.threshold_modal_n;
-    let threshold_modal_has_changed = threshold_modal_k != props.threshold_k;
-
-    let device_modal_visible = props.view.add_device_modal_visible;
-    let device_modal_value = props.view.add_device_modal_name.clone();
-
-    let confirm_remove_visible = props.view.confirm_remove_modal_visible;
-    let confirm_remove_device_name = props.view.confirm_remove_modal_device_name.clone();
-    let confirm_remove_focused = props.view.confirm_remove_modal_confirm_focused;
+    // NOTE: Modals have been moved to app.rs root level. See modal_frame.rs for details.
 
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.
@@ -302,42 +288,8 @@ pub fn SettingsScreen(props: &SettingsScreenProps) -> impl Into<AnyElement<'stat
                 }
             }
 
-            // Modals - rendered from TuiState props
-            TextInputModal(
-                visible: modal_visible,
-                focused: modal_visible,
-                title: "Edit Display Name".to_string(),
-                value: modal_value,
-                placeholder: "Enter your display name...".to_string(),
-                error: String::new(),
-                submitting: false,
-            )
-            ThresholdModal(
-                visible: threshold_modal_visible,
-                focused: threshold_modal_visible,
-                threshold_k: threshold_modal_k,
-                threshold_n: threshold_modal_n,
-                has_changed: threshold_modal_has_changed,
-                error: String::new(),
-                submitting: false,
-            )
-            TextInputModal(
-                visible: device_modal_visible,
-                focused: device_modal_visible,
-                title: "Add Device".to_string(),
-                value: device_modal_value,
-                placeholder: "Enter device name...".to_string(),
-                error: String::new(),
-                submitting: false,
-            )
-            ConfirmModal(
-                visible: confirm_remove_visible,
-                title: "Remove Device".to_string(),
-                message: format!("Are you sure you want to remove \"{}\"?", confirm_remove_device_name),
-                confirm_text: "Remove".to_string(),
-                cancel_text: "Cancel".to_string(),
-                confirm_focused: confirm_remove_focused,
-            )
+            // NOTE: All modals have been moved to app.rs root level and wrapped with ModalFrame
+            // for consistent positioning. See the "SETTINGS SCREEN MODALS" section in app.rs.
         }
     }
 }

@@ -198,6 +198,8 @@ pub struct BlockViewState {
     pub focus: BlockFocus,
     /// Whether in insert mode (typing message)
     pub insert_mode: bool,
+    /// Character used to enter insert mode (to prevent it being typed)
+    pub insert_mode_entry_char: Option<char>,
     /// Input buffer for message composition
     pub input_buffer: String,
     /// Selected resident index (for resident list)
@@ -235,6 +237,8 @@ pub struct ChatViewState {
     pub input_buffer: String,
     /// Whether in insert mode
     pub insert_mode: bool,
+    /// Character used to enter insert mode (to prevent it being typed)
+    pub insert_mode_entry_char: Option<char>,
     /// Create channel modal state
     pub create_modal: CreateChannelModalState,
     /// Topic edit modal state
@@ -2206,55 +2210,99 @@ fn handle_settings_confirm_remove_modal_key(
 
 /// Handle insert mode key events
 fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
+    // Capture screen type once to avoid borrow conflicts
+    let screen = state.screen();
+
     // Escape exits insert mode
     if key.code == KeyCode::Esc {
-        match state.screen() {
-            Screen::Block => state.block.insert_mode = false,
-            Screen::Chat => state.chat.insert_mode = false,
+        match screen {
+            Screen::Block => {
+                state.block.insert_mode = false;
+                state.block.insert_mode_entry_char = None;
+            }
+            Screen::Chat => {
+                state.chat.insert_mode = false;
+                state.chat.insert_mode_entry_char = None;
+            }
             _ => {}
         }
         return;
     }
 
-    // Get the active input buffer
-    let buffer = match state.screen() {
-        Screen::Block => &mut state.block.input_buffer,
-        Screen::Chat => &mut state.chat.input_buffer,
-        _ => return,
+    // Get the entry char to check if we need to consume it
+    let entry_char = match screen {
+        Screen::Block => state.block.insert_mode_entry_char,
+        Screen::Chat => state.chat.insert_mode_entry_char,
+        _ => None,
     };
 
     match key.code {
         KeyCode::Char(c) => {
-            buffer.push(c);
+            // If this char matches the entry char, consume it but don't add to buffer
+            if entry_char == Some(c) {
+                match screen {
+                    Screen::Block => state.block.insert_mode_entry_char = None,
+                    Screen::Chat => state.chat.insert_mode_entry_char = None,
+                    _ => {}
+                }
+            } else {
+                // Clear entry char and add char to buffer
+                match screen {
+                    Screen::Block => {
+                        state.block.insert_mode_entry_char = None;
+                        state.block.input_buffer.push(c);
+                    }
+                    Screen::Chat => {
+                        state.chat.insert_mode_entry_char = None;
+                        state.chat.input_buffer.push(c);
+                    }
+                    _ => {}
+                }
+            }
         }
         KeyCode::Backspace => {
-            buffer.pop();
+            match screen {
+                Screen::Block => {
+                    state.block.insert_mode_entry_char = None;
+                    state.block.input_buffer.pop();
+                }
+                Screen::Chat => {
+                    state.chat.insert_mode_entry_char = None;
+                    state.chat.input_buffer.pop();
+                }
+                _ => {}
+            }
         }
         KeyCode::Enter => {
-            if !buffer.is_empty() {
-                let content = buffer.clone();
-                buffer.clear();
-
-                match state.screen() {
-                    Screen::Block => {
+            match screen {
+                Screen::Block => {
+                    if !state.block.input_buffer.is_empty() {
+                        let content = state.block.input_buffer.clone();
+                        state.block.input_buffer.clear();
                         commands.push(TuiCommand::Dispatch(DispatchCommand::SendBlockMessage {
                             content,
                         }));
                         // Exit insert mode after sending
                         state.block.insert_mode = false;
+                        state.block.insert_mode_entry_char = None;
                         state.block.focus = BlockFocus::Residents;
                     }
-                    Screen::Chat => {
+                }
+                Screen::Chat => {
+                    if !state.chat.input_buffer.is_empty() {
+                        let content = state.chat.input_buffer.clone();
+                        state.chat.input_buffer.clear();
                         commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
                             channel_id: String::new(), // Will be filled by runtime
                             content,
                         }));
                         // Exit insert mode after sending
                         state.chat.insert_mode = false;
+                        state.chat.insert_mode_entry_char = None;
                         state.chat.focus = ChatFocus::Messages;
                     }
-                    _ => {}
                 }
+                _ => {}
             }
         }
         _ => {}
@@ -2350,6 +2398,7 @@ fn handle_block_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: K
     match key.code {
         KeyCode::Char('i') => {
             state.block.insert_mode = true;
+            state.block.insert_mode_entry_char = Some('i');
             state.block.focus = BlockFocus::Input;
         }
         // Left/Right navigation between panels (with wrap-around)
@@ -2436,6 +2485,7 @@ fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: Ke
     match key.code {
         KeyCode::Char('i') => {
             state.chat.insert_mode = true;
+            state.chat.insert_mode_entry_char = Some('i');
             state.chat.focus = ChatFocus::Input;
         }
         // Left/Right navigation between panels (with wrap-around)

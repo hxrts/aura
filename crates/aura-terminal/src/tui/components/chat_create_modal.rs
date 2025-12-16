@@ -5,6 +5,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 
 /// Callback type for modal cancel
@@ -88,115 +89,120 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: border_color,
+            overflow: Overflow::Hidden,
         ) {
+            // Header
             View(
-                width: Percent(50.0),
-                flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
-                border_color: border_color,
+                width: 100pct,
+                padding: 2,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Header
+                Text(
+                    content: "New Chat Group",
+                    weight: Weight::Bold,
+                    color: Theme::PRIMARY,
+                )
+            }
+
+            // Body - fills available space
+            View(
+                width: 100pct,
+                padding: 2,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+            ) {
+                // Name field
+                View(margin_bottom: 1) {
+                    Text(content: "Group Name:", color: Theme::TEXT)
+                }
                 View(
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
+                    width: 100pct,
+                    flex_direction: FlexDirection::Column,
+                    border_style: BorderStyle::Round,
+                    border_color: if active_field == 0 { Theme::PRIMARY } else { Theme::BORDER },
+                    padding: 1,
+                    margin_bottom: 2,
                 ) {
                     Text(
-                        content: "New Chat Group",
-                        weight: Weight::Bold,
-                        color: Theme::PRIMARY,
+                        content: name_display,
+                        color: name_color,
                     )
                 }
 
-                // Body
-                View(padding: 2, flex_direction: FlexDirection::Column) {
-                    // Name field
-                    View(margin_bottom: 1) {
-                        Text(content: "Group Name:", color: Theme::TEXT)
-                    }
-                    View(
-                        flex_direction: FlexDirection::Column,
-
-                        border_style: BorderStyle::Round,
-                        border_color: if active_field == 0 { Theme::PRIMARY } else { Theme::BORDER },
-                        padding: 1,
-                        margin_bottom: 2,
-                    ) {
-                        Text(
-                            content: name_display,
-                            color: name_color,
-                        )
-                    }
-
-                    // Topic field
-                    View(margin_bottom: 1) {
-                        Text(content: "Topic (optional):", color: Theme::TEXT)
-                    }
-                    View(
-                        flex_direction: FlexDirection::Column,
-
-                        border_style: BorderStyle::Round,
-                        border_color: if active_field == 1 { Theme::PRIMARY } else { Theme::BORDER },
-                        padding: 1,
-                        margin_bottom: 1,
-                    ) {
-                        Text(
-                            content: topic_display,
-                            color: topic_color,
-                        )
-                    }
-
-                    // Error message (if any)
-                    #(if !error.is_empty() {
-                        Some(element! {
-                            View(margin_bottom: 1) {
-                                Text(content: error, color: Theme::ERROR)
-                            }
-                        })
-                    } else {
-                        None
-                    })
-
-                    // Status message
-                    #(if creating {
-                        Some(element! {
-                            View(margin_top: 1) {
-                                Text(content: "Creating...", color: Theme::WARNING)
-                            }
-                        })
-                    } else {
-                        None
-                    })
+                // Topic field
+                View(margin_bottom: 1) {
+                    Text(content: "Topic (optional):", color: Theme::TEXT)
+                }
+                View(
+                    width: 100pct,
+                    flex_direction: FlexDirection::Column,
+                    border_style: BorderStyle::Round,
+                    border_color: if active_field == 1 { Theme::PRIMARY } else { Theme::BORDER },
+                    padding: 1,
+                    margin_bottom: 1,
+                ) {
+                    Text(
+                        content: topic_display,
+                        color: topic_color,
+                    )
                 }
 
-                // Footer with key hints
-                View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "Esc", color: Theme::SECONDARY)
-                        Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                    }
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "Tab", color: Theme::SECONDARY)
-                        Text(content: "Next field", color: Theme::TEXT_MUTED)
-                    }
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "Enter", color: Theme::SECONDARY)
-                        Text(content: "Create", color: Theme::TEXT_MUTED)
-                    }
+                // Error message (if any)
+                #(if !error.is_empty() {
+                    Some(element! {
+                        View(margin_bottom: 1) {
+                            Text(content: error, color: Theme::ERROR)
+                        }
+                    })
+                } else {
+                    None
+                })
+
+                // Status message
+                #(if creating {
+                    Some(element! {
+                        View(margin_top: 1) {
+                            Text(content: "Creating...", color: Theme::WARNING)
+                        }
+                    })
+                } else {
+                    None
+                })
+            }
+
+            // Footer with key hints
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                padding: 2,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                View(flex_direction: FlexDirection::Row, gap: 2) {
+                    Text(content: "Esc", color: Theme::SECONDARY)
+                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: 2) {
+                    Text(content: "Tab", color: Theme::SECONDARY)
+                    Text(content: "Next field", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: 2) {
+                    Text(content: "Enter", color: Theme::SECONDARY)
+                    Text(content: "Create", color: Theme::TEXT_MUTED)
                 }
             }
         }

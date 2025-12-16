@@ -5,6 +5,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 
 /// Callback type for modal close
@@ -51,86 +52,91 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
     element! {
         View(
             position: Position::Absolute,
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-
+            top: 0u16,
+            left: 0u16,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: Theme::SUCCESS,
+            overflow: Overflow::Hidden,
         ) {
+            // Header
             View(
-                width: Percent(70.0),
+                width: 100pct,
+                padding: 2,
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
-                border_color: Theme::SUCCESS,
+                align_items: AlignItems::Center,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Header
+                Text(
+                    content: "✓ Invitation Created",
+                    weight: Weight::Bold,
+                    color: Theme::SUCCESS,
+                )
+                View(margin_top: 1) {
+                    Text(
+                        content: format!("Type: {}", invitation_type),
+                        color: Theme::TEXT_MUTED,
+                    )
+                }
+            }
+
+            // Code display - fills available space
+            View(
+                width: 100pct,
+                padding: 2,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+            ) {
+                View(margin_bottom: 1) {
+                    Text(
+                        content: "Share this code with the recipient:",
+                        color: Theme::TEXT,
+                    )
+                }
+
+                // Code box
                 View(
-                    padding: 2,
+                    width: 100pct,
                     flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
+                    border_style: BorderStyle::Round,
+                    border_color: Theme::PRIMARY,
+                    padding: 2,
                 ) {
                     Text(
-                        content: "✓ Invitation Created",
-                        weight: Weight::Bold,
-                        color: Theme::SUCCESS,
+                        content: formatted_code,
+                        color: Theme::PRIMARY,
+                        wrap: TextWrap::Wrap,
                     )
-                    View(margin_top: 1) {
-                        Text(
-                            content: format!("Type: {}", invitation_type),
-                            color: Theme::TEXT_MUTED,
-                        )
-                    }
                 }
 
-                // Code display
-                View(padding: 2, flex_direction: FlexDirection::Column) {
-                    View(margin_bottom: 1) {
-                        Text(
-                            content: "Share this code with the recipient:",
-                            color: Theme::TEXT,
-                        )
-                    }
-
-                    // Code box
-                    View(
-                        flex_direction: FlexDirection::Column,
-
-                        border_style: BorderStyle::Round,
-                        border_color: Theme::PRIMARY,
-                        padding: 2,
-                    ) {
-                        Text(
-                            content: formatted_code,
-                            color: Theme::PRIMARY,
-                            wrap: TextWrap::NoWrap,
-                        )
-                    }
-
-                    View(margin_top: 2) {
-                        Text(
-                            content: "The recipient can import this code to accept your invitation.",
-                            color: Theme::TEXT_MUTED,
-                        )
-                    }
+                View(margin_top: 2) {
+                    Text(
+                        content: "The recipient can import this code to accept your invitation.",
+                        color: Theme::TEXT_MUTED,
+                    )
                 }
+            }
 
-                // Footer
-                View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::Center,
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                        Text(content: "Esc", color: Theme::SECONDARY)
-                        Text(content: "Close", color: Theme::TEXT_MUTED)
-                    }
+            // Footer
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                padding: 2,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                View(flex_direction: FlexDirection::Row, gap: 2) {
+                    Text(content: "Esc", color: Theme::SECONDARY)
+                    Text(content: "Close", color: Theme::TEXT_MUTED)
                 }
             }
         }

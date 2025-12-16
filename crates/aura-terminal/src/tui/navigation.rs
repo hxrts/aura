@@ -17,13 +17,6 @@
 
 use crate::tui::components::ListNavigation;
 use iocraft::prelude::*;
-use std::time::{Duration, Instant};
-
-/// Navigation throttle duration to prevent too-rapid key repeats
-pub const NAV_THROTTLE_MS: u64 = 150;
-
-/// Input throttle duration for text input (slightly faster than navigation)
-pub const INPUT_THROTTLE_MS: u64 = 50;
 
 /// Check if a navigation key was pressed (not released)
 pub fn is_nav_key_press(event: &TerminalEvent) -> Option<NavKey> {
@@ -67,92 +60,6 @@ impl NavKey {
             NavKey::Up => Some(ListNavigation::Up),
             NavKey::Down => Some(ListNavigation::Down),
             _ => None,
-        }
-    }
-}
-
-/// Throttle helper for navigation
-pub struct NavThrottle {
-    last_nav: Instant,
-    duration: Duration,
-}
-
-impl Default for NavThrottle {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl NavThrottle {
-    /// Create a new navigation throttle
-    pub fn new() -> Self {
-        Self {
-            // Start in the past so first navigation is immediate
-            last_nav: Instant::now() - Duration::from_millis(NAV_THROTTLE_MS + 100),
-            duration: Duration::from_millis(NAV_THROTTLE_MS),
-        }
-    }
-
-    /// Check if enough time has passed for another navigation
-    pub fn can_navigate(&self) -> bool {
-        self.last_nav.elapsed() >= self.duration
-    }
-
-    /// Mark that navigation occurred
-    pub fn mark(&mut self) {
-        self.last_nav = Instant::now();
-    }
-
-    /// Check and mark in one call - returns true if navigation is allowed
-    pub fn try_navigate(&mut self) -> bool {
-        if self.can_navigate() {
-            self.mark();
-            true
-        } else {
-            false
-        }
-    }
-}
-
-/// Throttle helper for text input to prevent too-rapid key repeats
-pub struct InputThrottle {
-    last_input: Instant,
-    duration: Duration,
-}
-
-impl Default for InputThrottle {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl InputThrottle {
-    /// Create a new input throttle
-    pub fn new() -> Self {
-        Self {
-            // Start in the past so first input is immediate
-            last_input: Instant::now() - Duration::from_millis(INPUT_THROTTLE_MS + 100),
-            duration: Duration::from_millis(INPUT_THROTTLE_MS),
-        }
-    }
-
-    /// Check if enough time has passed for another input
-    pub fn can_input(&self) -> bool {
-        self.last_input.elapsed() >= self.duration
-    }
-
-    /// Mark that input occurred
-    pub fn mark(&mut self) {
-        self.last_input = Instant::now();
-    }
-
-    /// Check and mark in one call - returns true if input is allowed
-    pub fn try_input(&mut self) -> bool {
-        if self.can_input() {
-            self.mark();
-            true
-        } else {
-            false
         }
     }
 }
@@ -687,13 +594,6 @@ mod tests {
         assert_eq!(navigate_grid(2, 3, 6, NavKey::Right), 3); // Continues to next row
         assert_eq!(navigate_grid(0, 3, 6, NavKey::Down), 3);
         assert_eq!(navigate_grid(5, 3, 6, NavKey::Right), 0); // Wraps to first
-    }
-
-    #[test]
-    fn test_nav_throttle() {
-        let mut throttle = NavThrottle::new();
-        assert!(throttle.try_navigate()); // First is always allowed
-        assert!(!throttle.try_navigate()); // Immediate second is blocked
     }
 
     #[test]

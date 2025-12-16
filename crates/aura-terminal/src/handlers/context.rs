@@ -209,3 +209,99 @@ struct ReceiptDebug {
     #[serde(default)]
     pub chain_hash: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_trims_and_lowercases() {
+        assert_eq!(normalize("  HELLO  "), "hello");
+        assert_eq!(normalize("World"), "world");
+        assert_eq!(normalize(""), "");
+    }
+
+    #[test]
+    fn test_anonymize_produces_consistent_output() {
+        let result1 = anonymize("test-peer-id");
+        let result2 = anonymize("test-peer-id");
+        assert_eq!(result1, result2);
+        assert!(result1.starts_with("anon-"));
+        assert_eq!(result1.len(), 17); // "anon-" + 12 hex chars
+    }
+
+    #[test]
+    fn test_anonymize_different_inputs_produce_different_outputs() {
+        let result1 = anonymize("peer-a");
+        let result2 = anonymize("peer-b");
+        assert_ne!(result1, result2);
+    }
+
+    #[test]
+    fn test_load_context_parses_valid_json() {
+        use std::io::Write;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let state_file = temp_dir.path().join("state.json");
+
+        let json = r#"{
+            "contexts": [
+                {
+                    "context": "test-context",
+                    "flow_budget": { "limit": 100, "spent": 20, "epoch": 1 },
+                    "rendezvous_envelopes": [],
+                    "channels": [],
+                    "receipts": []
+                }
+            ]
+        }"#;
+
+        let mut file = fs::File::create(&state_file).unwrap();
+        file.write_all(json.as_bytes()).unwrap();
+
+        let snapshot = load_context(&state_file, "test-context").unwrap();
+        assert_eq!(snapshot.context, "test-context");
+        assert_eq!(snapshot.flow_budget.limit, 100);
+        assert_eq!(snapshot.flow_budget.spent, 20);
+    }
+
+    #[test]
+    fn test_load_context_case_insensitive() {
+        use std::io::Write;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let state_file = temp_dir.path().join("state.json");
+
+        let json = r#"{
+            "contexts": [
+                {
+                    "context": "MyContext",
+                    "flow_budget": { "limit": 50, "spent": 10, "epoch": 2 },
+                    "rendezvous_envelopes": [],
+                    "channels": [],
+                    "receipts": []
+                }
+            ]
+        }"#;
+
+        let mut file = fs::File::create(&state_file).unwrap();
+        file.write_all(json.as_bytes()).unwrap();
+
+        // Should find regardless of case
+        let snapshot = load_context(&state_file, "mycontext").unwrap();
+        assert_eq!(snapshot.context, "MyContext");
+    }
+
+    #[test]
+    fn test_load_context_not_found() {
+        use std::io::Write;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let state_file = temp_dir.path().join("state.json");
+
+        let json = r#"{ "contexts": [] }"#;
+
+        let mut file = fs::File::create(&state_file).unwrap();
+        file.write_all(json.as_bytes()).unwrap();
+
+        let result = load_context(&state_file, "nonexistent");
+        assert!(result.is_err());
+    }
+}

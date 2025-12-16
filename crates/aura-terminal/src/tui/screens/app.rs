@@ -6,9 +6,11 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::components::{
-    AccountSetupModal, AccountSetupState, ConfirmModal, ContactSelectModal, ContactSelectState,
-    DiscoveredPeerInfo, Footer, HelpModal, HelpModalState, InvitePeerCallback, NavBar,
-    PeerInvitationStatus, ToastContainer, ToastLevel, ToastMessage,
+    AccountSetupModal, AccountSetupState, ChannelInfoModal, ChatCreateModal, ConfirmModal,
+    ContactSelectModal, ContactSelectState, DiscoveredPeerInfo, Footer, GuardianCandidateProps,
+    GuardianSetupModal, HelpModal, HelpModalState, InvitationCodeModal, InvitationCreateModal,
+    InvitationImportModal, InvitePeerCallback, ModalFrame, NavBar, PeerInvitationStatus,
+    TextInputModal, ThresholdModal, ToastContainer, ToastLevel, ToastMessage,
 };
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
@@ -34,8 +36,8 @@ use crate::tui::screens::settings::{
     UpdateThresholdCallback,
 };
 use crate::tui::types::{
-    BlockBudget, BlockSummary, Channel, Contact, Device, Guardian, Invitation, KeyHint, Message,
-    MfaPolicy, PendingRequest, RecoveryStatus, Resident, TraversalDepth,
+    BlockBudget, BlockSummary, Channel, Contact, Device, Guardian, Invitation, InvitationType,
+    KeyHint, Message, MfaPolicy, PendingRequest, RecoveryStatus, Resident, TraversalDepth,
 };
 
 use super::router::Screen;
@@ -151,67 +153,12 @@ pub type CreateAccountCallback = Arc<dyn Fn(String) + Send + Sync>;
 /// Callback for selecting a guardian from the modal (contact_id)
 pub type GuardianSelectCallback = Arc<dyn Fn(String) + Send + Sync>;
 
-/// Key repeat debounce state
-#[derive(Clone, Default)]
-struct KeyDebounce {
-    /// Last key code pressed (as debug string for comparison)
-    last_key: Option<String>,
-    /// Timestamp of last accepted key press
-    last_time: Option<std::time::Instant>,
-    /// Whether we're in "repeat" mode (after initial delay)
-    repeating: bool,
-}
-
-impl KeyDebounce {
-    /// Initial delay before key repeat starts (ms)
-    const INITIAL_DELAY_MS: u64 = 200;
-    /// Delay between repeated keys (ms)
-    const REPEAT_DELAY_MS: u64 = 50;
-
-    /// Check if this key event should be accepted (returns true) or debounced (returns false)
-    fn should_accept(&mut self, key: &str) -> bool {
-        let now = std::time::Instant::now();
-
-        match (&self.last_key, self.last_time) {
-            (Some(last), Some(time)) if last == key => {
-                // Same key - apply debouncing
-                let elapsed = now.duration_since(time).as_millis() as u64;
-                let threshold = if self.repeating {
-                    Self::REPEAT_DELAY_MS
-                } else {
-                    Self::INITIAL_DELAY_MS
-                };
-
-                if elapsed >= threshold {
-                    // Accept and mark as repeating
-                    self.last_time = Some(now);
-                    self.repeating = true;
-                    true
-                } else {
-                    // Debounce - too fast
-                    false
-                }
-            }
-            _ => {
-                // Different key or first press - always accept
-                self.last_key = Some(key.to_string());
-                self.last_time = Some(now);
-                self.repeating = false;
-                true
-            }
-        }
-    }
-}
-
 /// Main application with screen navigation
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let screen = hooks.use_state(|| Screen::Block);
     let should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
-
-    // Key debounce state for preventing double-presses
-    let key_debounce = hooks.use_ref(KeyDebounce::default);
 
     // Pure TUI state machine - holds all UI state for deterministic transitions
     // This is the source of truth; iocraft hooks sync FROM this state
@@ -367,7 +314,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let block_props = extract_block_view_props(&tui_state.read());
     let chat_props = extract_chat_view_props(&tui_state.read());
     let contacts_props = extract_contacts_view_props(&tui_state.read());
-    let _invitations_props = extract_invitations_view_props(&tui_state.read());
+    let invitations_props = extract_invitations_view_props(&tui_state.read());
     let settings_props = extract_settings_view_props(&tui_state.read());
     let recovery_props = extract_recovery_view_props(&tui_state.read());
     let neighborhood_props = extract_neighborhood_view_props(&tui_state.read());
@@ -448,8 +395,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let io_ctx_for_ceremony = app_ctx.io_context.clone();
         // Clone AppCore for key rotation operations
         let app_core_for_ceremony = app_ctx.app_core.clone();
-        // Key debounce ref for preventing rapid double-presses
-        let mut key_debounce = key_debounce.clone();
         // Clone all dispatch callbacks for use inside the closure
         let on_block_send = on_block_send.clone();
         let on_block_invite = on_block_invite.clone();
@@ -482,12 +427,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         move |event| {
             // Convert iocraft event to aura-core event and run through state machine
             if let Some(core_event) = convert_iocraft_event(event.clone()) {
-                // Apply key debouncing to prevent double-presses
-                // Uses classic pattern: longer initial delay, then faster repeat
-                let key_str = format!("{:?}", core_event);
-                if !key_debounce.write().should_accept(&key_str) {
-                    return; // Debounced - skip this event
-                }
                 // Get current state, apply transition, update state
                 let current = tui_state.read().clone();
                 let (new_state, commands) = transition(&current, core_event);
@@ -1035,13 +974,21 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             height: dim::TOTAL_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Nav bar with screen tabs and status (3 rows)
-            NavBar(
-                active_screen: current_screen,
-                syncing: syncing,
-                last_sync_time: last_sync,
-                peer_count: peers,
-            )
+            // Nav bar area (3 rows) - shows toast if active, otherwise nav bar
+            #(if current_toasts.is_empty() {
+                element! {
+                    NavBar(
+                        active_screen: current_screen,
+                        syncing: syncing,
+                        last_sync_time: last_sync,
+                        peer_count: peers,
+                    )
+                }.into_any()
+            } else {
+                element! {
+                    ToastContainer(toasts: current_toasts.clone())
+                }.into_any()
+            })
 
             // Screen content - fixed 25 rows (MIDDLE_HEIGHT)
             View(width: dim::TOTAL_WIDTH, height: dim::MIDDLE_HEIGHT, overflow: Overflow::Hidden) {
@@ -1163,49 +1110,392 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Show darkened hints when in insert mode (hotkeys inactive)
             Footer(hints: screen_hints.clone(), global_hints: global_hints.clone(), disabled: is_insert_mode)
 
+            // === MODAL OVERLAYS ===
+            // All modals are rendered at root level with ModalFrame for consistent positioning.
+            // See modal_frame.rs for positioning details.
+
             // Account setup modal overlay
-            AccountSetupModal(
-                visible: modal_visible,
-                display_name: modal_display_name,
-                focused: true,
-                creating: modal_creating,
-                success: modal_success,
-                error: modal_error,
-            )
+            #(if modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        AccountSetupModal(
+                            visible: true,
+                            display_name: modal_display_name.clone(),
+                            focused: true,
+                            creating: modal_creating,
+                            success: modal_success,
+                            error: modal_error.clone(),
+                        )
+                    }
+                })
+            } else {
+                None
+            })
 
             // Guardian selection modal overlay
-            ContactSelectModal(
-                visible: guardian_modal_visible,
-                title: guardian_modal_title,
-                contacts: guardian_modal_contacts,
-                selected_index: guardian_modal_selected,
-                error: guardian_modal_error,
-            )
+            #(if guardian_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        ContactSelectModal(
+                            visible: true,
+                            title: guardian_modal_title.clone(),
+                            contacts: guardian_modal_contacts.clone(),
+                            selected_index: guardian_modal_selected,
+                            error: guardian_modal_error.clone(),
+                        )
+                    }
+                })
+            } else {
+                None
+            })
 
             // Generic contact selection modal overlay
-            ContactSelectModal(
-                visible: contact_modal_visible,
-                title: contact_modal_title,
-                contacts: contact_modal_contacts,
-                selected_index: contact_modal_selected,
-                error: contact_modal_error,
-            )
+            #(if contact_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        ContactSelectModal(
+                            visible: true,
+                            title: contact_modal_title.clone(),
+                            contacts: contact_modal_contacts.clone(),
+                            selected_index: contact_modal_selected,
+                            error: contact_modal_error.clone(),
+                        )
+                    }
+                })
+            } else {
+                None
+            })
 
             // Confirm dialog modal overlay
-            ConfirmModal(
-                visible: confirm_visible,
-                title: confirm_title,
-                message: confirm_message,
-                confirm_text: "Confirm".to_string(),
-                cancel_text: "Cancel".to_string(),
-                confirm_focused: true,
-            )
+            #(if confirm_visible {
+                Some(element! {
+                    ModalFrame {
+                        ConfirmModal(
+                            visible: true,
+                            title: confirm_title.clone(),
+                            message: confirm_message.clone(),
+                            confirm_text: "Confirm".to_string(),
+                            cancel_text: "Cancel".to_string(),
+                            confirm_focused: true,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
 
             // Help modal overlay (context-sensitive)
-            HelpModal(visible: help_modal_visible, current_screen: Some(current_screen.name().to_string()))
+            #(if help_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        HelpModal(visible: true, current_screen: Some(current_screen.name().to_string()))
+                    }
+                })
+            } else {
+                None
+            })
 
-            // Toast notification overlay (absolute positioned at bottom, above key hints)
-            ToastContainer(toasts: current_toasts.clone())
+            // === CONTACTS SCREEN MODALS (moved from contacts.rs) ===
+
+            // Petname edit modal
+            #(if contacts_props.petname_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        TextInputModal(
+                            visible: true,
+                            focused: true,
+                            title: "Edit Petname".to_string(),
+                            value: contacts_props.petname_modal_value.clone(),
+                            placeholder: "Enter petname...".to_string(),
+                            error: String::new(),
+                            submitting: false,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Import invitation modal (accept invitation code)
+            #(if contacts_props.import_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        InvitationImportModal(
+                            visible: true,
+                            focused: true,
+                            code: contacts_props.import_modal_code.clone(),
+                            error: String::new(),
+                            importing: contacts_props.import_modal_importing,
+                            demo_mode: contacts_props.demo_mode,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Create invitation modal (send invitation)
+            #(if contacts_props.create_modal_visible {
+                let invitation_type = match contacts_props.create_modal_type_index {
+                    0 => InvitationType::Guardian,
+                    1 => InvitationType::Contact,
+                    _ => InvitationType::Channel,
+                };
+                Some(element! {
+                    ModalFrame {
+                        InvitationCreateModal(
+                            visible: true,
+                            focused: true,
+                            creating: contacts_props.create_modal_step > 0,
+                            error: String::new(),
+                            invitation_type: invitation_type,
+                            message: contacts_props.create_modal_message.clone(),
+                            ttl_hours: contacts_props.create_modal_ttl_hours as u32,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Guardian setup modal (multi-step wizard)
+            #(if contacts_props.guardian_setup_modal_visible {
+                let guardian_contacts: Vec<GuardianCandidateProps> = contacts_props.guardian_setup_modal_contacts
+                    .iter()
+                    .map(|c| GuardianCandidateProps {
+                        id: c.id.clone(),
+                        name: c.name.clone(),
+                        is_current_guardian: c.is_current_guardian,
+                    })
+                    .collect();
+
+                Some(element! {
+                    ModalFrame {
+                        GuardianSetupModal(
+                            visible: true,
+                            step: contacts_props.guardian_setup_modal_step.clone(),
+                            contacts: guardian_contacts,
+                            selected_indices: contacts_props.guardian_setup_modal_selected_indices.clone(),
+                            focused_index: contacts_props.guardian_setup_modal_focused_index,
+                            threshold_k: contacts_props.guardian_setup_modal_threshold_k,
+                            threshold_n: contacts_props.guardian_setup_modal_threshold_n,
+                            ceremony_responses: contacts_props.guardian_setup_modal_ceremony_responses.clone(),
+                            error: contacts_props.guardian_setup_modal_error.clone(),
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // === CHAT SCREEN MODALS (moved from chat.rs) ===
+
+            // Create channel modal
+            #(if chat_props.create_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        ChatCreateModal(
+                            visible: true,
+                            focused: true,
+                            name: chat_props.create_modal_name.clone(),
+                            topic: chat_props.create_modal_topic.clone(),
+                            active_field: chat_props.create_modal_active_field,
+                            error: String::new(),
+                            creating: false,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Topic editing modal
+            #(if chat_props.topic_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        TextInputModal(
+                            visible: true,
+                            title: "Set Channel Topic".to_string(),
+                            value: chat_props.topic_modal_value.clone(),
+                            placeholder: "Enter topic...".to_string(),
+                            error: String::new(),
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Channel info modal
+            #(if chat_props.info_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        ChannelInfoModal(
+                            visible: true,
+                            channel_name: chat_props.info_modal_channel_name.clone(),
+                            topic: chat_props.info_modal_topic.clone(),
+                            participants: vec!["You".to_string()],
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // === SETTINGS SCREEN MODALS (moved from settings.rs) ===
+
+            // Nickname edit modal
+            #(if settings_props.nickname_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        TextInputModal(
+                            visible: true,
+                            focused: true,
+                            title: "Edit Display Name".to_string(),
+                            value: settings_props.nickname_modal_value.clone(),
+                            placeholder: "Enter your display name...".to_string(),
+                            error: String::new(),
+                            submitting: false,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Threshold edit modal
+            #(if settings_props.threshold_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        ThresholdModal(
+                            visible: true,
+                            focused: true,
+                            threshold_k: settings_props.threshold_modal_k,
+                            threshold_n: settings_props.threshold_modal_n,
+                            has_changed: settings_props.threshold_modal_k != threshold_k,
+                            error: String::new(),
+                            submitting: false,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Add device modal
+            #(if settings_props.add_device_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        TextInputModal(
+                            visible: true,
+                            focused: true,
+                            title: "Add Device".to_string(),
+                            value: settings_props.add_device_modal_name.clone(),
+                            placeholder: "Enter device name...".to_string(),
+                            error: String::new(),
+                            submitting: false,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Confirm remove device modal
+            #(if settings_props.confirm_remove_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        ConfirmModal(
+                            visible: true,
+                            title: "Remove Device".to_string(),
+                            message: format!("Are you sure you want to remove \"{}\"?", settings_props.confirm_remove_modal_device_name),
+                            confirm_text: "Remove".to_string(),
+                            cancel_text: "Cancel".to_string(),
+                            confirm_focused: settings_props.confirm_remove_modal_confirm_focused,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // === BLOCK SCREEN MODALS (moved from block.rs) ===
+
+            // Block invite modal
+            #(if block_props.invite_modal_open {
+                Some(element! {
+                    ModalFrame {
+                        ContactSelectModal(
+                            visible: true,
+                            title: "Invite to Block".to_string(),
+                            contacts: contacts.clone(),
+                            selected_index: block_props.invite_selection,
+                            error: String::new(),
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // === INVITATIONS SCREEN MODALS (moved from invitations.rs) ===
+
+            // Create invitation modal
+            #(if invitations_props.create_modal_visible {
+                let invitation_type = match invitations_props.create_modal_type_index {
+                    0 => InvitationType::Guardian,
+                    1 => InvitationType::Contact,
+                    _ => InvitationType::Channel,
+                };
+                Some(element! {
+                    ModalFrame {
+                        InvitationCreateModal(
+                            visible: true,
+                            focused: true,
+                            creating: false,
+                            error: String::new(),
+                            invitation_type: invitation_type,
+                            message: invitations_props.create_modal_message.clone(),
+                            ttl_hours: invitations_props.create_modal_ttl_hours as u32,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Invitation code modal (after export)
+            #(if invitations_props.code_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        InvitationCodeModal(
+                            visible: true,
+                            code: invitations_props.code_modal_code.clone(),
+                            invitation_type: "Guardian".to_string(),
+                        )
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Import invitation modal
+            #(if invitations_props.import_modal_visible {
+                Some(element! {
+                    ModalFrame {
+                        InvitationImportModal(
+                            visible: true,
+                            focused: true,
+                            code: invitations_props.import_modal_code.clone(),
+                            error: String::new(),
+                            importing: invitations_props.import_modal_importing,
+                            demo_mode: props.demo_mode,
+                        )
+                    }
+                })
+            } else {
+                None
+            })
         }
     }
 }

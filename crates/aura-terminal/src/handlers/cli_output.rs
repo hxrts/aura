@@ -272,4 +272,90 @@ mod tests {
 
         assert_eq!(out.stdout_lines().len(), 3);
     }
+
+    #[test]
+    fn test_blank_adds_empty_line() {
+        let mut out = CliOutput::new();
+        out.println("Before");
+        out.blank();
+        out.println("After");
+
+        let lines = out.stdout_lines();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "Before");
+        assert_eq!(lines[1], "");
+        assert_eq!(lines[2], "After");
+    }
+
+    #[test]
+    fn test_is_empty() {
+        let empty = CliOutput::new();
+        assert!(empty.is_empty());
+
+        let mut non_empty = CliOutput::new();
+        non_empty.println("Hello");
+        assert!(!non_empty.is_empty());
+    }
+
+    #[test]
+    fn test_extend_merges_outputs() {
+        let mut out1 = CliOutput::new();
+        out1.println("Line 1");
+        out1.eprintln("Error 1");
+
+        let mut out2 = CliOutput::new();
+        out2.println("Line 2");
+        out2.eprintln("Error 2");
+
+        out1.extend(out2);
+
+        assert_eq!(out1.stdout_lines(), vec!["Line 1", "Line 2"]);
+        assert_eq!(out1.stderr_lines(), vec!["Error 1", "Error 2"]);
+    }
+
+    #[test]
+    fn test_output_line_constructors() {
+        let out = OutputLine::out("stdout");
+        let err = OutputLine::err("stderr");
+
+        assert_eq!(out, OutputLine::Out("stdout".to_string()));
+        assert_eq!(err, OutputLine::Err("stderr".to_string()));
+    }
+
+    #[test]
+    fn test_table_empty_headers() {
+        let mut out = CliOutput::new();
+        out.table(&[], &[]);
+
+        // Empty headers should result in no output
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_table_handles_varying_widths() {
+        let mut out = CliOutput::new();
+        out.table(
+            &["ID", "Name"],
+            &[
+                vec!["1".into(), "Alice".into()],
+                vec!["1000".into(), "B".into()],
+            ],
+        );
+
+        let lines = out.stdout_lines();
+        // Column widths should accommodate longest values
+        assert!(lines[2].contains("1   ") || lines[2].contains("1  ")); // ID column
+        assert!(lines[3].contains("1000")); // Second row
+    }
+
+    #[test]
+    fn test_builder_eprintln() {
+        let out = CliOutputBuilder::new()
+            .println("stdout")
+            .eprintln("stderr")
+            .build();
+
+        assert_eq!(out.stdout_lines().len(), 1);
+        assert_eq!(out.stderr_lines().len(), 1);
+    }
 }

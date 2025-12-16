@@ -50,7 +50,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         return element! {
             View(
                 position: Position::Absolute,
-                top: dim::NAV_HEIGHT,
+                top: 0u16,
                 left: 0u16,
                 width: dim::TOTAL_WIDTH,
                 height: dim::MIDDLE_HEIGHT,
@@ -129,7 +129,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         return element! {
             View(
                 position: Position::Absolute,
-                top: dim::NAV_HEIGHT,
+                top: 0u16,
                 left: 0u16,
                 width: dim::TOTAL_WIDTH,
                 height: dim::MIDDLE_HEIGHT,
@@ -199,7 +199,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     element! {
         View(
             position: Position::Absolute,
-            top: dim::NAV_HEIGHT,
+            top: 0u16,
             left: 0u16,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,

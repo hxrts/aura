@@ -16,7 +16,7 @@ use std::sync::Arc;
 use aura_app::signal_defs::BLOCK_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
-use crate::tui::components::{ContactSelectModal, MessageInput};
+use crate::tui::components::MessageInput;
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
 use crate::tui::props::BlockViewProps;
@@ -387,13 +387,10 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_focus = props.view.focus;
     let current_resident_index = props.view.selected_resident;
-    let is_invite_modal_visible = props.view.invite_modal_open;
     let display_input_text = props.view.input_buffer.clone();
     let input_focused = props.view.insert_mode || current_focus == BlockFocus::Input;
 
-    // Get contacts from props for modal
-    let contacts = props.contacts.clone();
-    let invite_selection = props.view.invite_selection;
+    // NOTE: Modals have been moved to app.rs root level. See modal_frame.rs for details.
 
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.
@@ -436,13 +433,8 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                 )
             }
 
-            // Invite modal overlay (shown when modal is visible)
-            ContactSelectModal(
-                title: "Invite to Block".to_string(),
-                contacts: contacts,
-                selected_index: invite_selection,
-                visible: is_invite_modal_visible,
-            )
+            // NOTE: All modals have been moved to app.rs root level and wrapped with ModalFrame
+            // for consistent positioning. See the "BLOCK SCREEN MODALS" section in app.rs.
         }
     }
 }

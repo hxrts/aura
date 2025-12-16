@@ -5,6 +5,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 use crate::tui::types::InvitationType;
 
@@ -104,154 +105,153 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
 
     element! {
         View(
-            width: 100pct,
-            height: 100pct,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
+            width: dim::TOTAL_WIDTH,
+            height: dim::MIDDLE_HEIGHT,
+            flex_direction: FlexDirection::Column,
+            background_color: Theme::BG_MODAL,
+            border_style: BorderStyle::Round,
+            border_color: Theme::PRIMARY,
+            overflow: Overflow::Hidden,
         ) {
+            // Header
             View(
-                width: Percent(60.0),
+                width: 100pct,
+                padding: 1,
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
-                border_color: Theme::PRIMARY,
+                align_items: AlignItems::Center,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
             ) {
-                // Header
-                View(
-                    padding: 2,
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                ) {
-                    Text(
-                        content: "Create Invitation",
-                        weight: Weight::Bold,
-                        color: Theme::PRIMARY,
-                    )
-                    View(margin_top: 1) {
-                        Text(
-                            content: "Invite someone to connect with you",
-                            color: Theme::TEXT_MUTED,
-                        )
+                Text(
+                    content: "Create Invitation",
+                    weight: Weight::Bold,
+                    color: Theme::PRIMARY,
+                )
+                Text(
+                    content: "Invite someone to connect with you",
+                    color: Theme::TEXT_MUTED,
+                )
+            }
+
+            // Form content - fills available space
+            View(
+                width: 100pct,
+                padding: 2,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+            ) {
+                // Invitation Type selector
+                View(flex_direction: FlexDirection::Column, margin_bottom: 1) {
+                    Text(content: "Type (Tab to change)", color: Theme::TEXT_MUTED)
+                    View(
+                        margin_top: 1,
+                        flex_direction: FlexDirection::Row,
+                        gap: 1,
+                        border_style: BorderStyle::Round,
+                        border_color: border_color,
+                        padding_left: 1,
+                        padding_right: 1,
+                    ) {
+                        Text(content: type_icon.to_string(), color: Theme::PRIMARY)
+                        Text(content: type_label.to_string(), color: Theme::TEXT)
                     }
                 }
 
-                // Form content
-                View(padding: 2, flex_direction: FlexDirection::Column) {
-                    // Invitation Type selector
-                    View(flex_direction: FlexDirection::Column, margin_bottom: 2) {
-                        Text(content: "Type (Tab to change)", color: Theme::TEXT_MUTED)
-                        View(
-                            margin_top: 1,
-                            flex_direction: FlexDirection::Row,
-                            gap: 1,
-                            border_style: BorderStyle::Round,
-                            border_color: border_color,
-                            padding_left: 1,
-                            padding_right: 1,
-                        ) {
-                            Text(content: type_icon.to_string(), color: Theme::PRIMARY)
-                            Text(content: type_label.to_string(), color: Theme::TEXT)
-                        }
-                    }
-
-                    // Type descriptions
-                    View(margin_bottom: 2) {
-                        #(match invitation_type {
-                            InvitationType::Contact => element! {
-                                Text(
-                                    content: "Add as a contact for messaging",
-                                    color: Theme::TEXT_MUTED,
-                                )
-                            },
-                            InvitationType::Guardian => element! {
-                                Text(
-                                    content: "Invite to be a guardian for account recovery",
-                                    color: Theme::TEXT_MUTED,
-                                )
-                            },
-                            InvitationType::Channel => element! {
-                                Text(
-                                    content: "Invite to join a chat channel",
-                                    color: Theme::TEXT_MUTED,
-                                )
-                            },
-                        })
-                    }
-
-                    // Optional message
-                    View(flex_direction: FlexDirection::Column, margin_bottom: 2) {
-                        Text(content: "Message (m to edit)", color: Theme::TEXT_MUTED)
-                        View(
-                            margin_top: 1,
-                            border_style: BorderStyle::Round,
-                            border_color: Theme::BORDER,
-                            padding_left: 1,
-                            padding_right: 1,
-                        ) {
-                            Text(content: message_display, color: message_color)
-                        }
-                    }
-
-                    // TTL selector
-                    View(flex_direction: FlexDirection::Column, margin_bottom: 2) {
-                        Text(content: "Expiry (t to change)", color: Theme::TEXT_MUTED)
-                        View(
-                            margin_top: 1,
-                            border_style: BorderStyle::Round,
-                            border_color: Theme::BORDER,
-                            padding_left: 1,
-                            padding_right: 1,
-                        ) {
-                            Text(content: ttl_display, color: Theme::TEXT)
-                        }
-                    }
-
-                    // Error message
-                    #(if has_error {
-                        Some(element! {
-                            View(margin_top: 1) {
-                                Text(content: error, color: Theme::ERROR)
-                            }
-                        })
-                    } else {
-                        None
+                // Type descriptions
+                View(margin_bottom: 1) {
+                    #(match invitation_type {
+                        InvitationType::Contact => element! {
+                            Text(
+                                content: "Add as a contact for messaging",
+                                color: Theme::TEXT_MUTED,
+                            )
+                        },
+                        InvitationType::Guardian => element! {
+                            Text(
+                                content: "Invite to be a guardian for account recovery",
+                                color: Theme::TEXT_MUTED,
+                            )
+                        },
+                        InvitationType::Channel => element! {
+                            Text(
+                                content: "Invite to join a chat channel",
+                                color: Theme::TEXT_MUTED,
+                            )
+                        },
                     })
                 }
 
-                // Footer with hints and button
-                View(
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    View(flex_direction: FlexDirection::Column, gap: 0) {
-                        View(flex_direction: FlexDirection::Row, gap: 1) {
-                            Text(content: "Tab", color: Theme::SECONDARY)
-                            Text(content: "type", color: Theme::TEXT_MUTED)
-                            Text(content: "t", color: Theme::SECONDARY)
-                            Text(content: "ttl", color: Theme::TEXT_MUTED)
-                            Text(content: "Esc", color: Theme::SECONDARY)
-                            Text(content: "cancel", color: Theme::TEXT_MUTED)
-                        }
-                    }
+                // Optional message
+                View(flex_direction: FlexDirection::Column, margin_bottom: 1) {
+                    Text(content: "Message (m to edit)", color: Theme::TEXT_MUTED)
                     View(
-                        padding_left: 2,
-                        padding_right: 2,
+                        margin_top: 1,
+                        width: 100pct,
                         border_style: BorderStyle::Round,
-                        border_color: if can_submit { Theme::PRIMARY } else { Theme::BORDER },
+                        border_color: Theme::BORDER,
+                        padding_left: 1,
+                        padding_right: 1,
                     ) {
-                        Text(
-                            content: submit_text,
-                            color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
-                        )
+                        Text(content: message_display, color: message_color)
                     }
+                }
+
+                // TTL selector
+                View(flex_direction: FlexDirection::Column, margin_bottom: 1) {
+                    Text(content: "Expiry (t to change)", color: Theme::TEXT_MUTED)
+                    View(
+                        margin_top: 1,
+                        border_style: BorderStyle::Round,
+                        border_color: Theme::BORDER,
+                        padding_left: 1,
+                        padding_right: 1,
+                    ) {
+                        Text(content: ttl_display, color: Theme::TEXT)
+                    }
+                }
+
+                // Error message
+                #(if has_error {
+                    Some(element! {
+                        View(margin_top: 1) {
+                            Text(content: error, color: Theme::ERROR)
+                        }
+                    })
+                } else {
+                    None
+                })
+            }
+
+            // Footer with hints and button
+            View(
+                width: 100pct,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                padding: 1,
+                gap: 3,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Top,
+                border_color: Theme::BORDER,
+            ) {
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "Tab", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "type", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "t", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "ttl", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "cancel", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "Enter", weight: Weight::Bold, color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED })
+                    Text(content: submit_text, color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED })
                 }
             }
         }
