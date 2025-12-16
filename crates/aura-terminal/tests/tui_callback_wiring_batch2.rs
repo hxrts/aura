@@ -815,7 +815,7 @@ async fn test_all_snapshots_consistent() {
     println!("  Contacts: {} contacts", contacts.contacts.len());
     println!("  Recovery: in_progress={}", recovery.is_in_progress);
     println!("  Neighborhood: {} blocks", neighborhood.blocks.len());
-    println!("  Block: {} residents", block.residents.len());
+    println!("  Block: {} residents", block.residents().len());
     println!(
         "  Invitations: {} invitations",
         invitations.invitations.len()

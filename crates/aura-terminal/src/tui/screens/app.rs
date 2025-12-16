@@ -372,53 +372,52 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let recovery_props = extract_recovery_view_props(&tui_state.read());
     let neighborhood_props = extract_neighborhood_view_props(&tui_state.read());
 
-    // Global hints that appear on all screens
+    // Global hints that appear on all screens (bottom row)
     let global_hints = vec![
+        KeyHint::new("↑↓←→", "Navigate"),
         KeyHint::new("Tab", "Next screen"),
         KeyHint::new("?", "Help"),
         KeyHint::new("q", "Quit"),
     ];
 
-    // Build screen-specific hints based on current screen
-    let mut screen_hints: Vec<KeyHint> = match current_screen {
+    // Build screen-specific hints based on current screen (top row)
+    let screen_hints: Vec<KeyHint> = match current_screen {
         Screen::Block => vec![
             KeyHint::new("i", "Insert"),
             KeyHint::new("v", "Invite"),
-            KeyHint::new("n", "Neighborhood"),
-            KeyHint::new("g", "Grant steward"),
-            KeyHint::new("r", "Revoke steward"),
+            KeyHint::new("n", "Neighbor"),
+            KeyHint::new("g", "Grant"),
+            KeyHint::new("r", "Revoke"),
         ],
         Screen::Chat => vec![
             KeyHint::new("i", "Insert"),
-            KeyHint::new("n", "New channel"),
-            KeyHint::new("o", "Channel info"),
-            KeyHint::new("t", "Set topic"),
-            KeyHint::new("r", "Retry failed"),
+            KeyHint::new("n", "New"),
+            KeyHint::new("o", "Info"),
+            KeyHint::new("t", "Topic"),
+            KeyHint::new("r", "Retry"),
         ],
         Screen::Contacts => vec![
-            KeyHint::new("e", "Edit name"),
+            KeyHint::new("e", "Edit"),
             KeyHint::new("g", "Guardian"),
             KeyHint::new("c", "Chat"),
-            KeyHint::new("i", "Accept invite"),
-            KeyHint::new("n", "Send invite"),
+            KeyHint::new("i", "Accept"),
+            KeyHint::new("n", "Invite"),
         ],
         Screen::Neighborhood => vec![
-            KeyHint::new("Enter", "Enter block"),
-            KeyHint::new("g", "Go home"),
-            KeyHint::new("b", "Back to street"),
+            KeyHint::new("Enter", "Enter"),
+            KeyHint::new("g", "Home"),
+            KeyHint::new("b", "Back"),
         ],
         Screen::Settings => vec![
             KeyHint::new("h/l", "Panel"),
             KeyHint::new("Space", "Toggle"),
         ],
         Screen::Recovery => vec![
-            KeyHint::new("a", "Add guardian"),
-            KeyHint::new("s", "Start recovery"),
+            KeyHint::new("a", "Add"),
+            KeyHint::new("s", "Start"),
             KeyHint::new("h/l", "Tab"),
         ],
     };
-    // Append global hints to screen-specific hints
-    screen_hints.extend(global_hints);
 
     // Clone contacts for guardian modal
     let contacts_for_modal = contacts.clone();
@@ -1160,8 +1159,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             }
 
             // Footer with key hints (3 rows)
+            // Row 2: Screen-specific hints, Row 3: Global hints with navigation
             // Show darkened hints when in insert mode (hotkeys inactive)
-            Footer(hints: screen_hints.clone(), disabled: is_insert_mode)
+            Footer(hints: screen_hints.clone(), global_hints: global_hints.clone(), disabled: is_insert_mode)
 
             // Account setup modal overlay
             AccountSetupModal(
@@ -1847,7 +1847,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let block_name = block_snap
         .block
         .as_ref()
-        .and_then(|b| b.name.clone())
+        .map(|b| b.name.clone())
         .unwrap_or_else(|| "My Block".to_string());
     // Chat channel uses selected channel from context
     // Note: Block messages use block:<block_id> channel, computed dynamically in on_block_send callback
@@ -1865,10 +1865,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         .blocks
         .iter()
         .map(|b| {
-            let name = b.name.clone().unwrap_or_else(|| b.id.clone());
+            let name = if b.name.is_empty() { b.id.clone() } else { b.name.clone() };
             BlockSummary::new(&b.id)
                 .with_name(&name)
-                .with_residents(b.resident_count)
+                .with_residents(b.resident_count.unwrap_or(0) as u8)
         })
         .collect();
 

@@ -58,7 +58,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     element! {
         View(
             position: Position::Absolute,
-            top: 0u16,
+            top: dim::NAV_HEIGHT,
             left: 0u16,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,

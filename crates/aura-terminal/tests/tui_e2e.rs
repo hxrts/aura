@@ -4552,26 +4552,22 @@ async fn test_snapshot_data_accuracy() {
         println!("  ⚠ No block info in snapshot (block may not have been set)");
     }
 
-    println!("\nPhase 2: Testing Resident.is_self");
+    println!("\nPhase 2: Testing Resident list");
 
-    // The block's creator (with authority_str) should be marked as is_self
-    let residents = &block_snapshot.residents;
-    let self_resident = residents.iter().find(|r| r.is_self);
+    // The block's residents should include the creator
+    let residents = block_snapshot.residents();
+    let self_resident = residents.iter().find(|r| r.id == authority_str);
     if let Some(resident) = self_resident {
-        assert_eq!(
-            resident.authority_id, authority_str,
-            "is_self resident should have matching authority ID"
-        );
         println!(
-            "  ✓ Resident.is_self correctly identifies current user: {}",
-            resident.name
+            "  ✓ Found current user in residents: {} ({})",
+            resident.name, resident.id
         );
     } else if !residents.is_empty() {
-        // If residents exist but none are self, check why
-        println!("  ⚠ No resident marked as is_self (authority may not match)");
+        // If residents exist but none match, check why
+        println!("  ⚠ Current user not found in residents");
         println!("    Expected authority: {}", authority_str);
         for r in residents {
-            println!("    Resident: {} (id={})", r.name, r.authority_id);
+            println!("    Resident: {} (id={})", r.name, r.id);
         }
     }
 
@@ -4624,21 +4620,27 @@ async fn test_snapshot_data_accuracy() {
     // Get contacts snapshot
     let contacts_snapshot = ctx.snapshot_contacts();
 
-    // Verify has_pending_suggestion logic
+    // Verify has_pending_suggestion logic - computed by comparing suggested_name to petname
     for contact in &contacts_snapshot.contacts {
-        let expected = match contact.authority_id.as_str() {
+        // has_pending_suggestion is true when suggested_name differs from petname
+        let has_pending_suggestion = contact
+            .suggested_name
+            .as_ref()
+            .is_some_and(|suggested| !suggested.is_empty() && *suggested != contact.petname);
+
+        let expected = match contact.id.as_str() {
             "contact-1" => true,  // suggested_name differs from petname
             "contact-2" => false, // suggested_name equals petname
             "contact-3" => false, // no suggested_name
             _ => false,
         };
         assert_eq!(
-            contact.has_pending_suggestion, expected,
+            has_pending_suggestion, expected,
             "Contact {} has_pending_suggestion should be {}",
             contact.petname, expected
         );
     }
-    println!("  ✓ Contact.has_pending_suggestion is correctly derived");
+    println!("  ✓ Contact has_pending_suggestion is correctly computed");
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&test_dir);

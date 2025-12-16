@@ -18,8 +18,6 @@ use aura_app::views::{
     },
 };
 
-use crate::tui::reactive::views;
-
 /// A chat channel
 #[derive(Clone, Debug, Default)]
 pub struct Channel {
@@ -1073,6 +1071,17 @@ impl Resident {
     }
 }
 
+impl From<&aura_app::views::block::Resident> for Resident {
+    fn from(r: &aura_app::views::block::Resident) -> Self {
+        Self {
+            id: r.id.clone(),
+            name: r.name.clone(),
+            is_steward: r.is_steward(),
+            is_self: false, // Cannot determine from aura-app Resident alone
+        }
+    }
+}
+
 /// Block storage budget
 #[derive(Clone, Debug, Default)]
 pub struct BlockBudget {
@@ -1088,6 +1097,17 @@ impl BlockBudget {
             0.0
         } else {
             (self.used as f32 / self.total as f32) * 100.0
+        }
+    }
+}
+
+impl From<&aura_app::views::block::StorageBudget> for BlockBudget {
+    fn from(s: &aura_app::views::block::StorageBudget) -> Self {
+        Self {
+            total: s.total_bytes,
+            used: s.used_bytes,
+            resident_count: 0, // Set separately
+            max_residents: 8,  // Default
         }
     }
 }
@@ -1181,48 +1201,6 @@ impl From<&AppContact> for Contact {
                 ContactStatus::Pending
             },
             is_guardian: c.is_guardian,
-        }
-    }
-}
-
-// =============================================================================
-// Adapters from views:: types (legacy - will be removed)
-// =============================================================================
-
-impl From<&views::Contact> for Contact {
-    fn from(c: &views::Contact) -> Self {
-        Self {
-            id: c.authority_id.clone(),
-            petname: c.petname.clone(),
-            suggested_name: c.suggested_name.clone(),
-            status: if c.is_online.unwrap_or(false) {
-                ContactStatus::Active
-            } else {
-                ContactStatus::Pending
-            },
-            is_guardian: false, // Would need to cross-reference with guardians
-        }
-    }
-}
-
-impl From<&views::Resident> for Resident {
-    fn from(r: &views::Resident) -> Self {
-        Self {
-            id: r.authority_id.clone(),
-            name: r.name.clone(),
-            is_steward: matches!(r.role, views::ResidentRole::Steward),
-            is_self: r.is_self,
-        }
-    }
-}
-
-impl From<&views::StorageInfo> for BlockBudget {
-    fn from(s: &views::StorageInfo) -> Self {
-        Self {
-            total: s.total_bytes,
-            used: s.used_bytes,
-            resident_count: 0, // Not part of StorageInfo
-            max_residents: 8,  // Default
         }
     }
 }

@@ -31,15 +31,15 @@ use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::components::{
     DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, EmptyState,
-    GuardianCandidateProps, GuardianSetupModal, InvitationImportModal, InvitePeerCallback,
-    StatusIndicator, TextInputModal,
+    GuardianCandidateProps, GuardianSetupModal, InvitationCreateModal, InvitationImportModal,
+    InvitePeerCallback, StatusIndicator, TextInputModal,
 };
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::props::ContactsViewProps;
 use crate::tui::theme::{Spacing, Theme};
-use crate::tui::types::{Contact, ContactStatus};
+use crate::tui::types::{Contact, ContactStatus, InvitationType};
 
 /// Callback type for updating a contact's petname (contact_id: String, new_petname: String)
 pub type UpdatePetnameCallback = Arc<dyn Fn(String, String) + Send + Sync>;
@@ -456,6 +456,29 @@ pub fn ContactsScreen(
                         error: String::new(),
                         importing: props.view.import_modal_importing,
                         demo_mode: props.view.demo_mode,
+                    )
+                })
+            } else {
+                None
+            })
+
+            // Create invitation modal (send invitation)
+            #(if props.view.create_modal_visible {
+                // Map type_index to InvitationType
+                let invitation_type = match props.view.create_modal_type_index {
+                    0 => InvitationType::Guardian,
+                    1 => InvitationType::Contact,
+                    _ => InvitationType::Channel,
+                };
+                Some(element! {
+                    InvitationCreateModal(
+                        visible: true,
+                        focused: true,
+                        creating: props.view.create_modal_step > 0,
+                        error: String::new(),
+                        invitation_type: invitation_type,
+                        message: props.view.create_modal_message.clone(),
+                        ttl_hours: props.view.create_modal_ttl_hours as u32,
                     )
                 })
             } else {

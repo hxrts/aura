@@ -24,7 +24,7 @@ pub use block::{
     StorageBudget,
 };
 pub use chat::{Channel, ChannelType, ChatState, Message};
-pub use contacts::{Contact, ContactsState};
+pub use contacts::{Contact, ContactsState, MySuggestion, SuggestionPolicy};
 pub use invitations::{
     Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
 };

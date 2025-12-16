@@ -71,12 +71,10 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
 
     element! {
         View(
-            position: Position::Absolute,
             width: 100pct,
             height: 100pct,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-
         ) {
             View(
                 width: Percent(60.0),

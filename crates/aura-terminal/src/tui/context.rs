@@ -504,10 +504,11 @@ impl IoContext {
         if let Some(snapshot) = self.app_core_snapshot() {
             GuardiansSnapshot {
                 guardians: snapshot.recovery.guardians.clone(),
-                threshold: Some(crate::tui::reactive::views::ThresholdConfig {
-                    threshold: snapshot.recovery.threshold,
-                    total: snapshot.recovery.guardian_count,
-                }),
+                threshold: aura_core::threshold::ThresholdConfig::new(
+                    snapshot.recovery.threshold as u16,
+                    snapshot.recovery.guardian_count as u16,
+                )
+                .ok(),
             }
         } else {
             GuardiansSnapshot::default()
@@ -566,62 +567,14 @@ impl IoContext {
     pub fn snapshot_block(&self) -> BlockSnapshot {
         // Try AppCore first
         if let Some(snapshot) = self.app_core_snapshot() {
-            // Get current authority ID for is_self detection
-            let current_authority_str = self
-                .app_core
-                .try_read()
-                .ok()
-                .and_then(|core| core.authority().map(|a| a.to_string()));
-
-            // Map aura-app BlockState to TUI BlockSnapshot
-            let block_info = if !snapshot.block.name.is_empty() {
-                Some(crate::tui::reactive::views::BlockInfo {
-                    id: snapshot.block.id.clone(),
-                    name: Some(snapshot.block.name.clone()),
-                    description: None,
-                    created_at: snapshot.block.created_at, // Use actual created_at from BlockState
-                })
+            let block = if !snapshot.block.name.is_empty() {
+                Some(snapshot.block.clone())
             } else {
                 None
             };
 
-            // Map aura-app Resident (has role) to TUI Resident (has role enum)
-            let convert_role = |role: &aura_app::views::block::ResidentRole| match role {
-                aura_app::views::block::ResidentRole::Admin
-                | aura_app::views::block::ResidentRole::Owner => {
-                    crate::tui::reactive::views::ResidentRole::Steward
-                }
-                aura_app::views::block::ResidentRole::Resident => {
-                    crate::tui::reactive::views::ResidentRole::Resident
-                }
-            };
-
             return BlockSnapshot {
-                block: block_info,
-                residents: snapshot
-                    .block
-                    .residents
-                    .iter()
-                    .map(|r| {
-                        // Determine is_self by comparing resident ID with current authority
-                        let is_self = current_authority_str
-                            .as_ref()
-                            .map(|auth| r.id == *auth)
-                            .unwrap_or(false);
-
-                        crate::tui::reactive::views::Resident {
-                            authority_id: r.id.clone(),
-                            name: r.name.clone(),
-                            is_self,
-                            is_online: r.is_online,
-                            role: convert_role(&r.role),
-                        }
-                    })
-                    .collect(),
-                storage: crate::tui::reactive::views::StorageInfo {
-                    used_bytes: snapshot.block.storage.used_bytes,
-                    total_bytes: snapshot.block.storage.total_bytes,
-                },
+                block,
                 is_resident: snapshot.block.resident_count > 0,
                 is_steward: snapshot.block.is_admin(),
             };
@@ -634,30 +587,8 @@ impl IoContext {
         // Try AppCore first
         if let Some(snapshot) = self.app_core_snapshot() {
             return ContactsSnapshot {
-                contacts: snapshot
-                    .contacts
-                    .contacts
-                    .iter()
-                    .map(|c| {
-                        // has_pending_suggestion is true when there's a suggested name
-                        // that differs from the current petname
-                        let has_pending_suggestion =
-                            c.suggested_name.as_ref().is_some_and(|suggested| {
-                                !suggested.is_empty() && *suggested != c.petname
-                            });
-
-                        crate::tui::reactive::views::Contact {
-                            authority_id: c.id.clone(),
-                            petname: c.petname.clone(),
-                            suggested_name: c.suggested_name.clone(),
-                            is_online: Some(c.is_online),
-                            added_at: c.last_interaction.unwrap_or(0), // Use last_interaction as proxy
-                            last_seen: c.last_interaction,
-                            has_pending_suggestion,
-                        }
-                    })
-                    .collect(),
-                policy: crate::tui::reactive::views::SuggestionPolicy::default(),
+                contacts: snapshot.contacts.contacts.clone(),
+                policy: aura_app::views::contacts::SuggestionPolicy::default(),
             };
         }
         ContactsSnapshot::default()
@@ -667,37 +598,15 @@ impl IoContext {
     pub fn snapshot_neighborhood(&self) -> NeighborhoodSnapshot {
         // Try AppCore first
         if let Some(snapshot) = self.app_core_snapshot() {
-            // Map aura-app NeighborhoodState to TUI NeighborhoodSnapshot
-            let home_block_id = &snapshot.neighborhood.home_block_id;
-            let current_block_id = snapshot
-                .neighborhood
-                .position
-                .as_ref()
-                .map(|p| p.current_block_id.clone());
-
             return NeighborhoodSnapshot {
                 neighborhood_id: Some(snapshot.neighborhood.home_block_id.clone()),
                 neighborhood_name: Some(snapshot.neighborhood.home_block_name.clone()),
-                blocks: snapshot
+                blocks: snapshot.neighborhood.neighbors.clone(),
+                position: snapshot
                     .neighborhood
-                    .neighbors
-                    .iter()
-                    .map(|b| crate::tui::reactive::views::NeighborhoodBlock {
-                        id: b.id.clone(),
-                        name: Some(b.name.clone()),
-                        resident_count: b.resident_count.unwrap_or(0) as u8,
-                        max_residents: 8, // Default max residents
-                        is_home: &b.id == home_block_id,
-                        can_enter: b.can_traverse,
-                        is_current: current_block_id.as_ref() == Some(&b.id),
-                    })
-                    .collect(),
-                position: crate::tui::reactive::views::TraversalPosition {
-                    neighborhood_id: Some(snapshot.neighborhood.home_block_id.clone()),
-                    block_id: current_block_id,
-                    depth: crate::tui::reactive::views::TraversalDepth::Street, // Default depth
-                    entered_at: 0, // Not tracked in aura-app
-                },
+                    .position
+                    .clone()
+                    .unwrap_or_default(),
             };
         }
         NeighborhoodSnapshot::default()
@@ -801,14 +710,14 @@ impl IoContext {
     /// Get block residents as iocraft types
     pub fn get_residents(&self) -> Vec<Resident> {
         let snap = self.snapshot_block();
-        snap.residents.iter().map(|r| r.into()).collect()
+        snap.residents().iter().map(|r| r.into()).collect()
     }
 
     /// Get block budget as iocraft type
     pub fn get_block_budget(&self) -> BlockBudget {
         let snap = self.snapshot_block();
-        let mut budget: BlockBudget = (&snap.storage).into();
-        budget.resident_count = snap.residents.len() as u8;
+        let mut budget: BlockBudget = (&snap.storage()).into();
+        budget.resident_count = snap.residents().len() as u8;
         budget
     }
 
@@ -1506,7 +1415,7 @@ impl IoContext {
     /// Returns `None` if:
     /// - There is no current context (not in a block)
     /// - The AppCore lock is busy
-    pub fn get_current_role(&self) -> Option<crate::tui::reactive::views::ResidentRole> {
+    pub fn get_current_role(&self) -> Option<aura_app::views::block::ResidentRole> {
         // Get a snapshot from AppCore
         let snapshot = self.app_core_snapshot()?;
 
@@ -1515,29 +1424,18 @@ impl IoContext {
         let block = snapshot.blocks.current_block().unwrap_or(&snapshot.block);
 
         // BlockState has a `my_role` field that tracks the current user's role
-        // Convert aura-app ResidentRole to local ResidentRole
-        let role = match block.my_role {
-            aura_app::views::block::ResidentRole::Owner
-            | aura_app::views::block::ResidentRole::Admin => {
-                crate::tui::reactive::views::ResidentRole::Steward
-            }
-            aura_app::views::block::ResidentRole::Resident => {
-                crate::tui::reactive::views::ResidentRole::Resident
-            }
-        };
-
-        Some(role)
+        Some(block.my_role)
     }
 
     /// Check if the current user has a specific capability
     ///
     /// Capability mapping:
     /// - `None` capability: Always allowed
-    /// - User-level capabilities: Any resident (Resident or Steward)
-    /// - Moderator/Admin capabilities: Steward only
+    /// - User-level capabilities: Any resident
+    /// - Moderator/Admin capabilities: Admin or Owner only
     pub fn has_capability(&self, capability: &crate::tui::commands::CommandCapability) -> bool {
+        use aura_app::views::block::ResidentRole;
         use crate::tui::commands::CommandCapability;
-        use crate::tui::reactive::views::ResidentRole;
 
         // None capability is always allowed
         if matches!(capability, CommandCapability::None) {
@@ -1570,7 +1468,7 @@ impl IoContext {
             | CommandCapability::JoinChannel
             | CommandCapability::LeaveContext => true,
 
-            // Moderator capabilities - require Steward role
+            // Moderator capabilities - require Admin or Owner role
             CommandCapability::ModerateKick
             | CommandCapability::ModerateBan
             | CommandCapability::ModerateMute
@@ -1578,7 +1476,7 @@ impl IoContext {
             | CommandCapability::ManageChannel
             | CommandCapability::PinContent
             | CommandCapability::GrantSteward => {
-                matches!(role, ResidentRole::Steward)
+                matches!(role, ResidentRole::Admin | ResidentRole::Owner)
             }
         }
     }
@@ -1603,10 +1501,10 @@ impl IoContext {
     /// - `Public` - Always allowed (read-only, status queries)
     /// - `Basic` - Always allowed (user token assumed in TUI)
     /// - `Sensitive` - Always allowed (account owner operations)
-    /// - `Admin` - Requires Steward role in current block
+    /// - `Admin` - Requires Admin or Owner role in current block
     pub fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
+        use aura_app::views::block::ResidentRole;
         use crate::tui::effects::CommandAuthorizationLevel;
-        use crate::tui::reactive::views::ResidentRole;
 
         let level = command.authorization_level();
 
@@ -1616,11 +1514,11 @@ impl IoContext {
             | CommandAuthorizationLevel::Basic
             | CommandAuthorizationLevel::Sensitive => Ok(()),
 
-            // Admin requires Steward role
+            // Admin requires Admin or Owner role
             CommandAuthorizationLevel::Admin => {
                 let role = self.get_current_role();
                 match role {
-                    Some(ResidentRole::Steward) => Ok(()),
+                    Some(ResidentRole::Admin | ResidentRole::Owner) => Ok(()),
                     Some(ResidentRole::Resident) => Err(format!(
                         "Permission denied: {} requires administrator privileges",
                         Self::command_name(command)

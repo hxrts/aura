@@ -68,11 +68,11 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
         Theme::TEXT_MUTED
     };
 
-    // Modal fills parent container (already positioned at middle panel)
+    // Modal positioned at middle panel region (below nav bar)
     element! {
         View(
             position: Position::Absolute,
-            top: 0u16,
+            top: dim::NAV_HEIGHT,
             left: 0u16,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
@@ -173,11 +173,11 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
         Theme::TEXT
     };
 
-    // Modal fills parent container (already positioned at middle panel)
+    // Modal positioned at middle panel region (below nav bar)
     element! {
         View(
             position: Position::Absolute,
-            top: 0u16,
+            top: dim::NAV_HEIGHT,
             left: 0u16,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,

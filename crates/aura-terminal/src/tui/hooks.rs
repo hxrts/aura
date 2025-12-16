@@ -221,7 +221,7 @@ pub struct GuardiansSnapshot {
     /// Guardian list
     pub guardians: Vec<aura_app::views::recovery::Guardian>,
     /// Threshold configuration
-    pub threshold: Option<crate::tui::reactive::views::ThresholdConfig>,
+    pub threshold: Option<aura_core::threshold::ThresholdConfig>,
 }
 
 impl Default for GuardiansSnapshot {
@@ -275,12 +275,8 @@ impl Default for InvitationsSnapshot {
 /// Snapshot of block-related data for rendering
 #[derive(Debug, Clone)]
 pub struct BlockSnapshot {
-    /// Block information
-    pub block: Option<crate::tui::reactive::views::BlockInfo>,
-    /// Residents list
-    pub residents: Vec<crate::tui::reactive::views::Resident>,
-    /// Storage information
-    pub storage: crate::tui::reactive::views::StorageInfo,
+    /// Block state (contains id, name, residents, storage, etc.)
+    pub block: Option<aura_app::views::block::BlockState>,
     /// Whether user is a resident
     pub is_resident: bool,
     /// Whether user is a steward
@@ -291,11 +287,21 @@ impl Default for BlockSnapshot {
     fn default() -> Self {
         Self {
             block: None,
-            residents: Vec::new(),
-            storage: crate::tui::reactive::views::StorageInfo::default(),
             is_resident: false,
             is_steward: false,
         }
+    }
+}
+
+impl BlockSnapshot {
+    /// Get residents list from block state
+    pub fn residents(&self) -> &[aura_app::views::block::Resident] {
+        self.block.as_ref().map(|b| b.residents.as_slice()).unwrap_or(&[])
+    }
+
+    /// Get storage info from block state
+    pub fn storage(&self) -> aura_app::views::block::StorageBudget {
+        self.block.as_ref().map(|b| b.storage.clone()).unwrap_or_default()
     }
 }
 
@@ -303,16 +309,16 @@ impl Default for BlockSnapshot {
 #[derive(Debug, Clone)]
 pub struct ContactsSnapshot {
     /// Contacts list
-    pub contacts: Vec<crate::tui::reactive::views::Contact>,
+    pub contacts: Vec<aura_app::views::contacts::Contact>,
     /// Suggestion policy
-    pub policy: crate::tui::reactive::views::SuggestionPolicy,
+    pub policy: aura_app::views::contacts::SuggestionPolicy,
 }
 
 impl Default for ContactsSnapshot {
     fn default() -> Self {
         Self {
             contacts: Vec::new(),
-            policy: crate::tui::reactive::views::SuggestionPolicy::default(),
+            policy: aura_app::views::contacts::SuggestionPolicy::default(),
         }
     }
 }
@@ -325,9 +331,9 @@ pub struct NeighborhoodSnapshot {
     /// Neighborhood name
     pub neighborhood_name: Option<String>,
     /// Blocks in neighborhood
-    pub blocks: Vec<crate::tui::reactive::views::NeighborhoodBlock>,
+    pub blocks: Vec<aura_app::views::neighborhood::NeighborBlock>,
     /// Current traversal position
-    pub position: crate::tui::reactive::views::TraversalPosition,
+    pub position: aura_app::views::neighborhood::TraversalPosition,
 }
 
 impl Default for NeighborhoodSnapshot {
@@ -336,7 +342,7 @@ impl Default for NeighborhoodSnapshot {
             neighborhood_id: None,
             neighborhood_name: None,
             blocks: Vec::new(),
-            position: crate::tui::reactive::views::TraversalPosition::default(),
+            position: aura_app::views::neighborhood::TraversalPosition::default(),
         }
     }
 }

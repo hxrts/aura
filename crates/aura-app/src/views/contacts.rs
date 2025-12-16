@@ -2,6 +2,37 @@
 
 use serde::{Deserialize, Serialize};
 
+// =============================================================================
+// Contact Suggestion Types
+// =============================================================================
+
+/// Policy for handling incoming contact name suggestions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum SuggestionPolicy {
+    /// Automatically accept contact suggestions
+    #[default]
+    AutoAccept,
+    /// Prompt the user before accepting suggestions
+    PromptFirst,
+    /// Ignore incoming suggestions
+    Ignore,
+}
+
+/// What the user shares about themselves to contacts
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct MySuggestion {
+    /// Display name to share
+    pub display_name: Option<String>,
+    /// Status message to share
+    pub status: Option<String>,
+}
+
+// =============================================================================
+// Contact Types
+// =============================================================================
+
 /// A contact
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]

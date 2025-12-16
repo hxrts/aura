@@ -12,8 +12,10 @@ use iocraft::prelude::*;
 /// Props for Footer
 #[derive(Default, Props)]
 pub struct FooterProps {
-    /// Key hints to display
+    /// Screen-specific key hints (top row)
     pub hints: Vec<KeyHint>,
+    /// Global key hints including navigation (bottom row)
+    pub global_hints: Vec<KeyHint>,
     /// Whether the footer is disabled (darkened, indicating hotkeys are inactive)
     pub disabled: bool,
 }
@@ -29,9 +31,16 @@ pub struct FooterProps {
 /// ```
 #[component]
 pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
-    // Format hints into a single line or wrap if needed
-    let hints_text: Vec<String> = props
+    // Format screen-specific hints (top row)
+    let screen_hints_text: Vec<String> = props
         .hints
+        .iter()
+        .map(|h| format!("[{}] {}", h.key, h.description))
+        .collect();
+
+    // Format global hints (bottom row)
+    let global_hints_text: Vec<String> = props
+        .global_hints
         .iter()
         .map(|h| format!("[{}] {}", h.key, h.description))
         .collect();
@@ -64,18 +73,35 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
                 border_color: border_color,
             )
 
-            // Row 2-3: Key hints (2 rows)
+            // Row 2: Screen-specific hints (1 row)
             View(
                 width: 100pct,
-                height: dim::KEY_HINTS_HEIGHT,
+                height: 1u16,
                 flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                gap: Spacing::MD,
-                padding_left: Spacing::SM,
-                padding_right: Spacing::SM,
+                gap: Spacing::SM,
+                padding_left: Spacing::XS,
+                padding_right: Spacing::XS,
                 overflow: Overflow::Hidden,
             ) {
-                #(hints_text.iter().map(|hint| {
+                #(screen_hints_text.iter().map(|hint| {
+                    let color = text_color;
+                    element! {
+                        Text(content: hint.clone(), color: color)
+                    }
+                }))
+            }
+
+            // Row 3: Global hints with navigation (1 row)
+            View(
+                width: 100pct,
+                height: 1u16,
+                flex_direction: FlexDirection::Row,
+                gap: Spacing::SM,
+                padding_left: Spacing::XS,
+                padding_right: Spacing::XS,
+                overflow: Overflow::Hidden,
+            ) {
+                #(global_hints_text.iter().map(|hint| {
                     let color = text_color;
                     element! {
                         Text(content: hint.clone(), color: color)
