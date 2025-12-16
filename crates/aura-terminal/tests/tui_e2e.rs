@@ -3694,7 +3694,7 @@ async fn test_request_state_sync() {
 
 #[tokio::test]
 async fn test_help_screen_shortcuts() {
-    use aura_terminal::tui::screens::{get_help_commands, HelpCommand};
+    use aura_terminal::tui::components::{get_help_commands, HelpCommand};
 
     println!("\n=== Help Screen Shortcuts Test ===\n");
 
@@ -3797,7 +3797,7 @@ async fn test_help_screen_shortcuts() {
 /// 4. Without a screen context, returns all commands in default order
 #[tokio::test]
 async fn test_context_sensitive_help() {
-    use aura_terminal::tui::screens::{get_help_commands, get_help_commands_for_screen};
+    use aura_terminal::tui::components::{get_help_commands, get_help_commands_for_screen};
 
     println!("\n=== Context-Sensitive Help Test ===\n");
 
