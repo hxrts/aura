@@ -53,7 +53,6 @@ pub mod effects;
 pub mod flow_budget;
 pub mod local_store;
 pub mod navigation;
-pub mod reactive;
 pub mod recovery_session;
 
 // Re-export main types for convenience
@@ -113,12 +112,44 @@ pub use flow_budget::{
 // Re-export local store types
 pub use local_store::{derive_key_material, TuiLocalStore};
 
-// Re-export reactive types
-pub use reactive::{
-    ChannelType, ChannelsQuery, GuardianApproval, GuardianStatus, GuardiansQuery,
-    InvitationDirection, InvitationStatus, InvitationType, InvitationsQuery, MessagesQuery,
-    RecoveryQuery, RecoveryState,
+// Re-export reactive/view types from aura-app and aura-agent
+// (formerly in reactive submodule, now inlined for simplicity)
+
+// FRP primitives from aura-agent (runtime layer)
+pub use aura_agent::reactive::Dynamic;
+pub use aura_agent::reactive::ReactiveScheduler;
+
+// Reactive infrastructure types from aura-agent
+pub use aura_agent::reactive::{
+    BlockDelta, BlockReduction, ChatReduction, FactSource, FactStreamAdapter, GuardianDelta,
+    GuardianReduction, InvitationReduction, RecoveryDelta, RecoveryReduction, SchedulerConfig,
+    ViewAdapter,
 };
+
+// Domain deltas
+pub use aura_chat::ChatDelta;
+pub use aura_invitation::InvitationDelta;
+
+// View types from aura-app
+pub use aura_app::views::block::{BlockState, Resident, ResidentRole, StorageBudget};
+pub use aura_app::views::chat::{Channel, ChannelType, Message};
+pub use aura_app::views::contacts::{Contact, MySuggestion, SuggestionPolicy};
+pub use aura_app::views::invitations::{
+    Invitation, InvitationDirection, InvitationStatus, InvitationType,
+};
+pub use aura_app::views::neighborhood::{AdjacencyType, NeighborBlock, TraversalPosition};
+pub use aura_app::views::recovery::{
+    Guardian, GuardianStatus, RecoveryApproval as GuardianApproval,
+    RecoveryProcessStatus as RecoveryStatus, RecoveryState,
+};
+
+// Query types from aura-app
+pub use aura_app::queries::{
+    ChannelsQuery, ContactsQuery, GuardiansQuery, InvitationsQuery, MessagesQuery, RecoveryQuery,
+};
+
+// ThresholdConfig from aura-core
+pub use aura_core::threshold::ThresholdConfig;
 
 // Re-export navigation types
 pub use navigation::{

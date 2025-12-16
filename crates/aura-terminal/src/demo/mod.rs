@@ -895,7 +895,7 @@ impl SimulatedBridge {
                         topic: topic.clone(),
                     };
                     if let Ok(channel_id) = amp.create_channel(params).await {
-                        let channel = crate::tui::reactive::Channel {
+                        let channel = crate::tui::Channel {
                             id: channel_id.to_string(),
                             name: name.clone(),
                             topic: topic.clone(),
