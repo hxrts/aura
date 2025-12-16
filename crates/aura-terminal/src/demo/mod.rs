@@ -1,4 +1,3 @@
-#![allow(deprecated)]
 //! # Demo Module
 //!
 //! Provides demo modes for showcasing Aura's capabilities.

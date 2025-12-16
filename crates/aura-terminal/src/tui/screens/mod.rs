@@ -6,7 +6,6 @@ mod app;
 mod block;
 mod chat;
 mod contacts;
-mod help;
 mod invitations;
 mod neighborhood;
 mod recovery;
@@ -26,7 +25,6 @@ pub use contacts::{
     run_contacts_screen, ContactsScreen, ImportInvitationCallback, StartChatCallback,
     UpdatePetnameCallback,
 };
-pub use help::{get_help_commands, get_help_commands_for_screen, HelpCommand};
 pub use invitations::{
     CreateInvitationCallback, ExportInvitationCallback, InvitationCallback, InvitationsScreen,
 };

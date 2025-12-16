@@ -6,8 +6,9 @@
 use iocraft::prelude::*;
 
 use crate::tui::layout::dim;
-use crate::tui::screens::get_help_commands_for_screen;
 use crate::tui::theme::Theme;
+
+use super::help_data::{get_help_commands_for_screen, HelpCommand};
 
 /// Props for HelpModal
 #[derive(Default, Props)]
@@ -19,10 +20,8 @@ pub struct HelpModalProps {
 }
 
 /// Group commands by category for display
-fn group_commands_by_category(
-    commands: &[crate::tui::screens::HelpCommand],
-) -> Vec<(String, Vec<&crate::tui::screens::HelpCommand>)> {
-    let mut groups: Vec<(String, Vec<&crate::tui::screens::HelpCommand>)> = Vec::new();
+fn group_commands_by_category(commands: &[HelpCommand]) -> Vec<(String, Vec<&HelpCommand>)> {
+    let mut groups: Vec<(String, Vec<&HelpCommand>)> = Vec::new();
     let mut current_category: Option<String> = None;
 
     for cmd in commands {
