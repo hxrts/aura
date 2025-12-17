@@ -145,16 +145,22 @@ pub async fn cancel_invitation(
 
 /// Import an invitation from a shareable code (TODO: Needs RuntimeBridge extension)
 ///
-/// **What it does**: Decodes invitation code and adds to received list
-/// **Returns**: Invitation information
+/// **What it does**: Validates and imports invitation code into state
+/// **Returns**: Unit result
 /// **Signal pattern**: Emits INVITATIONS_SIGNAL after import
 ///
 /// **TODO**: Add `import_invitation` to RuntimeBridge trait.
+///
+/// **Note**: For now, invitation parsing is handled in the terminal layer
+/// where aura-agent dependencies are available. This function is a placeholder
+/// for the future RuntimeBridge implementation.
 pub async fn import_invitation(
     _app_core: &Arc<RwLock<AppCore>>,
     _code: &str,
-) -> Result<Invitation, AuraError> {
+) -> Result<(), AuraError> {
     // TODO: Implement via RuntimeBridge once extended
+    // The parsing logic currently lives in the terminal handler
+    // where ShareableInvitation from aura-agent is available
     Err(AuraError::agent(
         "import_invitation not yet implemented - needs RuntimeBridge extension",
     ))
