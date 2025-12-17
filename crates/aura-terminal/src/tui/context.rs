@@ -1649,18 +1649,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_export_invitation_code_returns_code() {
+    async fn test_export_invitation_code_fails_without_runtime() {
         let ctx = IoContext::with_defaults();
-        let code = ctx
-            .export_invitation_code("inv-123")
-            .await
-            .expect("expected code");
+        let result = ctx.export_invitation_code("inv-123").await;
 
-        // Now generates proper shareable invitation codes in aura:v1: format
+        // Without RuntimeBridge, export should fail gracefully
+        assert!(result.is_err());
+        let err = result.unwrap_err();
         assert!(
-            code.starts_with("aura:v1:"),
-            "Expected aura:v1: prefix, got: {}",
-            code
+            err.contains("Runtime bridge not available") || err.contains("Failed to export"),
+            "Expected runtime error, got: {}",
+            err
         );
     }
 

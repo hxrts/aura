@@ -171,6 +171,9 @@ async fn emit_recovery_signal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::views::recovery::{
+        Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus,
+    };
     use crate::AppConfig;
 
     #[tokio::test]
@@ -179,8 +182,8 @@ mod tests {
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
         let status = get_recovery_status(&app_core).await;
-        assert!(!status.in_progress);
-        assert!(status.approvals.is_empty());
+        assert!(status.active_recovery.is_none());
+        assert!(status.guardians.is_empty());
     }
 
     #[tokio::test]
@@ -191,21 +194,35 @@ mod tests {
         // Register signal
         {
             let core = app_core.read().await;
-            core.register_signal(&*RECOVERY_SIGNAL, RecoveryState::default())
+            core.register(&*RECOVERY_SIGNAL, RecoveryState::default())
                 .await
                 .unwrap();
         }
 
-        // Emit recovery state
+        // Emit recovery state with active recovery process
         let state = RecoveryState {
-            in_progress: true,
-            approvals: vec![GuardianApproval {
-                guardian_id: "guardian-1".to_string(),
-                approved: false,
-                approved_at_ms: None,
+            guardians: vec![Guardian {
+                id: "guardian-1".to_string(),
+                name: "Alice".to_string(),
+                status: GuardianStatus::Active,
+                added_at: 1000,
+                last_seen: Some(2000),
             }],
-            request_id: Some("ceremony-123".to_string()),
-            status: "Waiting for approvals".to_string(),
+            threshold: 2,
+            guardian_count: 3,
+            active_recovery: Some(RecoveryProcess {
+                id: "ceremony-123".to_string(),
+                account_id: "account-abc".to_string(),
+                status: RecoveryProcessStatus::WaitingForApprovals,
+                approvals_received: 0,
+                approvals_required: 2,
+                approved_by: vec![],
+                approvals: vec![],
+                initiated_at: 1000,
+                expires_at: Some(2000),
+                progress: 0,
+            }),
+            pending_requests: vec![],
         };
 
         emit_recovery_signal(&app_core, state.clone())
@@ -214,7 +231,10 @@ mod tests {
 
         // Verify state was emitted
         let retrieved = get_recovery_status(&app_core).await;
-        assert!(retrieved.in_progress);
-        assert_eq!(retrieved.request_id, Some("ceremony-123".to_string()));
+        assert!(retrieved.active_recovery.is_some());
+        assert_eq!(
+            retrieved.active_recovery.as_ref().unwrap().id,
+            "ceremony-123"
+        );
     }
 }

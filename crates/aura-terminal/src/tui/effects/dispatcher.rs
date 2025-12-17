@@ -105,6 +105,17 @@ impl CommandDispatcher {
         self.check_capability(&command)?;
 
         // Then map to effect command
+        self.map_command(command)
+    }
+
+    /// Map command to effect without capability checking (for testing)
+    #[cfg(test)]
+    pub fn dispatch_unchecked(&self, command: IrcCommand) -> Result<EffectCommand, DispatchError> {
+        self.map_command(command)
+    }
+
+    /// Internal mapping from command to effect
+    fn map_command(&self, command: IrcCommand) -> Result<EffectCommand, DispatchError> {
         match command {
             IrcCommand::Msg { target, text } => Ok(EffectCommand::SendDirectMessage {
                 target,
@@ -230,7 +241,8 @@ mod tests {
             text: "hello".to_string(),
         };
 
-        let result = dispatcher.dispatch(cmd);
+        // Use dispatch_unchecked to test mapping without capability check
+        let result = dispatcher.dispatch_unchecked(cmd);
         assert!(result.is_ok());
         match result.unwrap() {
             EffectCommand::SendDirectMessage { target, content } => {
@@ -248,7 +260,8 @@ mod tests {
             name: "NewName".to_string(),
         };
 
-        let result = dispatcher.dispatch(cmd);
+        // Use dispatch_unchecked to test mapping without capability check
+        let result = dispatcher.dispatch_unchecked(cmd);
         assert!(result.is_ok());
         match result.unwrap() {
             EffectCommand::UpdateNickname { name } => {
@@ -265,7 +278,8 @@ mod tests {
             action: "waves".to_string(),
         };
 
-        let result = dispatcher.dispatch(cmd);
+        // Use dispatch_unchecked to test mapping error (missing channel)
+        let result = dispatcher.dispatch_unchecked(cmd);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -282,7 +296,8 @@ mod tests {
             action: "waves".to_string(),
         };
 
-        let result = dispatcher.dispatch(cmd);
+        // Use dispatch_unchecked to test mapping without capability check
+        let result = dispatcher.dispatch_unchecked(cmd);
         assert!(result.is_ok());
         match result.unwrap() {
             EffectCommand::SendAction { channel, action } => {
@@ -303,7 +318,8 @@ mod tests {
             reason: Some("flooding".to_string()),
         };
 
-        let result = dispatcher.dispatch(cmd);
+        // Use dispatch_unchecked to test mapping without capability check
+        let result = dispatcher.dispatch_unchecked(cmd);
         assert!(result.is_ok());
         match result.unwrap() {
             EffectCommand::KickUser {
@@ -327,7 +343,8 @@ mod tests {
             duration: Some(Duration::from_secs(300)),
         };
 
-        let result = dispatcher.dispatch(cmd);
+        // Use dispatch_unchecked to test mapping without capability check
+        let result = dispatcher.dispatch_unchecked(cmd);
         assert!(result.is_ok());
         match result.unwrap() {
             EffectCommand::MuteUser {

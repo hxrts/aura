@@ -111,11 +111,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_mfa_policy() {
+    async fn test_update_mfa_policy_without_runtime() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
+        // Without a runtime bridge, updating MFA policy should fail
         let result = update_mfa_policy(&app_core, true).await;
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Runtime bridge not available"));
     }
 }

@@ -323,6 +323,6 @@ mod tests {
 
         let invitations = list_invitations(&app_core).await;
         assert!(invitations.sent.is_empty());
-        assert!(invitations.received.is_empty());
+        assert!(invitations.pending.is_empty());
     }
 }

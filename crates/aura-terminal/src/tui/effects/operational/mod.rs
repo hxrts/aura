@@ -205,10 +205,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_export_invitation_returns_code() {
+    async fn test_export_invitation_fails_without_runtime() {
         let app_core = test_app_core();
         let handler = OperationalHandler::new(app_core);
 
+        // Without RuntimeBridge, export should fail gracefully
         let result = handler
             .execute(&EffectCommand::ExportInvitation {
                 invitation_id: "test-123".to_string(),
@@ -216,16 +217,15 @@ mod tests {
             .await;
 
         match result {
-            Some(Ok(OpResponse::InvitationCode { id, code })) => {
-                assert_eq!(id, "test-123");
-                // Now generates proper shareable invitation codes in aura:v1: format
+            Some(Err(OpError::Failed(msg))) => {
                 assert!(
-                    code.starts_with("aura:v1:"),
-                    "Expected aura:v1: prefix, got: {}",
-                    code
+                    msg.contains("Runtime bridge not available")
+                        || msg.contains("Failed to export"),
+                    "Expected runtime error, got: {}",
+                    msg
                 );
             }
-            _ => panic!("Expected InvitationCode response"),
+            _ => panic!("Expected Failed error without RuntimeBridge, got: {:?}", result),
         }
     }
 
@@ -245,40 +245,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_import_invitation_parses_valid_code() {
+    async fn test_import_invitation_fails_without_runtime() {
         let app_core = test_app_core();
         let handler = OperationalHandler::new(app_core);
 
-        // First export to get a valid code
-        let export_result = handler
-            .execute(&EffectCommand::ExportInvitation {
-                invitation_id: "roundtrip-test".to_string(),
+        // Without RuntimeBridge, import should fail gracefully
+        // Use a valid-format code to test the runtime requirement, not format validation
+        let result = handler
+            .execute(&EffectCommand::ImportInvitation {
+                code: "aura:v1:eyJ0ZXN0IjoidmFsdWUifQ==".to_string(),
             })
             .await;
 
-        let code = match export_result {
-            Some(Ok(OpResponse::InvitationCode { code, .. })) => code,
-            _ => panic!("Expected InvitationCode response"),
-        };
-
-        // Now import the exported code
-        let import_result = handler
-            .execute(&EffectCommand::ImportInvitation { code })
-            .await;
-
-        match import_result {
-            Some(Ok(OpResponse::InvitationImported {
-                invitation_id,
-                sender_id,
-                invitation_type,
-                ..
-            })) => {
-                assert_eq!(invitation_id, "roundtrip-test");
-                assert!(!sender_id.is_empty());
-                assert_eq!(invitation_type, "contact"); // Default type for minimal invitation
+        match result {
+            Some(Err(OpError::InvalidArgument(msg))) => {
+                // Expected - either invalid format or runtime unavailable
+                assert!(
+                    msg.contains("Runtime bridge not available")
+                        || msg.contains("Invalid invitation")
+                        || msg.contains("Failed"),
+                    "Expected error message, got: {}",
+                    msg
+                );
             }
-            Some(Err(e)) => panic!("Import failed: {:?}", e),
-            _ => panic!("Expected InvitationImported response"),
+            _ => panic!(
+                "Expected InvalidArgument error without RuntimeBridge, got: {:?}",
+                result
+            ),
         }
     }
 

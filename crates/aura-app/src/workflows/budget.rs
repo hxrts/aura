@@ -690,7 +690,7 @@ mod tests {
         // Register signal
         {
             let core = app_core.read().await;
-            core.register_signal(&*BUDGET_SIGNAL, BlockFlowBudget::default())
+            core.register(&*BUDGET_SIGNAL, BlockFlowBudget::default())
                 .await
                 .unwrap();
         }
