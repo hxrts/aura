@@ -80,7 +80,8 @@ async fn main() -> Result<(), AuraError> {
 
     // Create AppCore with runtime bridge (dependency inversion pattern)
     let config = AppConfig::default();
-    let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())?;
+    let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())
+        .map_err(|e| AuraError::agent(format!("{}", e)))?;
     let app_core = Arc::new(RwLock::new(app_core));
 
     // Initialize logging through effects
@@ -196,7 +197,7 @@ async fn resolve_config_path(
     cmd_config: Option<&PathBuf>,
     global_config: Option<&PathBuf>,
     _cli_handler: &CliHandler,
-) -> Result<PathBuf> {
+) -> Result<PathBuf, AuraError> {
     if let Some(config) = cmd_config {
         return Ok(config.clone());
     }
@@ -205,7 +206,7 @@ async fn resolve_config_path(
     }
 
     eprintln!("No config file specified. Use -c or --config to specify a config file.");
-    return Err(AuraError::invalid("No config file specified".into()));
+    return Err(AuraError::invalid("No config file specified"));
 }
 
 #[cfg(test)]

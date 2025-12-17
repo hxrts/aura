@@ -63,14 +63,31 @@
 //! ```
 
 pub mod budget;
+pub mod context;
 pub mod invitation;
 pub mod messaging;
 pub mod network;
+pub mod query;
 pub mod recovery;
+pub mod settings;
+pub mod steward;
 pub mod sync;
+pub mod system;
 
-// Re-export workflow functions for convenience
-pub use budget::{can_add_resident, can_join_neighborhood, can_pin_content, get_current_budget};
+// Re-export budget types and workflow functions
+pub use budget::{
+    // Types
+    BlockFlowBudget, BudgetBreakdown, BudgetError,
+    // Constants
+    BLOCK_TOTAL_SIZE, BYTE, KB, MAX_NEIGHBORHOODS, MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION,
+    RESIDENT_ALLOCATION,
+    // Workflow functions
+    can_add_resident, can_join_neighborhood, can_pin_content, get_budget_breakdown,
+    get_current_budget, update_budget,
+};
+pub use context::{
+    get_current_position, get_neighborhood_state, move_position, set_context,
+};
 pub use invitation::{
     accept_invitation, cancel_invitation, create_invitation, decline_invitation, export_invitation,
     import_invitation, list_invitations,
@@ -79,5 +96,9 @@ pub use messaging::{get_chat_state, send_direct_message, start_direct_chat};
 pub use network::{
     discover_peers, get_discovered_peers, list_lan_peers, list_peers, update_connection_status,
 };
+pub use query::{get_user_info, list_contacts, list_participants};
 pub use recovery::{approve_recovery, dispute_recovery, get_recovery_status, start_recovery};
+pub use settings::{get_settings, set_channel_mode, update_mfa_policy, update_nickname};
+pub use steward::{grant_steward, is_admin, revoke_steward};
 pub use sync::{force_sync, get_sync_status, request_state};
+pub use system::{is_available, ping, refresh_account};

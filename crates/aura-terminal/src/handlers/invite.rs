@@ -1,15 +1,30 @@
-//! Invitation CLI handlers.
+//! Invitation CLI handlers - Terminal-Specific Formatting
+//!
+//! This module provides terminal-specific invitation formatting for CLI and TUI.
+//! Business logic has been moved to `aura_app::workflows::invitation`.
+//!
+//! ## Architecture
+//!
+//! - **Business Logic**: `aura_app::workflows::invitation` (portable)
+//! - **Formatting**: This module (terminal-specific)
 //!
 //! Returns structured `CliOutput` for testability.
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::InvitationAction;
-// Import agent types from aura-agent (runtime layer)
-use aura_agent::handlers::{InvitationService, ShareableInvitation};
-use aura_agent::AuraAgent;
+use aura_app::views::invitations::Invitation;
 use aura_core::identifiers::AuthorityId;
 use std::str::FromStr;
+
+// Re-export workflow functions for backward compatibility
+// NOTE: Most operations require RuntimeBridge extension (see TODOs in aura-app)
+pub use aura_agent::{AuraAgent, InvitationService};
+use aura_agent::handlers::ShareableInvitation;
+use aura_app::workflows::invitation::{
+    accept_invitation, cancel_invitation, decline_invitation, export_invitation,
+    import_invitation, list_invitations,
+};
 
 /// Handle invitation-related CLI commands
 ///
@@ -32,7 +47,7 @@ pub async fn handle_invitation(
             ttl,
         } => {
             let mut output = CliOutput::new();
-            let invitation = create_invitation(agent, account, invitee, role, *ttl).await?;
+            let invitation = create_invitation_agent(agent, account, invitee, role, *ttl).await?;
             output.println(format!(
                 "Invitation created: id={} to={} role={} ttl={:?}",
                 invitation.invitation_id, invitee, role, ttl
@@ -166,7 +181,7 @@ fn format_invitation_type(shareable: &ShareableInvitation) -> String {
     }
 }
 
-async fn create_invitation(
+async fn create_invitation_agent(
     agent: &AuraAgent,
     account: &str,
     invitee: &str,

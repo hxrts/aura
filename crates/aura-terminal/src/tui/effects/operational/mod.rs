@@ -83,8 +83,8 @@ impl OperationalHandler {
     pub async fn execute(&self, command: &EffectCommand) -> Option<OpResult> {
         // Try each handler in sequence until one handles the command
 
-        // System commands (no dependencies)
-        if let Some(result) = system::handle_system(command).await {
+        // System commands
+        if let Some(result) = system::handle_system(command, &self.app_core).await {
             return Some(result);
         }
 

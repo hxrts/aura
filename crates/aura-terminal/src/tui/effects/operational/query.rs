@@ -1,6 +1,9 @@
 //! Query command handlers
 //!
 //! Handlers for ListParticipants, GetUserInfo.
+//!
+//! This module delegates to portable workflows in aura_app::workflows::query
+//! and adds terminal-specific response formatting.
 
 use std::sync::Arc;
 
@@ -10,6 +13,9 @@ use tokio::sync::RwLock;
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
+// Re-export workflows for convenience
+pub use aura_app::workflows::query::{get_user_info, list_contacts, list_participants};
+
 /// Handle query commands
 pub async fn handle_query(
     command: &EffectCommand,
@@ -17,97 +23,40 @@ pub async fn handle_query(
 ) -> Option<OpResult> {
     match command {
         EffectCommand::ListParticipants { channel } => {
-            // Get contacts snapshot to find participants
-            let app_core = app_core.read().await;
-            let snapshot = app_core.snapshot();
-            let contacts = &snapshot.contacts;
-
-            // Helper to get display name from contact
-            let get_name = |c: &aura_app::views::Contact| -> String {
-                if !c.petname.is_empty() {
-                    c.petname.clone()
-                } else if let Some(ref suggested) = c.suggested_name {
-                    suggested.clone()
-                } else {
-                    c.id.chars().take(8).collect::<String>() + "..."
-                }
-            };
-
-            let mut participants = Vec::new();
-
-            // Always include self (current user)
-            participants.push("You".to_string());
-
-            // For DM channels (format: "dm:<contact_id>"), include just that contact
-            if channel.starts_with("dm:") {
-                let contact_id = channel.strip_prefix("dm:").unwrap_or("");
-                if let Some(contact) = contacts.contact(contact_id) {
-                    participants.push(get_name(contact));
-                } else {
-                    participants.push(contact_id.to_string());
-                }
-            } else {
-                // For group channels, include all contacts as potential participants
-                // (In a real implementation, this would query actual channel membership)
-                for contact in contacts.filtered_contacts() {
-                    participants.push(get_name(contact));
-                }
+            // Delegate to workflow
+            match list_participants(app_core, channel).await {
+                Ok(participants) => Some(Ok(OpResponse::List(participants))),
+                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
-
-            Some(Ok(OpResponse::List(participants)))
         }
 
         EffectCommand::GetUserInfo { target } => {
-            // Get contacts snapshot to find user info
-            let app_core = app_core.read().await;
-            let snapshot = app_core.snapshot();
-            let contacts = &snapshot.contacts;
+            // Delegate to workflow
+            match get_user_info(app_core, target).await {
+                Ok(contact) => {
+                    // Format contact info for terminal display
+                    let display_name = if !contact.petname.is_empty() {
+                        contact.petname.clone()
+                    } else if let Some(ref suggested) = contact.suggested_name {
+                        suggested.clone()
+                    } else {
+                        contact.id.chars().take(8).collect::<String>() + "..."
+                    };
 
-            // Helper to get display name from contact
-            let get_name = |c: &aura_app::views::Contact| -> String {
-                if !c.petname.is_empty() {
-                    c.petname.clone()
-                } else if let Some(ref suggested) = c.suggested_name {
-                    suggested.clone()
-                } else {
-                    c.id.chars().take(8).collect::<String>() + "..."
+                    let info = format!(
+                        "User: {}\nID: {}\nOnline: {}\nGuardian: {}\nResident: {}",
+                        display_name,
+                        contact.id,
+                        if contact.is_online { "Yes" } else { "No" },
+                        if contact.is_guardian { "Yes" } else { "No" },
+                        if contact.is_resident { "Yes" } else { "No" }
+                    );
+
+                    Some(Ok(OpResponse::Data(info)))
                 }
-            };
-
-            // Helper to format contact info
-            let format_info = |c: &aura_app::views::Contact| -> String {
-                format!(
-                    "User: {}\nID: {}\nOnline: {}\nGuardian: {}\nResident: {}",
-                    get_name(c),
-                    c.id,
-                    if c.is_online { "Yes" } else { "No" },
-                    if c.is_guardian { "Yes" } else { "No" },
-                    if c.is_resident { "Yes" } else { "No" }
-                )
-            };
-
-            // Look up contact by ID
-            if let Some(contact) = contacts.contact(target) {
-                Some(Ok(OpResponse::Data(format_info(contact))))
-            } else {
-                // Try partial match by name
-                let matching: Vec<_> = contacts
-                    .filtered_contacts()
-                    .into_iter()
-                    .filter(|c| get_name(c).to_lowercase().contains(&target.to_lowercase()))
-                    .collect();
-
-                if matching.len() == 1 {
-                    Some(Ok(OpResponse::Data(format_info(matching[0]))))
-                } else if matching.is_empty() {
-                    Some(Ok(OpResponse::Data(format!("User '{}' not found", target))))
-                } else {
-                    let names: Vec<_> = matching.iter().map(|c| get_name(c)).collect();
-                    Some(Ok(OpResponse::Data(format!(
-                        "Multiple matches for '{}': {}",
-                        target,
-                        names.join(", ")
-                    ))))
+                Err(e) => {
+                    // Workflow already returns user-friendly error messages
+                    Some(Ok(OpResponse::Data(e.to_string())))
                 }
             }
         }
