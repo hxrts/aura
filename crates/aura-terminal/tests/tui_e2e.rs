@@ -812,7 +812,7 @@ async fn test_account_creation_callback_flow() {
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     // Create a unique test directory
     let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{}", std::process::id()));
@@ -923,7 +923,7 @@ async fn test_device_id_determinism() {
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Device ID Determinism Test ===\n");
     println!("NOTE: This tests device_id → authority_id derivation, NOT guardian recovery.\n");
@@ -1071,7 +1071,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Guardian Recovery: Cryptographic Identity Test ===\n");
 
@@ -1598,7 +1598,7 @@ async fn test_invitation_export_import_roundtrip() {
     use aura_terminal::tui::effects::EffectCommand;
     use serde::Deserialize;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     /// Account config format stored on disk
     #[derive(Deserialize)]
@@ -1732,7 +1732,7 @@ async fn test_moderation_commands_dispatch() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Moderation Commands Dispatch Test ===\n");
 
@@ -1822,7 +1822,7 @@ async fn test_peer_discovery_commands() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Peer Discovery Commands Test ===\n");
 
@@ -1904,7 +1904,7 @@ async fn test_lan_peer_invitation_flow() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== LAN Peer Invitation Flow Test ===\n");
 
@@ -2031,7 +2031,7 @@ async fn test_direct_messaging_flow() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Direct Messaging Flow Test ===\n");
 
@@ -2163,7 +2163,7 @@ async fn test_display_name_editing_flow() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Display Name Editing Flow Test ===\n");
 
@@ -2271,7 +2271,7 @@ async fn test_threshold_configuration_flow() {
     use aura_terminal::tui::effects::EffectCommand;
     use aura_terminal::tui::ThresholdState;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Threshold Configuration Flow Test ===\n");
 
@@ -2452,7 +2452,7 @@ async fn test_mfa_policy_configuration_flow() {
     use aura_terminal::tui::effects::EffectCommand;
     use aura_terminal::tui::types::MfaPolicy;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== MFA Policy Configuration Flow Test ===\n");
 
@@ -2604,7 +2604,7 @@ async fn test_block_messaging_flow() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Block Messaging Flow Test ===\n");
 
@@ -2740,7 +2740,7 @@ async fn test_set_context_flow() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== SetContext Flow Test ===\n");
 
@@ -2876,7 +2876,7 @@ async fn test_steward_role_flow() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Steward Role Flow Test ===\n");
 
@@ -3079,7 +3079,7 @@ async fn test_neighborhood_navigation_flow() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Neighborhood Navigation Flow Test ===\n");
 
@@ -3536,7 +3536,7 @@ async fn test_channel_mode_operations() {
     use aura_app::views::block::{BlockState, ResidentRole};
     use aura_app::AppCore;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     let test_dir =
         std::env::temp_dir().join(format!("aura-channel-mode-test-{}", std::process::id()));
@@ -4008,7 +4008,7 @@ async fn test_authorization_checking() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::{CommandAuthorizationLevel, EffectCommand};
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Authorization Checking Test ===\n");
 
@@ -4212,7 +4212,7 @@ async fn test_account_backup_restore_flow() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Account Backup/Restore Flow Test ===\n");
 
@@ -4378,7 +4378,7 @@ async fn test_device_management() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Device Management E2E Test ===\n");
 
@@ -4485,7 +4485,7 @@ async fn test_snapshot_data_accuracy() {
     use aura_core::identifiers::AuthorityId;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use async_lock::RwLock;
 
     println!("\n=== Snapshot Data Accuracy E2E Test ===\n");
 
