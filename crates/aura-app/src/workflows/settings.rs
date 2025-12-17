@@ -3,10 +3,7 @@
 //! This module contains settings operations that are portable across all frontends.
 //! It follows the reactive signal pattern and emits SETTINGS_SIGNAL updates.
 
-use crate::{
-    signal_defs::{DeviceInfo, SettingsState, SETTINGS_SIGNAL},
-    AppCore,
-};
+use crate::{signal_defs::{SettingsState, SETTINGS_SIGNAL}, AppCore};
 use async_lock::RwLock;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::sync::Arc;
@@ -15,17 +12,28 @@ use std::sync::Arc;
 ///
 /// **What it does**: Updates MFA policy and emits SETTINGS_SIGNAL
 /// **Returns**: Unit result
-/// **Signal pattern**: Emits SETTINGS_SIGNAL after update
-///
-/// **TODO**: Add RuntimeBridge method to persist MFA policy.
-/// Currently emits signal for UI updates only.
+/// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn update_mfa_policy(
     app_core: &Arc<RwLock<AppCore>>,
-    _require_mfa: bool,
+    require_mfa: bool,
 ) -> Result<(), AuraError> {
-    // TODO: Persist via RuntimeBridge
-    // For now, just emit signal for UI update
-    emit_settings_signal(app_core).await?;
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    let policy = if require_mfa {
+        "AlwaysRequired"
+    } else {
+        "SensitiveOnly"
+    };
+
+    runtime
+        .set_mfa_policy(policy)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to update MFA policy: {}", e)))?;
 
     Ok(())
 }
@@ -34,17 +42,22 @@ pub async fn update_mfa_policy(
 ///
 /// **What it does**: Updates display name and emits SETTINGS_SIGNAL
 /// **Returns**: Unit result
-/// **Signal pattern**: Emits SETTINGS_SIGNAL after update
-///
-/// **TODO**: Add RuntimeBridge method to persist display name.
-/// Currently emits signal for UI updates only.
+/// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn update_nickname(
     app_core: &Arc<RwLock<AppCore>>,
-    _name: String,
+    name: String,
 ) -> Result<(), AuraError> {
-    // TODO: Persist via RuntimeBridge
-    // For now, just emit signal for UI update
-    emit_settings_signal(app_core).await?;
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .set_display_name(&name)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to update display name: {}", e)))?;
 
     Ok(())
 }
@@ -81,42 +94,6 @@ pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> SettingsState {
     }
 }
 
-/// Emit settings signal with current state
-///
-/// **What it does**: Queries settings from runtime and emits SETTINGS_SIGNAL
-/// **Returns**: Unit result
-/// **Signal pattern**: Emits SETTINGS_SIGNAL
-///
-/// **TODO**: Query actual settings from RuntimeBridge.
-/// Currently uses placeholder values.
-async fn emit_settings_signal(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
-    let core = app_core.read().await;
-
-    // Get current settings from runtime
-    // For now, we use placeholder values - these would be queried from runtime in production
-    let display_name = String::new(); // TODO: Query from runtime
-    let threshold_k = 0; // TODO: Query from runtime
-    let threshold_n = 0; // TODO: Query from runtime
-    let mfa_policy = "SensitiveOnly".to_string(); // TODO: Query from runtime
-    let devices: Vec<DeviceInfo> = Vec::new(); // TODO: Query device list from runtime
-    let contact_count = 0; // TODO: Query contact count from runtime
-
-    let state = SettingsState {
-        display_name,
-        threshold_k,
-        threshold_n,
-        mfa_policy,
-        devices,
-        contact_count,
-    };
-
-    // Emit the signal
-    core.emit(&*SETTINGS_SIGNAL, state)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit settings signal: {}", e)))?;
-
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
