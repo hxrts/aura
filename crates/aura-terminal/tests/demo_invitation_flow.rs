@@ -15,8 +15,8 @@
 //! cargo test --package aura-terminal --test demo_invitation_flow -- --nocapture
 //! ```
 
+use async_lock::RwLock;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 use aura_agent::handlers::ShareableInvitation;
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};

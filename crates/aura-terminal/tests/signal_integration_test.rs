@@ -9,7 +9,7 @@
 //! The subscription may not be fully established before emit is called.
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, RECOVERY_SIGNAL,

@@ -18,8 +18,8 @@
 //! cargo test --package aura-terminal --test tui_callback_wiring_batch3 -- --nocapture
 //! ```
 
+use async_lock::RwLock;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 use aura_app::signal_defs::{
     BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,

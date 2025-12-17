@@ -27,7 +27,7 @@
 //! ```
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use aura_app::signal_defs::{CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, SYNC_STATUS_SIGNAL};
 use aura_app::views::chat::ChannelType;
