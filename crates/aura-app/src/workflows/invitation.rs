@@ -3,7 +3,7 @@
 //! This module contains invitation operations that are portable across
 //! all frontends via the RuntimeBridge abstraction.
 
-use crate::runtime_bridge::InvitationInfo;
+use crate::runtime_bridge::{InvitationBridgeType, InvitationInfo};
 use crate::{views::invitations::InvitationsState, AppCore, INVITATIONS_SIGNAL};
 use async_lock::RwLock;
 use aura_core::identifiers::AuthorityId;
@@ -269,6 +269,46 @@ pub async fn import_invitation(
         .await
         .map(|_| ()) // Discard InvitationInfo, just return success
         .map_err(|e| AuraError::agent(format!("Failed to import invitation: {}", e)))
+}
+
+/// Accept the first pending block/channel invitation
+///
+/// **What it does**: Finds and accepts the first pending channel invitation
+/// **Returns**: Invitation ID that was accepted
+/// **Signal pattern**: RuntimeBridge handles signal emission
+///
+/// This is used by UI to quickly accept a pending block invitation without
+/// requiring the user to select a specific invitation ID.
+pub async fn accept_pending_block_invitation(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<String, AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    // Get pending invitations
+    let pending = runtime.list_pending_invitations().await;
+
+    // Find a channel invitation that we received (sender is not us)
+    let our_authority = runtime.authority_id();
+    let block_invitation = pending.iter().find(|inv| {
+        matches!(inv.invitation_type, InvitationBridgeType::Channel { .. })
+            && inv.sender_id != our_authority
+    });
+
+    match block_invitation {
+        Some(inv) => {
+            runtime
+                .accept_invitation(&inv.invitation_id)
+                .await
+                .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {}", e)))?;
+            Ok(inv.invitation_id.clone())
+        }
+        None => Err(AuraError::agent("No pending block invitation found")),
+    }
 }
 
 #[cfg(test)]

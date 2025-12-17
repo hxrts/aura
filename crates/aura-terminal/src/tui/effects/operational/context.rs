@@ -15,6 +15,7 @@ use super::EffectCommand;
 
 // Re-export workflows for convenience
 pub use aura_app::workflows::context::{move_position, set_context};
+pub use aura_app::workflows::invitation::accept_pending_block_invitation;
 
 /// Handle context commands
 pub async fn handle_context(
@@ -51,9 +52,17 @@ pub async fn handle_context(
         }
 
         EffectCommand::AcceptPendingBlockInvitation => {
-            // Accept a pending block invitation
-            // TODO: Implement via invitation workflow once RuntimeBridge is extended
-            Some(Ok(OpResponse::Ok))
+            // Accept a pending block invitation via workflow
+            match accept_pending_block_invitation(app_core).await {
+                Ok(invitation_id) => Some(Ok(OpResponse::Data(format!(
+                    "Accepted block invitation: {}",
+                    invitation_id
+                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to accept block invitation: {}",
+                    e
+                )))),
+            }
         }
 
         _ => None,

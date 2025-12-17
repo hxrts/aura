@@ -589,6 +589,22 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })
     }
 
+    async fn get_invited_peer_ids(&self) -> Vec<String> {
+        // Get pending invitations where we are the sender
+        if let Ok(invitation_service) = self.agent.invitations().await {
+            let our_authority = self.agent.authority_id();
+            invitation_service
+                .list_pending()
+                .await
+                .iter()
+                .filter(|inv| inv.sender_id == our_authority)
+                .map(|inv| inv.receiver_id.to_string())
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     // =========================================================================
     // Settings Operations
     // =========================================================================

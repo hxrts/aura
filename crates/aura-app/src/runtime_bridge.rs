@@ -445,6 +445,12 @@ pub trait RuntimeBridge: Send + Sync {
     /// Parses the code and returns invitation info without accepting it.
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError>;
 
+    /// Get IDs of peers we have sent pending invitations to
+    ///
+    /// Returns a set of authority IDs for peers that have pending invitations
+    /// from us. Used to mark discovered peers as "invited" in the UI.
+    async fn get_invited_peer_ids(&self) -> Vec<String>;
+
     // =========================================================================
     // Settings Operations
     // =========================================================================
@@ -716,6 +722,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Err(IntentError::no_agent(
             "Invitation import not available in offline mode",
         ))
+    }
+
+    async fn get_invited_peer_ids(&self) -> Vec<String> {
+        Vec::new()
     }
 
     async fn get_settings(&self) -> SettingsBridgeState {

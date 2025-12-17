@@ -205,14 +205,12 @@ async fn emit_discovered_peers_signal(app_core: &AppCore) {
     let lan_peers = app_core.get_lan_peers().await;
 
     // Get invited peer IDs to mark peers as invited
-    let invited_ids: std::collections::HashSet<String> = app_core
-        .runtime()
-        .and_then(|_r| {
-            // TODO: Add method to get invited peer IDs from runtime
-            // For now, return empty set
-            Some(std::collections::HashSet::new())
-        })
-        .unwrap_or_default();
+    let invited_ids: std::collections::HashSet<String> = if let Some(runtime) = app_core.runtime()
+    {
+        runtime.get_invited_peer_ids().await.into_iter().collect()
+    } else {
+        std::collections::HashSet::new()
+    };
 
     // Combine into discovered peers state
     let mut peers = Vec::new();

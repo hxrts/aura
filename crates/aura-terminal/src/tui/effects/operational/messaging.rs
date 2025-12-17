@@ -19,7 +19,9 @@ use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflow functions for convenience
-pub use aura_app::workflows::messaging::{send_direct_message, start_direct_chat};
+pub use aura_app::workflows::messaging::{
+    invite_user_to_channel, send_action, send_direct_message, start_direct_chat,
+};
 
 /// Get current time in milliseconds since Unix epoch
 ///
@@ -70,18 +72,33 @@ pub async fn handle_messaging(
             }
         }
 
-        EffectCommand::SendAction {
-            channel: _,
-            action: _,
-        } => {
-            // IRC-style /me action
-            // TODO: Implement workflow for SendAction
-            Some(Ok(OpResponse::Ok))
+        EffectCommand::SendAction { channel, action } => {
+            // IRC-style /me action - use workflow
+            let timestamp = current_time_ms();
+            match send_action(app_core, channel, action, timestamp).await {
+                Ok(message_id) => Some(Ok(OpResponse::Data(format!(
+                    "Action sent: {}",
+                    message_id
+                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to send action: {}",
+                    e
+                )))),
+            }
         }
 
-        EffectCommand::InviteUser { target: _ } => {
-            // TODO: Implement workflow for InviteUser
-            Some(Ok(OpResponse::Ok))
+        EffectCommand::InviteUser { target } => {
+            // Invite user to current channel - use workflow
+            match invite_user_to_channel(app_core, target, None, None, None).await {
+                Ok(invitation_id) => Some(Ok(OpResponse::Data(format!(
+                    "Invitation sent: {}",
+                    invitation_id
+                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to invite user: {}",
+                    e
+                )))),
+            }
         }
 
         _ => None,

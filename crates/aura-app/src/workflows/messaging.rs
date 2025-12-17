@@ -172,6 +172,119 @@ pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> ChatState {
     }
 }
 
+/// Send an action/emote message to a channel
+///
+/// **What it does**: Sends an IRC-style /me action to a channel
+/// **Returns**: Message ID
+/// **Signal pattern**: Emits CHAT_SIGNAL after message is added
+///
+/// Action messages are formatted as "* Sender action text" and displayed
+/// differently from regular messages in the UI.
+///
+/// # Arguments
+/// * `app_core` - The application core
+/// * `channel_id` - Target channel ID
+/// * `action` - Action text (e.g., "waves hello")
+/// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
+pub async fn send_action(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: &str,
+    action: &str,
+    timestamp_ms: u64,
+) -> Result<String, AuraError> {
+    let core = app_core.read().await;
+    let mut chat_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+
+    // Verify channel exists
+    if chat_state.channel(channel_id).is_none() {
+        return Err(AuraError::agent(format!(
+            "Channel not found: {}",
+            channel_id
+        )));
+    }
+
+    let now = timestamp_ms;
+
+    // Create the action message with emote formatting
+    // Content is prefixed with ACTION marker for UI rendering
+    let message_id = format!("msg-{}-{}", channel_id, now);
+    let message = Message {
+        id: message_id.clone(),
+        channel_id: channel_id.to_string(),
+        sender_id: "self".to_string(),
+        sender_name: "You".to_string(),
+        // Format as emote: "* You action text"
+        content: format!("* You {}", action),
+        timestamp: now,
+        reply_to: None,
+        is_own: true,
+        is_read: true,
+    };
+
+    // Apply message to state
+    chat_state.apply_message(channel_id.to_string(), message);
+
+    // Emit updated state
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit chat signal: {}", e)))?;
+
+    Ok(message_id)
+}
+
+/// Invite a user to join the current channel
+///
+/// **What it does**: Creates a channel invitation for the target user
+/// **Returns**: Invitation ID
+/// **Signal pattern**: RuntimeBridge handles signal emission
+///
+/// This delegates to the invitation workflow to create a channel invitation.
+/// The target user receives the invitation and can accept to join the channel.
+///
+/// # Arguments
+/// * `app_core` - The application core
+/// * `target_user_id` - Target user's authority ID
+/// * `channel_id` - Channel to invite user to (use current selected if None)
+/// * `message` - Optional invitation message
+/// * `ttl_ms` - Optional time-to-live for the invitation
+pub async fn invite_user_to_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    target_user_id: &str,
+    channel_id: Option<&str>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> Result<String, AuraError> {
+    use aura_core::identifiers::AuthorityId;
+
+    // Determine channel ID - use provided or get current selected
+    let channel = match channel_id {
+        Some(id) => id.to_string(),
+        None => {
+            let chat_state = get_chat_state(app_core).await;
+            chat_state.selected_channel_id.ok_or_else(|| {
+                AuraError::agent("No channel selected. Please select a channel first.")
+            })?
+        }
+    };
+
+    // Parse target user ID as AuthorityId
+    let receiver = target_user_id
+        .parse::<AuthorityId>()
+        .map_err(|e| AuraError::agent(format!("Invalid user ID: {}", e)))?;
+
+    // Delegate to invitation workflow
+    let invitation = crate::workflows::invitation::create_channel_invitation(
+        app_core,
+        receiver,
+        channel.clone(),
+        message,
+        ttl_ms,
+    )
+    .await?;
+
+    Ok(invitation.invitation_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
