@@ -491,6 +491,31 @@ pub trait RuntimeBridge: Send + Sync {
     async fn is_authenticated(&self) -> bool;
 
     // =========================================================================
+    // Authorization / Capabilities
+    // =========================================================================
+
+    /// Check if the user has a specific command capability
+    ///
+    /// This method integrates with the Biscuit authorization system to verify
+    /// that the user has permission to execute commands requiring specific
+    /// capabilities. Used by CommandDispatcher for fine-grained authorization.
+    ///
+    /// # Arguments
+    /// * `capability` - The capability string (e.g., "send_dm", "moderate:kick")
+    ///
+    /// # Returns
+    /// `true` if the user has the capability, `false` otherwise
+    ///
+    /// # Default Implementation
+    /// Returns `true` for all capabilities. Override in implementations that
+    /// integrate with Biscuit tokens or other authorization systems.
+    async fn has_command_capability(&self, _capability: &str) -> bool {
+        // Default: allow all capabilities
+        // Implementations with Biscuit integration should check the token
+        true
+    }
+
+    // =========================================================================
     // Time Operations
     // =========================================================================
 

@@ -236,32 +236,133 @@ impl RecoveryService {
         )
     }
 
-    /// Initiate a full guardian ceremony with FROST key generation
+    /// Prepare guardian ceremony by generating FROST threshold keys
     ///
-    /// NOTE: This method is a placeholder for future integration.
-    /// Currently, ceremony initiation happens via send_guardian_invitation
-    /// and CeremonyTracker tracks progress. Full FROST key generation
-    /// integration requires architectural refactoring to pass
-    /// Arc<AuraEffectSystem> instead of Arc<RwLock<AuraEffectSystem>>.
+    /// This method generates new threshold keys for the guardian configuration
+    /// at a new epoch. The keys are stored but not activated until the ceremony
+    /// completes successfully.
+    ///
+    /// # Full Ceremony Flow
+    ///
+    /// For complete ceremony orchestration, use `RuntimeBridge.initiate_guardian_ceremony()`
+    /// via the AppCore workflow layer. That method:
+    /// 1. Calls this method to generate keys
+    /// 2. Creates a ceremony ID and registers with CeremonyTracker
+    /// 3. Sends guardian invitations via `send_guardian_invitation`
+    /// 4. Tracks responses and commits/rollbacks the key rotation
+    ///
+    /// This method is exposed for advanced use cases where you need direct
+    /// control over key generation separate from the invitation flow.
     ///
     /// # Arguments
     /// * `threshold_k` - Minimum number of guardians required (k-of-n)
     /// * `guardian_ids` - List of guardian authority IDs
     ///
     /// # Returns
-    /// Error indicating this method is not yet fully integrated
-    pub async fn initiate_guardian_ceremony(
+    /// A tuple of (new_epoch, key_packages, public_key_package) on success.
+    /// - `new_epoch`: The epoch for the new keys (call commit/rollback with this)
+    /// - `key_packages`: Encrypted key packages for each guardian
+    /// - `public_key_package`: The group public key for the new configuration
+    pub async fn prepare_guardian_keys(
         &self,
-        _threshold_k: u16,
-        _guardian_ids: Vec<AuthorityId>,
-    ) -> AgentResult<String> {
+        threshold_k: u16,
+        guardian_ids: Vec<AuthorityId>,
+    ) -> AgentResult<(u64, Vec<Vec<u8>>, Vec<u8>)> {
         use crate::core::AgentError;
+        use aura_core::effects::ThresholdSigningEffects;
 
-        // TODO: Implement full ceremony initiation with GuardianCeremonyExecutor
-        // This requires refactoring to handle Arc<RwLock<AuraEffectSystem>> vs Arc<AuraEffectSystem>
-        Err(AgentError::internal(
-            "Full guardian ceremony initiation not yet integrated - use send_guardian_invitation for now".to_string()
-        ))
+        let total_n = guardian_ids.len() as u16;
+
+        if threshold_k == 0 {
+            return Err(AgentError::invalid(
+                "Threshold must be at least 1".to_string(),
+            ));
+        }
+
+        if total_n < threshold_k {
+            return Err(AgentError::invalid(format!(
+                "Need at least {} guardians for {}-of-{} threshold",
+                threshold_k, threshold_k, total_n
+            )));
+        }
+
+        // Get effect system read lock
+        let effects = self.effects.read().await;
+        let authority_id = self.handler.authority_context().authority_id;
+
+        // Convert AuthorityId to String for the effect system interface
+        let guardian_id_strings: Vec<String> =
+            guardian_ids.iter().map(|id| id.to_string()).collect();
+
+        // Generate new threshold keys
+        let (new_epoch, key_packages, public_key) = effects
+            .rotate_keys(&authority_id, threshold_k, total_n, &guardian_id_strings)
+            .await
+            .map_err(|e| {
+                AgentError::internal(format!("Failed to generate threshold keys: {}", e))
+            })?;
+
+        tracing::info!(
+            authority_id = %authority_id,
+            new_epoch,
+            threshold_k,
+            total_n,
+            num_key_packages = key_packages.len(),
+            public_key_size = public_key.len(),
+            "Generated new guardian threshold keys"
+        );
+
+        Ok((new_epoch, key_packages, public_key))
+    }
+
+    /// Commit a guardian key rotation after successful ceremony
+    ///
+    /// Call this after all guardians have accepted and stored their key shares.
+    /// This makes the new epoch authoritative.
+    pub async fn commit_guardian_keys(&self, new_epoch: u64) -> AgentResult<()> {
+        use crate::core::AgentError;
+        use aura_core::effects::ThresholdSigningEffects;
+
+        let effects = self.effects.read().await;
+        let authority_id = self.handler.authority_context().authority_id;
+
+        effects
+            .commit_key_rotation(&authority_id, new_epoch)
+            .await
+            .map_err(|e| AgentError::internal(format!("Failed to commit key rotation: {}", e)))?;
+
+        tracing::info!(
+            authority_id = %authority_id,
+            epoch = new_epoch,
+            "Committed guardian key rotation"
+        );
+
+        Ok(())
+    }
+
+    /// Rollback a guardian key rotation after ceremony failure
+    ///
+    /// Call this when the ceremony fails (guardian declined, user cancelled, or timeout).
+    /// This discards the new epoch's keys and keeps the previous configuration active.
+    pub async fn rollback_guardian_keys(&self, failed_epoch: u64) -> AgentResult<()> {
+        use crate::core::AgentError;
+        use aura_core::effects::ThresholdSigningEffects;
+
+        let effects = self.effects.read().await;
+        let authority_id = self.handler.authority_context().authority_id;
+
+        effects
+            .rollback_key_rotation(&authority_id, failed_epoch)
+            .await
+            .map_err(|e| AgentError::internal(format!("Failed to rollback key rotation: {}", e)))?;
+
+        tracing::info!(
+            authority_id = %authority_id,
+            epoch = failed_epoch,
+            "Rolled back guardian key rotation"
+        );
+
+        Ok(())
     }
 
     /// Send a guardian invitation with key package

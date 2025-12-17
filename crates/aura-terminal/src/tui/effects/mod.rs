@@ -28,6 +28,6 @@ mod operational;
 pub use command_parser::{
     AuraEvent, CommandAuthorizationLevel, EffectCommand, EventFilter, EventSubscription,
 };
-pub use dispatcher::{CommandDispatcher, DispatchError};
+pub use dispatcher::{CapabilityPolicy, CommandDispatcher, DispatchError};
 pub use intent_mapper::{command_to_intent, is_intent_command, CommandContext};
 pub use operational::{OpError, OpResponse, OpResult, OperationalHandler};

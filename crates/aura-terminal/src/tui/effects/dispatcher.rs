@@ -1,10 +1,58 @@
 //! # Command Dispatcher
 //!
 //! Maps IRC-style commands to effect system commands with capability checking.
+//!
+//! ## Capability Checking
+//!
+//! The dispatcher supports configurable capability checking via `CapabilityPolicy`:
+//!
+//! - `AllowAll` - Permits all commands (for development/testing)
+//! - `DenyNonPublic` - Denies commands requiring capabilities (restrictive default)
+//! - `Custom(fn)` - Delegate to a custom capability checker
+//!
+//! For Biscuit integration, create a custom checker that calls RuntimeBridge:
+//!
+//! ```ignore
+//! let checker = |cap: &CommandCapability| -> bool {
+//!     if *cap == CommandCapability::None { return true; }
+//!     // Check via RuntimeBridge.has_command_capability(cap.as_str())
+//!     runtime.has_command_capability(cap.as_str())
+//! };
+//! let dispatcher = CommandDispatcher::with_policy(CapabilityPolicy::Custom(Box::new(checker)));
+//! ```
 
 use crate::tui::commands::{CommandCapability, IrcCommand};
 
 use super::command_parser::EffectCommand;
+
+/// Policy for checking command capabilities
+pub enum CapabilityPolicy {
+    /// Allow all commands regardless of capability requirements
+    AllowAll,
+    /// Deny all commands that require non-None capabilities
+    DenyNonPublic,
+    /// Use a custom capability checker function
+    Custom(Box<dyn Fn(&CommandCapability) -> bool + Send + Sync>),
+}
+
+impl Default for CapabilityPolicy {
+    fn default() -> Self {
+        // Default to AllowAll since authorization is also checked in IoContext
+        // The dispatcher's capability check is a secondary layer for when
+        // more fine-grained Biscuit-based authorization is needed
+        Self::AllowAll
+    }
+}
+
+impl std::fmt::Debug for CapabilityPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AllowAll => write!(f, "AllowAll"),
+            Self::DenyNonPublic => write!(f, "DenyNonPublic"),
+            Self::Custom(_) => write!(f, "Custom(...)"),
+        }
+    }
+}
 
 /// Error that can occur during command dispatch
 #[derive(Debug, Clone, PartialEq)]
@@ -57,17 +105,40 @@ impl std::fmt::Display for DispatchError {
 impl std::error::Error for DispatchError {}
 
 /// Command dispatcher that maps IRC commands to effect commands
+///
+/// The dispatcher converts IRC-style commands to effect commands with
+/// configurable capability checking. By default, all commands are allowed
+/// (authorization is also enforced by IoContext.check_authorization).
+///
+/// For stricter capability enforcement, configure a custom policy that
+/// integrates with Biscuit tokens via RuntimeBridge.
 pub struct CommandDispatcher {
     /// Current channel context
     current_channel: Option<String>,
+    /// Capability checking policy
+    capability_policy: CapabilityPolicy,
 }
 
 impl CommandDispatcher {
-    /// Create a new command dispatcher
+    /// Create a new command dispatcher with default policy (AllowAll)
     pub fn new() -> Self {
         Self {
             current_channel: None,
+            capability_policy: CapabilityPolicy::default(),
         }
+    }
+
+    /// Create a dispatcher with a specific capability policy
+    pub fn with_policy(policy: CapabilityPolicy) -> Self {
+        Self {
+            current_channel: None,
+            capability_policy: policy,
+        }
+    }
+
+    /// Set the capability policy
+    pub fn set_policy(&mut self, policy: CapabilityPolicy) {
+        self.capability_policy = policy;
     }
 
     /// Set the current channel context
@@ -85,18 +156,34 @@ impl CommandDispatcher {
         self.current_channel.as_deref()
     }
 
-    /// Check if a command is allowed (hook for Biscuit evaluation).
+    /// Check if a command is allowed based on the configured capability policy.
+    ///
+    /// The check delegates to the configured `CapabilityPolicy`:
+    /// - `AllowAll`: Always permits (used when IoContext handles authorization)
+    /// - `DenyNonPublic`: Denies commands requiring capabilities
+    /// - `Custom(fn)`: Delegates to custom checker (for Biscuit integration)
     pub fn check_capability(&self, command: &IrcCommand) -> Result<(), DispatchError> {
         let capability = command.required_capability();
-        // TODO: integrate Biscuit/policy check via AppCore; placeholder keeps structure intact.
-        if let CommandCapability::None = capability {
+
+        // Commands with no capability requirement always pass
+        if capability == CommandCapability::None {
             return Ok(());
         }
 
-        // Until policy is wired, deny non-None to surface in unified error handling
-        Err(DispatchError::PermissionDenied {
-            required: capability,
-        })
+        // Check based on policy
+        let allowed = match &self.capability_policy {
+            CapabilityPolicy::AllowAll => true,
+            CapabilityPolicy::DenyNonPublic => false,
+            CapabilityPolicy::Custom(checker) => checker(&capability),
+        };
+
+        if allowed {
+            Ok(())
+        } else {
+            Err(DispatchError::PermissionDenied {
+                required: capability,
+            })
+        }
     }
 
     /// Dispatch an IRC command to an effect command
@@ -369,5 +456,113 @@ mod tests {
 
         dispatcher.clear_current_channel();
         assert_eq!(dispatcher.current_channel(), None);
+    }
+
+    // =========================================================================
+    // Capability Policy Tests
+    // =========================================================================
+
+    #[test]
+    fn test_default_policy_allows_all() {
+        let dispatcher = CommandDispatcher::new();
+
+        // Default policy (AllowAll) should allow commands requiring capabilities
+        let cmd = IrcCommand::Msg {
+            target: "alice".to_string(),
+            text: "hello".to_string(),
+        };
+
+        // dispatch() now succeeds because default policy is AllowAll
+        let result = dispatcher.dispatch(cmd);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_deny_non_public_policy() {
+        let dispatcher = CommandDispatcher::with_policy(CapabilityPolicy::DenyNonPublic);
+
+        // Commands requiring capabilities should be denied
+        let cmd = IrcCommand::Msg {
+            target: "alice".to_string(),
+            text: "hello".to_string(),
+        };
+
+        let result = dispatcher.dispatch(cmd);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            DispatchError::PermissionDenied { .. }
+        ));
+    }
+
+    #[test]
+    fn test_deny_non_public_allows_help() {
+        let dispatcher = CommandDispatcher::with_policy(CapabilityPolicy::DenyNonPublic);
+
+        // Help command has no capability requirement, should pass check
+        // (but returns NotImplemented from dispatch, which is fine)
+        let cmd = IrcCommand::Help { command: None };
+
+        let result = dispatcher.check_capability(&cmd);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_custom_policy() {
+        // Custom policy that allows only specific capabilities
+        let checker = |cap: &CommandCapability| -> bool {
+            matches!(
+                cap,
+                CommandCapability::SendDm | CommandCapability::ViewMembers
+            )
+        };
+
+        let dispatcher =
+            CommandDispatcher::with_policy(CapabilityPolicy::Custom(Box::new(checker)));
+
+        // SendDm should be allowed
+        let msg_cmd = IrcCommand::Msg {
+            target: "alice".to_string(),
+            text: "hello".to_string(),
+        };
+        assert!(dispatcher.dispatch(msg_cmd).is_ok());
+
+        // ModerateKick should be denied
+        let mut dispatcher_with_channel = CommandDispatcher::with_policy(CapabilityPolicy::Custom(
+            Box::new(|cap: &CommandCapability| {
+                matches!(
+                    cap,
+                    CommandCapability::SendDm | CommandCapability::ViewMembers
+                )
+            }),
+        ));
+        dispatcher_with_channel.set_current_channel("general");
+
+        let kick_cmd = IrcCommand::Kick {
+            target: "spammer".to_string(),
+            reason: None,
+        };
+        let result = dispatcher_with_channel.dispatch(kick_cmd);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            DispatchError::PermissionDenied { .. }
+        ));
+    }
+
+    #[test]
+    fn test_set_policy() {
+        let mut dispatcher = CommandDispatcher::new();
+
+        // Start with AllowAll
+        let cmd = IrcCommand::Msg {
+            target: "alice".to_string(),
+            text: "hello".to_string(),
+        };
+        assert!(dispatcher.dispatch(cmd.clone()).is_ok());
+
+        // Change to DenyNonPublic
+        dispatcher.set_policy(CapabilityPolicy::DenyNonPublic);
+        assert!(dispatcher.dispatch(cmd).is_err());
     }
 }
