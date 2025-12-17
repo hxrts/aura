@@ -772,6 +772,8 @@ mod tests {
 
     #[tokio::test]
     async fn invitations_use_transport_envelopes() {
+        use std::sync::RwLock as StdRwLock;
+
         let mut authority_context =
             AuthorityContext::new(AuthorityId::new_from_entropy([70u8; 32]));
         authority_context.add_context(crate::core::context::RelationalContext {
@@ -781,7 +783,12 @@ mod tests {
         });
         let account_id = AccountId::new_from_entropy([12u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+
+        // Use shared transport inbox to verify messages are sent
+        let shared_inbox = Arc::new(StdRwLock::new(Vec::new()));
+        let effects = Arc::new(RwLock::new(
+            AuraEffectSystem::testing_with_shared_transport(&config, shared_inbox.clone()).unwrap()
+        ));
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
 
         let other_device = DeviceId::new_from_entropy([5u8; 32]);
@@ -793,11 +800,10 @@ mod tests {
             .await
             .unwrap();
 
-        let effects_guard = effects.read().await;
-        let envelope = effects_guard
-            .receive_envelope()
-            .await
-            .expect("invitation sent");
+        // Verify that an invitation was sent to the transport layer
+        let inbox = shared_inbox.read().unwrap();
+        assert_eq!(inbox.len(), 1, "Expected exactly one transport envelope");
+        let envelope = &inbox[0];
         assert_eq!(envelope.destination, AuthorityId::from_uuid(other_device.0));
         assert_eq!(
             envelope.metadata.get("type"),

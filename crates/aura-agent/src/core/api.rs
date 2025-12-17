@@ -236,6 +236,124 @@ impl AuraAgent {
         service
     }
 
+    /// Get the ceremony tracker for guardian ceremony coordination
+    ///
+    /// The ceremony tracker manages state for in-progress guardian ceremonies,
+    /// including tracking which guardians have accepted invitations and whether
+    /// the threshold has been reached.
+    ///
+    /// # Returns
+    /// A cloneable reference to the ceremony tracker service
+    pub async fn ceremony_tracker(&self) -> crate::runtime::services::CeremonyTracker {
+        self.runtime.ceremony_tracker().clone()
+    }
+
+    /// Process guardian ceremony acceptances and auto-complete when threshold is reached
+    ///
+    /// This method should be called periodically (e.g., in a background task) to:
+    /// 1. Poll for incoming guardian acceptance messages via transport
+    /// 2. Update the ceremony tracker with each acceptance
+    /// 3. Automatically commit ceremonies when threshold is reached
+    ///
+    /// # Returns
+    /// Number of acceptances processed and number of ceremonies completed
+    pub async fn process_ceremony_acceptances(&self) -> AgentResult<(usize, usize)> {
+        // Get recovery service and ceremony tracker
+        let recovery_service = self.recovery().await?;
+        let ceremony_tracker = self.ceremony_tracker().await;
+
+        // Process incoming acceptances from transport
+        let acceptances = recovery_service.process_guardian_acceptances().await?;
+        let acceptance_count = acceptances.len();
+        let mut completed_count = 0;
+
+        // Update ceremony tracker and check for threshold completion
+        for (ceremony_id, guardian_id) in acceptances {
+            // Clone guardian_id for logging since mark_accepted takes ownership
+            let guardian_id_clone = guardian_id.clone();
+
+            match ceremony_tracker
+                .mark_accepted(&ceremony_id, guardian_id)
+                .await
+            {
+                Ok(threshold_reached) => {
+                    if threshold_reached {
+                        tracing::info!(
+                            ceremony_id = %ceremony_id,
+                            "Ceremony threshold reached - committing guardian key rotation"
+                        );
+
+                        // Get ceremony state to retrieve new epoch
+                        match ceremony_tracker.get(&ceremony_id).await {
+                            Ok(ceremony_state) => {
+                                let new_epoch = ceremony_state.new_epoch;
+                                let authority_id = self.authority_id();
+
+                                tracing::info!(
+                                    ceremony_id = %ceremony_id,
+                                    new_epoch,
+                                    "Activating new guardian epoch"
+                                );
+
+                                // Commit the key rotation to activate the new epoch
+                                let commit_result = {
+                                    let effects = self.runtime.effects();
+                                    let effects_guard = effects.read().await;
+
+                                    use aura_core::effects::ThresholdSigningEffects;
+                                    effects_guard
+                                        .commit_key_rotation(&authority_id, new_epoch)
+                                        .await
+                                };
+
+                                match commit_result {
+                                    Ok(()) => {
+                                        tracing::info!(
+                                            ceremony_id = %ceremony_id,
+                                            new_epoch,
+                                            "Guardian ceremony committed successfully"
+                                        );
+                                        completed_count += 1;
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(
+                                            ceremony_id = %ceremony_id,
+                                            new_epoch,
+                                            error = %e,
+                                            "Failed to commit guardian key rotation"
+                                        );
+
+                                        // Mark ceremony as failed
+                                        let _ = ceremony_tracker
+                                            .mark_failed(&ceremony_id, Some(format!("Commit failed: {}", e)))
+                                            .await;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    ceremony_id = %ceremony_id,
+                                    error = %e,
+                                    "Failed to retrieve ceremony state for commit"
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        ceremony_id = %ceremony_id,
+                        guardian_id = %guardian_id_clone,
+                        error = %e,
+                        "Failed to mark guardian as accepted"
+                    );
+                }
+            }
+        }
+
+        Ok((acceptance_count, completed_count))
+    }
+
     /// Shutdown the agent
     pub async fn shutdown(self, ctx: &EffectContext) -> AgentResult<()> {
         self.runtime
@@ -355,6 +473,31 @@ impl AgentBuilder {
         let runtime = EffectSystemBuilder::simulation(seed)
             .with_config(self.config)
             .with_authority(authority_id)
+            .build(ctx)
+            .await
+            .map_err(AgentError::runtime)?;
+
+        Ok(AuraAgent::new(runtime, authority_id))
+    }
+
+    /// Build a simulation agent with shared transport inbox for multi-agent scenarios
+    ///
+    /// This enables communication between multiple simulated agents (e.g., Bob, Alice, Carol)
+    /// by providing a shared transport layer that routes messages based on destination authority.
+    pub async fn build_simulation_async_with_shared_transport(
+        self,
+        seed: u64,
+        ctx: &EffectContext,
+        shared_inbox: std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>,
+    ) -> AgentResult<AuraAgent> {
+        let authority_id = self
+            .authority_id
+            .ok_or_else(|| AgentError::config("Authority ID required"))?;
+
+        let runtime = EffectSystemBuilder::simulation(seed)
+            .with_config(self.config)
+            .with_authority(authority_id)
+            .with_shared_transport_inbox(shared_inbox)
             .build(ctx)
             .await
             .map_err(AgentError::runtime)?;

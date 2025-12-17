@@ -78,6 +78,7 @@
 
 pub mod cli;
 pub mod effects;
+pub mod error;
 pub mod handlers;
 pub mod ids;
 #[cfg(feature = "terminal")]
@@ -109,6 +110,9 @@ use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::{effects::ExecutionMode, identifiers::DeviceId, AuraError};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+// Re-export unified terminal error types
+pub use error::{TerminalError, TerminalResult};
 
 /// Create a CLI handler for the given device ID
 ///

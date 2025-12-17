@@ -537,4 +537,111 @@ pub async fn create_coordinated_application(
 
 Integrated coordination provides security, consistency, and privacy guarantees. Applications build on proven distributed systems patterns. See [System Architecture](001_system_architecture.md) for complete system integration.
 
+## Operation Categories: When to Use Ceremonies vs Optimistic Execution
+
+Not all distributed operations require full choreographic coordination. Aura classifies operations into three categories based on their security requirements:
+
+### Category A: Optimistic (Immediate Effect)
+
+Use optimistic execution when:
+- Operation is within an **established relational context**
+- Keys are already derived (no new key agreement needed)
+- Eventual consistency is acceptable
+- Worst case is temporary inconsistency, not security breach
+
+```rust
+// Category A: Just emit a CRDT fact
+async fn send_message(&mut self, channel_id: ChannelId, content: String) {
+    // Key already derived from context: KDF(ContextRoot, ChannelId, epoch)
+    let encrypted = self.encrypt_for_channel(&channel_id, &content).await;
+
+    // Emit fact - syncs via anti-entropy
+    self.emit_fact(ChatFact::Message {
+        channel_id,
+        content: encrypted,
+        timestamp: self.now(),
+    }).await;
+
+    // Message visible immediately, delivery status updates in background
+}
+```
+
+**Examples**: Send message, create channel, react, update topic, block contact
+
+### Category B: Deferred (Pending Until Confirmed)
+
+Use deferred execution when:
+- Operation affects other users' access or policies
+- Rollback is possible and acceptable
+- Some approval threshold is required
+- User can see "pending" state while waiting
+
+```rust
+// Category B: Create proposal, apply effect on approval
+async fn kick_member(&mut self, channel_id: ChannelId, target: AuthorityId) {
+    // Don't apply effect yet - create proposal
+    let proposal = Proposal {
+        operation: Operation::RemoveMember { channel_id, target },
+        requires_approval_from: vec![CapabilityRequirement::Role("admin")],
+        threshold: ApprovalThreshold::Any,
+        timeout_ms: 24 * 60 * 60 * 1000,
+    };
+
+    self.emit_proposal(proposal).await;
+    // UI shows "Pending: Remove {target}" until approved/rejected
+}
+```
+
+**Examples**: Change permissions, kick member, transfer ownership, archive channel
+
+### Category C: Consensus-Gated (Blocking Ceremony)
+
+Use ceremonies when:
+- Operation establishes **new cryptographic context**
+- Partial state would be dangerous or unusable
+- Operation is irreversible or security-critical
+- All parties must agree before any effect
+
+```rust
+// Category C: Must complete ceremony before proceeding
+async fn add_contact(&mut self, invitation: Invitation) -> Result<ContactId> {
+    // Start invitation ceremony - blocks until complete
+    let ceremony_id = self.ceremony_executor
+        .initiate_invitation_ceremony(invitation)
+        .await?;
+
+    // Cannot use contact until ceremony commits
+    // Ceremony establishes shared ContextRoot for key derivation
+    match self.await_ceremony(&ceremony_id).await? {
+        CeremonyStatus::Committed => Ok(ContactId::from_ceremony(&ceremony_id)),
+        CeremonyStatus::Aborted { reason } => Err(AuraError::ceremony_failed(reason)),
+    }
+}
+```
+
+**Examples**: Add contact, create group, add group member, guardian rotation, recovery
+
+### Decision Quick Reference
+
+```
+Is this operation establishing new cryptographic relationships?
+├─ YES → Category C (ceremony required)
+└─ NO: Does it affect other users' access?
+       ├─ YES: High-security or irreversible?
+       │       ├─ YES → Category B (deferred)
+       │       └─ NO → Category A (optimistic)
+       └─ NO → Category A (optimistic)
+```
+
+### Common Mistakes
+
+| Mistake | Why It's Wrong | Correct Approach |
+|---------|----------------|------------------|
+| Ceremony for channel creation | Context already exists | Category A - emit fact |
+| Optimistic guardian rotation | Partial key shares unusable | Category C - ceremony |
+| Blocking on message send | Eventual consistency is fine | Category A - optimistic |
+| Immediate permission change | Affects others' access | Category B - deferred |
+
+See [Operation Categories](115_operation_categories.md) for comprehensive documentation.
+
 Continue with [Advanced Choreography Guide](804_advanced_coordination_guide.md) for sophisticated protocol development. Learn comprehensive testing in [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md).

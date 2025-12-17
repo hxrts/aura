@@ -8,8 +8,6 @@
 //! 1. Subscribes to AppCore signals to detect Bob's actions
 //! 2. Routes actions to simulated agents (Alice/Carol)
 //! 3. Updates signals with agent responses
-//!
-//! This replaces the AuraEvent-based event forwarding with a unified signal approach.
 
 use std::sync::Arc;
 

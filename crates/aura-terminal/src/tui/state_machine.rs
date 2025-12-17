@@ -1060,6 +1060,18 @@ pub enum ToastLevel {
     Error,
 }
 
+impl ToastLevel {
+    /// Get the dismissal priority (higher = dismiss first on Escape)
+    /// Priority: Error (3) > Warning (2) > Info/Success (1)
+    pub fn priority(self) -> u8 {
+        match self {
+            Self::Error => 3,
+            Self::Warning => 2,
+            Self::Info | Self::Success => 1,
+        }
+    }
+}
+
 impl TuiState {
     /// Create a new TUI state with default values
     pub fn new() -> Self {
@@ -1089,6 +1101,17 @@ impl TuiState {
     /// Get the current screen
     pub fn screen(&self) -> Screen {
         self.router.current()
+    }
+
+    /// Get the ID of the highest priority toast (for prioritized dismissal)
+    ///
+    /// Priority: Error (3) > Warning (2) > Info/Success (1)
+    /// Returns None if no toasts exist.
+    pub fn highest_priority_toast_id(&self) -> Option<u64> {
+        self.toasts
+            .iter()
+            .max_by_key(|t| t.level.priority())
+            .map(|t| t.id)
     }
 
     /// Check if a modal is active (global or screen-specific)
@@ -1402,11 +1425,15 @@ fn handle_global_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: 
         return true;
     }
 
-    // Escape - dismiss toasts (when no modal is open)
+    // Escape - dismiss ONE toast at a time based on priority (when no modal is open)
+    // Priority: Error > Warning > Info/Success
     // Note: Modal escape handling is in handle_modal_key, so this only fires
     // when there's no modal open
     if key.code == KeyCode::Esc {
-        commands.push(TuiCommand::ClearAllToasts);
+        if let Some(toast_id) = state.highest_priority_toast_id() {
+            commands.push(TuiCommand::DismissToast { id: toast_id });
+        }
+        // If no toasts, Esc does nothing here (modals handled in handle_modal_key)
         return true;
     }
 
@@ -1449,9 +1476,16 @@ fn handle_modal_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: K
         return;
     }
 
-    // Escape closes any global modal
+    // Escape - prioritized dismissal: toasts first, then modal
+    // Priority: Error > Warning > Info/Success toasts, then close modal
     if key.code == KeyCode::Esc {
-        state.modal.close();
+        if let Some(toast_id) = state.highest_priority_toast_id() {
+            // Dismiss highest priority toast first
+            commands.push(TuiCommand::DismissToast { id: toast_id });
+        } else {
+            // No toasts left, close the modal
+            state.modal.close();
+        }
         return;
     }
 
@@ -1531,6 +1565,16 @@ fn handle_modal_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: K
 
 /// Handle screen-specific modal key events
 fn handle_screen_modal_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
+    // Escape - prioritized dismissal: toasts first, then fall through to close modal
+    // This ensures toasts are dismissed before any modal closes
+    if key.code == KeyCode::Esc {
+        if let Some(toast_id) = state.highest_priority_toast_id() {
+            commands.push(TuiCommand::DismissToast { id: toast_id });
+            return;
+        }
+        // No toasts - fall through to let individual modal handlers close the modal
+    }
+
     // Block screen modals
     if state.block.invite_modal_open {
         handle_block_invite_modal_key(state, commands, key);

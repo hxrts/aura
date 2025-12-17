@@ -220,6 +220,103 @@ The combination ensures that:
 - Metadata leakage tracked against context budget
 - Fact commits reveal only necessary information
 
-## 9. Summary
+## 9. Sync Status and Delivery Tracking
+
+Category A (optimistic) operations require UI feedback for sync and delivery status. Anti-entropy provides the underlying sync mechanism, but users need visibility into progress.
+
+### 9.1 Sync Status Model
+
+Sync status tracks journal fact propagation:
+
+```rust
+pub enum SyncStatus {
+    /// Fact committed locally, not yet synced
+    LocalOnly,
+
+    /// Fact synced to at least one peer
+    Syncing { peers_synced: usize, peers_total: usize },
+
+    /// Fact synced to all known peers
+    Synced,
+
+    /// Sync failed, will retry
+    SyncFailed { retry_at: u64 },
+}
+```
+
+Anti-entropy provides callbacks via `SyncProgressEvent` to track progress:
+- `Started` - sync session began
+- `DigestExchanged` - digest comparison complete
+- `Pulling` / `Pushing` - fact transfer in progress
+- `PeerCompleted` - sync finished with one peer
+- `AllCompleted` - all peers synced
+
+### 9.2 Message Delivery Status
+
+Message delivery extends sync status with read receipts:
+
+```rust
+pub enum DeliveryStatus {
+    /// Message queued locally
+    Sending,
+
+    /// Message reached at least one recipient device
+    Sent,
+
+    /// Message reached all online recipients
+    Delivered,
+
+    /// Recipient viewed the message
+    Read,
+
+    /// Delivery permanently failed
+    Failed { reason: String },
+}
+```
+
+Delivery status progresses: `Sending → Sent → Delivered → Read`
+
+The `aura-chat` crate provides fact types for delivery tracking:
+- `MessageDelivered` - records when message reaches recipient device
+- `DeliveryAcknowledged` - sender's acknowledgment, enables GC
+
+### 9.3 UI Status Indicators
+
+Status indicators provide user feedback:
+
+```
+Symbol  Meaning              Color    Animation
+─────────────────────────────────────────────────
+  ✓     Confirmed/Sent       Green    None
+  ✓✓    Delivered            Green    None
+  ✓✓    Read (blue)          Blue     None
+  ◐     Syncing/Sending      Blue     Pulsing
+  ◌     Pending              Gray     None
+  ⚠     Unconfirmed          Yellow   None
+  ✗     Failed               Red      None
+```
+
+For messages:
+- Single checkmark (✓) = sent to at least one peer
+- Double checkmark (✓✓) = delivered to recipient
+- Blue double checkmark = recipient read the message
+
+### 9.4 Integration with Operation Categories
+
+Sync status applies to **Category A operations** only:
+- Send message → delivery status tracking
+- Create channel → sync status to context members
+- Update topic → sync status to channel members
+- Block contact → local only (no sync needed for privacy)
+
+Category B and C operations have different confirmation models:
+- Category B uses proposal/approval state
+- Category C uses ceremony completion status
+
+See [Consensus - Operation Categories](104_consensus.md#17-operation-categories) for categorization details.
+
+## 10. Summary
 
 The transport, guard chain, and information flow architecture enforces strict control over message transmission. Secure channels bind communication to contexts. Guard chains enforce authorization, budget, and journal updates. Flow budgets and receipts regulate data usage. Leakage budgets reduce metadata exposure. Privacy-by-design patterns ensure minimal metadata exposure and context isolation. All operations remain private to the context and reveal no structural information.
+
+Sync status and delivery tracking provide user visibility into Category A operation propagation. Anti-entropy callbacks enable real-time progress updates. Delivery receipts enable message read status for enhanced UX.

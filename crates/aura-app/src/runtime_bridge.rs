@@ -75,6 +75,27 @@ pub struct RuntimeStatus {
     pub is_authenticated: bool,
 }
 
+/// Status of a guardian ceremony
+#[derive(Debug, Clone)]
+pub struct CeremonyStatus {
+    /// Ceremony identifier
+    pub ceremony_id: String,
+    /// Number of guardians who have accepted
+    pub accepted_count: u16,
+    /// Total number of guardians
+    pub total_count: u16,
+    /// Threshold required for completion
+    pub threshold: u16,
+    /// Whether the ceremony is complete
+    pub is_complete: bool,
+    /// Whether the ceremony has failed
+    pub has_failed: bool,
+    /// List of guardian IDs who have accepted
+    pub accepted_guardians: Vec<String>,
+    /// Optional error message if failed
+    pub error_message: Option<String>,
+}
+
 /// Information about a peer discovered via LAN (mDNS/UDP broadcast)
 #[derive(Debug, Clone)]
 pub struct LanPeerInfo {
@@ -232,6 +253,45 @@ pub trait RuntimeBridge: Send + Sync {
     /// This discards the new epoch's keys and keeps the previous configuration active.
     async fn rollback_guardian_key_rotation(&self, failed_epoch: u64) -> Result<(), IntentError>;
 
+    /// Initiate a guardian ceremony
+    ///
+    /// This method orchestrates the complete guardian ceremony:
+    /// 1. Generates FROST threshold keys at a new epoch
+    /// 2. Sends guardian invitations with key packages to each guardian
+    /// 3. Returns a ceremony ID for tracking progress
+    ///
+    /// Guardians process invitations through their full runtimes and respond
+    /// via the proper protocol. GuardianBinding facts are committed when
+    /// threshold is reached.
+    ///
+    /// # Arguments
+    /// * `threshold_k` - Minimum signers required (k)
+    /// * `total_n` - Total number of guardians (n)
+    /// * `guardian_ids` - IDs of contacts who will become guardians
+    ///
+    /// # Returns
+    /// A ceremony ID for tracking progress
+    async fn initiate_guardian_ceremony(
+        &self,
+        threshold_k: u16,
+        total_n: u16,
+        guardian_ids: &[String],
+    ) -> Result<String, IntentError>;
+
+    /// Get status of a guardian ceremony
+    ///
+    /// Returns the current state of the ceremony including:
+    /// - Number of guardians who have accepted
+    /// - Whether threshold has been reached
+    /// - Whether ceremony is complete or failed
+    ///
+    /// # Arguments
+    /// * `ceremony_id` - The ceremony ID returned from initiate_guardian_ceremony
+    ///
+    /// # Returns
+    /// CeremonyStatus with current state
+    async fn get_ceremony_status(&self, ceremony_id: &str) -> Result<CeremonyStatus, IntentError>;
+
     // =========================================================================
     // Invitation Operations
     // =========================================================================
@@ -382,6 +442,23 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn rollback_guardian_key_rotation(&self, _failed_epoch: u64) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
             "Key rotation not available in offline mode",
+        ))
+    }
+
+    async fn initiate_guardian_ceremony(
+        &self,
+        _threshold_k: u16,
+        _total_n: u16,
+        _guardian_ids: &[String],
+    ) -> Result<String, IntentError> {
+        Err(IntentError::no_agent(
+            "Guardian ceremony not available in offline mode",
+        ))
+    }
+
+    async fn get_ceremony_status(&self, _ceremony_id: &str) -> Result<CeremonyStatus, IntentError> {
+        Err(IntentError::no_agent(
+            "Guardian ceremony not available in offline mode",
         ))
     }
 

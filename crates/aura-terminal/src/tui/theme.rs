@@ -171,3 +171,66 @@ impl Icons {
         Self::SPINNER_4,
     ];
 }
+
+// =============================================================================
+// Styling Helpers
+// =============================================================================
+
+/// Get border color based on focus state
+///
+/// Use this instead of `if focused { Theme::BORDER_FOCUS } else { Theme::BORDER }`
+#[inline]
+pub fn focus_border_color(focused: bool) -> Color {
+    if focused {
+        Theme::BORDER_FOCUS
+    } else {
+        Theme::BORDER
+    }
+}
+
+/// Get text colors based on focus state
+///
+/// Returns `(primary_color, muted_color)` tuple.
+/// Use this for panels/sections that change text color based on focus.
+#[inline]
+pub fn focus_text_colors(focused: bool) -> (Color, Color) {
+    if focused {
+        (Theme::TEXT, Theme::TEXT_MUTED)
+    } else {
+        (Theme::TEXT_MUTED, Theme::TEXT_DISABLED)
+    }
+}
+
+/// Get list item colors based on selection state
+///
+/// Returns `(background_color, text_color)` tuple.
+/// Use this for selectable list items.
+#[inline]
+pub fn list_item_colors(selected: bool) -> (Color, Color) {
+    if selected {
+        (Theme::LIST_BG_SELECTED, Theme::LIST_TEXT_SELECTED)
+    } else {
+        (Theme::LIST_BG_NORMAL, Theme::LIST_TEXT_NORMAL)
+    }
+}
+
+/// Get list item colors with muted text variant
+///
+/// Returns `(background_color, primary_text_color, muted_text_color)` tuple.
+/// Use this for list items with secondary/description text.
+#[inline]
+pub fn list_item_colors_with_muted(selected: bool) -> (Color, Color, Color) {
+    if selected {
+        (
+            Theme::LIST_BG_SELECTED,
+            Theme::LIST_TEXT_SELECTED,
+            Theme::LIST_TEXT_SELECTED,
+        )
+    } else {
+        (
+            Theme::LIST_BG_NORMAL,
+            Theme::LIST_TEXT_NORMAL,
+            Theme::LIST_TEXT_MUTED,
+        )
+    }
+}

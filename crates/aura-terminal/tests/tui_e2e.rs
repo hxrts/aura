@@ -796,9 +796,9 @@ async fn test_invitation_import() {
 // Component State Tests (non-PTY, for faster CI)
 // ============================================================================
 
-use aura_terminal::tui::components::{
-    AccountSetupState, ChatCreateState, ContactSelectState, InvitationCodeState,
-    InvitationCreateState, InvitationImportState, TextInputState,
+use aura_terminal::tui::components::{AccountSetupState, ContactSelectState, TextInputState};
+use aura_terminal::tui::{
+    ChatCreateState, InvitationCodeState, InvitationCreateState, InvitationImportState,
 };
 use aura_terminal::tui::effects::EffectCommand;
 use aura_terminal::tui::screens::Screen;
@@ -2267,7 +2267,7 @@ async fn test_display_name_editing_flow() {
 #[tokio::test]
 async fn test_threshold_configuration_flow() {
     use aura_app::AppCore;
-    use aura_terminal::tui::components::ThresholdState;
+    use aura_terminal::tui::ThresholdState;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;

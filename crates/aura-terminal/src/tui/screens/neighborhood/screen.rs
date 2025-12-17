@@ -21,17 +21,15 @@ use std::sync::Arc;
 use aura_app::signal_defs::NEIGHBORHOOD_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
+use crate::tui::callbacks::GoHomeCallback;
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
 use crate::tui::props::NeighborhoodViewProps;
 use crate::tui::theme::Theme;
 use crate::tui::types::{BlockSummary, TraversalDepth};
 
-/// Callback type for navigation actions (block_id, depth)
+/// Navigation callback uses TraversalDepth type - kept local due to specialized parameter
 pub type NavigationCallback = Arc<dyn Fn(String, TraversalDepth) + Send + Sync>;
-
-/// Callback type for go home action (no args, navigates to home block)
-pub type GoHomeCallback = Arc<dyn Fn() + Send + Sync>;
 
 /// Props for BlockCard
 #[derive(Default, Props)]

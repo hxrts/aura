@@ -16,14 +16,15 @@
 //! All event handling is done by the parent TuiShell (IoApp) via the state machine.
 
 use iocraft::prelude::*;
-use std::{future::Future, pin::Pin, sync::Arc};
 
 use aura_app::signal_defs::INVITATIONS_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
-// NOTE: Modal components (InvitationCodeModal, InvitationCreateModal, InvitationImportModal)
-// have been moved to app.rs for root-level rendering
-use crate::tui::components::EmptyState;
+use crate::tui::callbacks::{
+    CreateInvitationCallback, ExportInvitationCallback, ImportInvitationCallback,
+    InvitationCallback,
+};
+use crate::tui::components::{DetailPanel, KeyValue, ListPanel, TabBar, TabItem};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
 use crate::tui::navigation::TwoPanelFocus;
@@ -34,27 +35,13 @@ use crate::tui::types::{
     InvitationType,
 };
 
-/// Callback type for invitation actions (invitation_id)
-pub type InvitationCallback = Arc<dyn Fn(String) + Send + Sync>;
-
-/// Callback type for creating new invitations (invitation_type, message, ttl_secs)
-pub type CreateInvitationCallback = Arc<dyn Fn(String, Option<String>, Option<u64>) + Send + Sync>;
-
-/// Callback type for exporting invitation code (invitation_id) -> returns code string
-pub type ExportInvitationCallback = Arc<
-    dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> + Send + Sync,
->;
-
-/// Callback type for importing invitation code (code) -> triggers import flow
-pub type ImportInvitationCallback = Arc<dyn Fn(String) + Send + Sync>;
-
 /// Props for FilterTabs
 #[derive(Default, Props)]
 pub struct FilterTabsProps {
     pub filter: InvitationFilter,
 }
 
-/// Tab bar for filtering invitations
+/// Tab bar for filtering invitations (using generic TabBar component)
 #[component]
 pub fn FilterTabs(props: &FilterTabsProps) -> impl Into<AnyElement<'static>> {
     let filters = [
@@ -64,27 +51,12 @@ pub fn FilterTabs(props: &FilterTabsProps) -> impl Into<AnyElement<'static>> {
     ];
     let current = props.filter;
 
+    // Convert filter enum to TabItem vec and find active index
+    let tabs: Vec<TabItem> = filters.iter().map(|f| TabItem::new(f.label())).collect();
+    let active_index = filters.iter().position(|&f| f == current).unwrap_or(0);
+
     element! {
-        View(
-            flex_direction: FlexDirection::Row,
-            width: 100pct,
-            overflow: Overflow::Hidden,
-            gap: Spacing::SM,
-            padding: Spacing::PANEL_PADDING,
-            border_style: BorderStyle::Single,
-            border_edges: Edges::Bottom,
-            border_color: Theme::BORDER,
-        ) {
-            #(filters.iter().map(|&f| {
-                let is_active = f == current;
-                let color = if is_active { Theme::PRIMARY } else { Theme::TEXT_MUTED };
-                let weight = if is_active { Weight::Bold } else { Weight::Normal };
-                let label = f.label().to_string();
-                element! {
-                    Text(content: label, color: color, weight: weight)
-                }
-            }))
-        }
+        TabBar(tabs: tabs, active_index: active_index, gap: Some(Spacing::SM))
     }
 }
 
@@ -118,13 +90,7 @@ pub fn InvitationItem(props: &InvitationItemProps) -> impl Into<AnyElement<'stat
         Theme::LIST_TEXT_MUTED
     };
 
-    let status_color = match inv.status {
-        InvitationStatus::Pending => Theme::WARNING,
-        InvitationStatus::Accepted => Theme::SUCCESS,
-        InvitationStatus::Declined => Theme::ERROR,
-        InvitationStatus::Expired => Theme::LIST_TEXT_MUTED,
-        InvitationStatus::Cancelled => Theme::LIST_TEXT_MUTED,
-    };
+    let status_color = inv.status.color();
 
     let type_icon = inv.invitation_type.icon().to_string();
     let direction_icon = inv.direction.icon().to_string();
@@ -159,45 +125,33 @@ pub struct InvitationListProps {
 /// List of invitations
 #[component]
 pub fn InvitationList(props: &InvitationListProps) -> impl Into<AnyElement<'static>> {
-    let border_color = if props.focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
-
-    let count = props.invitations.len();
-    let title = format!("Invitations ({})", count);
     let invitations = props.invitations.clone();
     let selected = props.selected_index;
 
+    // Build list items
+    let items: Vec<AnyElement<'static>> = invitations
+        .iter()
+        .enumerate()
+        .map(|(idx, inv)| {
+            let is_selected = idx == selected;
+            let id = inv.id.clone();
+            element! {
+                View(key: id) {
+                    InvitationItem(invitation: inv.clone(), is_selected: is_selected)
+                }
+            }
+            .into_any()
+        })
+        .collect();
+
     element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            border_style: BorderStyle::Round,
-            border_color: border_color,
-        ) {
-            View(padding_left: Spacing::PANEL_PADDING) {
-                Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-            View(
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                padding: Spacing::PANEL_PADDING,
-                overflow: Overflow::Scroll,
-            ) {
-                #(if invitations.is_empty() {
-                    vec![element! { View { EmptyState(title: "No invitations".to_string()) } }]
-                } else {
-                    invitations.iter().enumerate().map(|(idx, inv)| {
-                        let is_selected = idx == selected;
-                        let id = inv.id.clone();
-                        element! {
-                            View(key: id) { InvitationItem(invitation: inv.clone(), is_selected: is_selected) }
-                        }
-                    }).collect::<Vec<_>>()
-                })
-            }
-        }
+        ListPanel(
+            title: "Invitations".to_string(),
+            count: invitations.len(),
+            focused: props.focused,
+            items: items,
+            empty_message: "No invitations".to_string(),
+        )
     }
 }
 
@@ -213,69 +167,66 @@ pub struct InvitationDetailProps {
 /// Detail panel for selected invitation
 #[component]
 pub fn InvitationDetail(props: &InvitationDetailProps) -> impl Into<AnyElement<'static>> + '_ {
-    let border_color = if props.focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
     let on_accept = props.on_accept.clone();
     let on_decline = props.on_decline.clone();
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
-            border_style: BorderStyle::Round,
-            border_color: border_color,
-        ) {
-            View(padding_left: Spacing::PANEL_PADDING) {
-                Text(content: "Details", weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-            View(
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                padding: Spacing::PANEL_PADDING,
-            ) {
-                #(if let Some(inv) = &props.invitation {
-                    let mut nodes: Vec<AnyElement<'static>> = vec![
-                        element! { Text(content: format!("Type: {}", inv.invitation_type.label()), color: Theme::TEXT) }.into_any(),
-                        element! { Text(content: format!("Direction: {}", inv.direction.label()), color: Theme::TEXT) }.into_any(),
-                        element! { Text(content: format!("Status: {}", inv.status.label()), color: Theme::TEXT) }.into_any(),
-                        element! { Text(content: format!("Other Party: {}", inv.other_party_name), color: Theme::TEXT) }.into_any(),
-                        element! { Text(content: format!("Created: {}", format_timestamp(inv.created_at)), color: Theme::TEXT_MUTED) }.into_any(),
-                    ];
+    // Build content based on whether an invitation is selected
+    let content: Vec<AnyElement<'static>> = if let Some(inv) = &props.invitation {
+        let mut nodes: Vec<AnyElement<'static>> = vec![
+            element! { KeyValue(label: "Type".to_string(), value: inv.invitation_type.label().to_string()) }.into_any(),
+            element! { KeyValue(label: "Direction".to_string(), value: inv.direction.label().to_string()) }.into_any(),
+            element! { KeyValue(label: "Status".to_string(), value: inv.status.label().to_string()) }.into_any(),
+            element! { KeyValue(label: "Other Party".to_string(), value: inv.other_party_name.clone()) }.into_any(),
+            element! { KeyValue(label: "Created".to_string(), value: format_timestamp(inv.created_at)) }.into_any(),
+        ];
 
-                    if inv.status == InvitationStatus::Pending {
-                        let mut actions: Vec<AnyElement<'static>> = Vec::new();
-                        if let Some(cb) = on_accept {
-                            let id = inv.id.clone();
-                            actions.push(element! {
-                                Button(has_focus: true, handler: move |_| cb(id.clone())) {
-                                    Text(content: "Accept", color: Theme::PRIMARY)
-                                }
-                            }.into_any());
-                        }
-                        if let Some(cb) = on_decline {
-                            let id = inv.id.clone();
-                            actions.push(element! {
-                                Button(has_focus: true, handler: move |_| cb(id.clone())) {
-                                    Text(content: "Decline", color: Theme::ERROR)
-                                }
-                            }.into_any());
-                        }
-                        if !actions.is_empty() {
-                            nodes.push(element! {
-                                View(flex_direction: FlexDirection::Row, gap: Spacing::SM) { #(actions) }
-                            }.into_any());
+        // Add action buttons for pending invitations
+        if inv.status == InvitationStatus::Pending {
+            let mut actions: Vec<AnyElement<'static>> = Vec::new();
+            if let Some(cb) = on_accept {
+                let id = inv.id.clone();
+                actions.push(
+                    element! {
+                        Button(has_focus: true, handler: move |_| cb(id.clone())) {
+                            Text(content: "Accept", color: Theme::PRIMARY)
                         }
                     }
-
-                    nodes
-                } else {
-                    vec![element! { Text(content: "Select an invitation to view details", color: Theme::TEXT_MUTED) }.into_any()]
-                })
+                    .into_any(),
+                );
+            }
+            if let Some(cb) = on_decline {
+                let id = inv.id.clone();
+                actions.push(
+                    element! {
+                        Button(has_focus: true, handler: move |_| cb(id.clone())) {
+                            Text(content: "Decline", color: Theme::ERROR)
+                        }
+                    }
+                    .into_any(),
+                );
+            }
+            if !actions.is_empty() {
+                nodes.push(
+                    element! {
+                        View(flex_direction: FlexDirection::Row, gap: Spacing::SM) { #(actions) }
+                    }
+                    .into_any(),
+                );
             }
         }
+
+        nodes
+    } else {
+        vec![]
+    };
+
+    element! {
+        DetailPanel(
+            title: "Details".to_string(),
+            focused: props.focused,
+            content: content,
+            empty_message: "Select an invitation to view details".to_string(),
+        )
     }
 }
 

@@ -4,7 +4,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::{Spacing, Theme};
+use crate::tui::theme::{focus_border_color, Spacing, Theme};
 
 /// Props for Panel
 #[derive(Default, Props)]
@@ -35,11 +35,6 @@ pub struct PanelProps {
 /// This component is for simple titled panels with text content.
 #[component]
 pub fn Panel(props: &PanelProps) -> impl Into<AnyElement<'static>> {
-    let border_color = if props.focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
     let title = props.title.clone();
     let has_title = !title.is_empty();
     let badge = props.badge.clone();
@@ -50,7 +45,7 @@ pub fn Panel(props: &PanelProps) -> impl Into<AnyElement<'static>> {
         View(
             flex_direction: FlexDirection::Column,
             border_style: BorderStyle::Round,
-            border_color: border_color,
+            border_color: focus_border_color(props.focused),
             background_color: props.background.unwrap_or(Color::Reset),
             flex_grow: props.flex_grow.unwrap_or(0.0),
             width: props.width.unwrap_or(Size::Auto),
@@ -103,11 +98,10 @@ pub struct PanelStyle;
 
 impl PanelStyle {
     /// Get border color based on focus state
+    ///
+    /// Delegates to `theme::focus_border_color` for consistency.
+    #[inline]
     pub fn border_color(focused: bool) -> Color {
-        if focused {
-            Theme::BORDER_FOCUS
-        } else {
-            Theme::BORDER
-        }
+        focus_border_color(focused)
     }
 }

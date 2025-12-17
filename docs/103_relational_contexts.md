@@ -422,13 +422,99 @@ if recovery_op.is_emergency() {
 - Separate contexts for different relationship types
 - Garbage collect expired bindings periodically
 
-## 10. Summary
+## 10. Contexts vs Channels: Operation Categories
+
+Understanding the distinction between relational contexts and channels is essential for operation categorization.
+
+### 10.1 Relational Contexts (Category C - Consensus Required)
+
+Creating a relational context establishes a cryptographic relationship between authorities. This is a **Category C (consensus-gated)** operation because:
+
+- It creates the shared secret foundation for all future communication
+- Both parties must agree to establish the relationship
+- Partial state (one party thinks relationship exists, other doesn't) is dangerous
+
+**Examples:**
+- Adding a contact (bilateral context between two authorities)
+- Creating a group (multi-party context with all members)
+- Adding a member to an existing group (extends the cryptographic context)
+
+### 10.2 Channels Within Contexts (Category A - Optimistic)
+
+Once a relational context exists, channels are **Category A (optimistic)** operations:
+
+- Channels are just organizational substreams within the context
+- No new cryptographic agreement needed - keys derive from context
+- Channel facts sync via anti-entropy, eventual consistency is sufficient
+
+**Examples within existing context:**
+- Create channel → emit `ChannelCheckpoint` fact
+- Send message → derive key from context, encrypt, send
+- Update topic → emit fact to context journal
+
+### 10.3 The Cost Structure
+
+```
+                    BILATERAL                      MULTI-PARTY
+                    (2 members)                    (3+ members)
+                    ───────────                    ────────────
+Context Creation    Invitation ceremony            Group ceremony
+                    (Category C - expensive)       (Category C - expensive)
+
+Member Addition     N/A (already 2)               Per-member ceremony
+                                                  (Category C - expensive)
+
+Channel Creation    Optimistic                    Optimistic
+                    (Category A - cheap)          (Category A - cheap)
+
+Messages            Optimistic                    Optimistic
+                    (Category A - cheap)          (Category A - cheap)
+```
+
+The expensive part is establishing WHO is in the group. Once that's established, operations WITHIN the group are cheap.
+
+### 10.4 Multi-Party Context Keys
+
+Groups with >2 members derive keys from all member tree roots:
+
+```
+GroupContext {
+    context_id: ContextId,
+    members: [Alice, Bob, Carol],
+    group_secret: DerivedFromMemberTreeRoots,
+    epoch: u64,
+}
+
+Key Derivation:
+1. Each member contributes their tree root commitment
+2. Group secret = KDF(sorted_member_roots, context_id)
+3. Channel key = KDF(group_secret, channel_id, epoch)
+
+All members derive the SAME group secret from the SAME inputs
+```
+
+### 10.5 Why Membership Changes Require Ceremony
+
+Group membership changes are Category C because they affect encryption:
+
+1. **Forward Secrecy**: New members shouldn't read old messages
+   - Solution: Epoch rotation, new keys for new messages
+
+2. **Post-Compromise Security**: Removed members shouldn't read new messages
+   - Solution: Epoch rotation, re-derive group secret without removed member
+
+3. **Consistency**: All members must agree on who's in the group
+   - Solution: Ceremony ensures atomic membership view
+
+See [Consensus - Operation Categories](104_consensus.md#17-operation-categories) for the full decision tree.
+
+## 11. Summary
 
 Relational contexts represent cross-authority relationships in Aura. They provide shared state without revealing authority structure. They support guardian configuration, recovery, and application specific collaboration. Aura Consensus ensures strong agreement where needed. Deterministic reduction ensures consistent relational state. Privacy boundaries isolate each relationship from all others.
 
 The implementation provides concrete types (`RelationalContext`, `GuardianBinding`, `RecoveryGrant`) with builder patterns, query methods, and consensus integration. All relational facts are stored in a CRDT journal with deterministic commitment computation.
 
-## 11. Implementation References
+## 12. Implementation References
 
 - **Core Types**: `aura-core/src/relational/` - RelationalFact, GuardianBinding, RecoveryGrant, ConsensusProof domain types
 - **Context Management**: `aura-relational/src/lib.rs` - RelationalContext, RelationalJournal protocols

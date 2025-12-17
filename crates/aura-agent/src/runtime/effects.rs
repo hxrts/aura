@@ -171,11 +171,15 @@ impl AuraEffectSystem {
     ///
     /// When `crypto_seed` is provided, the crypto handler will use deterministic
     /// randomness for reproducible tests and simulations.
+    ///
+    /// When `shared_transport_inbox` is provided (for simulation mode), all agents
+    /// will share the same transport inbox for message routing.
     fn build_internal(
         config: AgentConfig,
         composite: CompositeHandlerAdapter,
         test_mode: bool,
         crypto_seed: Option<[u8; 32]>,
+        shared_transport_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
     ) -> Self {
         let authority = AuthorityId::from_uuid(config.device_id().0);
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
@@ -195,7 +199,8 @@ impl AuraEffectSystem {
         let tree_handler = InMemoryTreeHandler::new(oplog.clone());
         let sync_handler = LocalSyncHandler::new(oplog);
         let transport_handler = aura_effects::transport::RealTransportHandler::default();
-        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
+        // Use shared inbox if provided (simulation mode), otherwise create new local inbox
+        let transport_inbox = shared_transport_inbox.unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())));
         let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
         let secure_storage_handler = RealSecureStorageHandler::default();
         // Create indexed journal with capacity for 100k facts
@@ -244,6 +249,7 @@ impl AuraEffectSystem {
             composite,
             true,
             Some(Self::TEST_CRYPTO_SEED),
+            None, // No shared transport inbox
         ))
     }
 
@@ -251,7 +257,7 @@ impl AuraEffectSystem {
     pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_production(config.device_id());
         // Production uses OS entropy, no seed
-        Ok(Self::build_internal(config, composite, false, None))
+        Ok(Self::build_internal(config, composite, false, None, None))
     }
 
     /// Create effect system for testing with default configuration.
@@ -262,6 +268,25 @@ impl AuraEffectSystem {
             composite,
             true,
             Some(Self::TEST_CRYPTO_SEED),
+            None, // No shared transport inbox
+        ))
+    }
+
+    /// Create effect system for testing with shared transport inbox.
+    ///
+    /// This factory is used for tests that need to verify transport envelope routing,
+    /// enabling loopback testing where an agent can send and receive messages from itself.
+    pub fn testing_with_shared_transport(
+        config: &AgentConfig,
+        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> Result<Self, crate::core::AgentError> {
+        let composite = CompositeHandlerAdapter::for_testing(config.device_id());
+        Ok(Self::build_internal(
+            config.clone(),
+            composite,
+            true,
+            Some(Self::TEST_CRYPTO_SEED),
+            Some(shared_inbox),
         ))
     }
 
@@ -276,6 +301,30 @@ impl AuraEffectSystem {
             composite,
             true,
             Some(crypto_seed),
+            None, // No shared transport inbox
+        ))
+    }
+
+    /// Create effect system for simulation with shared transport inbox.
+    ///
+    /// This factory is used for multi-agent simulations where all agents need to
+    /// communicate through a shared transport layer. The shared inbox enables
+    /// message routing between Bob, Alice, and Carol in demo mode.
+    pub fn simulation_with_shared_transport(
+        config: &AgentConfig,
+        seed: u64,
+        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> Result<Self, crate::core::AgentError> {
+        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
+        // Convert u64 seed to [u8; 32] for crypto handler
+        let mut crypto_seed = [0u8; 32];
+        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
+        Ok(Self::build_internal(
+            config.clone(),
+            composite,
+            true,
+            Some(crypto_seed),
+            Some(shared_inbox),
         ))
     }
 
@@ -616,11 +665,11 @@ impl TransportEffects for AuraEffectSystem {
                 .transport_inbox
                 .write()
                 .expect("transport inbox poisoned");
-            if inbox.is_empty() {
-                None
-            } else {
-                Some(inbox.remove(0))
-            }
+            // In shared transport mode, filter by destination (this agent's authority ID)
+            inbox
+                .iter()
+                .position(|env| env.destination == self.authority_id)
+                .map(|pos| inbox.remove(pos))
         };
 
         match maybe {
@@ -646,9 +695,14 @@ impl TransportEffects for AuraEffectSystem {
                 .transport_inbox
                 .write()
                 .expect("transport inbox poisoned");
+            // In shared transport mode, filter by destination AND source/context
             inbox
                 .iter()
-                .position(|env| env.source == source && env.context == context)
+                .position(|env| {
+                    env.destination == self.authority_id
+                        && env.source == source
+                        && env.context == context
+                })
                 .map(|pos| inbox.remove(pos))
         };
 

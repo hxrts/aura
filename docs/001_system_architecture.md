@@ -527,6 +527,71 @@ The effect bridge connects the TUI to the real effect system. Commands dispatch 
 
 Demo mode compiles only with the development feature flag. The simulator automates Alice and Carol while Bob is human-controlled. Production builds exclude simulator dependencies. See [Terminal User Interface](115_tui.md) for component details.
 
+## 11. Operation Categories
+
+Aura classifies operations into three categories based on their security requirements and execution timing. This classification determines when consensus is needed versus when CRDT eventual consistency suffices.
+
+### 11.1 Category A: Optimistic Operations
+
+Operations that can proceed immediately without consensus. These use CRDT facts with eventual consistency and provide immediate local effect.
+
+**Characteristics:**
+- Immediate local effect
+- Background sync via anti-entropy
+- Failure shows indicator, doesn't block functionality
+- Partial success is acceptable
+
+**Examples:**
+- Send message (within established context)
+- Create channel (within established relational context)
+- Update channel topic
+- Block/unblock contact
+- Pin message
+
+These operations work because the cryptographic context already exists. Keys derive deterministically from shared journal state. No new agreement is needed.
+
+### 11.2 Category B: Deferred Operations
+
+Operations that apply locally but require agreement for finalization. Effect is pending until confirmed.
+
+**Characteristics:**
+- Immediate local effect shown as "pending"
+- Background ceremony for agreement
+- Failure triggers rollback with user notification
+- Multi-admin operations use this pattern
+
+**Examples:**
+- Change channel permissions (requires admin consensus)
+- Remove channel member (may be contested)
+- Transfer channel ownership
+- Rename channel
+
+### 11.3 Category C: Consensus-Gated Operations
+
+Operations where partial state is dangerous. These block until consensus completes.
+
+**Characteristics:**
+- Operation does NOT proceed until consensus achieved
+- Partial state would be dangerous or irrecoverable
+- User must wait for confirmation
+- Uses Aura Consensus with FROST threshold signatures
+
+**Examples:**
+- Guardian rotation (key shares distributed atomically)
+- Recovery execution (account state replacement)
+- OTA hard fork activation (breaking protocol change)
+- Device revocation (security-critical removal)
+- Add contact / Create group (establishes cryptographic context)
+- Add member to group (changes group encryption keys)
+
+### 11.4 Key Insight
+
+**Ceremonies establish shared cryptographic context. Operations within that context are cheap.**
+
+The invitation ceremony is Category C because it establishes the cryptographic foundation. Once established, channels and messages within that context are Category A. The expensive part is establishing WHO is in the relationship. Once established, operations WITHIN the relationship derive keys deterministically from shared state.
+
+See [Consensus - Operation Categories](104_consensus.md#17-operation-categories) for the complete decision tree and detailed classification.
+
 ## Documents That Reference This Guide
 
 - [Effect System and Runtime](106_effect_system_and_runtime.md) - Implementation details for the effect system architecture

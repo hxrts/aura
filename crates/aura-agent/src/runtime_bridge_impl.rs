@@ -303,6 +303,108 @@ impl RuntimeBridge for AgentRuntimeBridge {
             })
     }
 
+    async fn initiate_guardian_ceremony(
+        &self,
+        threshold_k: u16,
+        total_n: u16,
+        guardian_ids: &[String],
+    ) -> Result<String, IntentError> {
+        // Step 1: Generate FROST keys at new epoch
+        let (new_epoch, key_packages, _public_key) =
+            self.rotate_guardian_keys(threshold_k, total_n, guardian_ids)
+                .await?;
+
+        // Step 2: Create ceremony ID
+        let ceremony_id = format!("ceremony-{}-{}", new_epoch, uuid::Uuid::new_v4());
+
+        tracing::info!(
+            ceremony_id = %ceremony_id,
+            new_epoch,
+            threshold_k,
+            total_n,
+            "Guardian ceremony initiated, sending invitations to {} guardians",
+            guardian_ids.len()
+        );
+
+        // Step 3: Register ceremony with tracker
+        let tracker = self.agent.ceremony_tracker().await;
+        tracker
+            .register(
+                ceremony_id.clone(),
+                threshold_k,
+                total_n,
+                guardian_ids.to_vec(),
+                new_epoch,
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to register ceremony: {}", e))
+            })?;
+
+        // Step 4: Send guardian invitations with key packages
+        // This routes through the proper aura-recovery protocol
+        let recovery_service = self.agent.recovery().await.map_err(|e| {
+            IntentError::service_error(format!("Recovery service unavailable: {}", e))
+        })?;
+
+        for (idx, guardian_id) in guardian_ids.iter().enumerate() {
+            let key_package = &key_packages[idx];
+
+            tracing::debug!(
+                guardian_id = %guardian_id,
+                key_package_size = key_package.len(),
+                "Sending guardian invitation through protocol"
+            );
+
+            // Send through proper protocol (not mock!)
+            // This should trigger the choreography-based guardian ceremony
+            recovery_service
+                .send_guardian_invitation(
+                    guardian_id,
+                    &ceremony_id,
+                    threshold_k,
+                    total_n,
+                    key_package,
+                )
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to send guardian invitation to {}: {}",
+                        guardian_id, e
+                    ))
+                })?;
+        }
+
+        tracing::info!(
+            ceremony_id = %ceremony_id,
+            "All guardian invitations sent successfully"
+        );
+
+        Ok(ceremony_id)
+    }
+
+    async fn get_ceremony_status(
+        &self,
+        ceremony_id: &str,
+    ) -> Result<aura_app::runtime_bridge::CeremonyStatus, IntentError> {
+        let tracker = self.agent.ceremony_tracker().await;
+
+        let state = tracker.get(ceremony_id).await.map_err(|e| {
+            IntentError::validation_failed(format!("Ceremony not found: {}", e))
+        })?;
+
+        Ok(aura_app::runtime_bridge::CeremonyStatus {
+            ceremony_id: ceremony_id.to_string(),
+            accepted_count: state.accepted_guardians.len() as u16,
+            total_count: state.total_n,
+            threshold: state.threshold_k,
+            is_complete: state.accepted_guardians.len() >= state.threshold_k as usize,
+            has_failed: state.has_failed,
+            accepted_guardians: state.accepted_guardians.clone(),
+            error_message: state.error_message.clone(),
+        })
+    }
+
     // =========================================================================
     // Invitation Operations
     // =========================================================================

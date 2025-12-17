@@ -186,6 +186,98 @@ choreography! {
 
 This anti-entropy example illustrates a minimal synchronization protocol.
 
-## 8. Summary
+## 8. Operation Categories and Choreography Use
+
+Not all multi-party operations require full choreographic specification. Aura classifies operations into categories that determine when choreography is necessary.
+
+### 8.1 When to Use Choreography
+
+**Category C (Consensus-Gated) Operations** - Full choreography required:
+- Guardian rotation ceremonies
+- Recovery execution flows
+- OTA hard fork activation
+- Device revocation
+- Adding contacts / creating groups (establishing cryptographic context)
+- Adding members to existing groups
+
+These operations require explicit session types because:
+- Partial execution is dangerous
+- All parties must agree before effects apply
+- Strong ordering guarantees are necessary
+
+**Example - Invitation Ceremony:**
+```rust
+choreography! {
+    #[namespace = "invitation"]
+    protocol InvitationCeremony {
+        roles: Sender, Receiver;
+        Sender -> Receiver: Invitation(data: InvitationPayload);
+        Receiver -> Sender: Accept(commitment: Hash32);
+        // Context is now established
+    }
+}
+```
+
+### 8.2 When Choreography is NOT Required
+
+**Category A (Optimistic) Operations** - No choreography needed:
+- Send message (within established context)
+- Create channel (within existing relational context)
+- Update channel topic
+- Block/unblock contact
+
+These use simple CRDT fact emission because:
+- Cryptographic context already exists
+- Keys derive deterministically from shared state
+- Eventual consistency is sufficient
+- No coordination required
+
+**Example - No choreography:**
+```rust
+// Just emit a fact - no ceremony needed
+journal.append(ChannelCheckpoint {
+    context: existing_context_id,
+    channel: new_channel_id,
+    chan_epoch: 0,
+    base_gen: 0,
+    window: 1024,
+    ..
+});
+```
+
+**Category B (Deferred) Operations** - May use lightweight choreography:
+- Change channel permissions
+- Remove channel member (may be contested)
+- Transfer ownership
+
+These may use a proposal/approval pattern but don't require the full ceremony infrastructure.
+
+### 8.3 Decision Tree for Protocol Design
+
+```
+Is this operation establishing or modifying cryptographic relationships?
+│
+├─ YES → Use full choreography (Category C)
+│        Define explicit session types and guards
+│
+└─ NO: Does this affect other users' policies/access?
+       │
+       ├─ YES: Is strong agreement required?
+       │       │
+       │       ├─ YES → Use lightweight choreography (Category B)
+       │       │        Proposal/approval pattern
+       │       │
+       │       └─ NO → Use CRDT facts (Category A)
+       │               Eventually consistent
+       │
+       └─ NO → Use CRDT facts (Category A)
+               No coordination needed
+```
+
+See [Consensus - Operation Categories](104_consensus.md#17-operation-categories) for detailed categorization.
+
+## 9. Summary
 
 Aura uses choreographic programming to define global protocols. Projection produces local session types. Session types enforce structured communication. Handlers execute protocol steps using effect traits. Extension effects provide authorization, budgeting, and journal updates. Execution modes support testing, simulation, and production. Choreographies define distributed coordination for CRDT sync, FROST signing, and consensus.
+
+Importantly, not all multi-party operations need choreography. Operations within established cryptographic contexts (channels, messages) use optimistic CRDT facts. Choreography is reserved for Category C operations where partial state would be dangerous.

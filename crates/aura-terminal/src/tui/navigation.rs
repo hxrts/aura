@@ -205,6 +205,7 @@ pub fn navigate_grid(current: usize, cols: usize, total: usize, key: NavKey) -> 
 /// Unified navigation state for list-based screens
 ///
 /// Tracks both the current index and item count, enabling wrap-around navigation.
+/// Also tracks scroll offset for virtualized list rendering.
 /// Update the count when data changes, and navigation will automatically wrap.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ListNav {
@@ -212,6 +213,8 @@ pub struct ListNav {
     pub index: usize,
     /// Total number of items (updated from data layer)
     pub count: usize,
+    /// Scroll offset (first visible item index)
+    pub scroll_offset: usize,
 }
 
 impl ListNav {
@@ -274,6 +277,56 @@ impl ListNav {
     /// Reset to first item
     pub fn reset(&mut self) {
         self.index = 0;
+        self.scroll_offset = 0;
+    }
+
+    /// Get the visible range of items for a given viewport height
+    ///
+    /// Returns `(start, end)` where `start..end` are the visible indices.
+    pub fn visible_range(&self, viewport_height: usize) -> (usize, usize) {
+        if self.count == 0 || viewport_height == 0 {
+            return (0, 0);
+        }
+        let end = (self.scroll_offset + viewport_height).min(self.count);
+        (self.scroll_offset, end)
+    }
+
+    /// Ensure the given index is visible within the viewport
+    ///
+    /// Adjusts `scroll_offset` so that `index` falls within the visible range.
+    /// Call this after selecting an item to ensure it's on screen.
+    pub fn ensure_visible(&mut self, viewport_height: usize) {
+        if self.count == 0 || viewport_height == 0 {
+            self.scroll_offset = 0;
+            return;
+        }
+
+        // If index is above the visible area, scroll up
+        if self.index < self.scroll_offset {
+            self.scroll_offset = self.index;
+        }
+        // If index is below the visible area, scroll down
+        else if self.index >= self.scroll_offset + viewport_height {
+            self.scroll_offset = self.index.saturating_sub(viewport_height - 1);
+        }
+
+        // Clamp scroll offset to valid range
+        let max_offset = self.count.saturating_sub(viewport_height);
+        self.scroll_offset = self.scroll_offset.min(max_offset);
+    }
+
+    /// Navigate and auto-scroll to keep selection visible
+    ///
+    /// Combined navigation + scroll management for common use case.
+    pub fn navigate_with_scroll(&mut self, key: NavKey, viewport_height: usize) {
+        self.navigate(key);
+        self.ensure_visible(viewport_height);
+    }
+
+    /// Navigate to a specific index and ensure it's visible
+    pub fn select_with_scroll(&mut self, index: usize, viewport_height: usize) {
+        self.select(index);
+        self.ensure_visible(viewport_height);
     }
 }
 
@@ -749,5 +802,118 @@ mod tests {
         nav.navigate(NavKey::Left);
         assert_eq!(nav.current_panel(), 0);
         assert_eq!(nav.current_selection(), 1); // Preserves panel 0's selection
+    }
+
+    #[test]
+    fn test_list_nav_visible_range() {
+        let mut nav = ListNav::new();
+        nav.set_count(20);
+
+        // Initial state - viewport of 5
+        let (start, end) = nav.visible_range(5);
+        assert_eq!(start, 0);
+        assert_eq!(end, 5);
+
+        // Move scroll offset
+        nav.scroll_offset = 10;
+        let (start, end) = nav.visible_range(5);
+        assert_eq!(start, 10);
+        assert_eq!(end, 15);
+
+        // Scroll offset near end clamps to count
+        nav.scroll_offset = 18;
+        let (start, end) = nav.visible_range(5);
+        assert_eq!(start, 18);
+        assert_eq!(end, 20); // Clamped to count
+
+        // Empty list
+        nav.set_count(0);
+        let (start, end) = nav.visible_range(5);
+        assert_eq!(start, 0);
+        assert_eq!(end, 0);
+    }
+
+    #[test]
+    fn test_list_nav_ensure_visible() {
+        let mut nav = ListNav::new();
+        nav.set_count(20);
+
+        // Select item 0, viewport 5 - no scroll needed
+        nav.index = 0;
+        nav.ensure_visible(5);
+        assert_eq!(nav.scroll_offset, 0);
+
+        // Select item 4 - still visible in viewport 0..5
+        nav.index = 4;
+        nav.ensure_visible(5);
+        assert_eq!(nav.scroll_offset, 0);
+
+        // Select item 7 - need to scroll down
+        nav.index = 7;
+        nav.ensure_visible(5);
+        assert_eq!(nav.scroll_offset, 3); // 7 - (5 - 1) = 3
+
+        // Select item 2 - need to scroll up
+        nav.index = 2;
+        nav.ensure_visible(5);
+        assert_eq!(nav.scroll_offset, 2);
+
+        // Select last item
+        nav.index = 19;
+        nav.ensure_visible(5);
+        assert_eq!(nav.scroll_offset, 15); // 19 - (5 - 1) = 15
+    }
+
+    #[test]
+    fn test_list_nav_navigate_with_scroll() {
+        let mut nav = ListNav::new();
+        nav.set_count(10);
+
+        // Navigate down through the list
+        for _ in 0..7 {
+            nav.navigate_with_scroll(NavKey::Down, 5);
+        }
+        assert_eq!(nav.current(), 7);
+        // Should have scrolled to keep item 7 visible
+        assert!(nav.scroll_offset <= nav.index);
+        assert!(nav.index < nav.scroll_offset + 5);
+
+        // Navigate back up
+        for _ in 0..5 {
+            nav.navigate_with_scroll(NavKey::Up, 5);
+        }
+        assert_eq!(nav.current(), 2);
+        // Should have scrolled to keep item 2 visible
+        assert!(nav.scroll_offset <= nav.index);
+    }
+
+    #[test]
+    fn test_list_nav_select_with_scroll() {
+        let mut nav = ListNav::new();
+        nav.set_count(20);
+
+        // Select item far down the list
+        nav.select_with_scroll(15, 5);
+        assert_eq!(nav.current(), 15);
+        assert!(nav.scroll_offset <= 15);
+        assert!(15 < nav.scroll_offset + 5);
+
+        // Select item at the top
+        nav.select_with_scroll(2, 5);
+        assert_eq!(nav.current(), 2);
+        assert!(nav.scroll_offset <= 2);
+        assert!(2 < nav.scroll_offset + 5);
+    }
+
+    #[test]
+    fn test_list_nav_reset_clears_scroll() {
+        let mut nav = ListNav::new();
+        nav.set_count(20);
+        nav.index = 15;
+        nav.scroll_offset = 10;
+
+        nav.reset();
+        assert_eq!(nav.index, 0);
+        assert_eq!(nav.scroll_offset, 0);
     }
 }

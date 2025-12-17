@@ -46,8 +46,10 @@ pub mod screens;
 pub mod state_machine;
 pub mod theme;
 pub mod types;
+pub mod updates;
 
 // Shared infrastructure
+pub mod callbacks;
 pub mod commands;
 pub mod effects;
 pub mod flow_budget;
@@ -58,37 +60,46 @@ pub mod recovery_session;
 // Re-export main types for convenience
 pub use components::{
     calculate_scroll, get_help_commands, get_help_commands_for_screen, AccountSetupModal,
-    AccountSetupState, Badge, CancelCallback, ChannelInfoModal, ChatCreateModal, ChatCreateState,
-    CommandItem, CommandPalette, CompactMessage, ConfirmModal, ContactSelectModal,
-    ContactSelectState, CreateChatCallback, DemoHintBar, DemoInviteCodes, DiscoveredPeerInfo,
+    AccountSetupState, Badge, CommandItem, CommandPalette, CompactMessage, ConfirmModal,
+    ContactSelectModal, ContactSelectState, DemoHintBar, DemoInviteCodes, DiscoveredPeerInfo,
     DiscoveredPeersPanel, DiscoveredPeersState, Divider, EmptyState, FormField, FormFieldComponent,
-    FormModal, FormModalState, GuardianCandidateProps, GuardianSetupModal, Heading, HelpCommand,
-    HelpModal, HelpModalState, ImportCallback, InputModal, InvitationCodeModal, InvitationCodeState,
-    InvitationCreateModal, InvitationCreateState, InvitationImportModal, InvitationImportState,
+    FormModal, FormModalState, Heading, HelpCommand, HelpModal, HelpModalState, InputModal,
     InvitePeerCallback, KeyValue, List, ListEntry, ListItem, ListNavigation, LoadingState,
     MessageBubble, MessageGroupHeader, MessageInput, MessageInputState, NoResults, PaletteCommand,
     Panel, PanelStyle, PeerInvitationStatus, ProgressDots, ScrollDirection, Scrollable, Status,
     StatusBar, StatusDot, StatusIndicator, StyledText, SystemMessage, TextInput, TextInputModal,
-    TextInputState, TextStyle, Textarea, TextareaState, ThresholdModal, ThresholdState, Toast,
-    ToastContainer, ToastLevel, ToastMessage,
+    TextInputState, TextStyle, Textarea, TextareaState, Toast, ToastContainer, ToastLevel,
+    ToastMessage,
+};
+// Screen-specific modals are now in screen directories
+pub use screens::{
+    CancelCallback, ChannelInfoModal, ChatCreateModal, ChatCreateState, CreateChatCallback,
+    GuardianCandidateProps, GuardianSetupModal, ImportCallback, InvitationCodeModal,
+    InvitationCodeState, InvitationCreateModal, InvitationCreateState, InvitationImportModal,
+    InvitationImportState, ThresholdModal, ThresholdState,
 };
 pub use context::IoContext;
 pub use hooks::{
     is_vec_empty, snapshot_state, snapshot_vec, vec_len, AppCoreContext, BlockSnapshot,
-    ChatSnapshot, ContactsSnapshot, GuardiansSnapshot, HasReactiveData, InvitationsSnapshot,
-    NeighborhoodSnapshot, ReactiveValue, RecoverySnapshot,
+    CallbackContext, ChatSnapshot, ContactsSnapshot, GuardiansSnapshot, HasReactiveData,
+    InvitationsSnapshot, NeighborhoodSnapshot, ReactiveValue, RecoverySnapshot,
 };
 pub use screens::{
     run_app_with_context, run_block_screen, run_chat_screen, run_contacts_screen,
-    run_neighborhood_screen, run_recovery_screen, run_settings_screen, AddDeviceCallback,
-    BlockFocus, BlockInviteCallback, BlockNavCallback, BlockScreen, BlockSendCallback,
-    ChannelSelectCallback, ChatFocus, ChatScreen, ContactsScreen, CreateChannelCallback,
+    run_neighborhood_screen, run_recovery_screen, run_settings_screen, BlockFocus, BlockScreen,
+    ChatFocus, ChatScreen, ContactsScreen, InvitationsScreen, IoApp, MfaCallback, NavAction,
+    NavigationCallback, NeighborhoodScreen, RecoveryScreen, Router, Screen, SettingsScreen,
+};
+
+// Re-export callback types and factories
+pub use callbacks::{
+    AddDeviceCallback, ApprovalCallback, BlockInviteCallback, BlockNavCallback, BlockSendCallback,
+    CallbackRegistry, ChannelSelectCallback, CreateAccountCallback, CreateChannelCallback,
     CreateInvitationCallback, ExportInvitationCallback, GoHomeCallback, GrantStewardCallback,
-    ImportInvitationCallback, InvitationCallback, InvitationsScreen, IoApp, MfaCallback, NavAction,
-    NavigationCallback, NeighborhoodScreen, RecoveryCallback, RecoveryScreen, RemoveDeviceCallback,
-    RetryMessageCallback, RevokeStewardCallback, Router, Screen, SendCallback, SetTopicCallback,
-    SettingsScreen, StartChatCallback, UpdateNicknameCallback, UpdatePetnameCallback,
-    UpdateThresholdCallback,
+    GuardianSelectCallback, IdCallback, ImportInvitationCallback, InvitationCallback, NoArgCallback,
+    RecoveryCallback, RemoveDeviceCallback, RetryMessageCallback, RevokeStewardCallback,
+    SendCallback, SetTopicCallback, StartChatCallback, ThresholdCallback, TwoStringCallback,
+    UpdateNicknameCallback, UpdatePetnameCallback, UpdateThresholdCallback,
 };
 pub use theme::{Spacing, Theme};
 pub use types::*;

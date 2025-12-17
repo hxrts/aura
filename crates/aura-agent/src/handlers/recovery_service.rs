@@ -235,6 +235,225 @@ impl RecoveryService {
                 | Some(RecoveryState::Reconstructing { .. })
         )
     }
+
+    /// Initiate a full guardian ceremony with FROST key generation
+    ///
+    /// NOTE: This method is a placeholder for future integration.
+    /// Currently, ceremony initiation happens via send_guardian_invitation
+    /// and CeremonyTracker tracks progress. Full FROST key generation
+    /// integration requires architectural refactoring to pass
+    /// Arc<AuraEffectSystem> instead of Arc<RwLock<AuraEffectSystem>>.
+    ///
+    /// # Arguments
+    /// * `threshold_k` - Minimum number of guardians required (k-of-n)
+    /// * `guardian_ids` - List of guardian authority IDs
+    ///
+    /// # Returns
+    /// Error indicating this method is not yet fully integrated
+    pub async fn initiate_guardian_ceremony(
+        &self,
+        _threshold_k: u16,
+        _guardian_ids: Vec<AuthorityId>,
+    ) -> AgentResult<String> {
+        use crate::core::AgentError;
+
+        // TODO: Implement full ceremony initiation with GuardianCeremonyExecutor
+        // This requires refactoring to handle Arc<RwLock<AuraEffectSystem>> vs Arc<AuraEffectSystem>
+        Err(AgentError::internal(
+            "Full guardian ceremony initiation not yet integrated - use send_guardian_invitation for now".to_string()
+        ))
+    }
+
+    /// Send a guardian invitation with key package
+    ///
+    /// This routes the guardian invitation through the proper aura-recovery
+    /// protocol. The invitation includes an encrypted key package for the
+    /// guardian to store securely.
+    ///
+    /// # Arguments
+    /// * `guardian_id` - Contact ID of the guardian to invite
+    /// * `ceremony_id` - Unique ceremony identifier
+    /// * `threshold_k` - Minimum signers required
+    /// * `total_n` - Total number of guardians
+    /// * `key_package` - Encrypted FROST key package for this guardian
+    ///
+    /// # Returns
+    /// Ok if invitation was sent successfully
+    ///
+    /// # Protocol Flow
+    /// 1. Creates CeremonyProposal message with key package
+    /// 2. Serializes and wraps in TransportEnvelope
+    /// 3. Sends via TransportEffects to guardian's authority
+    /// 4. Guardian receives via their effect system
+    /// 5. Guardian processes through guard chain + journal
+    /// 6. GuardianBinding fact committed when accepted
+    pub async fn send_guardian_invitation(
+        &self,
+        guardian_id: &str,
+        ceremony_id: &str,
+        threshold_k: u16,
+        total_n: u16,
+        key_package: &[u8],
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+        use aura_core::effects::TransportEffects;
+        use aura_core::{hash::hash, ContextId, Hash32};
+        use aura_recovery::guardian_ceremony::CeremonyProposal;
+        use aura_recovery::{CeremonyId, GuardianRotationOp};
+
+        tracing::info!(
+            guardian_id = %guardian_id,
+            ceremony_id = %ceremony_id,
+            threshold_k,
+            total_n,
+            key_package_size = key_package.len(),
+            "Sending guardian invitation through transport"
+        );
+
+        // Parse ceremony ID (format: "ceremony-{epoch}-{uuid}")
+        let ceremony_id_bytes = if ceremony_id.starts_with("ceremony-") {
+            // Extract hash from ceremony ID
+            let parts: Vec<&str> = ceremony_id.split('-').collect();
+            if parts.len() >= 3 {
+                // Use the UUID part to derive a ceremony hash
+                let uuid_str = parts[2];
+                Hash32(hash(uuid_str.as_bytes()))
+            } else {
+                Hash32(hash(ceremony_id.as_bytes()))
+            }
+        } else {
+            Hash32(hash(ceremony_id.as_bytes()))
+        };
+        let ceremony_id_hash = CeremonyId(ceremony_id_bytes);
+
+        // Parse guardian authority ID from string
+        let guardian_authority: AuthorityId = guardian_id
+            .parse()
+            .map_err(|e| AgentError::invalid(format!("Invalid guardian ID: {}", e)))?;
+
+        // Get our authority context for source
+        let initiator_id = self.handler.authority_context().authority_id;
+
+        // Create a context ID for guardian ceremonies
+        // Use a deterministic derivation from initiator + ceremony ID
+        let context_entropy = {
+            let mut h = aura_core::hash::hasher();
+            h.update(b"GUARDIAN_CEREMONY_CONTEXT");
+            h.update(&initiator_id.to_bytes());
+            h.update(&ceremony_id_hash.0 .0);
+            h.finalize()
+        };
+        let ceremony_context = ContextId::new_from_entropy(context_entropy);
+
+        // Create the rotation operation
+        // Note: We don't have full guardian list here, just the recipient
+        // In a full implementation, this would include all guardian IDs
+        let operation = GuardianRotationOp {
+            threshold_k,
+            total_n,
+            guardian_ids: vec![guardian_authority], // Simplified for now
+            new_epoch: 1,                           // Will be updated by actual ceremony state
+        };
+
+        // Create the ceremony proposal
+        let proposal = CeremonyProposal {
+            ceremony_id: ceremony_id_hash,
+            initiator_id,
+            prestate_hash: Hash32([0u8; 32]), // Will be computed from actual guardian state
+            operation,
+            encrypted_key_package: key_package.to_vec(),
+            encryption_nonce: [0u8; 12], // Should use actual encryption nonce
+            ephemeral_public_key: vec![], // Should include ephemeral key for key agreement
+        };
+
+        // Serialize the proposal
+        let payload = serde_json::to_vec(&proposal)
+            .map_err(|e| AgentError::internal(format!("Failed to serialize proposal: {}", e)))?;
+
+        // Create transport envelope
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            "application/aura-guardian-proposal".to_string(),
+        );
+        metadata.insert("protocol-version".to_string(), "1".to_string());
+        metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
+
+        let envelope = aura_core::effects::TransportEnvelope {
+            destination: guardian_authority,
+            source: initiator_id,
+            context: ceremony_context,
+            payload,
+            metadata,
+            receipt: None, // Receipts would be added by guard chain in production
+        };
+
+        // Send via transport effects
+        let effects = self.effects.read().await;
+        effects
+            .send_envelope(envelope)
+            .await
+            .map_err(|e| AgentError::effects(format!("Failed to send invitation: {}", e)))?;
+
+        tracing::info!(
+            guardian_id = %guardian_id,
+            ceremony_id = %ceremony_id,
+            "Guardian invitation sent successfully"
+        );
+
+        Ok(())
+    }
+
+    /// Process incoming guardian acceptance responses from transport
+    ///
+    /// This method should be called periodically to check for acceptance messages
+    /// from guardians. The caller should update the ceremony tracker with the results.
+    ///
+    /// # Returns
+    /// List of (ceremony_id, guardian_id) pairs for accepted guardians
+    pub async fn process_guardian_acceptances(
+        &self,
+    ) -> AgentResult<Vec<(String, String)>> {
+        use aura_core::effects::TransportEffects;
+
+        let effects = self.effects.read().await;
+        let mut acceptances = Vec::new();
+
+        // Poll for incoming acceptance messages
+        loop {
+            match effects.receive_envelope().await {
+                Ok(envelope) => {
+                    // Check if this is a guardian acceptance response
+                    if envelope.metadata.get("content-type")
+                        == Some(&"application/aura-guardian-acceptance".to_string())
+                    {
+                        if let (Some(ceremony_id), Some(guardian_id)) = (
+                            envelope.metadata.get("ceremony-id"),
+                            envelope.metadata.get("guardian-id"),
+                        ) {
+                            tracing::info!(
+                                ceremony_id = %ceremony_id,
+                                guardian_id = %guardian_id,
+                                "Received guardian acceptance"
+                            );
+
+                            acceptances.push((ceremony_id.clone(), guardian_id.clone()));
+                        }
+                    }
+                }
+                Err(aura_core::effects::TransportError::NoMessage) => {
+                    // No more messages
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!("Error receiving acceptance response: {}", e);
+                    break;
+                }
+            }
+        }
+
+        Ok(acceptances)
+    }
 }
 
 #[cfg(test)]

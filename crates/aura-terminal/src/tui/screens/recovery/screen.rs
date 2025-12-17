@@ -16,12 +16,12 @@
 //! All event handling is done by the parent TuiShell (IoApp) via the state machine.
 
 use iocraft::prelude::*;
-use std::sync::Arc;
 
 use aura_app::signal_defs::RECOVERY_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
-use crate::tui::components::EmptyState;
+use crate::tui::callbacks::{ApprovalCallback, RecoveryCallback};
+use crate::tui::components::{EmptyState, KeyValue, TabBar, TabItem};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
 use crate::tui::props::RecoveryViewProps;
@@ -31,49 +31,38 @@ use crate::tui::types::{
     RecoveryTab,
 };
 
-/// Callback type for recovery actions (no args)
-pub type RecoveryCallback = Arc<dyn Fn() + Send + Sync>;
-
-/// Callback type for approval submission (takes request_id)
-pub type ApprovalCallback = Arc<dyn Fn(String) + Send + Sync>;
-
-/// Props for TabBar
+/// Props for RecoveryTabBar
 #[derive(Default, Props)]
-pub struct TabBarProps {
+pub struct RecoveryTabBarProps {
     pub active_tab: RecoveryTab,
     pub pending_count: usize,
 }
 
-/// Tab navigation bar
+/// Tab navigation bar for recovery screen (using generic TabBar component)
 #[component]
-pub fn TabBar(props: &TabBarProps) -> impl Into<AnyElement<'static>> {
+pub fn RecoveryTabBar(props: &RecoveryTabBarProps) -> impl Into<AnyElement<'static>> {
     let active = props.active_tab;
     let pending_count = props.pending_count;
 
+    // Convert RecoveryTab variants to TabItems with optional badge on Requests tab
+    let tabs: Vec<TabItem> = RecoveryTab::all()
+        .iter()
+        .map(|&tab| {
+            if tab == RecoveryTab::Requests && pending_count > 0 {
+                TabItem::with_badge(tab.title(), pending_count)
+            } else {
+                TabItem::new(tab.title())
+            }
+        })
+        .collect();
+
+    let active_index = RecoveryTab::all()
+        .iter()
+        .position(|&t| t == active)
+        .unwrap_or(0);
+
     element! {
-        View(
-            flex_direction: FlexDirection::Row,
-            gap: Spacing::MD,
-            padding: Spacing::PANEL_PADDING,
-            border_style: BorderStyle::Single,
-            border_edges: Edges::Bottom,
-            border_color: Theme::BORDER,
-        ) {
-            #(RecoveryTab::all().iter().map(|&tab| {
-                let is_active = tab == active;
-                let color = if is_active { Theme::PRIMARY } else { Theme::TEXT_MUTED };
-                let weight = if is_active { Weight::Bold } else { Weight::Normal };
-                // Show pending count badge on Requests tab
-                let title = if tab == RecoveryTab::Requests && pending_count > 0 {
-                    format!("{} ({})", tab.title(), pending_count)
-                } else {
-                    tab.title().to_string()
-                };
-                element! {
-                    Text(content: title, color: color, weight: weight)
-                }
-            }))
-        }
+        TabBar(tabs: tabs, active_index: active_index)
     }
 }
 
@@ -135,12 +124,7 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                             // Use consistent list item colors
                             let bg = if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL };
                             let text_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL };
-                            let status_color = match g.status {
-                                GuardianStatus::Active => Theme::SUCCESS,
-                                GuardianStatus::Pending => Theme::WARNING,
-                                GuardianStatus::Offline => Theme::LIST_TEXT_MUTED,
-                                GuardianStatus::Declined | GuardianStatus::Removed => Theme::ERROR,
-                            };
+                            let status_color = g.status.color();
                             let icon = g.status.icon().to_string();
                             let id = g.id.clone();
                             let name = g.name.clone();
@@ -163,10 +147,7 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                 border_color: Theme::BORDER,
                 padding: Spacing::PANEL_PADDING,
             ) {
-                View(flex_direction: FlexDirection::Row) {
-                    Text(content: "Threshold: ", color: Theme::TEXT_MUTED)
-                    Text(content: threshold_text, color: Theme::TEXT)
-                }
+                KeyValue(label: "Threshold".to_string(), value: threshold_text)
             }
         }
     }
@@ -223,10 +204,7 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
                 border_color: Theme::BORDER,
                 padding: Spacing::PANEL_PADDING,
             ) {
-                View(flex_direction: FlexDirection::Row) {
-                    Text(content: "Progress: ", color: Theme::TEXT_MUTED)
-                    Text(content: progress_text, color: Theme::TEXT)
-                }
+                KeyValue(label: "Progress".to_string(), value: progress_text)
             }
 
             // Approvals list
@@ -322,10 +300,7 @@ pub fn PendingRequestsPanel(props: &PendingRequestsPanelProps) -> impl Into<AnyE
                                     Text(content: status_icon.to_string(), color: status_color)
                                     View(flex_direction: FlexDirection::Column, flex_grow: 1.0) {
                                         Text(content: account, color: text_color)
-                                        View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                                            Text(content: "Progress:", color: Theme::TEXT_MUTED)
-                                            Text(content: progress_text, color: Theme::TEXT)
-                                        }
+                                        KeyValue(label: "Progress".to_string(), value: progress_text)
                                     }
                                 }
                             }
@@ -490,7 +465,7 @@ pub fn RecoveryScreen(
             let app_core = ctx.app_core.clone();
             async move {
                 // Helper closure to convert RecoveryState to TUI types
-                let convert_recovery_state = |recovery_state: &aura_app::views::RecoveryState| {
+                let convert_state = |recovery_state: &aura_app::views::RecoveryState| {
                     let guardians: Vec<Guardian> = recovery_state
                         .guardians
                         .iter()
@@ -520,7 +495,7 @@ pub fn RecoveryScreen(
                     let core = app_core.read().await;
                     if let Ok(recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
                         let (guardians, threshold, total, status, pending) =
-                            convert_recovery_state(&recovery_state);
+                            convert_state(&recovery_state);
                         reactive_guardians.set(guardians);
                         reactive_threshold_required.set(threshold);
                         reactive_threshold_total.set(total);
@@ -538,7 +513,7 @@ pub fn RecoveryScreen(
                 // Subscribe to signal updates - runs until component unmounts
                 while let Ok(recovery_state) = stream.recv().await {
                     let (guardians, threshold, total, status, pending) =
-                        convert_recovery_state(&recovery_state);
+                        convert_state(&recovery_state);
                     reactive_guardians.set(guardians);
                     reactive_threshold_required.set(threshold);
                     reactive_threshold_total.set(total);
@@ -576,7 +551,7 @@ pub fn RecoveryScreen(
         ) {
             // Tab bar with pending count badge (2 rows: 1 content + 1 border)
             View(height: 2) {
-                TabBar(active_tab: current_tab, pending_count: request_count)
+                RecoveryTabBar(active_tab: current_tab, pending_count: request_count)
             }
 
             // Content based on active tab (23 rows)

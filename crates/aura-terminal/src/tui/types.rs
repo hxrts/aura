@@ -3,6 +3,9 @@
 //! Domain types used across iocraft components.
 //! These use owned types (String, Vec) for compatibility with iocraft's 'static lifetime requirements.
 
+use crate::tui::theme::Theme;
+use iocraft::prelude::Color;
+
 // Re-export source types for adapters
 use aura_app::views::{
     chat::{Channel as AppChannel, Message as AppMessage},
@@ -392,6 +395,16 @@ impl InvitationStatus {
             Self::Declined => "Declined",
             Self::Expired => "Expired",
             Self::Cancelled => "Cancelled",
+        }
+    }
+
+    /// Get the color for this status
+    pub fn color(self) -> Color {
+        match self {
+            Self::Pending => Theme::WARNING,
+            Self::Accepted => Theme::SUCCESS,
+            Self::Declined => Theme::ERROR,
+            Self::Expired | Self::Cancelled => Theme::LIST_TEXT_MUTED,
         }
     }
 }
@@ -798,6 +811,16 @@ impl GuardianStatus {
             Self::Removed => "Removed",
         }
     }
+
+    /// Get the color for this status
+    pub fn color(self) -> Color {
+        match self {
+            Self::Active => Theme::SUCCESS,
+            Self::Pending => Theme::WARNING,
+            Self::Offline => Theme::LIST_TEXT_MUTED,
+            Self::Declined | Self::Removed => Theme::ERROR,
+        }
+    }
 }
 
 /// A guardian
@@ -999,6 +1022,15 @@ impl ContactStatus {
             Self::Active => "●",
             Self::Pending => "○",
             Self::Blocked => "⊗",
+        }
+    }
+
+    /// Get the color for this status
+    pub fn color(self) -> Color {
+        match self {
+            Self::Active => Theme::SUCCESS,
+            Self::Pending => Theme::WARNING,
+            Self::Blocked => Theme::ERROR,
         }
     }
 }

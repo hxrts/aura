@@ -522,6 +522,22 @@ async fn handle_tui_launch(
     };
     let effect_ctx = EffectContext::new(authority_id, context_id, execution_mode);
 
+    // In demo mode, create simulator first to get shared transport inbox
+    #[cfg(feature = "development")]
+    let demo_simulator_for_bob = match mode {
+        TuiMode::Demo { seed } => {
+            println!("Creating demo simulator for shared transport...");
+            let sim = DemoSimulator::new(seed)
+                .await
+                .map_err(|e| AuraError::internal(format!("Failed to create simulator: {}", e)))?;
+            Some(sim)
+        }
+        TuiMode::Production => None,
+    };
+
+    #[cfg(not(feature = "development"))]
+    let demo_simulator_for_bob: Option<()> = None;
+
     // Build agent using appropriate builder method based on mode
     let agent = match mode {
         TuiMode::Production => AgentBuilder::new()
@@ -532,14 +548,38 @@ async fn handle_tui_launch(
             .map_err(|e| AuraError::internal(format!("Failed to create agent: {}", e)))?,
         TuiMode::Demo { seed } => {
             println!("Using simulation agent with seed: {}", seed);
-            AgentBuilder::new()
-                .with_config(agent_config)
-                .with_authority(authority_id)
-                .build_simulation_async(seed, &effect_ctx)
-                .await
-                .map_err(|e| {
-                    AuraError::internal(format!("Failed to create simulation agent: {}", e))
-                })?
+
+            #[cfg(feature = "development")]
+            {
+                // Use shared transport inbox from simulator
+                let shared_inbox = demo_simulator_for_bob
+                    .as_ref()
+                    .map(|sim| sim.shared_transport_inbox.clone())
+                    .expect("Simulator should be created in demo mode");
+
+                println!("Creating Bob's agent with shared transport...");
+                AgentBuilder::new()
+                    .with_config(agent_config)
+                    .with_authority(authority_id)
+                    .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_inbox)
+                    .await
+                    .map_err(|e| {
+                        AuraError::internal(format!("Failed to create simulation agent with shared transport: {}", e))
+                    })?
+            }
+
+            #[cfg(not(feature = "development"))]
+            {
+                // Fallback for non-development builds
+                AgentBuilder::new()
+                    .with_config(agent_config)
+                    .with_authority(authority_id)
+                    .build_simulation_async(seed, &effect_ctx)
+                    .await
+                    .map_err(|e| {
+                        AuraError::internal(format!("Failed to create simulation agent: {}", e))
+                    })?
+            }
         }
     };
 
@@ -593,11 +633,11 @@ async fn handle_tui_launch(
         Option<DemoSimulator>,
         Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)>,
     ) = match mode {
-        TuiMode::Demo { seed } => {
+        TuiMode::Demo { seed: _ } => {
+            // Use the simulator we already created for shared transport
             println!("Starting demo simulator...");
-            let mut sim = DemoSimulator::new(seed)
-                .await
-                .map_err(|e| AuraError::internal(format!("Failed to create simulator: {}", e)))?;
+            let mut sim = demo_simulator_for_bob
+                .expect("Simulator should exist in demo mode");
 
             sim.start()
                 .await
@@ -628,6 +668,30 @@ async fn handle_tui_launch(
             // Start coordinator tasks
             let handles = coordinator.start();
             println!("Demo signal coordinator started");
+
+            // Start background task to process ceremony acceptances
+            let ceremony_agent = agent.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+                loop {
+                    interval.tick().await;
+                    match ceremony_agent.process_ceremony_acceptances().await {
+                        Ok((acceptances, completions)) => {
+                            if acceptances > 0 {
+                                tracing::info!(
+                                    acceptances = acceptances,
+                                    completions = completions,
+                                    "Processed guardian ceremony acceptances"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Error processing ceremony acceptances: {}", e);
+                        }
+                    }
+                }
+            });
+            println!("Ceremony acceptance processor started");
 
             (Some(sim), Some(handles))
         }

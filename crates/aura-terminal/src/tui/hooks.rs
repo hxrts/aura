@@ -369,6 +369,46 @@ impl Default for DevicesSnapshot {
 // Snapshots are now created directly from AppCore's ViewState in IoContext.
 // See context.rs for the snapshot_* implementations.
 
+// =============================================================================
+// Callback Context for iocraft
+// =============================================================================
+
+use crate::tui::callbacks::CallbackRegistry;
+
+/// Context type for sharing callbacks with iocraft components.
+///
+/// This enables components to access domain-specific callbacks via
+/// `hooks.use_context::<CallbackContext>()` instead of passing them
+/// through props at every level.
+///
+/// ## Example
+///
+/// ```ignore
+/// use crate::tui::hooks::CallbackContext;
+///
+/// #[component]
+/// fn ChatScreen(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+///     let callbacks = hooks.use_context::<CallbackContext>();
+///
+///     // Access chat-specific callbacks
+///     let on_send = callbacks.registry.chat.on_send.clone();
+///
+///     element! { ... }
+/// }
+/// ```
+#[derive(Clone)]
+pub struct CallbackContext {
+    /// The callback registry containing all domain callbacks
+    pub registry: CallbackRegistry,
+}
+
+impl CallbackContext {
+    /// Create a new CallbackContext with the given registry
+    pub fn new(registry: CallbackRegistry) -> Self {
+        Self { registry }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

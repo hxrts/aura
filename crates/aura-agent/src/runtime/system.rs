@@ -3,8 +3,8 @@
 //! Main runtime system that orchestrates all agent operations.
 
 use super::services::{
-    ContextManager, FlowBudgetManager, ReceiptManager, RendezvousManager, SocialManager,
-    SyncServiceManager,
+    CeremonyTracker, ContextManager, FlowBudgetManager, ReceiptManager, RendezvousManager,
+    SocialManager, SyncServiceManager,
 };
 use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
@@ -47,6 +47,9 @@ pub struct RuntimeSystem {
     /// Social manager (optional, for social topology and relay selection)
     social_manager: Option<SocialManager>,
 
+    /// Ceremony tracker (for guardian ceremony coordination)
+    ceremony_tracker: CeremonyTracker,
+
     /// Configuration
     #[allow(dead_code)] // Will be used for runtime configuration
     config: AgentConfig,
@@ -81,6 +84,7 @@ impl RuntimeSystem {
             sync_manager: None,
             rendezvous_manager: None,
             social_manager: None,
+            ceremony_tracker: CeremonyTracker::new(),
             config,
             authority_id,
         }
@@ -112,6 +116,7 @@ impl RuntimeSystem {
             sync_manager: Some(sync_manager),
             rendezvous_manager: None,
             social_manager: None,
+            ceremony_tracker: CeremonyTracker::new(),
             config,
             authority_id,
         }
@@ -143,6 +148,7 @@ impl RuntimeSystem {
             sync_manager: None,
             rendezvous_manager: Some(rendezvous_manager),
             social_manager: None,
+            ceremony_tracker: CeremonyTracker::new(),
             config,
             authority_id,
         }
@@ -175,9 +181,15 @@ impl RuntimeSystem {
             sync_manager,
             rendezvous_manager,
             social_manager,
+            ceremony_tracker: CeremonyTracker::new(),
             config,
             authority_id,
         }
+    }
+
+    /// Get the ceremony tracker
+    pub fn ceremony_tracker(&self) -> &CeremonyTracker {
+        &self.ceremony_tracker
     }
 
     /// Get the authority ID

@@ -13,7 +13,7 @@
 //! ```
 
 use super::{Intent, IntentError, StateSnapshot};
-use crate::runtime_bridge::{RuntimeBridge, SyncStatus as RuntimeSyncStatus};
+use crate::runtime_bridge::{LanPeerInfo, RuntimeBridge, SyncStatus as RuntimeSyncStatus};
 use crate::views::ViewState;
 
 use async_trait::async_trait;
@@ -1094,6 +1094,18 @@ impl AppCore {
         Ok(runtime.get_discovered_peers().await)
     }
 
+    /// Get LAN-discovered peers
+    ///
+    /// Returns a list of peers discovered via LAN (mDNS/UDP broadcast) with their
+    /// network addresses. Returns empty list if no runtime is available.
+    pub async fn get_lan_peers(&self) -> Vec<LanPeerInfo> {
+        if let Some(runtime) = &self.runtime {
+            runtime.get_lan_peers().await
+        } else {
+            vec![]
+        }
+    }
+
     /// Check if the runtime is online (has active sync or rendezvous services)
     pub async fn is_online(&self) -> bool {
         if let Some(runtime) = &self.runtime {
@@ -1231,6 +1243,68 @@ impl AppCore {
         })?;
 
         runtime.rollback_guardian_key_rotation(failed_epoch).await
+    }
+
+    /// Initiate a guardian ceremony with full protocol fidelity
+    ///
+    /// This orchestrates the complete guardian ceremony:
+    /// 1. Generates FROST threshold keys at a new epoch
+    /// 2. Sends guardian invitations with key packages to each guardian
+    /// 3. Returns a ceremony ID for tracking progress
+    ///
+    /// Guardians process invitations through their full runtimes and respond
+    /// via the proper protocol. GuardianBinding facts are committed when
+    /// threshold is reached.
+    ///
+    /// # Arguments
+    /// * `threshold_k` - Minimum signers required (k)
+    /// * `total_n` - Total number of guardians (n)
+    /// * `guardian_ids` - IDs of contacts who will become guardians
+    ///
+    /// # Returns
+    /// A ceremony ID for tracking progress
+    ///
+    /// # Errors
+    /// Returns `IntentError::NoAgent` if no runtime is configured.
+    pub async fn initiate_guardian_ceremony(
+        &self,
+        threshold_k: u16,
+        total_n: u16,
+        guardian_ids: &[String],
+    ) -> Result<String, IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("initiate_guardian_ceremony requires a runtime")
+        })?;
+
+        runtime
+            .initiate_guardian_ceremony(threshold_k, total_n, guardian_ids)
+            .await
+    }
+
+    /// Get status of a guardian ceremony
+    ///
+    /// Returns the current state of the ceremony including:
+    /// - Number of guardians who have accepted
+    /// - Whether threshold has been reached
+    /// - Whether ceremony is complete or failed
+    ///
+    /// # Arguments
+    /// * `ceremony_id` - The ceremony ID returned from initiate_guardian_ceremony
+    ///
+    /// # Returns
+    /// CeremonyStatus with current state
+    ///
+    /// # Errors
+    /// Returns `IntentError::NoAgent` if no runtime is configured.
+    pub async fn get_ceremony_status(
+        &self,
+        ceremony_id: &str,
+    ) -> Result<crate::runtime_bridge::CeremonyStatus, IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("get_ceremony_status requires a runtime")
+        })?;
+
+        runtime.get_ceremony_status(ceremony_id).await
     }
 }
 

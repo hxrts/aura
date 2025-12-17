@@ -11,11 +11,14 @@
 //! Uses `aura_app::signal_defs::BLOCK_SIGNAL` with `ReactiveEffects::subscribe()`.
 
 use iocraft::prelude::*;
-use std::sync::Arc;
 
 use aura_app::signal_defs::BLOCK_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
+use crate::tui::callbacks::{
+    BlockInviteCallback, BlockNavCallback, BlockSendCallback, GrantStewardCallback,
+    RevokeStewardCallback,
+};
 use crate::tui::components::MessageInput;
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
@@ -34,21 +37,6 @@ pub enum BlockFocus {
     /// Message input is focused (insert mode)
     Input,
 }
-
-/// Callback type for sending a message in the block channel
-pub type BlockSendCallback = Arc<dyn Fn(String) + Send + Sync>;
-
-/// Callback type for inviting someone to the block (contact_id: String)
-pub type BlockInviteCallback = Arc<dyn Fn(String) + Send + Sync>;
-
-/// Callback type for navigating to neighborhood view
-pub type BlockNavCallback = Arc<dyn Fn() + Send + Sync>;
-
-/// Callback type for granting steward role (receives resident_id: String)
-pub type GrantStewardCallback = Arc<dyn Fn(String) + Send + Sync>;
-
-/// Callback type for revoking steward role (receives resident_id: String)
-pub type RevokeStewardCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Props for ResidentList
 #[derive(Default, Props)]
@@ -390,7 +378,7 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let display_input_text = props.view.input_buffer.clone();
     let input_focused = props.view.insert_mode || current_focus == BlockFocus::Input;
 
-    // NOTE: Modals have been moved to app.rs root level. See modal_frame.rs for details.
+    // NOTE: Modals have been moved to app.rs root level. See modal.rs for ModalFrame details.
 
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.

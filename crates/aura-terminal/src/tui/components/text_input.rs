@@ -4,7 +4,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::Theme;
+use crate::tui::theme::{focus_border_color, Theme};
 
 /// Props for TextInput
 #[derive(Default, Props)]
@@ -25,12 +25,6 @@ pub struct TextInputProps {
 /// using `hooks.use_state()` with Copy-able wrapper types.
 #[component]
 pub fn TextInput(props: &TextInputProps) -> impl Into<AnyElement<'static>> {
-    let border_color = if props.focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
-
     let display_text = if props.value.is_empty() {
         props.placeholder.clone()
     } else {
@@ -46,7 +40,7 @@ pub fn TextInput(props: &TextInputProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             border_style: BorderStyle::Round,
-            border_color: border_color,
+            border_color: focus_border_color(props.focused),
             padding_left: 1,
             padding_right: 1,
         ) {

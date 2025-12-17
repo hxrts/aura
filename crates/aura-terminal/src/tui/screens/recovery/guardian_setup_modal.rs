@@ -154,30 +154,25 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
 
     element! {
         View(
-            padding: Spacing::SM,
+            padding_left: Spacing::SM,
+            padding_right: Spacing::SM,
+            padding_top: Spacing::XS,
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0,
         ) {
             Text(
-                content: "Select contacts to become your guardians:",
+                content: "Select guardians (can help recover your account):",
                 color: Theme::TEXT_MUTED,
-                wrap: TextWrap::Wrap,
             )
-            View(margin_top: Spacing::SM, margin_bottom: Spacing::SM) {
-                Text(
-                    content: "Guardians can help recover your account if you lose access.",
-                    color: Theme::TEXT_MUTED,
-                    wrap: TextWrap::Wrap,
-                )
-            }
 
-            // Contact list with checkboxes
+            // Contact list with checkboxes - compact
             View(
+                margin_top: Spacing::XS,
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
-                padding: Spacing::XS,
-                max_height: 15,
+                max_height: 10,
+                overflow: Overflow::Hidden,
             ) {
                 #(contacts.iter().enumerate().map(|(i, contact)| {
                     let is_selected = selected.contains(&i);
@@ -193,7 +188,6 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
                             flex_direction: FlexDirection::Row,
                             gap: 1,
                             padding_left: Spacing::XS,
-                            padding_right: Spacing::XS,
                             background_color: bg,
                         ) {
                             Text(content: checkbox.to_string(), color: if is_selected { Theme::SUCCESS } else { fg })
@@ -210,13 +204,11 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
                 }))
             }
 
-            // Selection count
-            View(margin_top: Spacing::SM) {
-                Text(
-                    content: format!("{} contacts selected", selected.len()),
-                    color: if selected.len() >= 2 { Theme::SUCCESS } else { Theme::WARNING },
-                )
-            }
+            // Selection count - inline
+            Text(
+                content: format!("{} selected (min 2)", selected.len()),
+                color: if selected.len() >= 2 { Theme::SUCCESS } else { Theme::WARNING },
+            )
         }
     }
     .into_any()
@@ -226,13 +218,13 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
     let k = props.threshold_k;
     let n = props.threshold_n;
 
-    // Security level hint
+    // Security level hint - compact
     let security_hint = if k == 1 {
-        "Low security: Any single guardian can recover".to_string()
+        "Low: any 1 can recover"
     } else if k == n {
-        "Maximum security: All guardians must agree".to_string()
+        "Max: all must agree"
     } else {
-        format!("Balanced: {} of {} guardians must agree", k, n)
+        "Balanced"
     };
 
     element! {
@@ -244,41 +236,28 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
             align_items: AlignItems::Center,
         ) {
             Text(
-                content: "Choose recovery threshold:",
-                color: Theme::TEXT,
-                weight: Weight::Bold,
+                content: "How many guardians must approve recovery?",
+                color: Theme::TEXT_MUTED,
             )
-            View(margin_top: Spacing::MD) {
-                Text(
-                    content: "How many guardians must approve a recovery request?",
-                    color: Theme::TEXT_MUTED,
-                    wrap: TextWrap::Wrap,
-                )
-            }
 
-            // Threshold selector
+            // Threshold selector - compact
             View(
-                margin_top: Spacing::LG,
-                margin_bottom: Spacing::LG,
+                margin_top: Spacing::SM,
+                margin_bottom: Spacing::SM,
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
                 gap: 2,
             ) {
-                // Left arrow
                 Text(
                     content: Icons::ARROW_DOUBLE_LEFT,
                     color: if k > 1 { Theme::PRIMARY } else { Theme::TEXT_MUTED },
                     weight: Weight::Bold,
                 )
-
-                // Threshold display
                 View(
                     border_style: BorderStyle::Round,
                     border_color: Theme::PRIMARY,
-                    padding_left: 3,
-                    padding_right: 3,
-                    padding_top: 1,
-                    padding_bottom: 1,
+                    padding_left: 2,
+                    padding_right: 2,
                 ) {
                     Text(
                         content: format!("{} of {}", k, n),
@@ -286,8 +265,6 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
                         weight: Weight::Bold,
                     )
                 }
-
-                // Right arrow
                 Text(
                     content: Icons::ARROW_DOUBLE_RIGHT,
                     color: if k < n { Theme::PRIMARY } else { Theme::TEXT_MUTED },
@@ -295,14 +272,8 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
                 )
             }
 
-            // Security hint
-            View(
-                padding: Spacing::SM,
-                border_style: BorderStyle::Round,
-                border_color: Theme::SECONDARY,
-            ) {
-                Text(content: security_hint, color: Theme::SECONDARY)
-            }
+            // Security hint - inline
+            Text(content: security_hint.to_string(), color: Theme::SECONDARY)
         }
     }
     .into_any()
@@ -329,25 +300,23 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0,
         ) {
-            Text(
-                content: "Waiting for guardian responses...",
-                color: Theme::TEXT,
-                weight: Weight::Bold,
-            )
-            View(margin_top: Spacing::SM) {
+            // Header with counts inline
+            View(flex_direction: FlexDirection::Row, gap: 2) {
+                Text(content: "Waiting...", color: Theme::TEXT, weight: Weight::Bold)
                 Text(
-                    content: format!("{} accepted, {} pending, {} declined", accepted, pending, declined),
+                    content: format!("{}✓ {}⏳ {}✗", accepted, pending, declined),
                     color: Theme::TEXT_MUTED,
                 )
             }
 
-            // Response list
+            // Response list - compact
             View(
-                margin_top: Spacing::MD,
+                margin_top: Spacing::XS,
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
-                padding: Spacing::SM,
+                max_height: 8,
+                overflow: Overflow::Hidden,
             ) {
                 #(responses.iter().map(|(_, name, response)| {
                     let (icon, color) = match response {
@@ -357,38 +326,22 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
                     };
 
                     element! {
-                        View(flex_direction: FlexDirection::Row, gap: 1, padding: Spacing::XS) {
+                        View(flex_direction: FlexDirection::Row, gap: 1, padding_left: Spacing::XS) {
                             Text(content: icon.to_string(), color: color)
                             Text(content: name.clone(), color: Theme::TEXT)
-                            Text(
-                                content: format!("({:?})", response),
-                                color: color,
-                            )
                         }
                     }
                 }))
             }
 
-            // Status message
+            // Status message - compact
             #(if declined > 0 {
                 Some(element! {
-                    View(margin_top: Spacing::MD, padding: Spacing::SM, background_color: Theme::ERROR) {
-                        Text(
-                            content: "Ceremony failed: A guardian declined",
-                            color: Theme::TEXT,
-                            weight: Weight::Bold,
-                        )
-                    }
+                    Text(content: "Failed: guardian declined", color: Theme::ERROR, weight: Weight::Bold)
                 })
             } else if accepted == total && total > 0 {
                 Some(element! {
-                    View(margin_top: Spacing::MD, padding: Spacing::SM, background_color: Theme::SUCCESS) {
-                        Text(
-                            content: "All guardians accepted! Completing ceremony...",
-                            color: Theme::TEXT,
-                            weight: Weight::Bold,
-                        )
-                    }
+                    Text(content: "All accepted! Completing...", color: Theme::SUCCESS, weight: Weight::Bold)
                 })
             } else {
                 None

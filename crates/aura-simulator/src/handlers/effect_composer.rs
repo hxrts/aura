@@ -13,12 +13,12 @@ use super::{
 };
 use crate::quint::itf_fuzzer::{ITFBasedFuzzer, ITFFuzzConfig, ITFTrace};
 use aura_agent::{AgentBuilder, AuraEffectSystem, EffectContext};
-use aura_core::effects::{ChaosEffects, ExecutionMode, TestingEffects};
+use aura_core::effects::{ChaosEffects, ExecutionMode, TestingEffects, TransportEnvelope};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tracing::info;
 
 /// Effect-based simulation composer
@@ -34,6 +34,8 @@ pub struct SimulationEffectComposer {
     scenario_handler: Option<Arc<SimulationScenarioHandler>>,
     itf_fuzzer: Option<ITFBasedFuzzer>,
     seed: u64,
+    /// Optional shared transport inbox for multi-agent simulations
+    shared_transport_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
 }
 
 impl SimulationEffectComposer {
@@ -47,12 +49,22 @@ impl SimulationEffectComposer {
             scenario_handler: None,
             itf_fuzzer: None,
             seed: 42, // Default deterministic seed
+            shared_transport_inbox: None,
         }
     }
 
     /// Set the seed for deterministic simulation
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
+        self
+    }
+
+    /// Set the shared transport inbox for multi-agent communication
+    pub fn with_shared_transport_inbox(
+        mut self,
+        inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> Self {
+        self.shared_transport_inbox = Some(inbox);
         self
     }
 
@@ -73,8 +85,16 @@ impl SimulationEffectComposer {
             .await
             .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
         let config = aura_agent::core::AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config)
-            .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
+
+        // Use shared transport inbox if provided, otherwise use standard testing mode
+        let effect_system = if let Some(inbox) = self.shared_transport_inbox.clone() {
+            AuraEffectSystem::simulation_with_shared_transport(&config, self.seed, inbox)
+                .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?
+        } else {
+            AuraEffectSystem::testing(&config)
+                .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?
+        };
+
         self.effect_system = Some(Arc::new(effect_system));
         Ok(self)
     }
@@ -208,6 +228,26 @@ impl SimulationEffectComposer {
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
         Self::new(device_id)
             .with_seed(seed)
+            .with_effect_system_async()
+            .await?
+            .with_time_control()
+            .with_fault_injection()
+            .with_scenario_management()
+            .build()
+    }
+
+    /// Create a simulation environment with shared transport inbox for multi-agent simulations
+    ///
+    /// This factory enables communication between multiple simulated agents (e.g., Bob, Alice, Carol)
+    /// by providing a shared transport layer that routes messages based on destination authority.
+    pub async fn for_simulation_async_with_shared_transport(
+        device_id: DeviceId,
+        seed: u64,
+        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
+        Self::new(device_id)
+            .with_seed(seed)
+            .with_shared_transport_inbox(shared_inbox)
             .with_effect_system_async()
             .await?
             .with_time_control()

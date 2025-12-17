@@ -139,6 +139,7 @@ pub struct EffectSystemBuilder {
     sync_config: Option<super::services::SyncManagerConfig>,
     rendezvous_config: Option<super::services::RendezvousManagerConfig>,
     social_config: Option<super::services::SocialManagerConfig>,
+    shared_transport_inbox: Option<std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
 }
 
 impl EffectSystemBuilder {
@@ -151,6 +152,7 @@ impl EffectSystemBuilder {
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
+            shared_transport_inbox: None,
         }
     }
 
@@ -163,6 +165,7 @@ impl EffectSystemBuilder {
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
+            shared_transport_inbox: None,
         }
     }
 
@@ -175,7 +178,17 @@ impl EffectSystemBuilder {
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
+            shared_transport_inbox: None,
         }
+    }
+
+    /// Set shared transport inbox for multi-agent simulations
+    pub fn with_shared_transport_inbox(
+        mut self,
+        inbox: std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>,
+    ) -> Self {
+        self.shared_transport_inbox = Some(inbox);
+        self
     }
 
     /// Set configuration
@@ -256,8 +269,14 @@ impl EffectSystemBuilder {
             }
             ExecutionMode::Simulation { seed } => {
                 let executor = EffectExecutor::simulation(authority_id, seed, registry.clone());
-                let system = super::AuraEffectSystem::simulation(&config, seed)
-                    .map_err(|e| e.to_string())?;
+                // Use shared transport inbox if provided, otherwise standard simulation mode
+                let system = if let Some(inbox) = self.shared_transport_inbox {
+                    super::AuraEffectSystem::simulation_with_shared_transport(&config, seed, inbox)
+                        .map_err(|e| e.to_string())?
+                } else {
+                    super::AuraEffectSystem::simulation(&config, seed)
+                        .map_err(|e| e.to_string())?
+                };
                 (executor, system)
             }
         };

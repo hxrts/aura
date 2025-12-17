@@ -4,7 +4,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::Theme;
+use crate::tui::theme::{focus_border_color, list_item_colors_with_muted, Theme};
 
 // =============================================================================
 // List Item
@@ -29,24 +29,10 @@ pub struct ListItemProps {
 #[component]
 pub fn ListItem(props: &ListItemProps) -> impl Into<AnyElement<'static>> {
     // Use consistent list item colors for all scrollable components
-    let bg = if props.selected {
-        Theme::LIST_BG_SELECTED
-    } else if props.highlighted {
-        Theme::BG_HOVER
+    let (bg, label_color, desc_color) = if props.highlighted && !props.selected {
+        (Theme::BG_HOVER, Theme::LIST_TEXT_NORMAL, Theme::LIST_TEXT_MUTED)
     } else {
-        Theme::LIST_BG_NORMAL
-    };
-
-    let label_color = if props.selected {
-        Theme::LIST_TEXT_SELECTED
-    } else {
-        Theme::LIST_TEXT_NORMAL
-    };
-
-    let desc_color = if props.selected {
-        Theme::LIST_TEXT_SELECTED
-    } else {
-        Theme::LIST_TEXT_MUTED
+        list_item_colors_with_muted(props.selected)
     };
 
     let icon_color = Theme::SECONDARY;
@@ -158,12 +144,6 @@ pub fn List(props: &ListProps) -> impl Into<AnyElement<'static>> {
     let bordered = props.bordered;
     let has_title = !title.is_empty();
 
-    let border_color = if focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
-
     let content = element! {
         View(flex_direction: FlexDirection::Column) {
             #(if has_title {
@@ -201,7 +181,7 @@ pub fn List(props: &ListProps) -> impl Into<AnyElement<'static>> {
         element! {
             View(
                 border_style: BorderStyle::Round,
-                border_color: border_color,
+                border_color: focus_border_color(focused),
                 padding: 1,
             ) {
                 #(content)

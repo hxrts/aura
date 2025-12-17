@@ -254,13 +254,30 @@ pub struct AgentState {
 impl SimulatedAgent {
     /// Create a new simulated agent
     pub async fn new(name: String, config: AgentConfig) -> anyhow::Result<Self> {
+        Self::new_with_shared_transport(name, config, None).await
+    }
+
+    /// Create a new simulated agent with optional shared transport inbox
+    pub async fn new_with_shared_transport(
+        name: String,
+        config: AgentConfig,
+        shared_inbox: Option<Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
+    ) -> anyhow::Result<Self> {
         // Create deterministic identifiers derived from seed and name
         let device_id = ids::device_id(&format!("demo:{}:{}:device", config.seed, name));
         let authority_id = ids::authority_id(&format!("demo:{}:{}:authority", config.seed, name));
 
-        // Create simulation environment (async to avoid nested runtime)
-        let environment =
-            SimulationEffectComposer::for_simulation_async(device_id, config.seed).await?;
+        // Create simulation environment with optional shared transport
+        let environment = if let Some(inbox) = shared_inbox {
+            SimulationEffectComposer::for_simulation_async_with_shared_transport(
+                device_id,
+                config.seed,
+                inbox,
+            )
+            .await?
+        } else {
+            SimulationEffectComposer::for_simulation_async(device_id, config.seed).await?
+        };
 
         tracing::info!(
             "Created simulated agent: {} (device: {}, authority: {})",
@@ -333,6 +350,88 @@ impl SimulatedAgent {
             self.name,
             account
         );
+    }
+
+    /// Check for and process incoming transport messages (guardian invitations, etc.)
+    pub async fn process_transport_messages(&mut self) -> anyhow::Result<Vec<AgentResponse>> {
+        use aura_core::effects::TransportEffects;
+
+        let mut responses = Vec::new();
+
+        // Poll for incoming messages
+        let env = self.environment.lock().await;
+        let effects = env.effect_system();
+
+        // Try to receive messages (non-blocking via NoMessage error)
+        loop {
+            match effects.receive_envelope().await {
+                Ok(envelope) => {
+                    // Check if this is a guardian ceremony invitation
+                    if envelope.metadata.get("content-type")
+                        == Some(&"application/aura-guardian-proposal".to_string())
+                    {
+                        tracing::info!(
+                            "{} received guardian ceremony invitation from {}",
+                            self.name,
+                            envelope.source
+                        );
+
+                        // In demo mode, auto-accept guardian invitations
+                        if let Some(ceremony_id) = envelope.metadata.get("ceremony-id") {
+                            tracing::info!(
+                                "{} auto-accepting guardian ceremony {}",
+                                self.name,
+                                ceremony_id
+                            );
+
+                            // Add guardian capability for the initiator
+                            self.state.capabilities.insert(AgentCapability::Guardian {
+                                account_authority: envelope.source,
+                                context_id: envelope.context,
+                            });
+
+                            // Send acceptance response back through transport
+                            let mut response_metadata = std::collections::HashMap::new();
+                            response_metadata.insert("content-type".to_string(), "application/aura-guardian-acceptance".to_string());
+                            response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+                            response_metadata.insert("guardian-id".to_string(), self.authority_id.to_string());
+
+                            let response_envelope = aura_core::effects::TransportEnvelope {
+                                destination: envelope.source,  // Send back to initiator (Bob)
+                                source: self.authority_id,
+                                context: envelope.context,
+                                payload: vec![],  // Empty payload for now
+                                metadata: response_metadata,
+                                receipt: None,
+                            };
+
+                            // Send through transport effects
+                            if let Err(e) = effects.send_envelope(response_envelope).await {
+                                tracing::error!("{} failed to send acceptance response: {}", self.name, e);
+                            } else {
+                                tracing::info!("{} sent acceptance response for ceremony {}", self.name, ceremony_id);
+                            }
+
+                            // Generate acceptance response for local processing
+                            responses.push(AgentResponse::AcceptGuardianBinding {
+                                account: envelope.source,
+                                context_id: envelope.context,
+                            });
+                        }
+                    }
+                }
+                Err(aura_core::effects::TransportError::NoMessage) => {
+                    // No more messages
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!("{} error receiving transport message: {}", self.name, e);
+                    break;
+                }
+            }
+        }
+
+        Ok(responses)
     }
 
     /// Process an incoming event and generate responses
@@ -675,8 +774,11 @@ pub struct AgentStatistics {
 pub struct AgentFactory;
 
 impl AgentFactory {
-    /// Create Alice and Carol agents for demo
-    pub async fn create_demo_agents(seed: u64) -> anyhow::Result<(SimulatedAgent, SimulatedAgent)> {
+    /// Create Alice and Carol agents for demo with optional shared transport
+    pub async fn create_demo_agents(
+        seed: u64,
+        shared_inbox: Option<Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
+    ) -> anyhow::Result<(SimulatedAgent, SimulatedAgent)> {
         let alice_config = AgentConfig {
             seed,
             response_delay_ms: (1500, 3000), // Alice is relatively quick
@@ -707,8 +809,8 @@ impl AgentFactory {
             },
         };
 
-        let alice = SimulatedAgent::new("Alice".to_string(), alice_config).await?;
-        let carol = SimulatedAgent::new("Carol".to_string(), carol_config).await?;
+        let alice = SimulatedAgent::new_with_shared_transport("Alice".to_string(), alice_config, shared_inbox.clone()).await?;
+        let carol = SimulatedAgent::new_with_shared_transport("Carol".to_string(), carol_config, shared_inbox).await?;
 
         Ok((alice, carol))
     }

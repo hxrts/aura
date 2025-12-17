@@ -17,32 +17,19 @@
 
 use iocraft::prelude::*;
 
-use std::sync::Arc;
-
 use aura_app::signal_defs::CHAT_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
+use crate::tui::callbacks::{
+    ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
+    SetTopicCallback,
+};
 use crate::tui::components::{MessageBubble, MessageInput};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
-use crate::tui::theme::{Spacing, Theme};
+use crate::tui::theme::{focus_border_color, list_item_colors, Spacing, Theme};
 use crate::tui::types::{Channel, Message};
-
-/// Callback type for sending messages
-pub type SendCallback = Arc<dyn Fn(String, String) + Send + Sync>;
-
-/// Callback type for channel selection (channel_id)
-pub type ChannelSelectCallback = Arc<dyn Fn(String) + Send + Sync>;
-
-/// Callback type for creating new channels (name, topic)
-pub type CreateChannelCallback = Arc<dyn Fn(String, Option<String>) + Send + Sync>;
-
-/// Callback type for retrying failed messages (message_id, channel, content)
-pub type RetryMessageCallback = Arc<dyn Fn(String, String, String) + Send + Sync>;
-
-/// Callback type for setting channel topic (channel_id, topic)
-pub type SetTopicCallback = Arc<dyn Fn(String, String) + Send + Sync>;
 
 /// Format a timestamp (ms since epoch) as a human-readable time string
 fn format_timestamp(ts_ms: u64) -> String {
@@ -90,17 +77,12 @@ pub struct ChannelListProps {
 #[component]
 pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
     let selected_idx = props.selected_index;
-    let border_color = if props.focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
 
     element! {
         View(
             flex_direction: FlexDirection::Column,
             border_style: BorderStyle::Round,
-            border_color: border_color,
+            border_color: focus_border_color(props.focused),
             padding: Spacing::PANEL_PADDING,
             width: 30pct,
         ) {
@@ -113,12 +95,7 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
             ) {
             #(props.channels.iter().enumerate().map(|(idx, ch)| {
                 let is_selected = idx == selected_idx;
-                // Use consistent list item colors
-                let (bg, fg) = if is_selected {
-                    (Theme::LIST_BG_SELECTED, Theme::LIST_TEXT_SELECTED)
-                } else {
-                    (Theme::LIST_BG_NORMAL, Theme::LIST_TEXT_NORMAL)
-                };
+                let (bg, fg) = list_item_colors(is_selected);
                 let id = ch.id.clone();
                 let name = ch.name.clone();
                 let badge = if ch.unread_count > 0 {
@@ -271,7 +248,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let channels_focused = current_focus == ChatFocus::Channels;
     let messages_focused = current_focus == ChatFocus::Messages;
 
-    // NOTE: Modals have been moved to app.rs root level. See modal_frame.rs for details.
+    // NOTE: Modals have been moved to app.rs root level. See modal.rs for ModalFrame details.
 
     // Message list border color based on focus
     let msg_border = if messages_focused {

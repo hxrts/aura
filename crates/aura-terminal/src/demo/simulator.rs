@@ -37,13 +37,19 @@ pub struct DemoSimulator {
 
     /// Shutdown signal
     shutdown_tx: Option<mpsc::Sender<()>>,
+
+    /// Shared transport inbox for Bob, Alice, and Carol
+    pub shared_transport_inbox: std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>,
 }
 
 impl DemoSimulator {
     /// Create a new demo simulator with the given seed
     pub async fn new(seed: u64) -> anyhow::Result<Self> {
-        // Create Alice and Carol agents
-        let (alice, carol) = AgentFactory::create_demo_agents(seed).await?;
+        // Create shared transport inbox for Bob, Alice, and Carol to communicate
+        let shared_inbox = std::sync::Arc::new(std::sync::RwLock::new(Vec::new()));
+
+        // Create Alice and Carol agents with shared transport
+        let (alice, carol) = AgentFactory::create_demo_agents(seed, Some(shared_inbox.clone())).await?;
 
         // Get Bob's authority ID - MUST match how TUI derives it in handle_tui_launch()
         // The TUI uses device_id_str = "demo:bob" and computes:
@@ -84,6 +90,7 @@ impl DemoSimulator {
             response_tx,
             event_loop_handle: None,
             shutdown_tx: None,
+            shared_transport_inbox: shared_inbox,
         })
     }
 
@@ -183,8 +190,26 @@ impl DemoSimulator {
                         }
                     }
 
-                    // Periodically process responses (for async responses)
+                    // Periodically process responses and transport messages
                     _ = response_interval.tick() => {
+                        // Check for incoming transport messages (guardian invitations, etc.)
+                        let mut alice_guard = alice.lock().await;
+                        if let Ok(responses) = alice_guard.process_transport_messages().await {
+                            for response in responses {
+                                tracing::debug!("Alice transport response: {:?}", response);
+                            }
+                        }
+                        drop(alice_guard);
+
+                        let mut carol_guard = carol.lock().await;
+                        if let Ok(responses) = carol_guard.process_transport_messages().await {
+                            for response in responses {
+                                tracing::debug!("Carol transport response: {:?}", response);
+                            }
+                        }
+                        drop(carol_guard);
+
+                        // Process any responses generated
                         bridge.process_responses().await;
                     }
                 }

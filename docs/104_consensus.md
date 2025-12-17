@@ -724,7 +724,100 @@ Consensus uses FROST as the final stage of agreement. FROST ensures that only on
 
 Consensus and FROST remain separate. Consensus orchestrates communication. FROST proves final agreement. Combining the two yields a single commit fact.
 
-## 17. Summary
+## 17. Operation Categories
+
+Not all operations require consensus. Aura classifies operations into three categories based on their security requirements and execution timing.
+
+### 17.1 Category A: Optimistic Operations
+
+Operations that can proceed immediately without consensus. These use CRDT facts with eventual consistency.
+
+**Characteristics:**
+- Immediate local effect
+- Background sync via anti-entropy
+- Failure shows indicator, doesn't block functionality
+- Partial success is acceptable
+
+**Examples:**
+- Send message (within established context)
+- Create channel (within established relational context)
+- Update channel topic
+- Block/unblock contact
+- Pin message
+
+These operations work because the cryptographic context already exists. Keys derive deterministically from shared journal state. No new agreement is needed.
+
+### 17.2 Category B: Deferred Operations
+
+Operations that apply locally but require agreement for finalization. Effect is pending until confirmed.
+
+**Characteristics:**
+- Immediate local effect shown as "pending"
+- Background ceremony for agreement
+- Failure triggers rollback with user notification
+- Multi-admin operations use this pattern
+
+**Examples:**
+- Change channel permissions (requires admin consensus)
+- Remove channel member (may be contested)
+- Transfer channel ownership
+- Rename channel
+
+### 17.3 Category C: Consensus-Gated Operations
+
+Operations where partial state is dangerous. These block until consensus completes.
+
+**Characteristics:**
+- Operation does NOT proceed until consensus achieved
+- Partial state would be dangerous or irrecoverable
+- User must wait for confirmation
+
+**Examples:**
+- Guardian rotation (key shares distributed atomically)
+- Recovery execution (account state replacement)
+- OTA hard fork activation (breaking protocol change)
+- Device revocation (security-critical removal)
+- Add contact / Create group (establishes cryptographic context)
+- Add member to group (changes group encryption keys)
+
+These use Aura Consensus as described in this document.
+
+### 17.4 Decision Tree
+
+```
+Does this operation establish or modify cryptographic relationships?
+│
+├─ YES: Does the user need to wait for completion?
+│       │
+│       ├─ YES (new context, key changes) → Category C (Consensus)
+│       │   Examples: add contact, create group, guardian rotation
+│       │
+│       └─ NO (removal from existing context) → Category B (Deferred)
+│           Examples: remove from group, revoke device
+│
+└─ NO: Does this affect other users' access or policies?
+       │
+       ├─ YES: Is this high-security or irreversible?
+       │       │
+       │       ├─ YES → Category B (Deferred)
+       │       │   Examples: transfer ownership, delete channel
+       │       │
+       │       └─ NO → Category A (Optimistic)
+       │           Examples: pin message, update topic
+       │
+       └─ NO → Category A (Optimistic)
+           Examples: send message, create channel, block contact
+```
+
+### 17.5 Key Insight
+
+**Ceremonies establish shared cryptographic context. Operations within that context are cheap.**
+
+Once a relational context exists (established via Category C invitation ceremony), channels and messages within that context are Category A. The expensive part is establishing WHO is in the relationship. Once established, operations WITHIN the relationship derive keys deterministically from shared state.
+
+See `work/optimistic.md` for detailed design and effect policy integration.
+
+## 18. Summary
 
 Aura Consensus produces monotone commit facts that represent non-monotone operations. It integrates with journals through set union. It uses FROST threshold signatures and CRDT evidence structures. It provides agreement, validity, and liveness. It supports authority updates and relational operations. It requires no global log and no central coordinator.
 The helper `HasEquivocatedInSet` excludes conflict batches that contain conflicting signatures from the same witness. `Fallback_Start` transitions the local state machine into fallback mode and arms gossip timers. Implementations must provide these utilities alongside the timers described earlier.
