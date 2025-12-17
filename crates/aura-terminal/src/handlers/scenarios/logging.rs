@@ -44,7 +44,12 @@ pub async fn persist_log(
         log.lines.join("\n").into_bytes(),
     )
     .await
-    .map_err(|e| TerminalError::Operation(format!("Failed to persist scenario log via storage effects: {}", e))?;
+    .map_err(|e| {
+        TerminalError::Operation(format!(
+            "Failed to persist scenario log via storage effects: {}",
+            e
+        ))
+    })?;
 
     Ok(storage_key)
 }

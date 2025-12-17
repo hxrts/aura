@@ -30,8 +30,8 @@ use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::{ImportInvitationCallback, StartChatCallback, UpdatePetnameCallback};
 use crate::tui::components::{
-    DetailPanel, DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, InvitePeerCallback,
-    KeyValue, ListPanel, StatusIndicator,
+    DetailPanel, DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState,
+    InvitePeerCallback, KeyValue, ListPanel, StatusIndicator,
 };
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
@@ -143,13 +143,15 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             .unwrap_or_else(|| "No suggestion".to_string());
 
         vec![
-            element! { KeyValue(label: "Petname".to_string(), value: c.petname.clone()) }.into_any(),
+            element! { KeyValue(label: "Petname".to_string(), value: c.petname.clone()) }
+                .into_any(),
             element! { KeyValue(label: "Status".to_string(), value: status_label.to_string()) }
                 .into_any(),
             element! { KeyValue(label: "Guardian".to_string(), value: guardian.to_string()) }
                 .into_any(),
             element! { View(height: 1) }.into_any(),
-            element! { KeyValue(label: "Suggested name".to_string(), value: suggestion) }.into_any(),
+            element! { KeyValue(label: "Suggested name".to_string(), value: suggestion) }
+                .into_any(),
         ]
     } else {
         vec![]
@@ -241,11 +243,8 @@ pub fn ContactsScreen(
                 {
                     let core = app_core.read().await;
                     if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-                        let contacts: Vec<Contact> = contacts_state
-                            .contacts
-                            .iter()
-                            .map(Contact::from)
-                            .collect();
+                        let contacts: Vec<Contact> =
+                            contacts_state.contacts.iter().map(Contact::from).collect();
                         reactive_contacts.set(contacts);
                     }
                 }
@@ -258,11 +257,8 @@ pub fn ContactsScreen(
 
                 // Subscribe to signal updates - runs until component unmounts
                 while let Ok(contacts_state) = stream.recv().await {
-                    let contacts: Vec<Contact> = contacts_state
-                        .contacts
-                        .iter()
-                        .map(Contact::from)
-                        .collect();
+                    let contacts: Vec<Contact> =
+                        contacts_state.contacts.iter().map(Contact::from).collect();
 
                     reactive_contacts.set(contacts);
                 }

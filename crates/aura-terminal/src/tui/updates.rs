@@ -329,7 +329,10 @@ mod tests {
         assert!(matches!(update1, UiUpdate::DisplayNameChanged(name) if name == "Alice"));
 
         let update2 = rx.try_recv().unwrap();
-        assert!(matches!(update2, UiUpdate::MfaPolicyChanged(MfaPolicy::AlwaysRequired)));
+        assert!(matches!(
+            update2,
+            UiUpdate::MfaPolicyChanged(MfaPolicy::AlwaysRequired)
+        ));
     }
 
     #[test]

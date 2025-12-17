@@ -127,10 +127,9 @@ impl CeremonyTracker {
     pub async fn get(&self, ceremony_id: &str) -> Result<CeremonyState, IntentError> {
         let ceremonies = self.ceremonies.read().await;
 
-        ceremonies
-            .get(ceremony_id)
-            .cloned()
-            .ok_or_else(|| IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id)))
+        ceremonies.get(ceremony_id).cloned().ok_or_else(|| {
+            IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+        })
     }
 
     /// Mark a guardian as having accepted the invitation
@@ -148,9 +147,9 @@ impl CeremonyTracker {
     ) -> Result<bool, IntentError> {
         let mut ceremonies = self.ceremonies.write().await;
 
-        let state = ceremonies
-            .get_mut(ceremony_id)
-            .ok_or_else(|| IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id)))?;
+        let state = ceremonies.get_mut(ceremony_id).ok_or_else(|| {
+            IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+        })?;
 
         // Check if guardian is part of this ceremony
         if !state.guardian_ids.contains(&guardian_id) {
@@ -223,9 +222,9 @@ impl CeremonyTracker {
     ) -> Result<(), IntentError> {
         let mut ceremonies = self.ceremonies.write().await;
 
-        let state = ceremonies
-            .get_mut(ceremony_id)
-            .ok_or_else(|| IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id)))?;
+        let state = ceremonies.get_mut(ceremony_id).ok_or_else(|| {
+            IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+        })?;
 
         state.has_failed = true;
         state.error_message = error_message.clone();
@@ -246,9 +245,9 @@ impl CeremonyTracker {
     pub async fn remove(&self, ceremony_id: &str) -> Result<(), IntentError> {
         let mut ceremonies = self.ceremonies.write().await;
 
-        ceremonies
-            .remove(ceremony_id)
-            .ok_or_else(|| IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id)))?;
+        ceremonies.remove(ceremony_id).ok_or_else(|| {
+            IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+        })?;
 
         tracing::debug!(ceremony_id = %ceremony_id, "Ceremony removed from tracker");
 

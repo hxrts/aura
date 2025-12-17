@@ -411,9 +411,7 @@ impl RecoveryService {
     ///
     /// # Returns
     /// List of (ceremony_id, guardian_id) pairs for accepted guardians
-    pub async fn process_guardian_acceptances(
-        &self,
-    ) -> AgentResult<Vec<(String, String)>> {
+    pub async fn process_guardian_acceptances(&self) -> AgentResult<Vec<(String, String)>> {
         use aura_core::effects::TransportEffects;
 
         let effects = self.effects.read().await;

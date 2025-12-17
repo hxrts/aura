@@ -62,9 +62,12 @@ async fn create_authority(ctx: &HandlerContext<'_>, threshold: u32) -> TerminalR
 
     let key = format!("authority:{}", authority_id);
     effects
-        .store(&key, serde_json::to_vec(&record).map_err(|e| {
-            TerminalError::Operation(format!("Failed to serialize authority record: {}", e))
-        })?)
+        .store(
+            &key,
+            serde_json::to_vec(&record).map_err(|e| {
+                TerminalError::Operation(format!("Failed to serialize authority record: {}", e))
+            })?,
+        )
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to persist authority: {}", e)))?;
 
@@ -144,8 +147,9 @@ async fn add_device(
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to read authority: {}", e)))?
     {
-        serde_json::from_slice(&bytes)
-            .map_err(|e| TerminalError::Config(format!("Failed to parse authority record: {}", e)))?
+        serde_json::from_slice(&bytes).map_err(|e| {
+            TerminalError::Config(format!("Failed to parse authority record: {}", e))
+        })?
     } else {
         return Err(TerminalError::NotFound(format!(
             "Authority {} not found; create it first",
@@ -164,7 +168,10 @@ async fn add_device(
         )
         .await
         .map_err(|e| {
-            TerminalError::Operation(format!("Failed to update authority {}: {}", authority_id, e))
+            TerminalError::Operation(format!(
+                "Failed to update authority {}: {}",
+                authority_id, e
+            ))
         })?;
 
     output.kv("Added device to authority", authority_id.to_string());

@@ -296,12 +296,18 @@ impl Default for BlockSnapshot {
 impl BlockSnapshot {
     /// Get residents list from block state
     pub fn residents(&self) -> &[aura_app::views::block::Resident] {
-        self.block.as_ref().map(|b| b.residents.as_slice()).unwrap_or(&[])
+        self.block
+            .as_ref()
+            .map(|b| b.residents.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Get storage info from block state
     pub fn storage(&self) -> aura_app::BlockFlowBudget {
-        self.block.as_ref().map(|b| b.storage.clone()).unwrap_or_default()
+        self.block
+            .as_ref()
+            .map(|b| b.storage.clone())
+            .unwrap_or_default()
     }
 }
 

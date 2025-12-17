@@ -74,38 +74,45 @@ pub fn format_budget_status(budget: &BlockFlowBudget) -> String {
     let mut output = String::new();
     output.push_str(&format!("Block Storage Budget: {}\n", budget.block_id));
     output.push_str(&format!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
-    output.push_str(&format!("\nTotal: {} / {} ({}% used)\n",
+    output.push_str(&format!(
+        "\nTotal: {} / {} ({}% used)\n",
         BudgetBreakdown::format_size(budget.total_used()),
         BudgetBreakdown::format_size(breakdown.total),
         usage_percent
     ));
 
     output.push_str(&format!("\nResident Storage:\n"));
-    output.push_str(&format!("  {} residents ({} max)\n",
+    output.push_str(&format!(
+        "  {} residents ({} max)\n",
         budget.resident_count,
         aura_app::MAX_RESIDENTS
     ));
-    output.push_str(&format!("  {} / {} used\n",
+    output.push_str(&format!(
+        "  {} / {} used\n",
         BudgetBreakdown::format_size(breakdown.resident_used),
         BudgetBreakdown::format_size(breakdown.resident_limit)
     ));
 
     output.push_str(&format!("\nNeighborhood Donations:\n"));
-    output.push_str(&format!("  {} neighborhoods ({} max)\n",
+    output.push_str(&format!(
+        "  {} neighborhoods ({} max)\n",
         budget.neighborhood_count,
         aura_app::MAX_NEIGHBORHOODS
     ));
-    output.push_str(&format!("  {} donated\n",
+    output.push_str(&format!(
+        "  {} donated\n",
         BudgetBreakdown::format_size(breakdown.neighborhood_donations)
     ));
 
     output.push_str(&format!("\nPinned Content:\n"));
-    output.push_str(&format!("  {} / {} used\n",
+    output.push_str(&format!(
+        "  {} / {} used\n",
         BudgetBreakdown::format_size(breakdown.pinned_used),
         BudgetBreakdown::format_size(breakdown.pinned_limit)
     ));
 
-    output.push_str(&format!("\nRemaining: {}\n",
+    output.push_str(&format!(
+        "\nRemaining: {}\n",
         BudgetBreakdown::format_size(breakdown.remaining)
     ));
 

@@ -325,7 +325,10 @@ impl AuraAgent {
 
                                         // Mark ceremony as failed
                                         let _ = ceremony_tracker
-                                            .mark_failed(&ceremony_id, Some(format!("Commit failed: {}", e)))
+                                            .mark_failed(
+                                                &ceremony_id,
+                                                Some(format!("Commit failed: {}", e)),
+                                            )
                                             .await;
                                     }
                                 }

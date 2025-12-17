@@ -128,6 +128,7 @@ pub mod queries;
 pub mod runtime_bridge;
 pub mod signal_defs;
 pub mod views;
+pub mod workflows;
 
 #[cfg(feature = "signals")]
 pub mod reactive_state;

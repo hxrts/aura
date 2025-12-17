@@ -797,12 +797,12 @@ async fn test_invitation_import() {
 // ============================================================================
 
 use aura_terminal::tui::components::{AccountSetupState, ContactSelectState, TextInputState};
-use aura_terminal::tui::{
-    ChatCreateState, InvitationCodeState, InvitationCreateState, InvitationImportState,
-};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::types::{Contact, ContactStatus, InvitationType};
+use aura_terminal::tui::{
+    ChatCreateState, InvitationCodeState, InvitationCreateState, InvitationImportState,
+};
 
 /// Test the complete account creation callback flow
 /// This tests the IoContext::create_account() method directly, which is what the
@@ -2267,9 +2267,9 @@ async fn test_display_name_editing_flow() {
 #[tokio::test]
 async fn test_threshold_configuration_flow() {
     use aura_app::AppCore;
-    use aura_terminal::tui::ThresholdState;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
+    use aura_terminal::tui::ThresholdState;
     use std::sync::Arc;
     use tokio::sync::RwLock;
 

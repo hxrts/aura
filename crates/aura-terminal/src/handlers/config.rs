@@ -3,10 +3,7 @@ use crate::handlers::HandlerContext;
 use aura_core::effects::StorageEffects;
 
 /// Load config bytes from StorageEffects by key (usually a path string).
-pub async fn load_config_bytes(
-    ctx: &HandlerContext<'_>,
-    key: &str,
-) -> TerminalResult<Vec<u8>> {
+pub async fn load_config_bytes(ctx: &HandlerContext<'_>, key: &str) -> TerminalResult<Vec<u8>> {
     let data = ctx
         .effects()
         .retrieve(key)

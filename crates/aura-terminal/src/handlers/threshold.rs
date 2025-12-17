@@ -64,7 +64,10 @@ pub async fn handle_threshold(
         "dkd" => execute_dkd_protocol(ctx, &valid_configs, threshold, &mut output).await?,
         _ => {
             output.eprintln(format!("Unknown threshold mode: {}", mode));
-            return Err(TerminalError::Input(format!("Unknown threshold mode: {}", mode)));
+            return Err(TerminalError::Input(format!(
+                "Unknown threshold mode: {}",
+                mode
+            )));
         }
     }
 

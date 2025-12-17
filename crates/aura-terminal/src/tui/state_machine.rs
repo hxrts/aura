@@ -2304,19 +2304,17 @@ fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, 
                 }
             }
         }
-        KeyCode::Backspace => {
-            match screen {
-                Screen::Block => {
-                    state.block.insert_mode_entry_char = None;
-                    state.block.input_buffer.pop();
-                }
-                Screen::Chat => {
-                    state.chat.insert_mode_entry_char = None;
-                    state.chat.input_buffer.pop();
-                }
-                _ => {}
+        KeyCode::Backspace => match screen {
+            Screen::Block => {
+                state.block.insert_mode_entry_char = None;
+                state.block.input_buffer.pop();
             }
-        }
+            Screen::Chat => {
+                state.chat.insert_mode_entry_char = None;
+                state.chat.input_buffer.pop();
+            }
+            _ => {}
+        },
         KeyCode::Enter => {
             match screen {
                 Screen::Block => {

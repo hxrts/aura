@@ -603,11 +603,7 @@ impl IoContext {
                 neighborhood_id: Some(snapshot.neighborhood.home_block_id.clone()),
                 neighborhood_name: Some(snapshot.neighborhood.home_block_name.clone()),
                 blocks: snapshot.neighborhood.neighbors.clone(),
-                position: snapshot
-                    .neighborhood
-                    .position
-                    .clone()
-                    .unwrap_or_default(),
+                position: snapshot.neighborhood.position.clone().unwrap_or_default(),
             };
         }
         NeighborhoodSnapshot::default()
@@ -1170,7 +1166,6 @@ impl IoContext {
             .collect()
     }
 
-
     /// Mark a LAN peer as having been invited
     ///
     /// Call this after successfully dispatching an InviteLanPeer command.
@@ -1493,8 +1488,8 @@ impl IoContext {
     /// - User-level capabilities: Any resident
     /// - Moderator/Admin capabilities: Admin or Owner only
     pub fn has_capability(&self, capability: &crate::tui::commands::CommandCapability) -> bool {
-        use aura_app::views::block::ResidentRole;
         use crate::tui::commands::CommandCapability;
+        use aura_app::views::block::ResidentRole;
 
         // None capability is always allowed
         if matches!(capability, CommandCapability::None) {
@@ -1562,8 +1557,8 @@ impl IoContext {
     /// - `Sensitive` - Always allowed (account owner operations)
     /// - `Admin` - Requires Admin or Owner role in current block
     pub fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
-        use aura_app::views::block::ResidentRole;
         use crate::tui::effects::CommandAuthorizationLevel;
+        use aura_app::views::block::ResidentRole;
 
         let level = command.authorization_level();
 

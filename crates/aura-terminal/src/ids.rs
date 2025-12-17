@@ -80,7 +80,10 @@ mod tests {
     fn test_authority_id_varies_with_seed() {
         let id1 = authority_id("alice");
         let id2 = authority_id("bob");
-        assert_ne!(id1, id2, "Different seeds should produce different authority IDs");
+        assert_ne!(
+            id1, id2,
+            "Different seeds should produce different authority IDs"
+        );
     }
 
     #[test]

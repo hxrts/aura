@@ -291,34 +291,76 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // (Screen components still use individual callback props for now)
     let on_block_send = callbacks.as_ref().map(|cb| cb.block.on_send.clone());
     let on_block_invite = callbacks.as_ref().map(|cb| cb.block.on_invite.clone());
-    let on_block_navigate_neighborhood = callbacks.as_ref().map(|cb| cb.block.on_navigate_neighborhood.clone());
-    let on_grant_steward = callbacks.as_ref().map(|cb| cb.block.on_grant_steward.clone());
-    let on_revoke_steward = callbacks.as_ref().map(|cb| cb.block.on_revoke_steward.clone());
+    let on_block_navigate_neighborhood = callbacks
+        .as_ref()
+        .map(|cb| cb.block.on_navigate_neighborhood.clone());
+    let on_grant_steward = callbacks
+        .as_ref()
+        .map(|cb| cb.block.on_grant_steward.clone());
+    let on_revoke_steward = callbacks
+        .as_ref()
+        .map(|cb| cb.block.on_revoke_steward.clone());
 
     let on_send = callbacks.as_ref().map(|cb| cb.chat.on_send.clone());
-    let on_retry_message = callbacks.as_ref().map(|cb| cb.chat.on_retry_message.clone());
-    let on_channel_select = callbacks.as_ref().map(|cb| cb.chat.on_channel_select.clone());
-    let on_create_channel = callbacks.as_ref().map(|cb| cb.chat.on_create_channel.clone());
+    let on_retry_message = callbacks
+        .as_ref()
+        .map(|cb| cb.chat.on_retry_message.clone());
+    let on_channel_select = callbacks
+        .as_ref()
+        .map(|cb| cb.chat.on_channel_select.clone());
+    let on_create_channel = callbacks
+        .as_ref()
+        .map(|cb| cb.chat.on_create_channel.clone());
     let on_set_topic = callbacks.as_ref().map(|cb| cb.chat.on_set_topic.clone());
 
-    let on_update_petname = callbacks.as_ref().map(|cb| cb.contacts.on_update_petname.clone());
-    let on_start_chat = callbacks.as_ref().map(|cb| cb.contacts.on_start_chat.clone());
-    let on_invite_lan_peer = callbacks.as_ref().map(|cb| cb.contacts.on_invite_lan_peer.clone());
-    let on_import_invitation = callbacks.as_ref().map(|cb| cb.invitations.on_import.clone());
+    let on_update_petname = callbacks
+        .as_ref()
+        .map(|cb| cb.contacts.on_update_petname.clone());
+    let on_start_chat = callbacks
+        .as_ref()
+        .map(|cb| cb.contacts.on_start_chat.clone());
+    let on_invite_lan_peer = callbacks
+        .as_ref()
+        .map(|cb| cb.contacts.on_invite_lan_peer.clone());
+    let on_import_invitation = callbacks
+        .as_ref()
+        .map(|cb| cb.invitations.on_import.clone());
 
-    let on_enter_block = callbacks.as_ref().map(|cb| cb.neighborhood.on_enter_block.clone());
-    let on_go_home = callbacks.as_ref().map(|cb| cb.neighborhood.on_go_home.clone());
-    let on_back_to_street = callbacks.as_ref().map(|cb| cb.neighborhood.on_back_to_street.clone());
+    let on_enter_block = callbacks
+        .as_ref()
+        .map(|cb| cb.neighborhood.on_enter_block.clone());
+    let on_go_home = callbacks
+        .as_ref()
+        .map(|cb| cb.neighborhood.on_go_home.clone());
+    let on_back_to_street = callbacks
+        .as_ref()
+        .map(|cb| cb.neighborhood.on_back_to_street.clone());
 
-    let on_update_mfa = callbacks.as_ref().map(|cb| cb.settings.on_update_mfa.clone());
-    let on_update_nickname = callbacks.as_ref().map(|cb| cb.settings.on_update_nickname.clone());
-    let on_update_threshold = callbacks.as_ref().map(|cb| cb.settings.on_update_threshold.clone());
-    let on_add_device = callbacks.as_ref().map(|cb| cb.settings.on_add_device.clone());
-    let on_remove_device = callbacks.as_ref().map(|cb| cb.settings.on_remove_device.clone());
+    let on_update_mfa = callbacks
+        .as_ref()
+        .map(|cb| cb.settings.on_update_mfa.clone());
+    let on_update_nickname = callbacks
+        .as_ref()
+        .map(|cb| cb.settings.on_update_nickname.clone());
+    let on_update_threshold = callbacks
+        .as_ref()
+        .map(|cb| cb.settings.on_update_threshold.clone());
+    let on_add_device = callbacks
+        .as_ref()
+        .map(|cb| cb.settings.on_add_device.clone());
+    let on_remove_device = callbacks
+        .as_ref()
+        .map(|cb| cb.settings.on_remove_device.clone());
 
-    let on_start_recovery = callbacks.as_ref().map(|cb| cb.recovery.on_start_recovery.clone());
-    let on_add_guardian = callbacks.as_ref().map(|cb| cb.recovery.on_add_guardian.clone());
-    let on_submit_approval = callbacks.as_ref().map(|cb| cb.recovery.on_submit_approval.clone());
+    let on_start_recovery = callbacks
+        .as_ref()
+        .map(|cb| cb.recovery.on_start_recovery.clone());
+    let on_add_guardian = callbacks
+        .as_ref()
+        .map(|cb| cb.recovery.on_add_guardian.clone());
+    let on_submit_approval = callbacks
+        .as_ref()
+        .map(|cb| cb.recovery.on_submit_approval.clone());
 
     let current_screen = screen.get();
 

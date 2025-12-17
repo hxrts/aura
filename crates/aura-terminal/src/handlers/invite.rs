@@ -174,10 +174,12 @@ async fn create_invitation(
     ttl_secs: Option<u64>,
 ) -> TerminalResult<aura_agent::Invitation> {
     let receiver_id = AuthorityId::from_uuid(
-        uuid::Uuid::from_str(invitee).map_err(|e| TerminalError::Input(format!("invalid invitee authority: {}", e)))?,
+        uuid::Uuid::from_str(invitee)
+            .map_err(|e| TerminalError::Input(format!("invalid invitee authority: {}", e)))?,
     );
     let subject_authority = AuthorityId::from_uuid(
-        uuid::Uuid::from_str(account).map_err(|e| TerminalError::Input(format!("invalid account authority: {}", e)))?,
+        uuid::Uuid::from_str(account)
+            .map_err(|e| TerminalError::Input(format!("invalid account authority: {}", e)))?,
     );
     let service = agent.invitations().await?;
     let expires_ms = ttl_secs.map(|s| s * 1000);

@@ -200,7 +200,8 @@ impl AuraEffectSystem {
         let sync_handler = LocalSyncHandler::new(oplog);
         let transport_handler = aura_effects::transport::RealTransportHandler::default();
         // Use shared inbox if provided (simulation mode), otherwise create new local inbox
-        let transport_inbox = shared_transport_inbox.unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())));
+        let transport_inbox =
+            shared_transport_inbox.unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())));
         let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
         let secure_storage_handler = RealSecureStorageHandler::default();
         // Create indexed journal with capacity for 100k facts

@@ -12,7 +12,11 @@ use super::types::{ScenarioInfo, ScenarioResult};
 use crate::handlers::HandlerContext;
 
 /// Handle scenario discovery through effects
-pub async fn handle_discover(ctx: &HandlerContext<'_>, root: &Path, validate: bool) -> TerminalResult<()> {
+pub async fn handle_discover(
+    ctx: &HandlerContext<'_>,
+    root: &Path,
+    validate: bool,
+) -> TerminalResult<()> {
     println!("Discovering scenarios in: {}", root.display());
     println!("Validation: {}", validate);
 
@@ -28,7 +32,7 @@ pub async fn handle_discover(ctx: &HandlerContext<'_>, root: &Path, validate: bo
         return Err(TerminalError::Operation(format!(
             "Root directory not found: {}",
             root.display()
-        ));
+        )));
     }
 
     // Simulate scenario discovery
@@ -50,7 +54,11 @@ pub async fn handle_discover(ctx: &HandlerContext<'_>, root: &Path, validate: bo
 }
 
 /// Handle scenario listing through effects
-pub async fn handle_list(ctx: &HandlerContext<'_>, directory: &Path, detailed: bool) -> TerminalResult<()> {
+pub async fn handle_list(
+    ctx: &HandlerContext<'_>,
+    directory: &Path,
+    detailed: bool,
+) -> TerminalResult<()> {
     println!("Listing scenarios in: {}", directory.display());
     println!("Detailed: {}", detailed);
 
@@ -153,19 +161,20 @@ pub async fn handle_report(
     // Load results through storage effects
     let input_key = format!("scenario_results:{}", input.display());
     let results_data = match ctx.effects().retrieve(&input_key).await {
-        Ok(Some(data)) => String::from_utf8(data)
-            .map_err(|e| TerminalError::Operation(format!("Invalid UTF-8 in results file: {}", e))?,
+        Ok(Some(data)) => String::from_utf8(data).map_err(|e| {
+            TerminalError::Operation(format!("Invalid UTF-8 in results file: {}", e))
+        })?,
         Ok(None) => {
             return Err(TerminalError::Operation(format!(
                 "Results file not found: {}",
                 input.display()
-            ))
+            )))
         }
         Err(e) => {
             return Err(TerminalError::Operation(format!(
                 "Failed to read results file via storage effects: {}",
                 e
-            ))
+            )))
         }
     };
 
@@ -177,7 +186,9 @@ pub async fn handle_report(
     ctx.effects()
         .store(&output_key, report.as_bytes().to_vec())
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to save report via storage effects: {}", e))?;
+        .map_err(|e| {
+            TerminalError::Operation(format!("Failed to save report via storage effects: {}", e))
+        })?;
 
     println!("Report generated successfully");
 
@@ -218,7 +229,10 @@ async fn validate_scenarios_through_effects(
         if scenario.contains("invalid") {
             let _ = ctx;
             eprintln!("Invalid scenario: {}", scenario);
-            return Err(TerminalError::Operation(format!("Invalid scenario: {}", scenario));
+            return Err(TerminalError::Operation(format!(
+                "Invalid scenario: {}",
+                scenario
+            )));
         }
     }
 
@@ -271,13 +285,15 @@ async fn save_scenario_results(
     } else {
         serde_json::to_string(results)
     }
-    .map_err(|e| TerminalError::Operation(format!("Failed to serialize results: {}", e))?;
+    .map_err(|e| TerminalError::Operation(format!("Failed to serialize results: {}", e)))?;
 
     let output_key = format!("scenario_output:{}", output_path.display());
     ctx.effects()
         .store(&output_key, results_json.as_bytes().to_vec())
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to save results via storage effects: {}", e))?;
+        .map_err(|e| {
+            TerminalError::Operation(format!("Failed to save results via storage effects: {}", e))
+        })?;
 
     println!("Results saved to storage key: {}", output_key);
 
@@ -291,14 +307,14 @@ fn generate_report_from_results(
     detailed: bool,
 ) -> TerminalResult<String> {
     let results_str = String::from_utf8(results_data.to_vec())
-        .map_err(|e| TerminalError::Operation(format!("Invalid UTF-8 in results: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Invalid UTF-8 in results: {}", e)))?;
 
     let results: Vec<ScenarioResult> = serde_json::from_str(&results_str)
-        .map_err(|e| TerminalError::Operation(format!("Failed to parse results: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to parse results: {}", e)))?;
 
     let report = match format.unwrap_or("text") {
         "json" => serde_json::to_string_pretty(&results)
-            .map_err(|e| TerminalError::Operation(format!("Failed to format JSON: {}", e))?,
+            .map_err(|e| TerminalError::Operation(format!("Failed to format JSON: {}", e)))?,
         _ => {
             let mut report = String::new();
             report.push_str("=== Scenario Results Report ===\n\n");

@@ -47,6 +47,26 @@ impl From<aura_agent::AgentError> for TerminalError {
     }
 }
 
+impl From<aura_app::IntentError> for TerminalError {
+    fn from(err: aura_app::IntentError) -> Self {
+        TerminalError::Operation(err.to_string())
+    }
+}
+
+#[cfg(feature = "development")]
+impl From<aura_testkit::TestError> for TerminalError {
+    fn from(err: aura_testkit::TestError) -> Self {
+        TerminalError::Operation(err.to_string())
+    }
+}
+
+#[cfg(feature = "development")]
+impl From<aura_core::effects::TestingError> for TerminalError {
+    fn from(err: aura_core::effects::TestingError) -> Self {
+        TerminalError::Operation(err.to_string())
+    }
+}
+
 #[cfg(feature = "terminal")]
 impl From<crate::tui::effects::DispatchError> for TerminalError {
     fn from(err: crate::tui::effects::DispatchError) -> Self {
@@ -71,15 +91,9 @@ impl From<crate::tui::effects::DispatchError> for TerminalError {
 impl From<crate::tui::effects::OpError> for TerminalError {
     fn from(err: crate::tui::effects::OpError) -> Self {
         match err {
-            crate::tui::effects::OpError::NotImplemented(s) => {
-                TerminalError::NotImplemented(s)
-            }
-            crate::tui::effects::OpError::InvalidArgument(s) => {
-                TerminalError::Input(s)
-            }
-            crate::tui::effects::OpError::Failed(s) => {
-                TerminalError::Operation(s)
-            }
+            crate::tui::effects::OpError::NotImplemented(s) => TerminalError::NotImplemented(s),
+            crate::tui::effects::OpError::InvalidArgument(s) => TerminalError::Input(s),
+            crate::tui::effects::OpError::Failed(s) => TerminalError::Operation(s),
         }
     }
 }

@@ -16,7 +16,10 @@ use crate::AdminAction;
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_admin(ctx: &HandlerContext<'_>, action: &AdminAction) -> TerminalResult<CliOutput> {
+pub async fn handle_admin(
+    ctx: &HandlerContext<'_>,
+    action: &AdminAction,
+) -> TerminalResult<CliOutput> {
     match action {
         AdminAction::Replace {
             account,
@@ -78,7 +81,9 @@ async fn replace_admin(
 
     let fact_value = serde_json::to_vec(&fact_content)
         .map(FactValue::Bytes)
-        .map_err(|e| TerminalError::Operation(format!("Failed to encode admin replacement fact: {}", e)))?;
+        .map_err(|e| {
+            TerminalError::Operation(format!("Failed to encode admin replacement fact: {}", e))
+        })?;
 
     let mut delta = Journal::new();
     let fact_key = format!("admin_replace:{}", account_id);
@@ -93,11 +98,12 @@ async fn replace_admin(
         .effects()
         .merge_facts(&current, &delta)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to merge admin replacement fact: {}", e)))?;
-    ctx.effects()
-        .persist_journal(&merged)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to persist admin replacement fact: {}", e)))?;
+        .map_err(|e| {
+            TerminalError::Operation(format!("Failed to merge admin replacement fact: {}", e))
+        })?;
+    ctx.effects().persist_journal(&merged).await.map_err(|e| {
+        TerminalError::Operation(format!("Failed to persist admin replacement fact: {}", e))
+    })?;
 
     output.println(format!(
         "Admin replacement recorded; new admin {} activates at epoch {}",

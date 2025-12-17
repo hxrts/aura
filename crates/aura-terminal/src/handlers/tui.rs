@@ -11,7 +11,6 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 // Import app types from aura-app (pure layer)
 use aura_app::{AppConfig, AppCore};
@@ -422,7 +421,7 @@ pub fn import_account_backup(
 const DEMO_SEED: u64 = 2024;
 
 /// Handle TUI launch
-pub async fn handle_tui(args: &TuiArgs) -> Result<()> {
+pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
     // Demo mode: use simulation backend with deterministic seed
     // The TUI code is IDENTICAL for demo and production - only the backend differs
     if args.demo {
@@ -464,7 +463,7 @@ async fn handle_tui_launch(
     data_dir: Option<&str>,
     device_id_str: Option<&str>,
     mode: TuiMode,
-) -> Result<()> {
+) -> crate::error::TerminalResult<()> {
     let mode_str = match mode {
         TuiMode::Production => "Production",
         TuiMode::Demo { .. } => "Demo (Simulation)",
@@ -564,7 +563,10 @@ async fn handle_tui_launch(
                     .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_inbox)
                     .await
                     .map_err(|e| {
-                        AuraError::internal(format!("Failed to create simulation agent with shared transport: {}", e))
+                        AuraError::internal(format!(
+                            "Failed to create simulation agent with shared transport: {}",
+                            e
+                        ))
                     })?
             }
 
@@ -636,8 +638,7 @@ async fn handle_tui_launch(
         TuiMode::Demo { seed: _ } => {
             // Use the simulator we already created for shared transport
             println!("Starting demo simulator...");
-            let mut sim = demo_simulator_for_bob
-                .expect("Simulator should exist in demo mode");
+            let mut sim = demo_simulator_for_bob.expect("Simulator should exist in demo mode");
 
             sim.start()
                 .await

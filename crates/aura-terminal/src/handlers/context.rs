@@ -138,9 +138,8 @@ async fn show_receipts(
 fn load_context(state_file: &Path, context: &str) -> TerminalResult<ContextSnapshot> {
     let data = fs::read_to_string(state_file)
         .map_err(|e| TerminalError::Config(format!("failed to read {:?}: {}", state_file, e)))?;
-    let file: ContextStateFile = serde_json::from_str(&data).map_err(|e| {
-        TerminalError::Config(format!("invalid JSON in {:?}: {}", state_file, e))
-    })?;
+    let file: ContextStateFile = serde_json::from_str(&data)
+        .map_err(|e| TerminalError::Config(format!("invalid JSON in {:?}: {}", state_file, e)))?;
     let ctx = normalize(context);
     file.contexts
         .into_iter()

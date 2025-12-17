@@ -169,7 +169,8 @@ pub fn SettingsScreen(
                             })
                             .collect();
                         reactive_devices.set(devices);
-                        reactive_threshold.set((settings_state.threshold_k, settings_state.threshold_n));
+                        reactive_threshold
+                            .set((settings_state.threshold_k, settings_state.threshold_n));
                     }
                 }
 
@@ -193,7 +194,8 @@ pub fn SettingsScreen(
                         })
                         .collect();
                     reactive_devices.set(devices);
-                    reactive_threshold.set((settings_state.threshold_k, settings_state.threshold_n));
+                    reactive_threshold
+                        .set((settings_state.threshold_k, settings_state.threshold_n));
                 }
             }
         });

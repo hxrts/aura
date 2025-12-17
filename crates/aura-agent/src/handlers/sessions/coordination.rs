@@ -787,7 +787,7 @@ mod tests {
         // Use shared transport inbox to verify messages are sent
         let shared_inbox = Arc::new(StdRwLock::new(Vec::new()));
         let effects = Arc::new(RwLock::new(
-            AuraEffectSystem::testing_with_shared_transport(&config, shared_inbox.clone()).unwrap()
+            AuraEffectSystem::testing_with_shared_transport(&config, shared_inbox.clone()).unwrap(),
         ));
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
 

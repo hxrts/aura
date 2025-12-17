@@ -310,9 +310,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         guardian_ids: &[String],
     ) -> Result<String, IntentError> {
         // Step 1: Generate FROST keys at new epoch
-        let (new_epoch, key_packages, _public_key) =
-            self.rotate_guardian_keys(threshold_k, total_n, guardian_ids)
-                .await?;
+        let (new_epoch, key_packages, _public_key) = self
+            .rotate_guardian_keys(threshold_k, total_n, guardian_ids)
+            .await?;
 
         // Step 2: Create ceremony ID
         let ceremony_id = format!("ceremony-{}-{}", new_epoch, uuid::Uuid::new_v4());
@@ -389,9 +389,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
     ) -> Result<aura_app::runtime_bridge::CeremonyStatus, IntentError> {
         let tracker = self.agent.ceremony_tracker().await;
 
-        let state = tracker.get(ceremony_id).await.map_err(|e| {
-            IntentError::validation_failed(format!("Ceremony not found: {}", e))
-        })?;
+        let state = tracker
+            .get(ceremony_id)
+            .await
+            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
 
         Ok(aura_app::runtime_bridge::CeremonyStatus {
             ceremony_id: ceremony_id.to_string(),

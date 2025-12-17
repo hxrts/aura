@@ -20,9 +20,9 @@ pub async fn handle_chat(
     _effects: &AuraEffectSystem,
     command: &ChatCommands,
 ) -> TerminalResult<()> {
-    let agent = ctx
-        .agent()
-        .ok_or_else(|| TerminalError::Operation("Agent not available - please initialize an account first".into()))?;
+    let agent = ctx.agent().ok_or_else(|| {
+        TerminalError::Operation("Agent not available - please initialize an account first".into())
+    })?;
 
     let chat = agent.chat();
     let authority_id = ctx.effect_context().authority_id();
@@ -179,7 +179,7 @@ pub async fn handle_chat(
             .await?;
         }
 
-            ChatCommands::Leave { group_id, force: _ } => {
+        ChatCommands::Leave { group_id, force: _ } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
             chat.remove_member(&group_id, authority_id, authority_id)
                 .await?;

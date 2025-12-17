@@ -90,17 +90,17 @@ async fn main() -> Result<()> {
     let cli_handler = CliHandler::with_agent(app_core, agent, device_id, effect_context);
 
     // Execute command through effect system
-    match command {
+    Ok(match command {
         Commands::Init(init) => {
             cli_handler
                 .handle_init(init.num_devices, init.threshold, &init.output)
-                .await
+                .await?
         }
         Commands::Status(status) => {
             let config_path =
                 resolve_config_path(status.config.as_ref(), args.config.as_ref(), &cli_handler)
                     .await?;
-            cli_handler.handle_status(&config_path).await
+            cli_handler.handle_status(&config_path).await?
         }
         Commands::Node(node) => {
             let config_path =
@@ -108,7 +108,7 @@ async fn main() -> Result<()> {
                     .await?;
             cli_handler
                 .handle_node(node.port.unwrap_or(58835), node.daemon, &config_path)
-                .await
+                .await?
         }
         Commands::Threshold(ThresholdArgs {
             configs,
@@ -117,20 +117,20 @@ async fn main() -> Result<()> {
         }) => {
             cli_handler
                 .handle_threshold(&configs, threshold, &mode)
-                .await
+                .await?
         }
         #[cfg(feature = "development")]
-        Commands::Scenarios { action } => cli_handler.handle_scenarios(&action).await,
+        Commands::Scenarios { action } => cli_handler.handle_scenarios(&action).await?,
         #[cfg(feature = "development")]
-        Commands::Demo { command } => cli_handler.handle_demo(&command).await,
-        Commands::Snapshot { action } => cli_handler.handle_snapshot(&action).await,
-        Commands::Admin { action } => cli_handler.handle_admin(&action).await,
-        Commands::Recovery { action } => cli_handler.handle_recovery(&action).await,
-        Commands::Invite { action } => cli_handler.handle_invitation(&action).await,
-        Commands::Authority { command } => cli_handler.handle_authority(&command).await,
-        Commands::Context { action } => cli_handler.handle_context(&action).await,
-        Commands::Amp { action } => cli_handler.handle_amp(&action).await,
-        Commands::Chat { command } => cli_handler.handle_chat(&command).await,
+        Commands::Demo { command } => cli_handler.handle_demo(&command).await?,
+        Commands::Snapshot { action } => cli_handler.handle_snapshot(&action).await?,
+        Commands::Admin { action } => cli_handler.handle_admin(&action).await?,
+        Commands::Recovery { action } => cli_handler.handle_recovery(&action).await?,
+        Commands::Invite { action } => cli_handler.handle_invitation(&action).await?,
+        Commands::Authority { command } => cli_handler.handle_authority(&command).await?,
+        Commands::Context { action } => cli_handler.handle_context(&action).await?,
+        Commands::Amp { action } => cli_handler.handle_amp(&action).await?,
+        Commands::Chat { command } => cli_handler.handle_chat(&command).await?,
         Commands::Sync { action } => {
             // Default to daemon mode if no subcommand specified
             let sync_action = action.unwrap_or(SyncAction::Daemon {
@@ -139,12 +139,12 @@ async fn main() -> Result<()> {
                 peers: None,
                 config: None,
             });
-            cli_handler.handle_sync(&sync_action).await
+            cli_handler.handle_sync(&sync_action).await?
         }
         #[cfg(feature = "terminal")]
-        Commands::Tui(args) => cli_handler.handle_tui(&args).await,
-        Commands::Version => cli_handler.handle_version().await,
-    }
+        Commands::Tui(args) => cli_handler.handle_tui(&args).await?,
+        Commands::Version => cli_handler.handle_version().await?,
+    })
 }
 
 /// Resolve the configuration file path from command line arguments

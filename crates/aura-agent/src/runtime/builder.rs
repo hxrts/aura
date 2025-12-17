@@ -139,7 +139,8 @@ pub struct EffectSystemBuilder {
     sync_config: Option<super::services::SyncManagerConfig>,
     rendezvous_config: Option<super::services::RendezvousManagerConfig>,
     social_config: Option<super::services::SocialManagerConfig>,
-    shared_transport_inbox: Option<std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
+    shared_transport_inbox:
+        Option<std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
 }
 
 impl EffectSystemBuilder {
@@ -274,8 +275,7 @@ impl EffectSystemBuilder {
                     super::AuraEffectSystem::simulation_with_shared_transport(&config, seed, inbox)
                         .map_err(|e| e.to_string())?
                 } else {
-                    super::AuraEffectSystem::simulation(&config, seed)
-                        .map_err(|e| e.to_string())?
+                    super::AuraEffectSystem::simulation(&config, seed).map_err(|e| e.to_string())?
                 };
                 (executor, system)
             }

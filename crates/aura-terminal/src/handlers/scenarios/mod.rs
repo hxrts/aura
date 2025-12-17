@@ -15,7 +15,7 @@ mod logging;
 mod simulation;
 mod types;
 
-use crate::error::{TerminalError, TerminalResult};
+use crate::error::TerminalResult;
 use crate::handlers::HandlerContext;
 use crate::ScenarioAction;
 
@@ -25,7 +25,10 @@ pub use types::{ScenarioInfo, ScenarioResult};
 /// Handle scenario operations through effects
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_scenarios(ctx: &HandlerContext<'_>, action: &ScenarioAction) -> TerminalResult<()> {
+pub async fn handle_scenarios(
+    ctx: &HandlerContext<'_>,
+    action: &ScenarioAction,
+) -> TerminalResult<()> {
     match action {
         ScenarioAction::Discover { root, validate } => {
             handlers::handle_discover(ctx, root, *validate).await

@@ -1300,9 +1300,10 @@ impl AppCore {
         &self,
         ceremony_id: &str,
     ) -> Result<crate::runtime_bridge::CeremonyStatus, IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::no_agent("get_ceremony_status requires a runtime")
-        })?;
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| IntentError::no_agent("get_ceremony_status requires a runtime"))?;
 
         runtime.get_ceremony_status(ceremony_id).await
     }

@@ -855,8 +855,8 @@ impl Query for BlocksQuery {
     }
 
     fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        use crate::views::block::{BlockState, BlocksState, ResidentRole};
         use crate::budget::BlockFlowBudget;
+        use crate::views::block::{BlockState, BlocksState, ResidentRole};
         use std::collections::HashMap;
 
         let blocks_list: Vec<BlockState> = bindings

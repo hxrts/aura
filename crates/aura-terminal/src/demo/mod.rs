@@ -392,24 +392,37 @@ impl SimulatedAgent {
 
                             // Send acceptance response back through transport
                             let mut response_metadata = std::collections::HashMap::new();
-                            response_metadata.insert("content-type".to_string(), "application/aura-guardian-acceptance".to_string());
-                            response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
-                            response_metadata.insert("guardian-id".to_string(), self.authority_id.to_string());
+                            response_metadata.insert(
+                                "content-type".to_string(),
+                                "application/aura-guardian-acceptance".to_string(),
+                            );
+                            response_metadata
+                                .insert("ceremony-id".to_string(), ceremony_id.clone());
+                            response_metadata
+                                .insert("guardian-id".to_string(), self.authority_id.to_string());
 
                             let response_envelope = aura_core::effects::TransportEnvelope {
-                                destination: envelope.source,  // Send back to initiator (Bob)
+                                destination: envelope.source, // Send back to initiator (Bob)
                                 source: self.authority_id,
                                 context: envelope.context,
-                                payload: vec![],  // Empty payload for now
+                                payload: vec![], // Empty payload for now
                                 metadata: response_metadata,
                                 receipt: None,
                             };
 
                             // Send through transport effects
                             if let Err(e) = effects.send_envelope(response_envelope).await {
-                                tracing::error!("{} failed to send acceptance response: {}", self.name, e);
+                                tracing::error!(
+                                    "{} failed to send acceptance response: {}",
+                                    self.name,
+                                    e
+                                );
                             } else {
-                                tracing::info!("{} sent acceptance response for ceremony {}", self.name, ceremony_id);
+                                tracing::info!(
+                                    "{} sent acceptance response for ceremony {}",
+                                    self.name,
+                                    ceremony_id
+                                );
                             }
 
                             // Generate acceptance response for local processing
@@ -809,8 +822,18 @@ impl AgentFactory {
             },
         };
 
-        let alice = SimulatedAgent::new_with_shared_transport("Alice".to_string(), alice_config, shared_inbox.clone()).await?;
-        let carol = SimulatedAgent::new_with_shared_transport("Carol".to_string(), carol_config, shared_inbox).await?;
+        let alice = SimulatedAgent::new_with_shared_transport(
+            "Alice".to_string(),
+            alice_config,
+            shared_inbox.clone(),
+        )
+        .await?;
+        let carol = SimulatedAgent::new_with_shared_transport(
+            "Carol".to_string(),
+            carol_config,
+            shared_inbox,
+        )
+        .await?;
 
         Ok((alice, carol))
     }

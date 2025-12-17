@@ -47,13 +47,16 @@ async fn propose_snapshot(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput>
     let fact_content = FactContent::Relational(RelationalFact::Generic {
         context_id: ctx.effect_context().context_id(),
         binding_type: "snapshot_proposed".to_string(),
-        binding_data: serde_json::to_vec(&proposal)
-            .map_err(|e| TerminalError::Operation(format!("Failed to serialize snapshot proposal: {}", e)))?,
+        binding_data: serde_json::to_vec(&proposal).map_err(|e| {
+            TerminalError::Operation(format!("Failed to serialize snapshot proposal: {}", e))
+        })?,
     });
 
     let fact_value = serde_json::to_vec(&fact_content)
         .map(FactValue::Bytes)
-        .map_err(|e| TerminalError::Operation(format!("Failed to encode snapshot proposal fact: {}", e)))?;
+        .map_err(|e| {
+            TerminalError::Operation(format!("Failed to encode snapshot proposal fact: {}", e))
+        })?;
 
     let mut delta = Journal::new();
     let fact_key = format!("snapshot_proposed:{}", ctx.effect_context().context_id());

@@ -38,7 +38,10 @@ pub async fn handle_invitations(
                 })),
                 Err(e) => {
                     // In demo/offline mode, generate a proper invitation code from ViewState
-                    tracing::debug!("Invitation export via runtime unavailable: {}, generating from ViewState", e);
+                    tracing::debug!(
+                        "Invitation export via runtime unavailable: {}, generating from ViewState",
+                        e
+                    );
 
                     // Get authority and invitation data from AppCore
                     let code = if let Ok(core) = app_core.try_read() {
@@ -56,11 +59,9 @@ pub async fn handle_invitations(
                                 ViewInvitationType::Block => DomainInvitationType::Channel {
                                     block_id: inv.block_id.clone().unwrap_or_default(),
                                 },
-                                ViewInvitationType::Guardian => {
-                                    DomainInvitationType::Guardian {
-                                        subject_authority: authority,
-                                    }
-                                }
+                                ViewInvitationType::Guardian => DomainInvitationType::Guardian {
+                                    subject_authority: authority,
+                                },
                                 ViewInvitationType::Chat => DomainInvitationType::Contact {
                                     petname: inv.from_name.clone().into(),
                                 },
@@ -87,9 +88,7 @@ pub async fn handle_invitations(
                                 version: ShareableInvitation::CURRENT_VERSION,
                                 invitation_id: invitation_id.clone(),
                                 sender_id: authority,
-                                invitation_type: DomainInvitationType::Contact {
-                                    petname: None,
-                                },
+                                invitation_type: DomainInvitationType::Contact { petname: None },
                                 expires_at: None,
                                 message: None,
                             };
@@ -154,9 +153,7 @@ pub async fn handle_invitations(
                 }
                 Err(e) => {
                     let error_msg = match e {
-                        ShareableInvitationError::InvalidFormat => {
-                            "Invalid invitation code format"
-                        }
+                        ShareableInvitationError::InvalidFormat => "Invalid invitation code format",
                         ShareableInvitationError::UnsupportedVersion(_) => {
                             "Unsupported invitation version"
                         }

@@ -45,8 +45,8 @@ pub use settings::{run_settings_screen, SettingsScreen};
 // Screen-specific modals (re-exported from screen directories)
 pub use chat::{ChannelInfoModal, ChatCreateModal, ChatCreateState, CreateChatCallback};
 pub use invitations::{
-    CancelCallback, ImportCallback, InvitationCodeModal, InvitationCodeState, InvitationCreateModal,
-    InvitationCreateState, InvitationImportModal, InvitationImportState,
+    CancelCallback, ImportCallback, InvitationCodeModal, InvitationCodeState,
+    InvitationCreateModal, InvitationCreateState, InvitationImportModal, InvitationImportState,
     ModalCreateInvitationCallback,
 };
 pub use recovery::{GuardianCandidateProps, GuardianSetupModal, ThresholdModal, ThresholdState};

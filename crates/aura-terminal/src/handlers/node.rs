@@ -79,10 +79,9 @@ async fn run_daemon_mode(
 
     // Run a short, effect-driven heartbeat loop to verify the node can make progress
     for idx in 0..3 {
-        ctx.effects()
-            .sleep_ms(200)
-            .await
-            .map_err(|e| TerminalError::Operation(format!("daemon heartbeat sleep failed: {}", e)))?;
+        ctx.effects().sleep_ms(200).await.map_err(|e| {
+            TerminalError::Operation(format!("daemon heartbeat sleep failed: {}", e))
+        })?;
         let epoch = ctx.effects().current_epoch().await.unwrap_or(0);
         output.println(format!("Daemon heartbeat {} at epoch {}", idx + 1, epoch));
     }

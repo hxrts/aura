@@ -37,9 +37,10 @@
 //! - **Fast**: No process spawning, direct function calls
 //! - **Easy to debug**: Full visibility into captured output
 
+use crate::error::TerminalResult;
 use crate::handlers::{CliHandler, EffectContext};
 use crate::{ids, ContextAction, RecoveryAction};
-use anyhow::Result;
+use anyhow::Result as AnyhowResult;
 use aura_agent::AgentBuilder;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::ExecutionMode;
@@ -94,14 +95,14 @@ impl CliTestHarness {
     /// Create a new test harness with default configuration
     ///
     /// This is async because agent construction requires an async runtime context.
-    pub async fn new() -> Result<Self> {
+    pub async fn new() -> AnyhowResult<Self> {
         Self::with_device_id(DeviceId::from_bytes([0u8; 32])).await
     }
 
     /// Create a test harness with a specific device ID
     ///
     /// This is async because agent construction requires an async runtime context.
-    pub async fn with_device_id(device_id: DeviceId) -> Result<Self> {
+    pub async fn with_device_id(device_id: DeviceId) -> AnyhowResult<Self> {
         let authority_id = ids::authority_id(&format!("cli:test-authority:{}", device_id));
         let context_id = ids::context_id(&format!("cli:test-context:{}", device_id));
         let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
@@ -148,7 +149,7 @@ impl CliTestHarness {
     // =========================================================================
 
     /// Execute the version command
-    pub async fn exec_version(&mut self) -> Result<()> {
+    pub async fn exec_version(&mut self) -> TerminalResult<()> {
         self.clear_output();
         // Version command prints directly, so we capture it
         // For now, we'll run it and note the output comes from println!
@@ -172,7 +173,7 @@ impl CliTestHarness {
         num_devices: u32,
         threshold: u32,
         output_path: &std::path::Path,
-    ) -> Result<()> {
+    ) -> TerminalResult<()> {
         self.clear_output();
         self.handler
             .handle_init(num_devices, threshold, output_path)
@@ -180,19 +181,19 @@ impl CliTestHarness {
     }
 
     /// Execute the status command
-    pub async fn exec_status(&mut self, config_path: &std::path::Path) -> Result<()> {
+    pub async fn exec_status(&mut self, config_path: &std::path::Path) -> TerminalResult<()> {
         self.clear_output();
         self.handler.handle_status(config_path).await
     }
 
     /// Execute the recovery command
-    pub async fn exec_recovery(&mut self, action: &RecoveryAction) -> Result<()> {
+    pub async fn exec_recovery(&mut self, action: &RecoveryAction) -> TerminalResult<()> {
         self.clear_output();
         self.handler.handle_recovery(action).await
     }
 
     /// Execute the authority list command
-    pub async fn exec_authority_list(&mut self) -> Result<()> {
+    pub async fn exec_authority_list(&mut self) -> TerminalResult<()> {
         self.clear_output();
         use crate::AuthorityCommands;
         self.handler
@@ -205,7 +206,7 @@ impl CliTestHarness {
         &mut self,
         context_id: String,
         state_file: &Path,
-    ) -> Result<()> {
+    ) -> TerminalResult<()> {
         self.clear_output();
         let action = ContextAction::Inspect {
             context: context_id,
@@ -220,7 +221,7 @@ impl CliTestHarness {
         context_id: String,
         state_file: &Path,
         detailed: bool,
-    ) -> Result<()> {
+    ) -> TerminalResult<()> {
         self.clear_output();
         let action = ContextAction::Receipts {
             context: context_id,

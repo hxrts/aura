@@ -78,11 +78,19 @@ async fn propose_upgrade(
     // Parse version string (e.g., "1.2.3")
     let parts: Vec<&str> = to_version.split('.').collect();
     if parts.len() != 3 {
-        return Err(TerminalError::Input("Invalid semantic version format. Expected: major.minor.patch".into()));
+        return Err(TerminalError::Input(
+            "Invalid semantic version format. Expected: major.minor.patch".into(),
+        ));
     }
-    let major: u16 = parts[0].parse().map_err(|e| TerminalError::Input(format!("Invalid major version: {}", e)))?;
-    let minor: u16 = parts[1].parse().map_err(|e| TerminalError::Input(format!("Invalid minor version: {}", e)))?;
-    let patch: u16 = parts[2].parse().map_err(|e| TerminalError::Input(format!("Invalid patch version: {}", e)))?;
+    let major: u16 = parts[0]
+        .parse()
+        .map_err(|e| TerminalError::Input(format!("Invalid major version: {}", e)))?;
+    let minor: u16 = parts[1]
+        .parse()
+        .map_err(|e| TerminalError::Input(format!("Invalid minor version: {}", e)))?;
+    let patch: u16 = parts[2]
+        .parse()
+        .map_err(|e| TerminalError::Input(format!("Invalid patch version: {}", e)))?;
     let version = SemanticVersion::new(major, minor, patch);
 
     // Compute artifact hash from local file if available, otherwise hash the URL string
@@ -112,9 +120,12 @@ async fn propose_upgrade(
 
     let key = format!("ota:proposal:{}", proposal.package_id);
     ctx.effects()
-        .store(&key, serde_json::to_vec(&proposal).map_err(|e| {
-            TerminalError::Operation(format!("Failed to serialize proposal: {}", e))
-        })?)
+        .store(
+            &key,
+            serde_json::to_vec(&proposal).map_err(|e| {
+                TerminalError::Operation(format!("Failed to serialize proposal: {}", e))
+            })?,
+        )
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to store proposal: {}", e)))?;
 

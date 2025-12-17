@@ -238,16 +238,15 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
         guardians,
     };
 
-    let response = coordinator
-        .execute_setup(request)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Guardian setup choreography failed: {}", e))?;
+    let response = coordinator.execute_setup(request).await.map_err(|e| {
+        TerminalError::Operation(format!("Guardian setup choreography failed: {}", e))
+    })?;
 
     if !response.success {
         return Err(TerminalError::Operation(format!(
             "Guardian setup failed: {}",
             response.error.unwrap_or_else(|| "unknown error".into())
-        ));
+        )));
     }
 
     steps.push(SimStep {

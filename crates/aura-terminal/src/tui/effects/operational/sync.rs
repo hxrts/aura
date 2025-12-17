@@ -13,7 +13,10 @@ use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 /// Handle sync commands
-pub async fn handle_sync(command: &EffectCommand, app_core: &Arc<RwLock<AppCore>>) -> Option<OpResult> {
+pub async fn handle_sync(
+    command: &EffectCommand,
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Option<OpResult> {
     match command {
         EffectCommand::ForceSync => {
             // Update sync status signal to show syncing

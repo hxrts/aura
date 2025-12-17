@@ -58,9 +58,10 @@
 //! - `handler_context` - Shared context type for all handlers
 //! - `docs/001_system_architecture.md` - Layer 7 architecture
 
+use crate::error::{TerminalError, TerminalResult};
 use crate::{
     AdminAction, AmpAction, AuthorityCommands, ChatCommands, ContextAction, InvitationAction,
-    OtaAction, RecoveryAction, SnapshotAction, SyncAction, TerminalError,
+    OtaAction, RecoveryAction, SnapshotAction, SyncAction,
 };
 
 #[cfg(feature = "terminal")]
@@ -71,7 +72,6 @@ use crate::{DemoCommands, ScenarioAction};
 use aura_app::AppCore;
 use aura_core::identifiers::DeviceId;
 use std::path::Path;
-use crate::error::{TerminalError, TerminalResult};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -84,8 +84,8 @@ pub mod authority;
 pub mod budget;
 pub mod chat;
 pub mod cli_output;
-pub mod context;
 pub mod config;
+pub mod context;
 pub mod handler_context;
 pub mod init;
 pub mod invite;
@@ -112,7 +112,6 @@ pub use handler_context::HandlerContext;
 pub mod demo;
 #[cfg(feature = "development")]
 pub mod scenarios;
-
 
 /// Main CLI handler that coordinates all operations through effects
 ///
@@ -176,7 +175,11 @@ impl CliHandler {
         effects: &'a AuraEffectSystem,
         include_agent: bool,
     ) -> HandlerContext<'a> {
-        let agent_opt = if include_agent { Some(&*self.agent) } else { None };
+        let agent_opt = if include_agent {
+            Some(&*self.agent)
+        } else {
+            None
+        };
         HandlerContext::new(&self.effect_context, effects, self.device_id, agent_opt)
     }
 
@@ -192,9 +195,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = init::handle_init(&ctx, num_devices, threshold, output_dir)
-            .await
-            ?;
+        let output = init::handle_init(&ctx, num_devices, threshold, output_dir).await?;
         output.render();
         Ok(())
     }
@@ -206,9 +207,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = status::handle_status(&ctx, config_path)
-            .await
-            ?;
+        let output = status::handle_status(&ctx, config_path).await?;
 
         // Render device status
         output.render();
@@ -227,13 +226,16 @@ impl CliHandler {
     /// Handle node command through effects
     ///
     /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_node(&self, port: u16, daemon: bool, config_path: &Path) -> TerminalResult<()> {
+    pub async fn handle_node(
+        &self,
+        port: u16,
+        daemon: bool,
+        config_path: &Path,
+    ) -> TerminalResult<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = node::handle_node(&ctx, port, daemon, config_path)
-            .await
-            ?;
+        let output = node::handle_node(&ctx, port, daemon, config_path).await?;
         output.render();
         Ok(())
     }
@@ -241,13 +243,16 @@ impl CliHandler {
     /// Handle threshold command through effects
     ///
     /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_threshold(&self, configs: &str, threshold: u32, mode: &str) -> TerminalResult<()> {
+    pub async fn handle_threshold(
+        &self,
+        configs: &str,
+        threshold: u32,
+        mode: &str,
+    ) -> TerminalResult<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = threshold::handle_threshold(&ctx, configs, threshold, mode)
-            .await
-            ?;
+        let output = threshold::handle_threshold(&ctx, configs, threshold, mode).await?;
         output.render();
         Ok(())
     }
@@ -268,9 +273,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = version::handle_version(&ctx)
-            .await
-            ?;
+        let output = version::handle_version(&ctx).await?;
         output.render();
         Ok(())
     }
@@ -282,9 +285,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = snapshot::handle_snapshot(&ctx, action)
-            .await
-            ?;
+        let output = snapshot::handle_snapshot(&ctx, action).await?;
         output.render();
         Ok(())
     }
@@ -296,9 +297,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = admin::handle_admin(&ctx, action)
-            .await
-            ?;
+        let output = admin::handle_admin(&ctx, action).await?;
         output.render();
         Ok(())
     }
@@ -310,9 +309,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = recovery::handle_recovery(&ctx, action)
-            .await
-            ?;
+        let output = recovery::handle_recovery(&ctx, action).await?;
         output.render();
         Ok(())
     }
@@ -324,9 +321,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, true);
-        let output = invite::handle_invitation(&ctx, action)
-            .await
-            ?;
+        let output = invite::handle_invitation(&ctx, action).await?;
         output.render();
         Ok(())
     }
@@ -338,9 +333,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = authority::handle_authority(&ctx, command)
-            .await
-            ?;
+        let output = authority::handle_authority(&ctx, command).await?;
         output.render();
         Ok(())
     }
@@ -352,9 +345,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = context::handle_context(&ctx, action)
-            .await
-            ?;
+        let output = context::handle_context(&ctx, action).await?;
         output.render();
         Ok(())
     }
@@ -366,9 +357,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = ota::handle_ota(&ctx, action)
-            .await
-            ?;
+        let output = ota::handle_ota(&ctx, action).await?;
         output.render();
         Ok(())
     }
@@ -380,9 +369,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = amp::handle_amp(&ctx, action)
-            .await
-            ?;
+        let output = amp::handle_amp(&ctx, action).await?;
         output.render();
         Ok(())
     }
@@ -392,9 +379,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        chat::handle_chat(&ctx, &effects, command)
-            .await
-            ?
+        chat::handle_chat(&ctx, &effects, command).await
     }
 
     /// Handle sync commands (daemon mode by default)
@@ -404,9 +389,7 @@ impl CliHandler {
         let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = self.make_ctx(&effects, false);
-        let output = sync::handle_sync(&ctx, action)
-            .await
-            ?;
+        let output = sync::handle_sync(&ctx, action).await?;
         output.render();
         Ok(())
     }

@@ -39,7 +39,8 @@ pub struct DemoSimulator {
     shutdown_tx: Option<mpsc::Sender<()>>,
 
     /// Shared transport inbox for Bob, Alice, and Carol
-    pub shared_transport_inbox: std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>,
+    pub shared_transport_inbox:
+        std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>,
 }
 
 impl DemoSimulator {
@@ -49,7 +50,8 @@ impl DemoSimulator {
         let shared_inbox = std::sync::Arc::new(std::sync::RwLock::new(Vec::new()));
 
         // Create Alice and Carol agents with shared transport
-        let (alice, carol) = AgentFactory::create_demo_agents(seed, Some(shared_inbox.clone())).await?;
+        let (alice, carol) =
+            AgentFactory::create_demo_agents(seed, Some(shared_inbox.clone())).await?;
 
         // Get Bob's authority ID - MUST match how TUI derives it in handle_tui_launch()
         // The TUI uses device_id_str = "demo:bob" and computes:

@@ -132,9 +132,7 @@ pub async fn handle_network(
 
             let peer_list: Vec<String> = lan_peers
                 .iter()
-                .map(|peer| {
-                    format!("{} ({})", peer.authority_id, peer.address)
-                })
+                .map(|peer| format!("{} ({})", peer.authority_id, peer.address))
                 .collect();
 
             tracing::info!("Found {} LAN peers", peer_list.len());

@@ -22,7 +22,10 @@ use tokio::signal;
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_sync(ctx: &HandlerContext<'_>, action: &SyncAction) -> TerminalResult<CliOutput> {
+pub async fn handle_sync(
+    ctx: &HandlerContext<'_>,
+    action: &SyncAction,
+) -> TerminalResult<CliOutput> {
     match action {
         SyncAction::Daemon {
             interval,

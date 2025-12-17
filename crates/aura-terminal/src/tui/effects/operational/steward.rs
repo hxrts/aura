@@ -31,8 +31,7 @@ pub async fn handle_steward(
                     // Find and update the target resident
                     if let Some(resident) = block.resident_mut(target) {
                         // Can't promote an Owner
-                        if matches!(resident.role, aura_app::views::block::ResidentRole::Owner)
-                        {
+                        if matches!(resident.role, aura_app::views::block::ResidentRole::Owner) {
                             return Some(Err(OpError::Failed(
                                 "Cannot modify Owner role".to_string(),
                             )));
@@ -75,8 +74,7 @@ pub async fn handle_steward(
                     // Find and update the target resident
                     if let Some(resident) = block.resident_mut(target) {
                         // Can only demote Admin, not Owner
-                        if !matches!(resident.role, aura_app::views::block::ResidentRole::Admin)
-                        {
+                        if !matches!(resident.role, aura_app::views::block::ResidentRole::Admin) {
                             return Some(Err(OpError::Failed(
                                 "Can only revoke Admin role, not Owner or Resident".to_string(),
                             )));

@@ -30,7 +30,11 @@ pub struct ListItemProps {
 pub fn ListItem(props: &ListItemProps) -> impl Into<AnyElement<'static>> {
     // Use consistent list item colors for all scrollable components
     let (bg, label_color, desc_color) = if props.highlighted && !props.selected {
-        (Theme::BG_HOVER, Theme::LIST_TEXT_NORMAL, Theme::LIST_TEXT_MUTED)
+        (
+            Theme::BG_HOVER,
+            Theme::LIST_TEXT_NORMAL,
+            Theme::LIST_TEXT_MUTED,
+        )
     } else {
         list_item_colors_with_muted(props.selected)
     };

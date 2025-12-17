@@ -31,7 +31,11 @@ pub struct ChatCallbacks {
 
 impl ChatCallbacks {
     /// Create chat callbacks from context
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender, app_core: Arc<tokio::sync::RwLock<aura_app::AppCore>>) -> Self {
+    pub fn new(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+        app_core: Arc<tokio::sync::RwLock<aura_app::AppCore>>,
+    ) -> Self {
         Self {
             on_send: Self::make_send(ctx.clone(), tx.clone()),
             on_retry_message: Self::make_retry_message(ctx.clone(), tx.clone()),
@@ -71,29 +75,31 @@ impl ChatCallbacks {
     }
 
     fn make_retry_message(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RetryMessageCallback {
-        Arc::new(move |message_id: String, channel: String, content: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let msg_id = message_id.clone();
-            let cmd = EffectCommand::RetryMessage {
-                message_id,
-                channel,
-                content,
-            };
-            tokio::spawn(async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let _ = tx.send(UiUpdate::MessageRetried { message_id: msg_id });
+        Arc::new(
+            move |message_id: String, channel: String, content: String| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let msg_id = message_id.clone();
+                let cmd = EffectCommand::RetryMessage {
+                    message_id,
+                    channel,
+                    content,
+                };
+                tokio::spawn(async move {
+                    match ctx.dispatch(cmd).await {
+                        Ok(_) => {
+                            let _ = tx.send(UiUpdate::MessageRetried { message_id: msg_id });
+                        }
+                        Err(e) => {
+                            let _ = tx.send(UiUpdate::OperationFailed {
+                                operation: "RetryMessage".to_string(),
+                                error: format!("{}", e),
+                            });
+                        }
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "RetryMessage".to_string(),
-                            error: format!("{}", e),
-                        });
-                    }
-                }
-            });
-        })
+                });
+            },
+        )
     }
 
     fn make_channel_select(
@@ -151,7 +157,10 @@ impl ChatCallbacks {
             tokio::spawn(async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::TopicSet { channel: ch, topic: t });
+                        let _ = tx.send(UiUpdate::TopicSet {
+                            channel: ch,
+                            topic: t,
+                        });
                     }
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
@@ -331,7 +340,9 @@ impl InvitationsCallbacks {
             tokio::spawn(async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::InvitationAccepted { invitation_id: inv_id });
+                        let _ = tx.send(UiUpdate::InvitationAccepted {
+                            invitation_id: inv_id,
+                        });
                     }
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
@@ -353,7 +364,9 @@ impl InvitationsCallbacks {
             tokio::spawn(async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::InvitationDeclined { invitation_id: inv_id });
+                        let _ = tx.send(UiUpdate::InvitationDeclined {
+                            invitation_id: inv_id,
+                        });
                     }
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
@@ -1062,7 +1075,11 @@ pub struct CallbackRegistry {
 
 impl CallbackRegistry {
     /// Create all callbacks from context
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender, app_core: Arc<tokio::sync::RwLock<aura_app::AppCore>>) -> Self {
+    pub fn new(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+        app_core: Arc<tokio::sync::RwLock<aura_app::AppCore>>,
+    ) -> Self {
         Self {
             chat: ChatCallbacks::new(ctx.clone(), tx.clone(), app_core),
             contacts: ContactsCallbacks::new(ctx.clone(), tx.clone()),
