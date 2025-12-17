@@ -4,8 +4,8 @@
 //! with the agent-layer ChatService for group management and messaging.
 
 use crate::cli::chat::ChatCommands;
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::HandlerContext;
-use anyhow::{anyhow, Result};
 use aura_agent::AuraEffectSystem;
 use aura_chat::ChatGroupId;
 use aura_chat::ChatMessageId;
@@ -19,10 +19,10 @@ pub async fn handle_chat(
     ctx: &HandlerContext<'_>,
     _effects: &AuraEffectSystem,
     command: &ChatCommands,
-) -> Result<()> {
+) -> TerminalResult<()> {
     let agent = ctx
         .agent()
-        .ok_or_else(|| anyhow!("Agent not available - please initialize an account first"))?;
+        .ok_or_else(|| TerminalError::Operation("Agent not available - please initialize an account first".into()))?;
 
     let chat = agent.chat();
     let authority_id = ctx.effect_context().authority_id();
@@ -132,7 +132,7 @@ pub async fn handle_chat(
             let group = chat
                 .get_group(&group_id)
                 .await?
-                .ok_or_else(|| anyhow!("Group not found: {}", group_id))?;
+                .ok_or_else(|| TerminalError::NotFound(format!("Group not found: {}", group_id)))?;
 
             ConsoleEffects::log_info(ctx.effects(), &format!("=== {} ===", group.name)).await?;
             ConsoleEffects::log_info(ctx.effects(), &format!("ID: {}", group.id)).await?;
@@ -179,7 +179,7 @@ pub async fn handle_chat(
             .await?;
         }
 
-        ChatCommands::Leave { group_id, force: _ } => {
+            ChatCommands::Leave { group_id, force: _ } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
             chat.remove_member(&group_id, authority_id, authority_id)
                 .await?;

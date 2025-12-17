@@ -3,15 +3,15 @@
 //! Effect-based implementation of the version command.
 //! Returns structured `CliOutput` for testability.
 
+use crate::error::TerminalResult;
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::Result;
 
 /// Handle version display through effects
 ///
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_version(_ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+pub async fn handle_version(_ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     // Display version information through console effects

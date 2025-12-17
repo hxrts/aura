@@ -3,8 +3,8 @@
 //! Effect-based implementation of the init command.
 //! Returns structured `CliOutput` for testability.
 
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::Result;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::time::TimeStamp;
 use aura_protocol::effect_traits::StorageEffects;
@@ -23,7 +23,7 @@ pub async fn handle_init(
     num_devices: u32,
     threshold: u32,
     output_dir: &Path,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     // Log initialization start
@@ -36,16 +36,15 @@ pub async fn handle_init(
     // Validate parameters through effects
     if threshold > num_devices {
         output.eprintln("Threshold cannot be greater than number of devices");
-        return Err(anyhow::anyhow!(
+        return Err(TerminalError::Input(format!(
             "Invalid parameters: threshold ({}) > num_devices ({})",
-            threshold,
-            num_devices
-        ));
+            threshold, num_devices
+        )));
     }
 
     if threshold == 0 {
         output.eprintln("Threshold must be greater than 0");
-        return Err(anyhow::anyhow!("Invalid threshold: 0"));
+        return Err(TerminalError::Input("Invalid threshold: 0".into()));
     }
 
     // Create directory structure through storage effects
@@ -60,7 +59,7 @@ pub async fn handle_init(
     ctx.effects()
         .store(&effect_api_path.display().to_string(), effect_api_data)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to create effect_api: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to create effect_api: {}", e)))?;
 
     // Create device config files through storage effects
     for i in 1..=num_devices {
@@ -73,11 +72,10 @@ pub async fn handle_init(
             .store(&config_key, config_content.into_bytes())
             .await
             .map_err(|e| {
-                anyhow::anyhow!(
+                TerminalError::Operation(format!(
                     "Failed to create device config {} via storage effects: {}",
-                    i,
-                    e
-                )
+                    i, e
+                ))
             })?;
 
         output.println(format!("Created device_{}.toml", i));
@@ -91,29 +89,32 @@ pub async fn handle_init(
 }
 
 /// Create directory marker through storage effects
-async fn create_directory_through_effects(ctx: &HandlerContext<'_>, path: &Path) -> Result<()> {
+async fn create_directory_through_effects(
+    ctx: &HandlerContext<'_>,
+    path: &Path,
+) -> TerminalResult<()> {
     // Use unified time system to get physical time
     let physical_time = ctx
         .effects()
         .physical_time()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to get physical time: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to get physical time: {}", e)))?;
 
     let timestamp = TimeStamp::PhysicalClock(physical_time);
 
     // Create directory marker via StorageEffects with proper TimeStamp serialization
     let dir_marker_key = format!("directory_marker:{}", path.display());
     let timestamp_bytes = serde_json::to_vec(&timestamp)
-        .map_err(|e| anyhow::anyhow!("Failed to serialize timestamp: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to serialize timestamp: {}", e)))?;
 
     ctx.effects()
         .store(&dir_marker_key, timestamp_bytes)
         .await
         .map_err(|e| {
-            anyhow::anyhow!(
+            TerminalError::Operation(format!(
                 "Failed to create directory marker via storage effects: {}",
                 e
-            )
+            ))
         })?;
 
     Ok(())
@@ -125,13 +126,13 @@ async fn create_effect_api(
     threshold: u32,
     num_devices: u32,
     output: &mut CliOutput,
-) -> Result<Vec<u8>> {
+) -> TerminalResult<Vec<u8>> {
     // Use unified time system to get physical time
     let physical_time = ctx
         .effects()
         .physical_time()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to get physical time: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to get physical time: {}", e)))?;
     let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
 
     // Create a simple CBOR-like structure

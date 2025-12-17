@@ -3,8 +3,8 @@
 //! Returns structured `CliOutput` for testability.
 
 use crate::cli::context::ContextAction;
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::{Context as AnyhowContext, Result};
 use aura_core::hash;
 use serde::Deserialize;
 use std::fs;
@@ -15,7 +15,10 @@ use std::path::Path;
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_context(ctx: &HandlerContext<'_>, action: &ContextAction) -> Result<CliOutput> {
+pub async fn handle_context(
+    ctx: &HandlerContext<'_>,
+    action: &ContextAction,
+) -> TerminalResult<CliOutput> {
     match action {
         ContextAction::Inspect {
             context,
@@ -33,7 +36,7 @@ async fn inspect_context(
     _ctx: &HandlerContext<'_>,
     context: &str,
     state_file: &Path,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     let snapshot = load_context(state_file, context)?;
@@ -90,7 +93,7 @@ async fn show_receipts(
     context: &str,
     state_file: &Path,
     detailed: bool,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     let snapshot = load_context(state_file, context)?;
@@ -132,16 +135,19 @@ async fn show_receipts(
     Ok(output)
 }
 
-fn load_context(state_file: &Path, context: &str) -> Result<ContextSnapshot> {
+fn load_context(state_file: &Path, context: &str) -> TerminalResult<ContextSnapshot> {
     let data = fs::read_to_string(state_file)
-        .with_context(|| format!("failed to read {:?}", state_file))?;
-    let file: ContextStateFile =
-        serde_json::from_str(&data).with_context(|| format!("invalid JSON in {:?}", state_file))?;
+        .map_err(|e| TerminalError::Config(format!("failed to read {:?}: {}", state_file, e)))?;
+    let file: ContextStateFile = serde_json::from_str(&data).map_err(|e| {
+        TerminalError::Config(format!("invalid JSON in {:?}: {}", state_file, e))
+    })?;
     let ctx = normalize(context);
     file.contexts
         .into_iter()
         .find(|entry| normalize(&entry.context) == ctx)
-        .with_context(|| format!("context {} not found in {:?}", context, state_file))
+        .ok_or_else(|| {
+            TerminalError::NotFound(format!("context {} not found in {:?}", context, state_file))
+        })
 }
 
 fn normalize(value: &str) -> String {

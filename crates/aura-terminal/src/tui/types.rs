@@ -1133,13 +1133,13 @@ impl BlockBudget {
     }
 }
 
-impl From<&aura_app::views::block::StorageBudget> for BlockBudget {
-    fn from(s: &aura_app::views::block::StorageBudget) -> Self {
+impl From<&aura_app::BlockFlowBudget> for BlockBudget {
+    fn from(budget: &aura_app::BlockFlowBudget) -> Self {
         Self {
-            total: s.total_bytes,
-            used: s.used_bytes,
-            resident_count: 0, // Set separately
-            max_residents: 8,  // Default
+            total: budget.total_allocation(),
+            used: budget.total_used(),
+            resident_count: budget.resident_count,
+            max_residents: aura_app::MAX_RESIDENTS,
         }
     }
 }

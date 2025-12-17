@@ -77,7 +77,6 @@
 #![allow(missing_docs)]
 
 pub mod cli;
-pub mod effects;
 pub mod error;
 pub mod handlers;
 pub mod ids;

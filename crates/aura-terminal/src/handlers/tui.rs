@@ -536,7 +536,7 @@ async fn handle_tui_launch(
     };
 
     #[cfg(not(feature = "development"))]
-    let demo_simulator_for_bob: Option<()> = None;
+    let _demo_simulator_for_bob: Option<()> = None;
 
     // Build agent using appropriate builder method based on mode
     let agent = match mode {

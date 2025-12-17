@@ -3,8 +3,8 @@
 //! Returns structured `CliOutput` for testability.
 
 use crate::cli::amp::AmpAction;
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::Result;
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{hash, Hash32};
 use aura_journal::fact::{
@@ -18,7 +18,7 @@ use std::str::FromStr;
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_amp(ctx: &HandlerContext<'_>, action: &AmpAction) -> Result<CliOutput> {
+pub async fn handle_amp(ctx: &HandlerContext<'_>, action: &AmpAction) -> TerminalResult<CliOutput> {
     match action {
         AmpAction::Inspect { context, channel } => handle_amp_inspect(ctx, context, channel).await,
         AmpAction::Bump {
@@ -37,13 +37,17 @@ async fn handle_amp_inspect(
     ctx: &HandlerContext<'_>,
     context_str: &str,
     channel_str: &str,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
-    let context = ContextId::from_str(context_str)?;
-    let channel = ChannelId::from_str(channel_str)?;
+    let context = ContextId::from_str(context_str)
+        .map_err(|e| TerminalError::Input(format!("Invalid context id: {}", e)))?;
+    let channel = ChannelId::from_str(channel_str)
+        .map_err(|e| TerminalError::Input(format!("Invalid channel id: {}", e)))?;
 
-    let state = get_channel_state(ctx.effects(), context, channel).await?;
+    let state = get_channel_state(ctx.effects(), context, channel)
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {}", e)))?;
 
     output.section(&format!(
         "Channel State for {}:{}",
@@ -73,13 +77,17 @@ async fn handle_amp_bump(
     context_str: &str,
     channel_str: &str,
     reason: &str,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
-    let context = ContextId::from_str(context_str)?;
-    let channel = ChannelId::from_str(channel_str)?;
+    let context = ContextId::from_str(context_str)
+        .map_err(|e| TerminalError::Input(format!("Invalid context id: {}", e)))?;
+    let channel = ChannelId::from_str(channel_str)
+        .map_err(|e| TerminalError::Input(format!("Invalid channel id: {}", e)))?;
 
-    let state = get_channel_state(ctx.effects(), context, channel).await?;
+    let state = get_channel_state(ctx.effects(), context, channel)
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {}", e)))?;
 
     if state.pending_bump.is_some() {
         output.eprintln("Error: Channel already has a pending bump");
@@ -118,13 +126,17 @@ async fn handle_amp_checkpoint(
     ctx: &HandlerContext<'_>,
     context_str: &str,
     channel_str: &str,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
-    let context = ContextId::from_str(context_str)?;
-    let channel = ChannelId::from_str(channel_str)?;
+    let context = ContextId::from_str(context_str)
+        .map_err(|e| TerminalError::Input(format!("Invalid context id: {}", e)))?;
+    let channel = ChannelId::from_str(channel_str)
+        .map_err(|e| TerminalError::Input(format!("Invalid channel id: {}", e)))?;
 
-    let state = get_channel_state(ctx.effects(), context, channel).await?;
+    let state = get_channel_state(ctx.effects(), context, channel)
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {}", e)))?;
 
     let checkpoint = ChannelCheckpoint {
         context,
@@ -142,7 +154,8 @@ async fn handle_amp_checkpoint(
 
     ctx.effects()
         .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint.clone()))
-        .await?;
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to create checkpoint: {}", e)))?;
 
     output.section(&format!(
         "Checkpoint created for {}:{}",

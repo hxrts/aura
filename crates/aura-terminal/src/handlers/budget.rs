@@ -1,0 +1,226 @@
+//! # Budget Handlers
+//!
+//! Shared budget logic for both CLI and TUI.
+//!
+//! This module provides budget query, formatting, and display logic
+//! that can be used by both the CLI commands and TUI screens.
+//!
+//! ## Usage
+//!
+//! ### CLI Commands
+//!
+//! ```rust,ignore
+//! use crate::handlers::budget;
+//!
+//! pub fn show_budget_status(ctx: &Context) {
+//!     let budget = budget::get_current_budget(&ctx.app_core).await;
+//!     let formatted = budget::format_budget_status(&budget);
+//!     println!("{}", formatted);
+//! }
+//! ```
+//!
+//! ### TUI Screens
+//!
+//! ```rust,ignore
+//! use crate::handlers::budget;
+//!
+//! // Get budget data
+//! let budget = budget::get_current_budget(&app_core).await;
+//!
+//! // TUI adds visual hints (colors, warnings)
+//! let view = FlowBudgetView::from_budget(budget);
+//! ```
+
+use std::sync::Arc;
+
+use aura_app::{AppCore, BlockFlowBudget, BudgetBreakdown, BUDGET_SIGNAL};
+use aura_core::effects::reactive::ReactiveEffects;
+use tokio::sync::RwLock;
+
+/// Get the current budget for the active block
+///
+/// Reads from BUDGET_SIGNAL if available, otherwise returns a default budget.
+/// This is the primary method for getting budget data in both CLI and TUI.
+pub async fn get_current_budget(app_core: &Arc<RwLock<AppCore>>) -> BlockFlowBudget {
+    let core = app_core.read().await;
+
+    // Try to read from BUDGET_SIGNAL
+    match core.read(&*BUDGET_SIGNAL).await {
+        Ok(budget) => budget,
+        Err(_) => {
+            // Fall back to default budget if signal not available
+            BlockFlowBudget::default()
+        }
+    }
+}
+
+/// Get a budget breakdown with formatted display values
+///
+/// Returns the breakdown struct with all computed limits and usage values.
+/// Use this for detailed budget inspection (CLI commands, TUI panels).
+pub async fn get_budget_breakdown(app_core: &Arc<RwLock<AppCore>>) -> BudgetBreakdown {
+    let budget = get_current_budget(app_core).await;
+    budget.breakdown()
+}
+
+/// Format budget status as a human-readable string
+///
+/// Returns a multi-line summary suitable for CLI output or TUI display.
+/// Includes total usage, per-category breakdowns, and capacity warnings.
+pub fn format_budget_status(budget: &BlockFlowBudget) -> String {
+    let breakdown = budget.breakdown();
+    let usage_percent = (budget.usage_fraction() * 100.0) as u8;
+
+    let mut output = String::new();
+    output.push_str(&format!("Block Storage Budget: {}\n", budget.block_id));
+    output.push_str(&format!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+    output.push_str(&format!("\nTotal: {} / {} ({}% used)\n",
+        BudgetBreakdown::format_size(budget.total_used()),
+        BudgetBreakdown::format_size(breakdown.total),
+        usage_percent
+    ));
+
+    output.push_str(&format!("\nResident Storage:\n"));
+    output.push_str(&format!("  {} residents ({} max)\n",
+        budget.resident_count,
+        aura_app::MAX_RESIDENTS
+    ));
+    output.push_str(&format!("  {} / {} used\n",
+        BudgetBreakdown::format_size(breakdown.resident_used),
+        BudgetBreakdown::format_size(breakdown.resident_limit)
+    ));
+
+    output.push_str(&format!("\nNeighborhood Donations:\n"));
+    output.push_str(&format!("  {} neighborhoods ({} max)\n",
+        budget.neighborhood_count,
+        aura_app::MAX_NEIGHBORHOODS
+    ));
+    output.push_str(&format!("  {} donated\n",
+        BudgetBreakdown::format_size(breakdown.neighborhood_donations)
+    ));
+
+    output.push_str(&format!("\nPinned Content:\n"));
+    output.push_str(&format!("  {} / {} used\n",
+        BudgetBreakdown::format_size(breakdown.pinned_used),
+        BudgetBreakdown::format_size(breakdown.pinned_limit)
+    ));
+
+    output.push_str(&format!("\nRemaining: {}\n",
+        BudgetBreakdown::format_size(breakdown.remaining)
+    ));
+
+    // Add warnings if capacity is high
+    if usage_percent > 95 {
+        output.push_str("\n⚠️  CRITICAL: Storage is nearly full!\n");
+    } else if usage_percent > 80 {
+        output.push_str("\n⚠️  WARNING: Storage is running low\n");
+    }
+
+    output
+}
+
+/// Format budget breakdown as a compact one-line summary
+///
+/// Returns a short status line suitable for status bars or compact displays.
+pub fn format_budget_compact(budget: &BlockFlowBudget) -> String {
+    let usage_percent = (budget.usage_fraction() * 100.0) as u8;
+    format!(
+        "Storage: {} / {} ({}%)",
+        BudgetBreakdown::format_size(budget.total_used()),
+        BudgetBreakdown::format_size(budget.total_allocation()),
+        usage_percent
+    )
+}
+
+/// Check if budget can accommodate a new resident
+///
+/// Returns Ok(()) if capacity is available, Err with message otherwise.
+/// Use this before attempting to add residents.
+pub fn check_can_add_resident(budget: &BlockFlowBudget) -> Result<(), String> {
+    if budget.can_add_resident() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Cannot add resident: block at capacity ({}/{})",
+            budget.resident_count,
+            aura_app::MAX_RESIDENTS
+        ))
+    }
+}
+
+/// Check if budget can accommodate joining a neighborhood
+///
+/// Returns Ok(()) if capacity is available, Err with message otherwise.
+/// Use this before attempting to join neighborhoods.
+pub fn check_can_join_neighborhood(budget: &BlockFlowBudget) -> Result<(), String> {
+    if budget.can_join_neighborhood() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Cannot join neighborhood: block at capacity ({}/{})",
+            budget.neighborhood_count,
+            aura_app::MAX_NEIGHBORHOODS
+        ))
+    }
+}
+
+/// Check if budget can accommodate pinning content of given size
+///
+/// Returns Ok(()) if space is available, Err with message otherwise.
+/// Use this before attempting to pin content.
+pub fn check_can_pin(budget: &BlockFlowBudget, size_bytes: u64) -> Result<(), String> {
+    if budget.can_pin(size_bytes) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Cannot pin content: need {}, have {} available",
+            BudgetBreakdown::format_size(size_bytes),
+            BudgetBreakdown::format_size(budget.pinned_storage_remaining())
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_budget_status() {
+        let mut budget = BlockFlowBudget::new("test-block");
+        budget.add_resident().unwrap();
+        budget.join_neighborhood().unwrap();
+
+        let formatted = format_budget_status(&budget);
+
+        // Check that key information is present
+        assert!(formatted.contains("test-block"));
+        assert!(formatted.contains("1 residents"));
+        assert!(formatted.contains("1 neighborhoods"));
+        assert!(formatted.contains("Remaining"));
+    }
+
+    #[test]
+    fn test_format_budget_compact() {
+        let budget = BlockFlowBudget::new("test");
+        let compact = format_budget_compact(&budget);
+
+        assert!(compact.contains("Storage:"));
+        assert!(compact.contains("%"));
+    }
+
+    #[test]
+    fn test_capacity_checks() {
+        let mut budget = BlockFlowBudget::new("test");
+
+        // Should be able to add resident initially
+        assert!(check_can_add_resident(&budget).is_ok());
+
+        // Fill up residents
+        for _ in 0..aura_app::MAX_RESIDENTS {
+            budget.add_resident().unwrap();
+        }
+
+        // Now should fail
+        assert!(check_can_add_resident(&budget).is_err());
+    }
+}

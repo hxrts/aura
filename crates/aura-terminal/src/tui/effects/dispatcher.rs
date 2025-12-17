@@ -85,12 +85,18 @@ impl CommandDispatcher {
         self.current_channel.as_deref()
     }
 
-    /// Check if a command is allowed (currently permissive until Biscuit wiring lands)
+    /// Check if a command is allowed (hook for Biscuit evaluation).
     pub fn check_capability(&self, command: &IrcCommand) -> Result<(), DispatchError> {
-        let _capability = command.required_capability();
-        // Capability evaluation will be enforced once Biscuit integration is routed through the bridge.
+        let capability = command.required_capability();
+        // TODO: integrate Biscuit/policy check via AppCore; placeholder keeps structure intact.
+        if let CommandCapability::None = capability {
+            return Ok(());
+        }
 
-        Ok(())
+        // Until policy is wired, deny non-None to surface in unified error handling
+        Err(DispatchError::PermissionDenied {
+            required: capability,
+        })
     }
 
     /// Dispatch an IRC command to an effect command

@@ -267,14 +267,14 @@ fn convert_resident(r: &aura_app::views::block::Resident, my_id: &str) -> Reside
 
 /// Convert aura-app storage budget to TUI block budget
 fn convert_budget(
-    storage: &aura_app::views::block::StorageBudget,
+    storage: &aura_app::BlockFlowBudget,
     resident_count: u32,
 ) -> BlockBudget {
     BlockBudget {
-        total: storage.total_bytes,
-        used: storage.used_bytes,
+        total: storage.total_allocation(),
+        used: storage.total_used(),
         resident_count: resident_count as u8,
-        max_residents: 8, // Default max
+        max_residents: aura_app::MAX_RESIDENTS,
     }
 }
 

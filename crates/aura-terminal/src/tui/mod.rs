@@ -113,12 +113,14 @@ pub use commands::{
     CommandHelp, IrcCommand, ParseError,
 };
 
-// Re-export flow budget types
-pub use flow_budget::{
-    example_budget_table, BlockFlowBudget, BudgetBreakdown, BudgetError, FlowBudgetView,
-    BLOCK_TOTAL_SIZE, KB, MAX_NEIGHBORHOODS, MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION,
-    RESIDENT_ALLOCATION,
+// Re-export budget types from aura-app (domain logic)
+pub use aura_app::{
+    BlockFlowBudget, BudgetBreakdown, BudgetError, BLOCK_TOTAL_SIZE, KB, MAX_NEIGHBORHOODS,
+    MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION, RESIDENT_ALLOCATION,
 };
+
+// Re-export TUI-specific budget view helpers
+pub use flow_budget::{example_budget_table, FlowBudgetView};
 
 // Re-export local store types
 pub use local_store::{derive_key_material, TuiLocalStore};
@@ -142,7 +144,7 @@ pub use aura_chat::ChatDelta;
 pub use aura_invitation::InvitationDelta;
 
 // View types from aura-app
-pub use aura_app::views::block::{BlockState, Resident, ResidentRole, StorageBudget};
+pub use aura_app::views::block::{BlockState, Resident, ResidentRole};
 pub use aura_app::views::chat::{Channel, ChannelType, Message};
 pub use aura_app::views::contacts::{Contact, MySuggestion, SuggestionPolicy};
 pub use aura_app::views::invitations::{

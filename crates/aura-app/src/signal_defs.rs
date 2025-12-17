@@ -46,6 +46,7 @@ use crate::queries::{
     BlocksQuery, BoundSignal, ChatQuery, ContactsQuery, GuardiansQuery, InvitationsQuery,
     NeighborhoodQuery, RecoveryQuery,
 };
+use crate::budget::BlockFlowBudget;
 use crate::views::{
     BlockState, BlocksState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
     RecoveryState,
@@ -80,6 +81,10 @@ pub static BLOCKS_SIGNAL: LazyLock<Signal<BlocksState>> =
 /// Signal for neighborhood state (nearby peers, relay info)
 pub static NEIGHBORHOOD_SIGNAL: LazyLock<Signal<NeighborhoodState>> =
     LazyLock::new(|| Signal::new("app:neighborhood"));
+
+/// Signal for block storage budget (resident/neighborhood/pinned allocations)
+pub static BUDGET_SIGNAL: LazyLock<Signal<BlockFlowBudget>> =
+    LazyLock::new(|| Signal::new("app:budget"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Query-Bound Signals

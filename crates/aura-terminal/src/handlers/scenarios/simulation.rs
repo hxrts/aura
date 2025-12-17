@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use crate::error::{TerminalError, TerminalResult};
 use aura_agent::AgentConfig;
 use aura_authenticate::{RecoveryContext, RecoveryOperationType};
 use aura_recovery::guardian_setup::GuardianSetupCoordinator;
@@ -34,7 +34,7 @@ pub struct CliRecoverySimResult {
 pub async fn simulate_cli_recovery_demo(
     seed: u64,
     _ctx: &HandlerContext<'_>,
-) -> Result<CliRecoverySimResult> {
+) -> TerminalResult<CliRecoverySimResult> {
     let handler = SimulationScenarioHandler::new(seed);
     let mut steps = Vec::new();
     let start = Instant::now();
@@ -210,7 +210,7 @@ pub async fn simulate_cli_recovery_demo(
 }
 
 /// Run the guardian setup choreography
-async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> Result<()> {
+async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalResult<()> {
     let effect_system = Arc::new(aura_agent::AuraEffectSystem::testing(
         &AgentConfig::default(),
     )?);
@@ -241,10 +241,10 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> Result<()>
     let response = coordinator
         .execute_setup(request)
         .await
-        .map_err(|e| anyhow::anyhow!("Guardian setup choreography failed: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Guardian setup choreography failed: {}", e))?;
 
     if !response.success {
-        return Err(anyhow::anyhow!(
+        return Err(TerminalError::Operation(format!(
             "Guardian setup failed: {}",
             response.error.unwrap_or_else(|| "unknown error".into())
         ));

@@ -17,27 +17,15 @@ use super::modal_overlays::{
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use crate::tui::callbacks::{
-    AddDeviceCallback, ApprovalCallback, BlockInviteCallback, BlockNavCallback, BlockSendCallback,
-    CallbackRegistry, ChannelSelectCallback, CreateAccountCallback, CreateChannelCallback,
-    CreateInvitationCallback, ExportInvitationCallback, GoHomeCallback, GrantStewardCallback,
-    GuardianSelectCallback, ImportInvitationCallback, InvitationCallback, RecoveryCallback,
-    RemoveDeviceCallback, RetryMessageCallback, RevokeStewardCallback, SendCallback,
-    SetTopicCallback, StartChatCallback, UpdateNicknameCallback, UpdatePetnameCallback,
-    UpdateThresholdCallback,
-};
-use crate::tui::hooks::CallbackContext;
+use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
     ConfirmModal, ContactSelectModal, ContactSelectState, DiscoveredPeerInfo, Footer, HelpModal,
-    HelpModalState, InvitePeerCallback, ModalFrame, NavBar, ToastContainer, ToastLevel,
-    ToastMessage,
+    HelpModalState, ModalFrame, NavBar, ToastContainer, ToastLevel, ToastMessage,
 };
 use crate::tui::context::IoContext;
-use crate::tui::hooks::AppCoreContext;
+use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
-use crate::tui::screens::neighborhood::NavigationCallback;
 use crate::tui::screens::router::Screen;
-use crate::tui::screens::settings::MfaCallback;
 use crate::tui::screens::{
     BlockScreen, ChatScreen, ContactsScreen, NeighborhoodScreen, RecoveryScreen, SettingsScreen,
 };
@@ -84,56 +72,11 @@ pub struct IoAppProps {
     pub neighborhood_name: String,
     pub blocks: Vec<BlockSummary>,
     pub traversal_depth: TraversalDepth,
-    // Effect dispatch callback for sending messages
-    pub on_send: Option<SendCallback>,
-    // Effect dispatch callback for retrying failed messages
-    pub on_retry_message: Option<RetryMessageCallback>,
-    // Effect dispatch callback for channel selection
-    pub on_channel_select: Option<ChannelSelectCallback>,
-    // Effect dispatch callback for creating new channels
-    pub on_create_channel: Option<CreateChannelCallback>,
-    // Effect dispatch callback for setting channel topic
-    pub on_set_topic: Option<SetTopicCallback>,
-    // Effect dispatch callbacks for invitation actions
-    pub on_accept_invitation: Option<InvitationCallback>,
-    pub on_decline_invitation: Option<InvitationCallback>,
-    pub on_create_invitation: Option<CreateInvitationCallback>,
-    pub on_export_invitation: Option<ExportInvitationCallback>,
-    pub on_import_invitation: Option<ImportInvitationCallback>,
-    // Effect dispatch callbacks for neighborhood navigation
-    pub on_enter_block: Option<NavigationCallback>,
-    pub on_go_home: Option<GoHomeCallback>,
-    pub on_back_to_street: Option<GoHomeCallback>,
-    // Effect dispatch callbacks for recovery actions
-    pub on_start_recovery: Option<RecoveryCallback>,
-    pub on_add_guardian: Option<RecoveryCallback>,
-    /// Callback when a guardian is selected from the modal (contact_id)
-    pub on_select_guardian: Option<GuardianSelectCallback>,
     /// Pending recovery requests from others that we can approve
     pub pending_requests: Vec<PendingRequest>,
-    /// Callback for submitting guardian approval (request_id)
-    pub on_submit_approval: Option<ApprovalCallback>,
-    // Effect dispatch callbacks for settings
-    pub on_update_mfa: Option<MfaCallback>,
-    pub on_update_nickname: Option<UpdateNicknameCallback>,
-    pub on_update_threshold: Option<UpdateThresholdCallback>,
-    pub on_add_device: Option<AddDeviceCallback>,
-    pub on_remove_device: Option<RemoveDeviceCallback>,
-    // Effect dispatch callbacks for contacts actions
-    pub on_update_petname: Option<UpdatePetnameCallback>,
-    pub on_start_chat: Option<StartChatCallback>,
-    pub on_invite_lan_peer: Option<InvitePeerCallback>,
-    // Effect dispatch callbacks for block actions
-    pub on_block_send: Option<BlockSendCallback>,
-    pub on_block_invite: Option<BlockInviteCallback>,
-    pub on_block_navigate_neighborhood: Option<BlockNavCallback>,
-    pub on_grant_steward: Option<GrantStewardCallback>,
-    pub on_revoke_steward: Option<RevokeStewardCallback>,
     // Account setup
     /// Whether to show account setup modal on start
     pub show_account_setup: bool,
-    /// Callback for account creation
-    pub on_create_account: Option<CreateAccountCallback>,
     // Sync status
     /// Whether sync is in progress
     pub sync_in_progress: bool,
@@ -153,6 +96,8 @@ pub struct IoAppProps {
     pub update_rx: Option<Arc<Mutex<Option<UiUpdateReceiver>>>>,
     /// UI update sender for sending updates from event handlers
     pub update_tx: Option<UiUpdateSender>,
+    /// Callback registry for all domain actions
+    pub callbacks: Option<CallbackRegistry>,
 }
 
 /// Main application with screen navigation
@@ -206,7 +151,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         state
     });
     let account_version = hooks.use_state(|| 0usize);
-    let on_create_account = props.on_create_account.clone();
 
     // Guardian selection modal state
     let guardian_select_state = hooks.use_ref(ContactSelectState::new);
@@ -338,38 +282,43 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let neighborhood_name = props.neighborhood_name.clone();
     let blocks = props.blocks.clone();
     let traversal_depth = props.traversal_depth;
-    // Effect dispatch callbacks
-    let on_send = props.on_send.clone();
-    let on_retry_message = props.on_retry_message.clone();
-    let on_channel_select = props.on_channel_select.clone();
-    let on_create_channel = props.on_create_channel.clone();
-    let on_set_topic = props.on_set_topic.clone();
-    let on_accept_invitation = props.on_accept_invitation.clone();
-    let on_decline_invitation = props.on_decline_invitation.clone();
-    let on_create_invitation = props.on_create_invitation.clone();
-    let on_export_invitation = props.on_export_invitation.clone();
-    let on_import_invitation = props.on_import_invitation.clone();
-    let on_enter_block = props.on_enter_block.clone();
-    let on_go_home = props.on_go_home.clone();
-    let on_back_to_street = props.on_back_to_street.clone();
-    let on_start_recovery = props.on_start_recovery.clone();
-    let on_add_guardian = props.on_add_guardian.clone();
-    let on_select_guardian = props.on_select_guardian.clone();
+    // Pending recovery requests
     let pending_requests = props.pending_requests.clone();
-    let on_submit_approval = props.on_submit_approval.clone();
-    let on_update_mfa = props.on_update_mfa.clone();
-    let on_update_nickname = props.on_update_nickname.clone();
-    let on_update_threshold = props.on_update_threshold.clone();
-    let on_add_device = props.on_add_device.clone();
-    let on_remove_device = props.on_remove_device.clone();
-    let on_update_petname = props.on_update_petname.clone();
-    let on_start_chat = props.on_start_chat.clone();
-    let on_invite_lan_peer = props.on_invite_lan_peer.clone();
-    let on_block_send = props.on_block_send.clone();
-    let on_block_invite = props.on_block_invite.clone();
-    let on_block_navigate_neighborhood = props.on_block_navigate_neighborhood.clone();
-    let on_grant_steward = props.on_grant_steward.clone();
-    let on_revoke_steward = props.on_revoke_steward.clone();
+    // Callbacks registry and individual callback extraction for screen props
+    let callbacks = props.callbacks.clone();
+
+    // Extract individual callbacks from registry for screen component props
+    // (Screen components still use individual callback props for now)
+    let on_block_send = callbacks.as_ref().map(|cb| cb.block.on_send.clone());
+    let on_block_invite = callbacks.as_ref().map(|cb| cb.block.on_invite.clone());
+    let on_block_navigate_neighborhood = callbacks.as_ref().map(|cb| cb.block.on_navigate_neighborhood.clone());
+    let on_grant_steward = callbacks.as_ref().map(|cb| cb.block.on_grant_steward.clone());
+    let on_revoke_steward = callbacks.as_ref().map(|cb| cb.block.on_revoke_steward.clone());
+
+    let on_send = callbacks.as_ref().map(|cb| cb.chat.on_send.clone());
+    let on_retry_message = callbacks.as_ref().map(|cb| cb.chat.on_retry_message.clone());
+    let on_channel_select = callbacks.as_ref().map(|cb| cb.chat.on_channel_select.clone());
+    let on_create_channel = callbacks.as_ref().map(|cb| cb.chat.on_create_channel.clone());
+    let on_set_topic = callbacks.as_ref().map(|cb| cb.chat.on_set_topic.clone());
+
+    let on_update_petname = callbacks.as_ref().map(|cb| cb.contacts.on_update_petname.clone());
+    let on_start_chat = callbacks.as_ref().map(|cb| cb.contacts.on_start_chat.clone());
+    let on_invite_lan_peer = callbacks.as_ref().map(|cb| cb.contacts.on_invite_lan_peer.clone());
+    let on_import_invitation = callbacks.as_ref().map(|cb| cb.invitations.on_import.clone());
+
+    let on_enter_block = callbacks.as_ref().map(|cb| cb.neighborhood.on_enter_block.clone());
+    let on_go_home = callbacks.as_ref().map(|cb| cb.neighborhood.on_go_home.clone());
+    let on_back_to_street = callbacks.as_ref().map(|cb| cb.neighborhood.on_back_to_street.clone());
+
+    let on_update_mfa = callbacks.as_ref().map(|cb| cb.settings.on_update_mfa.clone());
+    let on_update_nickname = callbacks.as_ref().map(|cb| cb.settings.on_update_nickname.clone());
+    let on_update_threshold = callbacks.as_ref().map(|cb| cb.settings.on_update_threshold.clone());
+    let on_add_device = callbacks.as_ref().map(|cb| cb.settings.on_add_device.clone());
+    let on_remove_device = callbacks.as_ref().map(|cb| cb.settings.on_remove_device.clone());
+
+    let on_start_recovery = callbacks.as_ref().map(|cb| cb.recovery.on_start_recovery.clone());
+    let on_add_guardian = callbacks.as_ref().map(|cb| cb.recovery.on_add_guardian.clone());
+    let on_submit_approval = callbacks.as_ref().map(|cb| cb.recovery.on_submit_approval.clone());
 
     let current_screen = screen.get();
 
@@ -452,8 +401,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut confirm_modal_version = confirm_modal_version.clone();
         let mut help_modal_state = help_modal_state.clone();
         let mut help_modal_version = help_modal_version.clone();
-        let on_create_account = on_create_account.clone();
-        let on_select_guardian = on_select_guardian.clone();
         let contacts_for_modal = contacts_for_modal.clone();
         // Clone update_tx for toast operations (via UiUpdate channel)
         let update_tx_for_toasts = update_tx_holder.clone();
@@ -461,33 +408,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let io_ctx_for_ceremony = app_ctx.io_context.clone();
         // Clone AppCore for key rotation operations
         let app_core_for_ceremony = app_ctx.app_core.clone();
-        // Clone all dispatch callbacks for use inside the closure
-        let on_block_send = on_block_send.clone();
-        let on_block_invite = on_block_invite.clone();
-        let on_grant_steward = on_grant_steward.clone();
-        let on_revoke_steward = on_revoke_steward.clone();
-        let on_channel_select = on_channel_select.clone();
-        let on_send = on_send.clone();
-        let on_retry_message = on_retry_message.clone();
-        let on_create_channel = on_create_channel.clone();
-        let on_set_topic = on_set_topic.clone();
-        let on_update_petname = on_update_petname.clone();
-        let on_start_chat = on_start_chat.clone();
-        let on_accept_invitation = on_accept_invitation.clone();
-        let on_decline_invitation = on_decline_invitation.clone();
-        let on_create_invitation = on_create_invitation.clone();
-        let on_import_invitation = on_import_invitation.clone();
-        let on_export_invitation = on_export_invitation.clone();
-        let on_start_recovery = on_start_recovery.clone();
-        let on_submit_approval = on_submit_approval.clone();
-        let on_update_nickname = on_update_nickname.clone();
-        let on_update_threshold = on_update_threshold.clone();
-        let on_update_mfa = on_update_mfa.clone();
-        let on_add_device = on_add_device.clone();
-        let on_remove_device = on_remove_device.clone();
-        let on_enter_block = on_enter_block.clone();
-        let on_go_home = on_go_home.clone();
-        let on_back_to_street = on_back_to_street.clone();
+        // Clone callbacks registry for command dispatch
+        let callbacks = callbacks.clone();
         // Clone contacts for use inside the closure (for populating guardian modal)
         let contacts_for_modal_populate = contacts.clone();
         move |event| {
@@ -586,356 +508,299 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }
                 }
 
-                // Execute commands
-                for cmd in commands {
-                    match cmd {
-                        TuiCommand::Exit => {
-                            should_exit.set(true);
-                        }
-                        TuiCommand::Dispatch(dispatch_cmd) => {
-                            // Handle dispatch commands - map to callbacks
-                            match dispatch_cmd {
-                                DispatchCommand::CreateAccount { name } => {
-                                    if let Some(ref callback) = on_create_account {
-                                        callback(name);
+                // Execute commands using callbacks registry
+                if let Some(ref cb) = callbacks {
+                    for cmd in commands {
+                        match cmd {
+                            TuiCommand::Exit => {
+                                should_exit.set(true);
+                            }
+                            TuiCommand::Dispatch(dispatch_cmd) => {
+                                // Handle dispatch commands via CallbackRegistry
+                                match dispatch_cmd {
+                                    DispatchCommand::CreateAccount { name } => {
+                                        (cb.app.on_create_account)(name);
                                     }
-                                }
-                                DispatchCommand::AddGuardian { contact_id } => {
-                                    if let Some(ref callback) = on_select_guardian {
-                                        callback(contact_id);
+                                    DispatchCommand::AddGuardian { contact_id } => {
+                                        (cb.recovery.on_select_guardian)(contact_id);
                                     }
-                                }
-                                DispatchCommand::SelectGuardianByIndex { index } => {
-                                    // Map index to contact_id from legacy modal state
-                                    let contact_id = guardian_select_state
-                                        .read()
-                                        .contacts
-                                        .get(index)
-                                        .map(|c| c.id.clone());
+                                    DispatchCommand::SelectGuardianByIndex { index } => {
+                                        // Map index to contact_id from legacy modal state
+                                        let contact_id = guardian_select_state
+                                            .read()
+                                            .contacts
+                                            .get(index)
+                                            .map(|c| c.id.clone());
 
-                                    // Hide the modal
-                                    guardian_select_state.write().hide();
-                                    guardian_select_version
-                                        .set(guardian_select_version.get().wrapping_add(1));
+                                        // Hide the modal
+                                        guardian_select_state.write().hide();
+                                        guardian_select_version
+                                            .set(guardian_select_version.get().wrapping_add(1));
 
-                                    // Also close in TuiState
-                                    tui_state.write().modal.close();
+                                        // Also close in TuiState
+                                        tui_state.write().modal.close();
 
-                                    // Call the callback with contact_id
-                                    if let Some(contact_id) = contact_id {
-                                        if let Some(ref callback) = on_select_guardian {
-                                            callback(contact_id);
+                                        // Call the callback with contact_id
+                                        if let Some(contact_id) = contact_id {
+                                            (cb.recovery.on_select_guardian)(contact_id);
                                         }
                                     }
-                                }
 
-                                // === Block Screen Commands ===
-                                DispatchCommand::SendBlockMessage { content } => {
-                                    if let Some(ref callback) = on_block_send {
-                                        callback(content);
+                                    // === Block Screen Commands ===
+                                    DispatchCommand::SendBlockMessage { content } => {
+                                        (cb.block.on_send)(content);
                                     }
-                                }
-                                DispatchCommand::InviteToBlock { contact_id } => {
-                                    if let Some(ref callback) = on_block_invite {
-                                        callback(contact_id);
+                                    DispatchCommand::InviteToBlock { contact_id } => {
+                                        (cb.block.on_invite)(contact_id);
                                     }
-                                }
-                                DispatchCommand::GrantSteward { resident_id } => {
-                                    if let Some(ref callback) = on_grant_steward {
-                                        callback(resident_id);
+                                    DispatchCommand::GrantSteward { resident_id } => {
+                                        (cb.block.on_grant_steward)(resident_id);
                                     }
-                                }
-                                DispatchCommand::RevokeSteward { resident_id } => {
-                                    if let Some(ref callback) = on_revoke_steward {
-                                        callback(resident_id);
+                                    DispatchCommand::RevokeSteward { resident_id } => {
+                                        (cb.block.on_revoke_steward)(resident_id);
                                     }
-                                }
 
-                                // === Chat Screen Commands ===
-                                DispatchCommand::SelectChannel { channel_id } => {
-                                    if let Some(ref callback) = on_channel_select {
-                                        callback(channel_id);
+                                    // === Chat Screen Commands ===
+                                    DispatchCommand::SelectChannel { channel_id } => {
+                                        (cb.chat.on_channel_select)(channel_id);
                                     }
-                                }
-                                DispatchCommand::SendChatMessage {
-                                    channel_id,
-                                    content,
-                                } => {
-                                    if let Some(ref callback) = on_send {
-                                        callback(channel_id, content);
+                                    DispatchCommand::SendChatMessage {
+                                        channel_id,
+                                        content,
+                                    } => {
+                                        (cb.chat.on_send)(channel_id, content);
                                     }
-                                }
-                                DispatchCommand::RetryMessage { message_id } => {
-                                    // Note: RetryMessage requires channel and content from the failed message
-                                    // The callback expects (message_id, channel_id, content)
-                                    // For now, log a warning since we don't have the full message context here
-                                    if on_retry_message.is_some() {
+                                    DispatchCommand::RetryMessage { message_id } => {
+                                        // Note: RetryMessage requires channel and content from the failed message
+                                        // For now, log a warning since we don't have the full message context here
                                         tracing::warn!(
                                             "RetryMessage not fully implemented: message_id={}",
                                             message_id
                                         );
                                     }
-                                }
-                                DispatchCommand::CreateChannel { name } => {
-                                    if let Some(ref callback) = on_create_channel {
-                                        callback(name, None);
+                                    DispatchCommand::CreateChannel { name } => {
+                                        (cb.chat.on_create_channel)(name, None);
                                     }
-                                }
-                                DispatchCommand::SetChannelTopic { channel_id, topic } => {
-                                    if let Some(ref callback) = on_set_topic {
-                                        callback(channel_id, topic);
+                                    DispatchCommand::SetChannelTopic { channel_id, topic } => {
+                                        (cb.chat.on_set_topic)(channel_id, topic);
                                     }
-                                }
 
-                                // === Contacts Screen Commands ===
-                                DispatchCommand::UpdatePetname {
-                                    contact_id,
-                                    petname,
-                                } => {
-                                    if let Some(ref callback) = on_update_petname {
-                                        callback(contact_id, petname);
+                                    // === Contacts Screen Commands ===
+                                    DispatchCommand::UpdatePetname {
+                                        contact_id,
+                                        petname,
+                                    } => {
+                                        (cb.contacts.on_update_petname)(contact_id, petname);
                                     }
-                                }
-                                DispatchCommand::StartChat { contact_id } => {
-                                    if let Some(ref callback) = on_start_chat {
-                                        callback(contact_id);
+                                    DispatchCommand::StartChat { contact_id } => {
+                                        (cb.contacts.on_start_chat)(contact_id);
                                     }
-                                }
 
-                                // === Invitations Screen Commands ===
-                                DispatchCommand::AcceptInvitation { invitation_id } => {
-                                    if let Some(ref callback) = on_accept_invitation {
-                                        callback(invitation_id);
+                                    // === Invitations Screen Commands ===
+                                    DispatchCommand::AcceptInvitation { invitation_id } => {
+                                        (cb.invitations.on_accept)(invitation_id);
                                     }
-                                }
-                                DispatchCommand::DeclineInvitation { invitation_id } => {
-                                    if let Some(ref callback) = on_decline_invitation {
-                                        callback(invitation_id);
+                                    DispatchCommand::DeclineInvitation { invitation_id } => {
+                                        (cb.invitations.on_decline)(invitation_id);
                                     }
-                                }
-                                DispatchCommand::CreateInvitation {
-                                    invitation_type,
-                                    message,
-                                } => {
-                                    if let Some(ref callback) = on_create_invitation {
+                                    DispatchCommand::CreateInvitation {
+                                        invitation_type,
+                                        message,
+                                    } => {
                                         // Third argument is TTL in seconds (None = no expiry)
-                                        callback(invitation_type, message, None);
+                                        (cb.invitations.on_create)(invitation_type, message, None);
                                     }
-                                }
-                                DispatchCommand::ImportInvitation { code } => {
-                                    if let Some(ref callback) = on_import_invitation {
-                                        callback(code);
+                                    DispatchCommand::ImportInvitation { code } => {
+                                        (cb.invitations.on_import)(code);
                                     }
-                                }
-                                DispatchCommand::ExportInvitation { invitation_id } => {
-                                    if let Some(ref callback) = on_export_invitation {
-                                        callback(invitation_id);
+                                    DispatchCommand::ExportInvitation { invitation_id } => {
+                                        (cb.invitations.on_export)(invitation_id);
                                     }
-                                }
 
-                                // === Recovery Screen Commands ===
-                                DispatchCommand::StartRecovery => {
-                                    if let Some(ref callback) = on_start_recovery {
-                                        callback();
+                                    // === Recovery Screen Commands ===
+                                    DispatchCommand::StartRecovery => {
+                                        (cb.recovery.on_start_recovery)();
                                     }
-                                }
-                                DispatchCommand::ApproveRecovery { request_id } => {
-                                    if let Some(ref callback) = on_submit_approval {
-                                        callback(request_id);
+                                    DispatchCommand::ApproveRecovery { request_id } => {
+                                        (cb.recovery.on_submit_approval)(request_id);
                                     }
-                                }
 
-                                // === Guardian Ceremony Commands ===
-                                DispatchCommand::StartGuardianCeremony { contact_ids, threshold_k } => {
-                                    tracing::info!(
-                                        "Starting guardian ceremony with {} contacts, threshold {}",
-                                        contact_ids.len(),
-                                        threshold_k
-                                    );
+                                    // === Guardian Ceremony Commands ===
+                                    DispatchCommand::StartGuardianCeremony { contact_ids, threshold_k } => {
+                                        tracing::info!(
+                                            "Starting guardian ceremony with {} contacts, threshold {}",
+                                            contact_ids.len(),
+                                            threshold_k
+                                        );
 
-                                    let io_ctx = io_ctx_for_ceremony.clone();
-                                    let ids = contact_ids.clone();
-                                    let n = contact_ids.len() as u8;
-                                    let k = threshold_k;
+                                        let io_ctx = io_ctx_for_ceremony.clone();
+                                        let ids = contact_ids.clone();
+                                        let n = contact_ids.len() as u8;
+                                        let k = threshold_k;
 
-                                    // Use pre-cloned AppCore for key rotation
-                                    let app_core = app_core_for_ceremony.clone();
+                                        // Use pre-cloned AppCore for key rotation
+                                        let app_core = app_core_for_ceremony.clone();
 
-                                    tokio::spawn(async move {
-                                        // Step 1: Rotate keys - generates new FROST threshold keys
-                                        // The authority ID would come from the account context
-                                        // For demo mode, we'll use the key rotation through the effect system
-                                        let core = app_core.read().await;
+                                        tokio::spawn(async move {
+                                            // Step 1: Rotate keys - generates new FROST threshold keys
+                                            // The authority ID would come from the account context
+                                            // For demo mode, we'll use the key rotation through the effect system
+                                            let core = app_core.read().await;
 
-                                        // Initiate guardian ceremony through the real protocol.
-                                        // This sends guardian invitations to each guardian through
-                                        // their full Aura runtimes (not mock acceptance).
-                                        match core.initiate_guardian_ceremony(k as u16, n as u16, &ids).await {
-                                            Ok(ceremony_id) => {
-                                                tracing::info!(
-                                                    ceremony_id = ?ceremony_id,
-                                                    threshold = k,
-                                                    guardians = n,
-                                                    "Guardian ceremony initiated, waiting for guardian responses"
-                                                );
+                                            // Initiate guardian ceremony through the real protocol.
+                                            // This sends guardian invitations to each guardian through
+                                            // their full Aura runtimes (not mock acceptance).
+                                            match core.initiate_guardian_ceremony(k as u16, n as u16, &ids).await {
+                                                Ok(ceremony_id) => {
+                                                    tracing::info!(
+                                                        ceremony_id = ?ceremony_id,
+                                                        threshold = k,
+                                                        guardians = n,
+                                                        "Guardian ceremony initiated, waiting for guardian responses"
+                                                    );
 
-                                                // The ceremony will proceed through the actual protocol:
-                                                // 1. Key packages are sent to each guardian
-                                                // 2. Guardians process invitations through their runtimes
-                                                // 3. They respond with AcceptGuardianBinding or decline
-                                                // 4. GuardianBinding facts are committed to journal
-                                                // 5. Views update reactively from journal facts
-                                                //
-                                                // No mock acceptance here - full protocol fidelity!
+                                                    // The ceremony will proceed through the actual protocol:
+                                                    // 1. Key packages are sent to each guardian
+                                                    // 2. Guardians process invitations through their runtimes
+                                                    // 3. They respond with AcceptGuardianBinding or decline
+                                                    // 4. GuardianBinding facts are committed to journal
+                                                    // 5. Views update reactively from journal facts
+                                                    //
+                                                    // No mock acceptance here - full protocol fidelity!
 
-                                                // Show ceremony started toast
-                                                io_ctx.add_info_toast(
-                                                    "guardian-ceremony-started",
-                                                    format!("Guardian ceremony started! Waiting for {}-of-{} guardians to respond", k, n)
-                                                ).await;
+                                                    // Show ceremony started toast
+                                                    io_ctx.add_info_toast(
+                                                        "guardian-ceremony-started",
+                                                        format!("Guardian ceremony started! Waiting for {}-of-{} guardians to respond", k, n)
+                                                    ).await;
 
-                                                // Spawn a task to monitor ceremony progress and show completion
-                                                let app_core_monitor = app_core.clone();
-                                                let io_ctx_monitor = io_ctx.clone();
-                                                tokio::spawn(async move {
-                                                    // Poll for ceremony completion (max 30 seconds)
-                                                    for _ in 0..60 {
-                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                                    // Spawn a task to monitor ceremony progress and show completion
+                                                    let app_core_monitor = app_core.clone();
+                                                    let io_ctx_monitor = io_ctx.clone();
+                                                    tokio::spawn(async move {
+                                                        // Poll for ceremony completion (max 30 seconds)
+                                                        for _ in 0..60 {
+                                                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-                                                        let core = app_core_monitor.read().await;
-                                                        if let Ok(status) = core.get_ceremony_status(&ceremony_id).await {
-                                                            if status.is_complete {
-                                                                tracing::info!("Guardian ceremony completed successfully");
-                                                                io_ctx_monitor.add_success_toast(
-                                                                    "guardian-ceremony-complete",
-                                                                    format!("Guardian ceremony complete! {}-of-{} threshold achieved", k, n)
-                                                                ).await;
-                                                                break;
+                                                            let core = app_core_monitor.read().await;
+                                                            if let Ok(status) = core.get_ceremony_status(&ceremony_id).await {
+                                                                if status.is_complete {
+                                                                    tracing::info!("Guardian ceremony completed successfully");
+                                                                    io_ctx_monitor.add_success_toast(
+                                                                        "guardian-ceremony-complete",
+                                                                        format!("Guardian ceremony complete! {}-of-{} threshold achieved", k, n)
+                                                                    ).await;
+                                                                    break;
+                                                                }
                                                             }
                                                         }
-                                                    }
-                                                });
+                                                    });
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("Failed to initiate guardian ceremony: {}", e);
+
+                                                    io_ctx.add_error_toast(
+                                                        "guardian-ceremony-error",
+                                                        format!("Failed to initiate guardian ceremony: {}", e)
+                                                    ).await;
+                                                }
                                             }
-                                            Err(e) => {
-                                                tracing::error!("Failed to initiate guardian ceremony: {}", e);
+                                        });
 
-                                                io_ctx.add_error_toast(
-                                                    "guardian-ceremony-error",
-                                                    format!("Failed to initiate guardian ceremony: {}", e)
-                                                ).await;
-                                            }
-                                        }
-                                    });
-
-                                    // Update TUI state to close modal and show completion
-                                    tui_state.write().contacts.guardian_setup_modal.visible = false;
-                                    tui_state.write().contacts.guardian_setup_modal.has_pending_ceremony = false;
-                                    tui_state_version.set(tui_state_version.get() + 1);
-                                }
-                                DispatchCommand::CancelGuardianCeremony => {
-                                    tracing::info!("Canceling guardian ceremony");
-
-                                    // If there was a pending key rotation, roll it back
-                                    // The epoch would be tracked in ceremony state
-                                    // For now, just log that we would rollback
-                                    tracing::info!("Would rollback any pending key rotation");
-
-                                    // Close the modal and reset ceremony state
-                                    tui_state.write().contacts.guardian_setup_modal.visible = false;
-                                    tui_state.write().contacts.guardian_setup_modal.has_pending_ceremony = false;
-                                    tui_state.write().contacts.guardian_setup_modal.step = Default::default();
-                                    tui_state.write().contacts.guardian_setup_modal.selected_indices.clear();
-                                    tui_state.write().contacts.guardian_setup_modal.ceremony_responses.clear();
-                                    tui_state_version.set(tui_state_version.get() + 1);
-                                }
-
-                                // === Settings Screen Commands ===
-                                DispatchCommand::UpdateNickname { nickname } => {
-                                    if let Some(ref callback) = on_update_nickname {
-                                        callback(nickname);
+                                        // Update TUI state to close modal and show completion
+                                        tui_state.write().contacts.guardian_setup_modal.visible = false;
+                                        tui_state.write().contacts.guardian_setup_modal.has_pending_ceremony = false;
+                                        tui_state_version.set(tui_state_version.get() + 1);
                                     }
-                                }
-                                DispatchCommand::UpdateThreshold { k, n } => {
-                                    if let Some(ref callback) = on_update_threshold {
-                                        callback(k, n);
-                                    }
-                                }
-                                DispatchCommand::UpdateMfaPolicy { policy } => {
-                                    if let Some(ref callback) = on_update_mfa {
-                                        callback(policy);
-                                    }
-                                }
-                                DispatchCommand::AddDevice { name } => {
-                                    if let Some(ref callback) = on_add_device {
-                                        callback(name);
-                                    }
-                                }
-                                DispatchCommand::RemoveDevice { device_id } => {
-                                    if let Some(ref callback) = on_remove_device {
-                                        callback(device_id);
-                                    }
-                                }
+                                    DispatchCommand::CancelGuardianCeremony => {
+                                        tracing::info!("Canceling guardian ceremony");
 
-                                // === Neighborhood Screen Commands ===
-                                DispatchCommand::EnterBlock { block_id } => {
-                                    if let Some(ref callback) = on_enter_block {
+                                        // If there was a pending key rotation, roll it back
+                                        // The epoch would be tracked in ceremony state
+                                        // For now, just log that we would rollback
+                                        tracing::info!("Would rollback any pending key rotation");
+
+                                        // Close the modal and reset ceremony state
+                                        tui_state.write().contacts.guardian_setup_modal.visible = false;
+                                        tui_state.write().contacts.guardian_setup_modal.has_pending_ceremony = false;
+                                        tui_state.write().contacts.guardian_setup_modal.step = Default::default();
+                                        tui_state.write().contacts.guardian_setup_modal.selected_indices.clear();
+                                        tui_state.write().contacts.guardian_setup_modal.ceremony_responses.clear();
+                                        tui_state_version.set(tui_state_version.get() + 1);
+                                    }
+
+                                    // === Settings Screen Commands ===
+                                    DispatchCommand::UpdateNickname { nickname } => {
+                                        (cb.settings.on_update_nickname)(nickname);
+                                    }
+                                    DispatchCommand::UpdateThreshold { k, n } => {
+                                        (cb.settings.on_update_threshold)(k, n);
+                                    }
+                                    DispatchCommand::UpdateMfaPolicy { policy } => {
+                                        (cb.settings.on_update_mfa)(policy);
+                                    }
+                                    DispatchCommand::AddDevice { name } => {
+                                        (cb.settings.on_add_device)(name);
+                                    }
+                                    DispatchCommand::RemoveDevice { device_id } => {
+                                        (cb.settings.on_remove_device)(device_id);
+                                    }
+
+                                    // === Neighborhood Screen Commands ===
+                                    DispatchCommand::EnterBlock { block_id } => {
                                         // Default to Street-level traversal depth
-                                        callback(block_id, TraversalDepth::default());
+                                        (cb.neighborhood.on_enter_block)(block_id, TraversalDepth::default());
                                     }
-                                }
-                                DispatchCommand::GoHome => {
-                                    if let Some(ref callback) = on_go_home {
-                                        callback();
+                                    DispatchCommand::GoHome => {
+                                        (cb.neighborhood.on_go_home)();
                                     }
-                                }
-                                DispatchCommand::BackToStreet => {
-                                    if let Some(ref callback) = on_back_to_street {
-                                        callback();
+                                    DispatchCommand::BackToStreet => {
+                                        (cb.neighborhood.on_back_to_street)();
                                     }
-                                }
 
-                                // === Navigation Commands ===
-                                DispatchCommand::NavigateTo(_screen) => {
-                                    // Navigation is handled by TuiState directly
-                                    // The state machine already updates the screen
+                                    // === Navigation Commands ===
+                                    DispatchCommand::NavigateTo(_screen) => {
+                                        // Navigation is handled by TuiState directly
+                                        // The state machine already updates the screen
+                                    }
                                 }
                             }
-                        }
-                        TuiCommand::ShowToast { message, level } => {
-                            // Send toast through UiUpdate channel (reactive)
-                            if let Some(ref tx) = update_tx_for_toasts {
-                                let toast_level = match level {
-                                    crate::tui::state_machine::ToastLevel::Info => ToastLevel::Info,
-                                    crate::tui::state_machine::ToastLevel::Success => ToastLevel::Success,
-                                    crate::tui::state_machine::ToastLevel::Warning => ToastLevel::Warning,
-                                    crate::tui::state_machine::ToastLevel::Error => ToastLevel::Error,
-                                };
-                                let toast_id = format!(
-                                    "toast-{}",
-                                    std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .map(|d| d.as_millis())
-                                        .unwrap_or(0)
-                                );
-                                let toast = ToastMessage::new(toast_id, message).with_level(toast_level);
-                                let _ = tx.send(UiUpdate::ToastAdded(toast));
+                            TuiCommand::ShowToast { message, level } => {
+                                // Send toast through UiUpdate channel (reactive)
+                                if let Some(ref tx) = update_tx_for_toasts {
+                                    let toast_level = match level {
+                                        crate::tui::state_machine::ToastLevel::Info => ToastLevel::Info,
+                                        crate::tui::state_machine::ToastLevel::Success => ToastLevel::Success,
+                                        crate::tui::state_machine::ToastLevel::Warning => ToastLevel::Warning,
+                                        crate::tui::state_machine::ToastLevel::Error => ToastLevel::Error,
+                                    };
+                                    let toast_id = format!(
+                                        "toast-{}",
+                                        std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map(|d| d.as_millis())
+                                            .unwrap_or(0)
+                                    );
+                                    let toast = ToastMessage::new(toast_id, message).with_level(toast_level);
+                                    let _ = tx.send(UiUpdate::ToastAdded(toast));
+                                }
                             }
-                        }
-                        TuiCommand::DismissToast { id } => {
-                            // Dismiss specific toast via UiUpdate channel
-                            if let Some(ref tx) = update_tx_for_toasts {
-                                let toast_id = format!("toast-{}", id);
-                                let _ = tx.send(UiUpdate::ToastDismissed { toast_id });
+                            TuiCommand::DismissToast { id } => {
+                                // Dismiss specific toast via UiUpdate channel
+                                if let Some(ref tx) = update_tx_for_toasts {
+                                    let toast_id = format!("toast-{}", id);
+                                    let _ = tx.send(UiUpdate::ToastDismissed { toast_id });
+                                }
                             }
-                        }
-                        TuiCommand::ClearAllToasts => {
-                            // Clear all toasts via UiUpdate channel
-                            if let Some(ref tx) = update_tx_for_toasts {
-                                let _ = tx.send(UiUpdate::ToastsCleared);
+                            TuiCommand::ClearAllToasts => {
+                                // Clear all toasts via UiUpdate channel
+                                if let Some(ref tx) = update_tx_for_toasts {
+                                    let _ = tx.send(UiUpdate::ToastsCleared);
+                                }
                             }
-                        }
-                        TuiCommand::Render => {
-                            // Render is handled by iocraft automatically
+                            TuiCommand::Render => {
+                                // Render is handled by iocraft automatically
+                            }
                         }
                     }
                 }
@@ -1320,47 +1185,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // Create CallbackContext for providing callbacks to components via iocraft context
     let callback_context = CallbackContext::new(callbacks.clone());
 
-    // Extract individual callbacks for backward compatibility with IoAppProps
-    // TODO: Eventually screens will get these from CallbackContext directly
-    let on_send = callbacks.chat.on_send.clone();
-    let on_retry_message = callbacks.chat.on_retry_message.clone();
-    let on_channel_select = callbacks.chat.on_channel_select.clone();
-    let on_create_channel = callbacks.chat.on_create_channel.clone();
-    let on_set_topic = callbacks.chat.on_set_topic.clone();
-
-    let on_accept_invitation = callbacks.invitations.on_accept.clone();
-    let on_decline_invitation = callbacks.invitations.on_decline.clone();
-    let on_create_invitation = callbacks.invitations.on_create.clone();
-    let on_export_invitation = callbacks.invitations.on_export.clone();
-    let on_import_invitation = callbacks.invitations.on_import.clone();
-
-    let on_start_recovery = callbacks.recovery.on_start_recovery.clone();
-    let on_add_guardian = callbacks.recovery.on_add_guardian.clone();
-    let on_select_guardian = callbacks.recovery.on_select_guardian.clone();
-    let on_submit_approval = callbacks.recovery.on_submit_approval.clone();
-
-    let on_update_mfa = callbacks.settings.on_update_mfa.clone();
-    let on_update_nickname = callbacks.settings.on_update_nickname.clone();
-    let on_update_threshold = callbacks.settings.on_update_threshold.clone();
-    let on_add_device = callbacks.settings.on_add_device.clone();
-    let on_remove_device = callbacks.settings.on_remove_device.clone();
-
-    let on_update_petname = callbacks.contacts.on_update_petname.clone();
-    let on_start_chat = callbacks.contacts.on_start_chat.clone();
-    let on_invite_lan_peer = callbacks.contacts.on_invite_lan_peer.clone();
-
-    let on_block_send = callbacks.block.on_send.clone();
-    let on_block_invite = callbacks.block.on_invite.clone();
-    let on_block_navigate_neighborhood = callbacks.block.on_navigate_neighborhood.clone();
-    let on_grant_steward = callbacks.block.on_grant_steward.clone();
-    let on_revoke_steward = callbacks.block.on_revoke_steward.clone();
-
-    let on_enter_block = callbacks.neighborhood.on_enter_block.clone();
-    let on_go_home = callbacks.neighborhood.on_go_home.clone();
-    let on_back_to_street = callbacks.neighborhood.on_back_to_street.clone();
-
-    let on_create_account = callbacks.app.on_create_account.clone();
-
     // Check if account already exists to determine if we show setup modal
     let show_account_setup = !ctx_arc.has_account();
 
@@ -1421,16 +1245,20 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
             ContextProvider(value: Context::owned(app_context)) {
                 ContextProvider(value: Context::owned(cb_context)) {
                     IoApp(
+                    // Chat screen data
                     channels: channels,
                     messages: messages,
+                    // Recovery screen data
                     invitations: invitations,
                     guardians: guardians,
+                    pending_requests: Vec::new(), // Populated reactively in RecoveryScreen
+                    recovery_status: recovery_status,
+                    // Settings screen data
                     devices: devices,
                     display_name: display_name,
                     threshold_k: threshold_k,
                     threshold_n: threshold_n,
                     mfa_policy: MfaPolicy::SensitiveOnly,
-                    recovery_status: recovery_status,
                     // Block screen data
                     block_name: block_name,
                     residents: residents,
@@ -1443,45 +1271,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     neighborhood_name: neighborhood_name,
                     blocks: blocks,
                     traversal_depth: TraversalDepth::Street,
-                    // Effect dispatch callbacks
-                    on_send: Some(on_send),
-                    on_retry_message: Some(on_retry_message),
-                    on_channel_select: Some(on_channel_select.clone()),
-                    on_create_channel: Some(on_create_channel),
-                    on_set_topic: Some(on_set_topic),
-                    on_accept_invitation: Some(on_accept_invitation),
-                    on_decline_invitation: Some(on_decline_invitation),
-                    on_create_invitation: Some(on_create_invitation),
-                    on_export_invitation: Some(on_export_invitation),
-                    on_import_invitation: Some(on_import_invitation),
-                    on_enter_block: Some(on_enter_block),
-                    on_go_home: Some(on_go_home),
-                    on_back_to_street: Some(on_back_to_street),
-                    // Recovery callbacks
-                    on_start_recovery: Some(on_start_recovery),
-                    on_add_guardian: Some(on_add_guardian),
-                    on_select_guardian: Some(on_select_guardian),
-                    pending_requests: Vec::new(), // Populated reactively in RecoveryScreen
-                    on_submit_approval: Some(on_submit_approval),
-                    // Settings callbacks
-                    on_update_mfa: Some(on_update_mfa),
-                    on_update_nickname: Some(on_update_nickname),
-                    on_update_threshold: Some(on_update_threshold),
-                    on_add_device: Some(on_add_device),
-                    on_remove_device: Some(on_remove_device),
-                    // Contacts callbacks
-                    on_update_petname: Some(on_update_petname),
-                    on_start_chat: Some(on_start_chat),
-                    on_invite_lan_peer: Some(on_invite_lan_peer),
-                    // Block callbacks
-                    on_block_send: Some(on_block_send),
-                    on_block_invite: Some(on_block_invite),
-                    on_block_navigate_neighborhood: Some(on_block_navigate_neighborhood),
-                    on_grant_steward: Some(on_grant_steward),
-                    on_revoke_steward: Some(on_revoke_steward),
                     // Account setup
                     show_account_setup: show_account_setup,
-                    on_create_account: Some(on_create_account.clone()),
                     // Sync status
                     sync_in_progress: sync_in_progress,
                     last_sync_time: last_sync_time,
@@ -1493,6 +1284,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     // Reactive update channel
                     update_rx: Some(update_rx_holder),
                     update_tx: Some(update_tx.clone()),
+                    // Callbacks registry
+                    callbacks: Some(callbacks),
                 )
                 }
             }

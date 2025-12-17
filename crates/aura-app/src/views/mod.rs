@@ -21,7 +21,6 @@ pub use state::ViewState;
 // Re-export state types for convenience
 pub use block::{
     BanRecord, BlockState, BlocksState, KickRecord, MuteRecord, Resident, ResidentRole,
-    StorageBudget,
 };
 pub use chat::{Channel, ChannelType, ChatState, Message};
 pub use contacts::{Contact, ContactsState, MySuggestion, SuggestionPolicy};

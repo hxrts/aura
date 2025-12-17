@@ -1,8 +1,8 @@
 //! Admin maintenance commands (replacement, fork controls).
 //! Returns structured `CliOutput` for testability.
 
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::{anyhow, Result};
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::{AccountId, AuthorityId};
 use aura_core::{FactValue, Journal};
@@ -16,7 +16,7 @@ use crate::AdminAction;
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_admin(ctx: &HandlerContext<'_>, action: &AdminAction) -> Result<CliOutput> {
+pub async fn handle_admin(ctx: &HandlerContext<'_>, action: &AdminAction) -> TerminalResult<CliOutput> {
     match action {
         AdminAction::Replace {
             account,
@@ -31,11 +31,15 @@ async fn replace_admin(
     account: &str,
     new_admin: &str,
     activation_epoch: u64,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
-    let account_id: AccountId = account.parse().map_err(|e: uuid::Error| anyhow!(e))?;
-    let new_admin_id: AuthorityId = new_admin.parse().map_err(|e: uuid::Error| anyhow!(e))?;
+    let account_id: AccountId = account
+        .parse()
+        .map_err(|e: uuid::Error| TerminalError::Input(format!("{}", e)))?;
+    let new_admin_id: AuthorityId = new_admin
+        .parse()
+        .map_err(|e: uuid::Error| TerminalError::Input(format!("{}", e)))?;
 
     output.println(format!(
         "Replacing admin for account {} with {} (activation epoch {})",
@@ -64,13 +68,17 @@ async fn replace_admin(
     let fact_content = FactContent::Relational(RelationalFact::Generic {
         context_id: ctx.effect_context().context_id(),
         binding_type: "admin_replaced".to_string(),
-        binding_data: serde_json::to_vec(&fact_payload)
-            .map_err(|e| anyhow!("Failed to serialize admin replacement payload: {}", e))?,
+        binding_data: serde_json::to_vec(&fact_payload).map_err(|e| {
+            TerminalError::Operation(format!(
+                "Failed to serialize admin replacement payload: {}",
+                e
+            ))
+        })?,
     });
 
     let fact_value = serde_json::to_vec(&fact_content)
         .map(FactValue::Bytes)
-        .map_err(|e| anyhow!("Failed to encode admin replacement fact: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to encode admin replacement fact: {}", e)))?;
 
     let mut delta = Journal::new();
     let fact_key = format!("admin_replace:{}", account_id);
@@ -80,16 +88,16 @@ async fn replace_admin(
         .effects()
         .get_journal()
         .await
-        .map_err(|e| anyhow!("Failed to load journal: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to load journal: {}", e)))?;
     let merged = ctx
         .effects()
         .merge_facts(&current, &delta)
         .await
-        .map_err(|e| anyhow!("Failed to merge admin replacement fact: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to merge admin replacement fact: {}", e)))?;
     ctx.effects()
         .persist_journal(&merged)
         .await
-        .map_err(|e| anyhow!("Failed to persist admin replacement fact: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to persist admin replacement fact: {}", e)))?;
 
     output.println(format!(
         "Admin replacement recorded; new admin {} activates at epoch {}",

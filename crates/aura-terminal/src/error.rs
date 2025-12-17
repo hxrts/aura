@@ -34,20 +34,33 @@ impl From<anyhow::Error> for TerminalError {
     }
 }
 
+impl From<aura_core::AuraError> for TerminalError {
+    fn from(err: aura_core::AuraError) -> Self {
+        TerminalError::Operation(err.to_string())
+    }
+}
+
 #[cfg(feature = "terminal")]
-impl From<crate::tui::effects::dispatcher::DispatchError> for TerminalError {
-    fn from(err: crate::tui::effects::dispatcher::DispatchError) -> Self {
+impl From<aura_agent::AgentError> for TerminalError {
+    fn from(err: aura_agent::AgentError) -> Self {
+        TerminalError::Operation(err.to_string())
+    }
+}
+
+#[cfg(feature = "terminal")]
+impl From<crate::tui::effects::DispatchError> for TerminalError {
+    fn from(err: crate::tui::effects::DispatchError) -> Self {
         match err {
-            crate::tui::effects::dispatcher::DispatchError::PermissionDenied { required } => {
+            crate::tui::effects::DispatchError::PermissionDenied { required } => {
                 TerminalError::Capability(format!("requires {}", required.as_str()))
             }
-            crate::tui::effects::dispatcher::DispatchError::NotFound { resource } => {
+            crate::tui::effects::DispatchError::NotFound { resource } => {
                 TerminalError::NotFound(resource)
             }
-            crate::tui::effects::dispatcher::DispatchError::InvalidParameter { param, reason } => {
+            crate::tui::effects::DispatchError::InvalidParameter { param, reason } => {
                 TerminalError::Input(format!("{}: {}", param, reason))
             }
-            crate::tui::effects::dispatcher::DispatchError::NotImplemented { command } => {
+            crate::tui::effects::DispatchError::NotImplemented { command } => {
                 TerminalError::NotImplemented(command)
             }
         }
@@ -55,16 +68,16 @@ impl From<crate::tui::effects::dispatcher::DispatchError> for TerminalError {
 }
 
 #[cfg(feature = "terminal")]
-impl From<crate::tui::effects::operational::OpError> for TerminalError {
-    fn from(err: crate::tui::effects::operational::OpError) -> Self {
+impl From<crate::tui::effects::OpError> for TerminalError {
+    fn from(err: crate::tui::effects::OpError) -> Self {
         match err {
-            crate::tui::effects::operational::OpError::NotImplemented(s) => {
+            crate::tui::effects::OpError::NotImplemented(s) => {
                 TerminalError::NotImplemented(s)
             }
-            crate::tui::effects::operational::OpError::InvalidArgument(s) => {
+            crate::tui::effects::OpError::InvalidArgument(s) => {
                 TerminalError::Input(s)
             }
-            crate::tui::effects::operational::OpError::Failed(s) => {
+            crate::tui::effects::OpError::Failed(s) => {
                 TerminalError::Operation(s)
             }
         }

@@ -2,9 +2,9 @@
 //!
 //! Returns structured `CliOutput` for testability.
 
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::InvitationAction;
-use anyhow::{anyhow, Result};
 // Import agent types from aura-agent (runtime layer)
 use aura_agent::handlers::{InvitationService, ShareableInvitation};
 use aura_agent::AuraAgent;
@@ -19,10 +19,10 @@ use std::str::FromStr;
 pub async fn handle_invitation(
     ctx: &HandlerContext<'_>,
     action: &InvitationAction,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let agent = ctx
         .agent()
-        .ok_or_else(|| anyhow!("agent not available in handler context"))?;
+        .ok_or_else(|| TerminalError::Operation("agent not available in handler context".into()))?;
 
     match action {
         InvitationAction::Create {
@@ -113,7 +113,7 @@ pub async fn handle_invitation(
         InvitationAction::Import { code } => {
             let mut output = CliOutput::new();
             let shareable = InvitationService::import_code(code)
-                .map_err(|e| anyhow!("Invalid invitation code: {}", e))?;
+                .map_err(|e| TerminalError::Input(format!("Invalid invitation code: {}", e)))?;
 
             output.section("Invitation Details");
             output.kv("Invitation ID", shareable.invitation_id.to_string());
@@ -172,12 +172,12 @@ async fn create_invitation(
     invitee: &str,
     role: &str,
     ttl_secs: Option<u64>,
-) -> Result<aura_agent::Invitation> {
+) -> TerminalResult<aura_agent::Invitation> {
     let receiver_id = AuthorityId::from_uuid(
-        uuid::Uuid::from_str(invitee).map_err(|e| anyhow!("invalid invitee authority: {e}"))?,
+        uuid::Uuid::from_str(invitee).map_err(|e| TerminalError::Input(format!("invalid invitee authority: {}", e)))?,
     );
     let subject_authority = AuthorityId::from_uuid(
-        uuid::Uuid::from_str(account).map_err(|e| anyhow!("invalid account authority: {e}"))?,
+        uuid::Uuid::from_str(account).map_err(|e| TerminalError::Input(format!("invalid account authority: {}", e)))?,
     );
     let service = agent.invitations().await?;
     let expires_ms = ttl_secs.map(|s| s * 1000);
@@ -186,17 +186,17 @@ async fn create_invitation(
         service
             .invite_as_guardian(receiver_id, subject_authority, None, expires_ms)
             .await
-            .map_err(|e| anyhow!(e))
+            .map_err(|e| TerminalError::Operation(e.to_string()))
     } else if role.eq_ignore_ascii_case("channel") {
         service
             .invite_to_channel(receiver_id, "channel".to_string(), None, expires_ms)
             .await
-            .map_err(|e| anyhow!(e))
+            .map_err(|e| TerminalError::Operation(e.to_string()))
     } else {
         service
             .invite_as_contact(receiver_id, Some(role.to_string()), None, expires_ms)
             .await
-            .map_err(|e| anyhow!(e))
+            .map_err(|e| TerminalError::Operation(e.to_string()))
     }
 }
 

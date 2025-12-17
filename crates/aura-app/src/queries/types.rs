@@ -855,7 +855,8 @@ impl Query for BlocksQuery {
     }
 
     fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        use crate::views::block::{BlockState, BlocksState, ResidentRole, StorageBudget};
+        use crate::views::block::{BlockState, BlocksState, ResidentRole};
+        use crate::budget::BlockFlowBudget;
         use std::collections::HashMap;
 
         let blocks_list: Vec<BlockState> = bindings
@@ -873,7 +874,7 @@ impl Query for BlocksQuery {
                     name: get_string(&row, "name"),
                     residents: Vec::new(), // Populated by separate query
                     my_role,
-                    storage: StorageBudget::default(),
+                    storage: BlockFlowBudget::default(),
                     online_count: get_int(&row, "online_count") as u32,
                     resident_count: get_int(&row, "resident_count") as u32,
                     is_primary: get_bool(&row, "is_primary"),

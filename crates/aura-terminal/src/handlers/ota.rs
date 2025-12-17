@@ -5,8 +5,8 @@
 //!
 //! Returns structured `CliOutput` for testability.
 
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::{Context, Result};
 use aura_core::effects::StorageEffects;
 use aura_core::{hash, AccountId, Hash32, SemanticVersion};
 use aura_sync::maintenance::{IdentityEpochFence, UpgradeProposal};
@@ -22,7 +22,7 @@ use crate::{ids, OtaAction};
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_ota(ctx: &HandlerContext<'_>, action: &OtaAction) -> Result<CliOutput> {
+pub async fn handle_ota(ctx: &HandlerContext<'_>, action: &OtaAction) -> TerminalResult<CliOutput> {
     match action {
         OtaAction::Propose {
             from_version,
@@ -56,7 +56,7 @@ async fn propose_upgrade(
     upgrade_type: &str,
     download_url: &str,
     description: &str,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.println(format!(
@@ -68,23 +68,21 @@ async fn propose_upgrade(
         "soft" => UpgradeKind::SoftFork,
         "hard" => UpgradeKind::HardFork,
         _ => {
-            return Err(anyhow::anyhow!(
+            return Err(TerminalError::Input(format!(
                 "Invalid upgrade type: {}. Use 'soft' or 'hard'",
                 upgrade_type
-            ))
+            )))
         }
     };
 
     // Parse version string (e.g., "1.2.3")
     let parts: Vec<&str> = to_version.split('.').collect();
     if parts.len() != 3 {
-        return Err(anyhow::anyhow!(
-            "Invalid semantic version format. Expected: major.minor.patch"
-        ));
+        return Err(TerminalError::Input("Invalid semantic version format. Expected: major.minor.patch".into()));
     }
-    let major: u16 = parts[0].parse().context("Invalid major version")?;
-    let minor: u16 = parts[1].parse().context("Invalid minor version")?;
-    let patch: u16 = parts[2].parse().context("Invalid patch version")?;
+    let major: u16 = parts[0].parse().map_err(|e| TerminalError::Input(format!("Invalid major version: {}", e)))?;
+    let minor: u16 = parts[1].parse().map_err(|e| TerminalError::Input(format!("Invalid minor version: {}", e)))?;
+    let patch: u16 = parts[2].parse().map_err(|e| TerminalError::Input(format!("Invalid patch version: {}", e)))?;
     let version = SemanticVersion::new(major, minor, patch);
 
     // Compute artifact hash from local file if available, otherwise hash the URL string
@@ -108,13 +106,17 @@ async fn propose_upgrade(
         },
     };
 
-    proposal.validate().context("Invalid upgrade proposal")?;
+    proposal
+        .validate()
+        .map_err(|e| TerminalError::Operation(format!("Invalid upgrade proposal: {}", e)))?;
 
     let key = format!("ota:proposal:{}", proposal.package_id);
     ctx.effects()
-        .store(&key, serde_json::to_vec(&proposal)?)
+        .store(&key, serde_json::to_vec(&proposal).map_err(|e| {
+            TerminalError::Operation(format!("Failed to serialize proposal: {}", e))
+        })?)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to store proposal: {}", e)))?;
 
     output.kv("Proposal ID", proposal.package_id.to_string());
     output.kv("Version", proposal.version.to_string());
@@ -123,20 +125,20 @@ async fn propose_upgrade(
     Ok(output)
 }
 
-async fn set_policy(ctx: &HandlerContext<'_>, policy: &str) -> Result<CliOutput> {
+async fn set_policy(ctx: &HandlerContext<'_>, policy: &str) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     let key = "ota:policy";
     ctx.effects()
         .store(key, policy.as_bytes().to_vec())
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to set policy: {}", e)))?;
 
     output.kv("OTA policy set to", policy);
     Ok(output)
 }
 
-async fn get_status(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+async fn get_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.section("OTA Status");
@@ -167,22 +169,23 @@ async fn get_status(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
     Ok(output)
 }
 
-async fn opt_in(ctx: &HandlerContext<'_>, proposal_id: &str) -> Result<CliOutput> {
+async fn opt_in(ctx: &HandlerContext<'_>, proposal_id: &str) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
-    let proposal_uuid = Uuid::parse_str(proposal_id).context("proposal_id must be a UUID")?;
+    let proposal_uuid = Uuid::parse_str(proposal_id)
+        .map_err(|e| TerminalError::Input(format!("proposal_id must be a UUID: {}", e)))?;
 
     let key = format!("ota:optin:{}", proposal_uuid);
     ctx.effects()
         .store(&key, b"opted-in".to_vec())
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to opt in: {}", e)))?;
 
     output.kv("Opted into proposal", proposal_uuid.to_string());
     Ok(output)
 }
 
-async fn list_proposals(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+async fn list_proposals(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     let proposals = list_saved_proposals(ctx).await?;
@@ -203,7 +206,7 @@ async fn list_proposals(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
     Ok(output)
 }
 
-async fn get_stats(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+async fn get_stats(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.section("OTA Statistics");
@@ -222,11 +225,12 @@ async fn get_stats(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
     Ok(output)
 }
 
-fn compute_artifact_hash(download_url: &str) -> Result<Hash32> {
+fn compute_artifact_hash(download_url: &str) -> TerminalResult<Hash32> {
     let mut hasher = hash::hasher();
     let path = Path::new(download_url);
     if path.exists() {
-        let data = fs::read(path)?;
+        let data = fs::read(path)
+            .map_err(|e| TerminalError::Operation(format!("Failed to read artifact: {}", e)))?;
         hasher.update(&data);
     } else {
         hasher.update(download_url.as_bytes());
@@ -235,7 +239,7 @@ fn compute_artifact_hash(download_url: &str) -> Result<Hash32> {
     Ok(Hash32::new(digest))
 }
 
-async fn list_saved_proposals(ctx: &HandlerContext<'_>) -> Result<Vec<UpgradeProposal>> {
+async fn list_saved_proposals(ctx: &HandlerContext<'_>) -> TerminalResult<Vec<UpgradeProposal>> {
     let mut proposals = Vec::new();
     let keys = ctx
         .effects()

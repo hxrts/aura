@@ -3,10 +3,10 @@
 //! Effect-based implementation of threshold operations.
 //! Returns structured `CliOutput` for testability.
 
+use crate::error::{TerminalError, TerminalResult};
+use crate::handlers::config::load_config_utf8;
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::Result;
 use aura_authenticate::{DkdConfig, DkdProtocol};
-use aura_core::effects::StorageEffects;
 use aura_core::DeviceId;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -21,7 +21,7 @@ pub async fn handle_threshold(
     configs: &str,
     threshold: u32,
     mode: &str,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
     let config_paths: Vec<&str> = configs.split(',').collect();
 
@@ -36,46 +36,19 @@ pub async fn handle_threshold(
     let mut valid_configs = Vec::new();
     for config_path in &config_paths {
         let path = PathBuf::from(config_path);
+        let key = format!("device_config:{}", path.display());
+        let config_string = load_config_utf8(ctx, &key).await.map_err(|e| {
+            output.eprintln(format!("Failed to read config {}: {}", config_path, e));
+            e
+        })?;
 
-        // Load config via StorageEffects
-        let config_key = format!("device_config:{}", path.display());
-        match ctx.effects().retrieve(&config_key).await {
-            Ok(Some(data)) => match String::from_utf8(data) {
-                Ok(config_string) => match parse_config_data(config_string.as_bytes()) {
-                    Ok(config) => {
-                        output.println(format!("Loaded config: {}", config_path));
-                        valid_configs.push((path, config));
-                    }
-                    Err(e) => {
-                        output.eprintln(format!("Invalid config {}: {}", config_path, e));
-                        return Err(anyhow::anyhow!("Invalid config {}: {}", config_path, e));
-                    }
-                },
-                Err(e) => {
-                    output.eprintln(format!(
-                        "Invalid UTF-8 in config file {}: {}",
-                        config_path, e
-                    ));
-                    return Err(anyhow::anyhow!(
-                        "Invalid UTF-8 in config file {}: {}",
-                        config_path,
-                        e
-                    ));
-                }
-            },
-            Ok(None) => {
-                output.eprintln(format!("Config file not found: {}", config_path));
-                return Err(anyhow::anyhow!("Config file not found: {}", config_path));
-            }
-            Err(e) => {
-                output.eprintln(format!("Failed to read config {}: {}", config_path, e));
-                return Err(anyhow::anyhow!(
-                    "Failed to read config {}: {}",
-                    config_path,
-                    e
-                ));
-            }
-        }
+        let config = parse_config_data(config_string.as_bytes()).map_err(|e| {
+            output.eprintln(format!("Invalid config {}: {}", config_path, e));
+            e
+        })?;
+
+        output.println(format!("Loaded config: {}", config_path));
+        valid_configs.push((path, config));
     }
 
     // Validate threshold parameters
@@ -91,7 +64,7 @@ pub async fn handle_threshold(
         "dkd" => execute_dkd_protocol(ctx, &valid_configs, threshold, &mut output).await?,
         _ => {
             output.eprintln(format!("Unknown threshold mode: {}", mode));
-            return Err(anyhow::anyhow!("Unknown threshold mode: {}", mode));
+            return Err(TerminalError::Input(format!("Unknown threshold mode: {}", mode)));
         }
     }
 
@@ -99,12 +72,12 @@ pub async fn handle_threshold(
 }
 
 /// Parse configuration data
-fn parse_config_data(data: &[u8]) -> Result<ThresholdConfig> {
-    let config_str =
-        String::from_utf8(data.to_vec()).map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))?;
+fn parse_config_data(data: &[u8]) -> Result<ThresholdConfig, TerminalError> {
+    let config_str = String::from_utf8(data.to_vec())
+        .map_err(|e| TerminalError::Config(format!("Invalid UTF-8: {}", e)))?;
 
-    let config: ThresholdConfig = toml::from_str(&config_str)
-        .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
+    let config: ThresholdConfig =
+        toml::from_str(&config_str).map_err(|e| TerminalError::Config(e.to_string()))?;
 
     Ok(config)
 }
@@ -114,10 +87,10 @@ fn validate_threshold_params(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
     output: &mut CliOutput,
-) -> Result<()> {
+) -> TerminalResult<()> {
     if configs.is_empty() {
         output.eprintln("No valid configurations provided");
-        return Err(anyhow::anyhow!("No valid configurations"));
+        return Err(TerminalError::Input("No valid configurations".into()));
     }
 
     let num_devices = configs.len() as u32;
@@ -127,16 +100,15 @@ fn validate_threshold_params(
             "Threshold ({}) cannot be greater than number of devices ({})",
             threshold, num_devices
         ));
-        return Err(anyhow::anyhow!(
+        return Err(TerminalError::Input(format!(
             "Invalid threshold: {} > {}",
-            threshold,
-            num_devices
-        ));
+            threshold, num_devices
+        )));
     }
 
     if threshold == 0 {
         output.eprintln("Threshold must be greater than 0");
-        return Err(anyhow::anyhow!("Invalid threshold: 0"));
+        return Err(TerminalError::Input("Invalid threshold: 0".into()));
     }
 
     // Verify all configs have compatible threshold settings
@@ -148,7 +120,10 @@ fn validate_threshold_params(
                 configs[0].1.threshold,
                 config.threshold
             ));
-            return Err(anyhow::anyhow!("Threshold mismatch in {}", path.display()));
+            return Err(TerminalError::Config(format!(
+                "Threshold mismatch in {}",
+                path.display()
+            )));
         }
     }
 
@@ -162,7 +137,7 @@ async fn execute_threshold_signing(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
     output: &mut CliOutput,
-) -> Result<()> {
+) -> TerminalResult<()> {
     use aura_core::effects::ThresholdSigningEffects;
     use aura_core::threshold::{ApprovalContext, SignableOperation, SigningContext};
     use aura_core::tree::{TreeOp, TreeOpKind};
@@ -218,7 +193,7 @@ async fn execute_threshold_verification(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
     output: &mut CliOutput,
-) -> Result<()> {
+) -> TerminalResult<()> {
     use aura_core::effects::{CryptoEffects, ThresholdSigningEffects};
 
     output.section("Threshold Verification Operation");
@@ -290,7 +265,7 @@ async fn execute_threshold_keygen(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
     output: &mut CliOutput,
-) -> Result<()> {
+) -> TerminalResult<()> {
     use aura_core::effects::ThresholdSigningEffects;
 
     output.section("Threshold Key Generation");
@@ -341,7 +316,7 @@ async fn execute_dkd_protocol(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
     output: &mut CliOutput,
-) -> Result<()> {
+) -> TerminalResult<()> {
     output.section("DKD (Distributed Key Derivation) Protocol");
 
     // Create participant device IDs from configs
@@ -379,12 +354,12 @@ async fn execute_dkd_protocol(
     let session_id = protocol
         .initiate_session(ctx.effects(), participants.clone(), None)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to initiate DKD session: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to initiate DKD session: {}", e)))?;
 
     let result = protocol
         .execute_protocol(ctx.effects(), &session_id, participants[0])
         .await
-        .map_err(|e| anyhow::anyhow!("DKD protocol execution failed: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("DKD protocol execution failed: {}", e)))?;
 
     output.blank();
     output.println("DKD protocol completed successfully!");
@@ -407,7 +382,7 @@ pub async fn handle_dkd_test(
     context: &str,
     threshold: u16,
     total: u16,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.println(format!(
@@ -425,11 +400,10 @@ pub async fn handle_dkd_test(
         .collect();
 
     if participants.is_empty() || threshold == 0 || threshold > total {
-        return Err(anyhow::anyhow!(
+        return Err(TerminalError::Input(format!(
             "Invalid DKD parameters: threshold={}, total={}",
-            threshold,
-            total
-        ));
+            threshold, total
+        )));
     }
 
     let config = DkdConfig {
@@ -444,12 +418,12 @@ pub async fn handle_dkd_test(
     let session_id = protocol
         .initiate_session(ctx.effects(), participants.clone(), None)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to initiate DKD session: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to initiate DKD session: {}", e)))?;
 
     let result = protocol
         .execute_protocol(ctx.effects(), &session_id, participants[0])
         .await
-        .map_err(|e| anyhow::anyhow!("DKD protocol execution failed: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("DKD protocol execution failed: {}", e)))?;
 
     output.blank();
     output.println("DKD test completed successfully!");

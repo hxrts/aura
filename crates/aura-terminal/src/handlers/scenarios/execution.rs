@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use anyhow::Result;
+use crate::error::{TerminalError, TerminalResult};
 use aura_core::effects::ConsoleEffects;
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 
@@ -24,7 +24,7 @@ pub async fn execute_scenarios(
     pattern: Option<&str>,
     parallel: bool,
     max_parallel: Option<usize>,
-) -> Result<Vec<ScenarioResult>> {
+) -> TerminalResult<Vec<ScenarioResult>> {
     let base_dir = directory.unwrap_or_else(|| Path::new("scenarios"));
     let mut scenario_files = collect_scenario_files(base_dir)?;
 
@@ -78,18 +78,18 @@ pub async fn execute_scenarios(
 }
 
 /// Collect scenario files (toml) under a directory tree
-pub fn collect_scenario_files(root: &Path) -> Result<Vec<PathBuf>> {
+pub fn collect_scenario_files(root: &Path) -> TerminalResult<Vec<PathBuf>> {
     let mut stack = vec![root.to_path_buf()];
     let mut found = Vec::new();
 
     while let Some(dir) = stack.pop() {
         let entries = fs::read_dir(&dir).map_err(|e| {
-            anyhow::anyhow!("Failed to read scenario directory {}: {}", dir.display(), e)
+            TerminalError::Operation(format!("Failed to read scenario directory {}: {}", dir.display(), e)
         })?;
 
         for entry in entries {
             let entry = entry.map_err(|e| {
-                anyhow::anyhow!("Failed to read scenario entry {}: {}", dir.display(), e)
+                TerminalError::Operation(format!("Failed to read scenario entry {}: {}", dir.display(), e)
             })?;
             let path = entry.path();
             if path.is_dir() {
@@ -104,13 +104,13 @@ pub fn collect_scenario_files(root: &Path) -> Result<Vec<PathBuf>> {
 }
 
 /// Run a single scenario file with detailed logging
-async fn run_scenario_file(ctx: &HandlerContext<'_>, path: &Path) -> Result<Option<String>> {
+async fn run_scenario_file(ctx: &HandlerContext<'_>, path: &Path) -> TerminalResult<Option<String>> {
     let effects_ref = ctx.effects();
     let contents = fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("Failed to read scenario {}: {}", path.display(), e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to read scenario {}: {}", path.display(), e))?;
 
     let parsed: toml::Value = toml::from_str(&contents).map_err(|e| {
-        anyhow::anyhow!("Failed to parse scenario {} as TOML: {}", path.display(), e)
+        TerminalError::Operation(format!("Failed to parse scenario {} as TOML: {}", path.display(), e)
     })?;
 
     let mut lines = ScenarioLog::new(path);
@@ -209,7 +209,7 @@ async fn run_scenario_file(ctx: &HandlerContext<'_>, path: &Path) -> Result<Opti
                 }
 
                 if sim_result.outcome != "RecoveryDemoSuccess" {
-                    return Err(anyhow::anyhow!(
+                    return Err(TerminalError::Operation(format!(
                         "Scenario failed in simulator (outcome {})",
                         sim_result.outcome
                     ));
@@ -222,7 +222,7 @@ async fn run_scenario_file(ctx: &HandlerContext<'_>, path: &Path) -> Result<Opti
                     &format!("Simulator execution error: {}", e),
                 )
                 .await;
-                return Err(anyhow::anyhow!("Simulator execution failed: {}", e));
+                return Err(TerminalError::Operation(format!("Simulator execution failed: {}", e));
             }
         }
     }

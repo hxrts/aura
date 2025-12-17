@@ -1,8 +1,8 @@
 //! Snapshot maintenance command handler.
 //! Returns structured `CliOutput` for testability.
 
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::Result;
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::{FactValue, Journal};
@@ -19,13 +19,13 @@ use crate::SnapshotAction;
 pub async fn handle_snapshot(
     ctx: &HandlerContext<'_>,
     action: &SnapshotAction,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     match action {
         SnapshotAction::Propose => propose_snapshot(ctx).await,
     }
 }
 
-async fn propose_snapshot(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+async fn propose_snapshot(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.println("Starting snapshot proposal...");
@@ -48,12 +48,12 @@ async fn propose_snapshot(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
         context_id: ctx.effect_context().context_id(),
         binding_type: "snapshot_proposed".to_string(),
         binding_data: serde_json::to_vec(&proposal)
-            .map_err(|e| anyhow::anyhow!("Failed to serialize snapshot proposal: {}", e))?,
+            .map_err(|e| TerminalError::Operation(format!("Failed to serialize snapshot proposal: {}", e)))?,
     });
 
     let fact_value = serde_json::to_vec(&fact_content)
         .map(FactValue::Bytes)
-        .map_err(|e| anyhow::anyhow!("Failed to encode snapshot proposal fact: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to encode snapshot proposal fact: {}", e)))?;
 
     let mut delta = Journal::new();
     let fact_key = format!("snapshot_proposed:{}", ctx.effect_context().context_id());
@@ -63,16 +63,16 @@ async fn propose_snapshot(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
         .effects()
         .get_journal()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to load journal: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to load journal: {}", e)))?;
     let merged = ctx
         .effects()
         .merge_facts(&current, &delta)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to merge snapshot fact: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to merge snapshot fact: {}", e)))?;
     ctx.effects()
         .persist_journal(&merged)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to persist snapshot fact: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to persist snapshot fact: {}", e)))?;
 
     output.kv("Snapshot proposal recorded with key", fact_key);
 

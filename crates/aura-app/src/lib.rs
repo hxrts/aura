@@ -122,6 +122,7 @@ uniffi::custom_type!(ContextId, String);
 // =============================================================================
 
 pub mod bridge;
+pub mod budget;
 pub mod core;
 pub mod queries;
 pub mod runtime_bridge;
@@ -159,11 +160,17 @@ pub use crate::bridge::callback::StateObserver;
 #[cfg(feature = "signals")]
 pub use crate::reactive_state::{ReactiveState, ReactiveVec};
 
+// Re-export budget types
+pub use crate::budget::{
+    BlockFlowBudget, BudgetBreakdown, BudgetError, BLOCK_TOTAL_SIZE, KB, MAX_NEIGHBORHOODS,
+    MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION, RESIDENT_ALLOCATION,
+};
+
 // Re-export signal definitions for convenience
 // Note: SyncStatus and ConnectionStatus are signal-specific types in signal_defs module.
 // The runtime_bridge::SyncStatus is different (runtime status).
 pub use crate::signal_defs::{
-    register_app_signals, AppError, BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL,
+    register_app_signals, AppError, BLOCKS_SIGNAL, BLOCK_SIGNAL, BUDGET_SIGNAL, CHAT_SIGNAL,
     CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
     NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL, SYNC_STATUS_SIGNAL, UNREAD_COUNT_SIGNAL,
 };

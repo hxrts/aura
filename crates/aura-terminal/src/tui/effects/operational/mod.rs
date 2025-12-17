@@ -56,6 +56,7 @@ use tokio::sync::RwLock;
 pub use types::{OpError, OpResponse, OpResult};
 
 use super::EffectCommand;
+use crate::error::TerminalError;
 
 /// Handles operational commands that don't create journal facts.
 ///
@@ -146,7 +147,8 @@ impl OperationalHandler {
     }
 
     /// Emit an error to the error signal
-    pub async fn emit_error(&self, error: AppError) {
+    pub async fn emit_error(&self, error: TerminalError) {
+        let error = map_terminal_error(&error);
         if let Ok(core) = self.app_core.try_read() {
             let _ = core.emit(&*ERROR_SIGNAL, Some(error)).await;
         }
@@ -157,6 +159,19 @@ impl OperationalHandler {
         if let Ok(core) = self.app_core.try_read() {
             let _ = core.emit(&*ERROR_SIGNAL, None).await;
         }
+    }
+}
+
+/// Map terminal-facing errors onto AppError for signal emission.
+fn map_terminal_error(err: &TerminalError) -> AppError {
+    match err {
+        TerminalError::Input(msg) => AppError::new("INPUT_ERROR", msg),
+        TerminalError::Config(msg) => AppError::new("CONFIG_ERROR", msg),
+        TerminalError::Capability(msg) => AppError::new("CAPABILITY_DENIED", msg),
+        TerminalError::NotFound(msg) => AppError::new("NOT_FOUND", msg),
+        TerminalError::Network(msg) => AppError::new("NETWORK_ERROR", msg),
+        TerminalError::NotImplemented(msg) => AppError::new("NOT_IMPLEMENTED", msg),
+        TerminalError::Operation(msg) => AppError::new("OPERATION_FAILED", msg),
     }
 }
 

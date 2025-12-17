@@ -6,9 +6,9 @@
 //! Returns structured `CliOutput` for testability.
 
 use crate::cli::sync::SyncAction;
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::ids;
-use anyhow::Result;
 // Import sync types from aura-agent (runtime layer)
 use aura_agent::{SyncManagerConfig, SyncServiceManager};
 use aura_core::identifiers::DeviceId;
@@ -22,7 +22,7 @@ use tokio::signal;
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_sync(ctx: &HandlerContext<'_>, action: &SyncAction) -> Result<CliOutput> {
+pub async fn handle_sync(ctx: &HandlerContext<'_>, action: &SyncAction) -> TerminalResult<CliOutput> {
     match action {
         SyncAction::Daemon {
             interval,
@@ -51,7 +51,7 @@ async fn handle_daemon_mode(
     interval_secs: u64,
     max_concurrent: usize,
     peers: Option<&str>,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.println("Starting sync daemon...");
@@ -91,7 +91,7 @@ async fn handle_daemon_mode(
     manager
         .start(&time_handler)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to start sync service: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {}", e)))?;
 
     println!("\nSync daemon started. Press Ctrl+C to stop.\n");
 
@@ -150,7 +150,7 @@ async fn handle_daemon_mode(
     manager
         .stop()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to stop sync service: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to stop sync service: {}", e)))?;
 
     let _ = ctx; // Acknowledge context for future use
 
@@ -162,7 +162,7 @@ async fn handle_daemon_mode(
 }
 
 /// Perform a one-shot sync with specific peers
-async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Result<CliOutput> {
+async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.println("Performing one-shot sync...");
@@ -175,7 +175,7 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Result<C
         .collect();
 
     if peers.is_empty() {
-        return Err(anyhow::anyhow!("No peers specified for sync"));
+        return Err(TerminalError::Input("No peers specified for sync".into()));
     }
 
     output.kv("Peers", peers.len().to_string());
@@ -189,7 +189,7 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Result<C
     manager
         .start(&time_handler)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to start sync service: {}", e))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {}", e)))?;
 
     // Note: Full sync_with_peers would need the full effect system
     // For now, just add peers and show status
@@ -222,7 +222,7 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Result<C
 }
 
 /// Show sync status and metrics
-async fn handle_status(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
+async fn handle_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.section("Sync Service Status");
@@ -242,7 +242,7 @@ async fn handle_status(ctx: &HandlerContext<'_>) -> Result<CliOutput> {
 }
 
 /// Add a peer to the sync list
-async fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> Result<CliOutput> {
+async fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     let peer_id = ids::device_id(peer_str);
@@ -254,7 +254,7 @@ async fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> Result<Cli
 }
 
 /// Remove a peer from the sync list
-async fn handle_remove_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> Result<CliOutput> {
+async fn handle_remove_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     let peer_id = ids::device_id(peer_str);

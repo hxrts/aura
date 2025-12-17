@@ -3,6 +3,7 @@
 //! This module contains block state types including moderation functionality
 //! (bans, mutes, kicks) that were previously in TUI-only demo code.
 
+use crate::budget::BlockFlowBudget;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -107,38 +108,8 @@ pub struct KickRecord {
 }
 
 // =============================================================================
-// Storage Types
+// Block State
 // =============================================================================
-
-/// Storage budget info
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct StorageBudget {
-    /// Total storage budget in bytes
-    pub total_bytes: u64,
-    /// Used storage in bytes
-    pub used_bytes: u64,
-    /// Reserved storage in bytes
-    pub reserved_bytes: u64,
-}
-
-impl StorageBudget {
-    /// Get available storage in bytes
-    pub fn available_bytes(&self) -> u64 {
-        self.total_bytes
-            .saturating_sub(self.used_bytes)
-            .saturating_sub(self.reserved_bytes)
-    }
-
-    /// Get usage percentage (0-100)
-    pub fn usage_percentage(&self) -> f64 {
-        if self.total_bytes == 0 {
-            0.0
-        } else {
-            (self.used_bytes as f64 / self.total_bytes as f64) * 100.0
-        }
-    }
-}
 
 /// Block state with full moderation support
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -152,8 +123,8 @@ pub struct BlockState {
     pub residents: Vec<Resident>,
     /// Current user's role
     pub my_role: ResidentRole,
-    /// Storage budget
-    pub storage: StorageBudget,
+    /// Storage budget (uses comprehensive BlockFlowBudget from budget module)
+    pub storage: BlockFlowBudget,
     /// Number of online residents
     pub online_count: u32,
     /// Total resident count
@@ -206,16 +177,16 @@ impl BlockState {
             storage_allocated: Self::RESIDENT_ALLOCATION,
         };
 
+        // Initialize budget with one resident (the creator)
+        let mut budget = BlockFlowBudget::new(&id);
+        let _ = budget.add_resident(); // Creator is first resident
+
         Self {
             id,
             name: name.unwrap_or_default(),
             residents: vec![steward],
             my_role: ResidentRole::Owner,
-            storage: StorageBudget {
-                total_bytes: Self::DEFAULT_STORAGE_BUDGET,
-                used_bytes: 0,
-                reserved_bytes: Self::RESIDENT_ALLOCATION,
-            },
+            storage: budget,
             online_count: 1,
             resident_count: 1,
             is_primary: false,
@@ -242,7 +213,8 @@ impl BlockState {
 
     /// Add a resident to the block
     pub fn add_resident(&mut self, resident: Resident) {
-        self.storage.reserved_bytes += resident.storage_allocated;
+        // Charge storage budget for new resident
+        let _ = self.storage.add_resident();
         self.resident_count += 1;
         if resident.is_online {
             self.online_count += 1;
@@ -254,10 +226,8 @@ impl BlockState {
     pub fn remove_resident(&mut self, id: &str) -> Option<Resident> {
         if let Some(pos) = self.residents.iter().position(|r| r.id == id) {
             let resident = self.residents.remove(pos);
-            self.storage.reserved_bytes = self
-                .storage
-                .reserved_bytes
-                .saturating_sub(resident.storage_allocated);
+            // Free storage budget
+            let _ = self.storage.remove_resident();
             self.resident_count = self.resident_count.saturating_sub(1);
             if resident.is_online {
                 self.online_count = self.online_count.saturating_sub(1);

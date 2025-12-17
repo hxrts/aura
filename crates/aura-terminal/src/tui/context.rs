@@ -40,6 +40,7 @@ use aura_app::signal_defs::{
 use aura_app::views::contacts::Contact as ViewContact;
 use aura_core::effects::reactive::ReactiveEffects;
 
+use crate::error::TerminalError;
 use crate::tui::effects::{
     command_to_intent, CommandContext, EffectCommand, OpResponse, OperationalHandler,
 };
@@ -303,7 +304,7 @@ impl IoContext {
 
     /// Check if an account (authority) has been set up
     ///
-    /// Returns true if an actual account exists (not placeholder IDs).
+    /// Returns true if an account exists.
     /// When false, the account setup modal should be shown.
     pub fn has_account(&self) -> bool {
         self.has_existing_account
@@ -776,7 +777,13 @@ impl IoContext {
                     }
                     Ok(())
                 }
-                Err(e) => Err(format!("Intent dispatch failed: {}", e)),
+                Err(e) => {
+                    let msg = format!("Intent dispatch failed: {}", e);
+                    self.operational
+                        .emit_error(TerminalError::Operation(msg.clone()))
+                        .await;
+                    Err(msg)
+                }
             }
         } else if let Some(result) = self.operational.execute(&command).await {
             // Handle operational command, checking for special responses
@@ -843,7 +850,11 @@ impl IoContext {
                         .await;
                     Ok(())
                 }
-                Err(e) => Err(e.to_string()),
+                Err(e) => {
+                    let terr: TerminalError = e.clone().into();
+                    self.operational.emit_error(terr.clone()).await;
+                    Err(terr.to_string())
+                }
             }
         } else {
             // Unknown command - log warning and return error
@@ -851,7 +862,11 @@ impl IoContext {
                 "Unknown command not handled by Intent or Operational: {:?}",
                 command
             );
-            Err(format!("Unknown command: {:?}", command))
+            let msg = format!("Unknown command: {:?}", command);
+            self.operational
+                .emit_error(TerminalError::Operation(msg.clone()))
+                .await;
+            Err(msg)
         }
     }
 
@@ -910,7 +925,13 @@ impl IoContext {
                     }
                     Ok(())
                 }
-                Err(e) => Err(format!("Intent dispatch failed: {}", e)),
+                Err(e) => {
+                    let msg = format!("Intent dispatch failed: {}", e);
+                    self.operational
+                        .emit_error(TerminalError::Operation(msg.clone()))
+                        .await;
+                    Err(msg)
+                }
             }
         } else if let Some(result) = self.operational.execute(&command).await {
             // Handle operational command, checking for special responses
@@ -977,7 +998,11 @@ impl IoContext {
                         .await;
                     Ok(())
                 }
-                Err(e) => Err(e.to_string()),
+                Err(e) => {
+                    let terr: TerminalError = e.clone().into();
+                    self.operational.emit_error(terr.clone()).await;
+                    Err(terr.to_string())
+                }
             }
         } else {
             // Unknown command - log warning and return error
@@ -985,7 +1010,11 @@ impl IoContext {
                 "Unknown command not handled by Intent or Operational: {:?}",
                 command
             );
-            Err(format!("Unknown command: {:?}", command))
+            let msg = format!("Unknown command: {:?}", command);
+            self.operational
+                .emit_error(TerminalError::Operation(msg.clone()))
+                .await;
+            Err(msg)
         }
     }
 

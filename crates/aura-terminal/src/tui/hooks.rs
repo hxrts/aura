@@ -300,7 +300,7 @@ impl BlockSnapshot {
     }
 
     /// Get storage info from block state
-    pub fn storage(&self) -> aura_app::views::block::StorageBudget {
+    pub fn storage(&self) -> aura_app::BlockFlowBudget {
         self.block.as_ref().map(|b| b.storage.clone()).unwrap_or_default()
     }
 }
