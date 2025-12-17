@@ -107,8 +107,8 @@ impl OperationalHandler {
             return Some(result);
         }
 
-        // Settings commands (no dependencies)
-        if let Some(result) = settings::handle_settings(command).await {
+        // Settings commands
+        if let Some(result) = settings::handle_settings(command, &self.app_core).await {
             return Some(result);
         }
 

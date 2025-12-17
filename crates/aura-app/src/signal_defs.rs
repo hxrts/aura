@@ -143,6 +143,14 @@ pub static ERROR_SIGNAL: LazyLock<Signal<Option<AppError>>> =
 pub static UNREAD_COUNT_SIGNAL: LazyLock<Signal<usize>> =
     LazyLock::new(|| Signal::new("app:unread_count"));
 
+/// Signal for discovered peers (rendezvous + LAN)
+pub static DISCOVERED_PEERS_SIGNAL: LazyLock<Signal<DiscoveredPeersState>> =
+    LazyLock::new(|| Signal::new("app:discovered_peers"));
+
+/// Signal for account settings and profile
+pub static SETTINGS_SIGNAL: LazyLock<Signal<SettingsState>> =
+    LazyLock::new(|| Signal::new("app:settings"));
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Signal Value Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,6 +221,58 @@ impl AppError {
     }
 }
 
+/// Discovered peer information
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredPeer {
+    /// Authority ID of the peer
+    pub authority_id: String,
+    /// Network address (empty for rendezvous, IP:port for LAN)
+    pub address: String,
+    /// Discovery method ("rendezvous" or "LAN")
+    pub method: String,
+    /// Whether this peer has been invited already
+    pub invited: bool,
+}
+
+/// State of discovered peers for the signal
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DiscoveredPeersState {
+    /// List of discovered peers
+    pub peers: Vec<DiscoveredPeer>,
+    /// Timestamp of last update (ms since epoch)
+    pub last_updated_ms: u64,
+}
+
+/// Device information for settings
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceInfo {
+    /// Device ID
+    pub id: String,
+    /// Device name/label
+    pub name: String,
+    /// Whether this is the current device
+    pub is_current: bool,
+    /// Last seen timestamp (ms since epoch)
+    pub last_seen: Option<u64>,
+}
+
+/// Account settings and profile state
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SettingsState {
+    /// Display name/nickname
+    pub display_name: String,
+    /// Threshold k (minimum signers required)
+    pub threshold_k: u8,
+    /// Threshold n (total guardians)
+    pub threshold_n: u8,
+    /// MFA policy setting
+    pub mfa_policy: String,
+    /// List of devices
+    pub devices: Vec<DeviceInfo>,
+    /// Number of contacts
+    pub contact_count: usize,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Signal Registration Helper
 // ─────────────────────────────────────────────────────────────────────────────
@@ -265,6 +325,12 @@ pub async fn register_app_signals<R: ReactiveEffects>(handler: &R) -> Result<(),
         .await?;
     handler.register(&*ERROR_SIGNAL, None).await?;
     handler.register(&*UNREAD_COUNT_SIGNAL, 0).await?;
+    handler
+        .register(&*DISCOVERED_PEERS_SIGNAL, DiscoveredPeersState::default())
+        .await?;
+    handler
+        .register(&*SETTINGS_SIGNAL, SettingsState::default())
+        .await?;
 
     Ok(())
 }

@@ -1107,6 +1107,9 @@ impl IoContext {
     ///
     /// Returns a list of (authority_id, address) pairs for discovered peers.
     /// Returns empty list if no runtime is available.
+    ///
+    /// Note: This only returns internet rendezvous peers. For LAN-discovered
+    /// peers with full address info, use `get_lan_peers()`.
     pub async fn get_discovered_peers(&self) -> Vec<(String, String)> {
         let core = self.app_core.read().await;
 
@@ -1119,6 +1122,25 @@ impl IoContext {
             Err(_) => vec![],
         }
     }
+
+    /// Get peers discovered via LAN (mDNS/UDP broadcast)
+    ///
+    /// Returns a list of (authority_id, address) pairs for LAN-discovered peers.
+    /// Returns empty list if no runtime is available.
+    pub async fn get_lan_peers(&self) -> Vec<(String, String)> {
+        let core = self.app_core.read().await;
+        let runtime = match core.runtime() {
+            Some(r) => r,
+            None => return vec![],
+        };
+
+        let lan_peers = runtime.get_lan_peers().await;
+        lan_peers
+            .iter()
+            .map(|peer| (peer.authority_id.to_string(), peer.address.clone()))
+            .collect()
+    }
+
 
     /// Mark a LAN peer as having been invited
     ///
@@ -1386,6 +1408,14 @@ impl IoContext {
     pub async fn add_success_toast(&self, id: impl Into<String>, message: impl Into<String>) {
         use crate::tui::components::ToastMessage;
         self.add_toast(ToastMessage::success(id, message)).await;
+    }
+
+    /// Add an info toast notification
+    ///
+    /// Convenience method for info messages.
+    pub async fn add_info_toast(&self, id: impl Into<String>, message: impl Into<String>) {
+        use crate::tui::components::ToastMessage;
+        self.add_toast(ToastMessage::info(id, message)).await;
     }
 
     /// Get all current toast notifications
