@@ -69,9 +69,7 @@ pub mod recovery;
 // Re-export workflow functions for convenience
 pub use budget::{can_add_resident, can_join_neighborhood, can_pin_content, get_current_budget};
 pub use invitation::{
-    accept_invitation, cancel_invitation, create_invitation, decline_invitation,
-    export_invitation, import_invitation, list_invitations,
+    accept_invitation, cancel_invitation, create_invitation, decline_invitation, export_invitation,
+    import_invitation, list_invitations,
 };
-pub use recovery::{
-    approve_recovery, dispute_recovery, get_recovery_status, start_recovery,
-};
+pub use recovery::{approve_recovery, dispute_recovery, get_recovery_status, start_recovery};

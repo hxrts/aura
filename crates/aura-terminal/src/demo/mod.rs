@@ -32,6 +32,8 @@ pub use hints::DemoHints;
 pub use signal_coordinator::DemoSignalCoordinator;
 pub use simulator::DemoSimulator;
 
+use crate::error::TerminalError;
+use crate::error::TerminalResult;
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 use std::collections::HashSet;
@@ -253,7 +255,7 @@ pub struct AgentState {
 
 impl SimulatedAgent {
     /// Create a new simulated agent
-    pub async fn new(name: String, config: AgentConfig) -> anyhow::Result<Self> {
+    pub async fn new(name: String, config: AgentConfig) -> TerminalResult<Self> {
         Self::new_with_shared_transport(name, config, None).await
     }
 
@@ -262,7 +264,7 @@ impl SimulatedAgent {
         name: String,
         config: AgentConfig,
         shared_inbox: Option<Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
-    ) -> anyhow::Result<Self> {
+    ) -> TerminalResult<Self> {
         // Create deterministic identifiers derived from seed and name
         let device_id = ids::device_id(&format!("demo:{}:{}:device", config.seed, name));
         let authority_id = ids::authority_id(&format!("demo:{}:{}:authority", config.seed, name));
@@ -316,14 +318,14 @@ impl SimulatedAgent {
     }
 
     /// Start the agent's autonomous behavior
-    pub async fn start(&mut self) -> anyhow::Result<()> {
+    pub async fn start(&mut self) -> TerminalResult<()> {
         self.state.monitoring = true;
         tracing::info!("Agent {} started monitoring", self.name);
         Ok(())
     }
 
     /// Stop the agent
-    pub async fn stop(&mut self) -> anyhow::Result<()> {
+    pub async fn stop(&mut self) -> TerminalResult<()> {
         self.state.monitoring = false;
         tracing::info!("Agent {} stopped", self.name);
         Ok(())
@@ -353,7 +355,7 @@ impl SimulatedAgent {
     }
 
     /// Check for and process incoming transport messages (guardian invitations, etc.)
-    pub async fn process_transport_messages(&mut self) -> anyhow::Result<Vec<AgentResponse>> {
+    pub async fn process_transport_messages(&mut self) -> TerminalResult<Vec<AgentResponse>> {
         use aura_core::effects::TransportEffects;
 
         let mut responses = Vec::new();
@@ -451,7 +453,7 @@ impl SimulatedAgent {
     pub async fn process_event(
         &mut self,
         event: &AgentEvent,
-    ) -> anyhow::Result<Vec<AgentResponse>> {
+    ) -> TerminalResult<Vec<AgentResponse>> {
         if !self.state.monitoring {
             return Ok(vec![]);
         }
@@ -510,7 +512,7 @@ impl SimulatedAgent {
         from: &AuthorityId,
         channel: &str,
         content: &str,
-    ) -> anyhow::Result<Option<AgentResponse>> {
+    ) -> TerminalResult<Option<AgentResponse>> {
         tracing::debug!(
             "Agent {} received message from {} in {}: {}",
             self.name,
@@ -543,7 +545,7 @@ impl SimulatedAgent {
         account: &AuthorityId,
         session_id: &str,
         _context_id: &ContextId,
-    ) -> anyhow::Result<Option<AgentResponse>> {
+    ) -> TerminalResult<Option<AgentResponse>> {
         // Check if we're a guardian for this account
         if !self.is_guardian_for(account) {
             tracing::debug!(
@@ -592,7 +594,7 @@ impl SimulatedAgent {
         &mut self,
         account: &AuthorityId,
         context_id: &ContextId,
-    ) -> anyhow::Result<Option<AgentResponse>> {
+    ) -> TerminalResult<Option<AgentResponse>> {
         tracing::info!(
             "Agent {} participating in guardian ceremony for {} (context: {})",
             self.name,
@@ -638,7 +640,7 @@ impl SimulatedAgent {
     async fn handle_phase_change(
         &mut self,
         phase: &DemoPhase,
-    ) -> anyhow::Result<Vec<AgentResponse>> {
+    ) -> TerminalResult<Vec<AgentResponse>> {
         let mut responses = Vec::new();
 
         match phase {
@@ -670,7 +672,7 @@ impl SimulatedAgent {
     }
 
     /// Generate contextual response to a message
-    async fn generate_contextual_response(&self, content: &str) -> anyhow::Result<Option<String>> {
+    async fn generate_contextual_response(&self, content: &str) -> TerminalResult<Option<String>> {
         let content_lower = content.to_lowercase();
 
         // Context-aware responses
@@ -727,7 +729,7 @@ impl SimulatedAgent {
     }
 
     /// Process pending actions (called periodically by demo loop)
-    pub async fn process_pending_actions(&mut self) -> anyhow::Result<()> {
+    pub async fn process_pending_actions(&mut self) -> TerminalResult<()> {
         if !self.state.monitoring {
             return Ok(());
         }
@@ -791,7 +793,7 @@ impl AgentFactory {
     pub async fn create_demo_agents(
         seed: u64,
         shared_inbox: Option<Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
-    ) -> anyhow::Result<(SimulatedAgent, SimulatedAgent)> {
+    ) -> TerminalResult<(SimulatedAgent, SimulatedAgent)> {
         let alice_config = AgentConfig {
             seed,
             response_delay_ms: (1500, 3000), // Alice is relatively quick
@@ -841,7 +843,7 @@ impl AgentFactory {
     /// Create agents with custom configs
     pub async fn create_custom_agents(
         configs: Vec<(String, AgentConfig)>,
-    ) -> anyhow::Result<Vec<SimulatedAgent>> {
+    ) -> TerminalResult<Vec<SimulatedAgent>> {
         let mut agents = Vec::new();
 
         for (name, config) in configs {

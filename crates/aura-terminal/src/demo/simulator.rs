@@ -45,7 +45,7 @@ pub struct DemoSimulator {
 
 impl DemoSimulator {
     /// Create a new demo simulator with the given seed
-    pub async fn new(seed: u64) -> anyhow::Result<Self> {
+    pub async fn new(seed: u64) -> TerminalResult<Self> {
         // Create shared transport inbox for Bob, Alice, and Carol to communicate
         let shared_inbox = std::sync::Arc::new(std::sync::RwLock::new(Vec::new()));
 
@@ -131,7 +131,7 @@ impl DemoSimulator {
     }
 
     /// Start the simulated agents and event loop
-    pub async fn start(&mut self) -> anyhow::Result<()> {
+    pub async fn start(&mut self) -> TerminalResult<()> {
         // Start both agents
         self.alice.lock().await.start().await?;
         self.carol.lock().await.start().await?;
@@ -229,7 +229,7 @@ impl DemoSimulator {
     }
 
     /// Stop the simulator
-    pub async fn stop(&mut self) -> anyhow::Result<()> {
+    pub async fn stop(&mut self) -> TerminalResult<()> {
         // Send shutdown signal
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(()).await;

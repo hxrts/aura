@@ -1,20 +1,24 @@
-//! # Budget Handlers
+//! # Budget Handlers - Terminal-Specific Formatting
 //!
-//! Shared budget logic for both CLI and TUI.
+//! This module provides terminal-specific budget formatting for CLI and TUI.
+//! Business logic has been moved to `aura_app::workflows::budget`.
 //!
-//! This module provides budget query, formatting, and display logic
-//! that can be used by both the CLI commands and TUI screens.
+//! ## Architecture
+//!
+//! - **Business Logic**: `aura_app::workflows::budget` (portable)
+//! - **Formatting**: This module (terminal-specific)
 //!
 //! ## Usage
 //!
 //! ### CLI Commands
 //!
 //! ```rust,ignore
-//! use crate::handlers::budget;
+//! use aura_app::workflows::budget;
+//! use crate::handlers::budget::format_budget_status;
 //!
-//! pub fn show_budget_status(ctx: &Context) {
-//!     let budget = budget::get_current_budget(&ctx.app_core).await;
-//!     let formatted = budget::format_budget_status(&budget);
+//! pub async fn show_budget_status(app_core: &Arc<RwLock<AppCore>>) {
+//!     let budget = budget::get_current_budget(app_core).await;
+//!     let formatted = format_budget_status(&budget);
 //!     println!("{}", formatted);
 //! }
 //! ```
@@ -22,46 +26,23 @@
 //! ### TUI Screens
 //!
 //! ```rust,ignore
-//! use crate::handlers::budget;
+//! use aura_app::workflows::budget;
 //!
-//! // Get budget data
+//! // Get budget data from workflow
 //! let budget = budget::get_current_budget(&app_core).await;
 //!
 //! // TUI adds visual hints (colors, warnings)
 //! let view = FlowBudgetView::from_budget(budget);
 //! ```
 
-use std::sync::Arc;
+use aura_app::{BlockFlowBudget, BudgetBreakdown};
 
-use aura_app::{AppCore, BlockFlowBudget, BudgetBreakdown, BUDGET_SIGNAL};
-use aura_core::effects::reactive::ReactiveEffects;
-use tokio::sync::RwLock;
-
-/// Get the current budget for the active block
-///
-/// Reads from BUDGET_SIGNAL if available, otherwise returns a default budget.
-/// This is the primary method for getting budget data in both CLI and TUI.
-pub async fn get_current_budget(app_core: &Arc<RwLock<AppCore>>) -> BlockFlowBudget {
-    let core = app_core.read().await;
-
-    // Try to read from BUDGET_SIGNAL
-    match core.read(&*BUDGET_SIGNAL).await {
-        Ok(budget) => budget,
-        Err(_) => {
-            // Fall back to default budget if signal not available
-            BlockFlowBudget::default()
-        }
-    }
-}
-
-/// Get a budget breakdown with formatted display values
-///
-/// Returns the breakdown struct with all computed limits and usage values.
-/// Use this for detailed budget inspection (CLI commands, TUI panels).
-pub async fn get_budget_breakdown(app_core: &Arc<RwLock<AppCore>>) -> BudgetBreakdown {
-    let budget = get_current_budget(app_core).await;
-    budget.breakdown()
-}
+// Re-export workflow functions for backward compatibility
+// Business logic is now in aura_app::workflows::budget
+pub use aura_app::workflows::budget::{
+    can_add_resident, can_join_neighborhood, can_pin_content, get_budget_breakdown,
+    get_current_budget, update_budget,
+};
 
 /// Format budget status as a human-readable string
 ///

@@ -1,7 +1,7 @@
 //! Aura Terminal Main Entry Point
 //! Uses bpaf for CLI parsing and delegates execution to CLI handlers.
 
-use anyhow::Result;
+use aura_core::AuraError;
 // Import app types from aura-app (pure layer)
 use aura_app::{AppConfig, AppCore};
 // Import agent types from aura-agent (runtime layer)
@@ -39,7 +39,7 @@ run 'aura COMMAND --help' for command-specific options"
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), AuraError> {
     // Check if no arguments were provided (just "aura" with no command)
     let raw_args: Vec<String> = std::env::args().collect();
     if raw_args.len() == 1 {
@@ -74,7 +74,8 @@ async fn main() -> Result<()> {
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&effect_context)
-        .await?;
+        .await
+        .map_err(|e| AuraError::agent(format!("{}", e)))?;
     let agent = Arc::new(agent);
 
     // Create AppCore with runtime bridge (dependency inversion pattern)
@@ -91,46 +92,80 @@ async fn main() -> Result<()> {
 
     // Execute command through effect system
     Ok(match command {
-        Commands::Init(init) => {
-            cli_handler
-                .handle_init(init.num_devices, init.threshold, &init.output)
-                .await?
-        }
+        Commands::Init(init) => cli_handler
+            .handle_init(init.num_devices, init.threshold, &init.output)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
         Commands::Status(status) => {
             let config_path =
                 resolve_config_path(status.config.as_ref(), args.config.as_ref(), &cli_handler)
-                    .await?;
-            cli_handler.handle_status(&config_path).await?
+                    .await
+                    .map_err(|e| AuraError::agent(format!("{}", e)))?;
+            cli_handler
+                .handle_status(&config_path)
+                .await
+                .map_err(|e| AuraError::agent(format!("{}", e)))?
         }
         Commands::Node(node) => {
             let config_path =
                 resolve_config_path(node.config.as_ref(), args.config.as_ref(), &cli_handler)
-                    .await?;
+                    .await
+                    .map_err(|e| AuraError::agent(format!("{}", e)))?;
             cli_handler
                 .handle_node(node.port.unwrap_or(58835), node.daemon, &config_path)
-                .await?
+                .await
+                .map_err(|e| AuraError::agent(format!("{}", e)))?
         }
         Commands::Threshold(ThresholdArgs {
             configs,
             threshold,
             mode,
-        }) => {
-            cli_handler
-                .handle_threshold(&configs, threshold, &mode)
-                .await?
-        }
+        }) => cli_handler
+            .handle_threshold(&configs, threshold, &mode)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
         #[cfg(feature = "development")]
-        Commands::Scenarios { action } => cli_handler.handle_scenarios(&action).await?,
+        Commands::Scenarios { action } => cli_handler
+            .handle_scenarios(&action)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
         #[cfg(feature = "development")]
-        Commands::Demo { command } => cli_handler.handle_demo(&command).await?,
-        Commands::Snapshot { action } => cli_handler.handle_snapshot(&action).await?,
-        Commands::Admin { action } => cli_handler.handle_admin(&action).await?,
-        Commands::Recovery { action } => cli_handler.handle_recovery(&action).await?,
-        Commands::Invite { action } => cli_handler.handle_invitation(&action).await?,
-        Commands::Authority { command } => cli_handler.handle_authority(&command).await?,
-        Commands::Context { action } => cli_handler.handle_context(&action).await?,
-        Commands::Amp { action } => cli_handler.handle_amp(&action).await?,
-        Commands::Chat { command } => cli_handler.handle_chat(&command).await?,
+        Commands::Demo { command } => cli_handler
+            .handle_demo(&command)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+        Commands::Snapshot { action } => cli_handler
+            .handle_snapshot(&action)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+        Commands::Admin { action } => cli_handler
+            .handle_admin(&action)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+        Commands::Recovery { action } => cli_handler
+            .handle_recovery(&action)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+        Commands::Invite { action } => cli_handler
+            .handle_invitation(&action)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+        Commands::Authority { command } => cli_handler
+            .handle_authority(&command)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+        Commands::Context { action } => cli_handler
+            .handle_context(&action)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+        Commands::Amp { action } => cli_handler
+            .handle_amp(&action)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+        Commands::Chat { command } => cli_handler
+            .handle_chat(&command)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
         Commands::Sync { action } => {
             // Default to daemon mode if no subcommand specified
             let sync_action = action.unwrap_or(SyncAction::Daemon {
@@ -139,11 +174,20 @@ async fn main() -> Result<()> {
                 peers: None,
                 config: None,
             });
-            cli_handler.handle_sync(&sync_action).await?
+            cli_handler
+                .handle_sync(&sync_action)
+                .await
+                .map_err(|e| AuraError::agent(format!("{}", e)))?
         }
         #[cfg(feature = "terminal")]
-        Commands::Tui(args) => cli_handler.handle_tui(&args).await?,
-        Commands::Version => cli_handler.handle_version().await?,
+        Commands::Tui(args) => cli_handler
+            .handle_tui(&args)
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+        Commands::Version => cli_handler
+            .handle_version()
+            .await
+            .map_err(|e| AuraError::agent(format!("{}", e)))?,
     })
 }
 
@@ -161,7 +205,7 @@ async fn resolve_config_path(
     }
 
     eprintln!("No config file specified. Use -c or --config to specify a config file.");
-    anyhow::bail!("No config file specified")
+    return Err(AuraError::invalid("No config file specified".into()));
 }
 
 #[cfg(test)]
