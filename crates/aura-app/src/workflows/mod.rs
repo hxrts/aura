@@ -64,7 +64,10 @@
 
 pub mod budget;
 pub mod invitation;
+pub mod messaging;
+pub mod network;
 pub mod recovery;
+pub mod sync;
 
 // Re-export workflow functions for convenience
 pub use budget::{can_add_resident, can_join_neighborhood, can_pin_content, get_current_budget};
@@ -72,4 +75,9 @@ pub use invitation::{
     accept_invitation, cancel_invitation, create_invitation, decline_invitation, export_invitation,
     import_invitation, list_invitations,
 };
+pub use messaging::{get_chat_state, send_direct_message, start_direct_chat};
+pub use network::{
+    discover_peers, get_discovered_peers, list_lan_peers, list_peers, update_connection_status,
+};
 pub use recovery::{approve_recovery, dispute_recovery, get_recovery_status, start_recovery};
+pub use sync::{force_sync, get_sync_status, request_state};

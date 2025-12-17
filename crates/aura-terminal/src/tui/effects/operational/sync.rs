@@ -1,95 +1,48 @@
-//! Sync command handlers
+//! Sync command handlers - TUI Operational Layer
+//!
+//! This module provides TUI-specific sync operation handling.
+//! Business logic has been moved to `aura_app::workflows::sync`.
+//!
+//! ## Architecture
+//!
+//! - **Business Logic**: `aura_app::workflows::sync` (portable)
+//! - **TUI Integration**: This module (operational layer)
 //!
 //! Handlers for ForceSync, RequestState.
 
 use std::sync::Arc;
 
-use aura_app::signal_defs::{SyncStatus, SYNC_STATUS_SIGNAL};
 use aura_app::AppCore;
-use aura_core::effects::reactive::ReactiveEffects;
 use tokio::sync::RwLock;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
+// Re-export workflow functions for convenience
+pub use aura_app::workflows::sync::{force_sync, get_sync_status, request_state};
+
 /// Handle sync commands
+///
+/// This is now a thin wrapper around workflow functions.
+/// Business logic lives in aura_app::workflows::sync.
 pub async fn handle_sync(
     command: &EffectCommand,
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Option<OpResult> {
     match command {
         EffectCommand::ForceSync => {
-            // Update sync status signal to show syncing
-            if let Ok(core) = app_core.try_read() {
-                let _ = core
-                    .emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Syncing { progress: 0 })
-                    .await;
+            // Use workflow for business logic
+            let result = force_sync(app_core).await;
+
+            match result {
+                Ok(_) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(OpError::Failed(format!("Sync failed: {}", e)))),
             }
-
-            // Trigger sync through effect injection (RuntimeBridge)
-            let result = if let Ok(core) = app_core.try_read() {
-                core.trigger_sync().await
-            } else {
-                Err(aura_app::core::IntentError::internal_error(
-                    "AppCore unavailable",
-                ))
-            };
-
-            // Update status based on result
-            if let Ok(core) = app_core.try_read() {
-                match &result {
-                    Ok(()) => {
-                        let _ = core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Synced).await;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Sync trigger failed: {}", e);
-                        // In demo/offline mode, show as synced (local-only)
-                        let _ = core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Synced).await;
-                    }
-                }
-            }
-
-            Some(Ok(OpResponse::Ok))
         }
 
         EffectCommand::RequestState { peer_id } => {
-            // Request state from a specific peer - triggers targeted sync
-            // Update sync status signal to show syncing
-            if let Ok(core) = app_core.try_read() {
-                let _ = core
-                    .emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Syncing { progress: 0 })
-                    .await;
-            }
-
-            // Trigger sync through AppCore (RuntimeBridge handles peer targeting)
-            // For now, we trigger a general sync - peer-targeted sync requires
-            // additional infrastructure in the sync engine
-            let result = if let Ok(core) = app_core.try_read() {
-                core.trigger_sync().await
-            } else {
-                Err(aura_app::core::IntentError::internal_error(
-                    "AppCore unavailable",
-                ))
-            };
-
-            // Update status based on result
-            if let Ok(core) = app_core.try_read() {
-                match &result {
-                    Ok(_) => {
-                        let _ = core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Synced).await;
-                    }
-                    Err(e) => {
-                        let _ = core
-                            .emit(
-                                &*SYNC_STATUS_SIGNAL,
-                                SyncStatus::Failed {
-                                    message: e.to_string(),
-                                },
-                            )
-                            .await;
-                    }
-                }
-            }
+            // Use workflow for business logic
+            let result = request_state(app_core, peer_id).await;
 
             match result {
                 Ok(_) => Some(Ok(OpResponse::Data(format!(
