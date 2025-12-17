@@ -1282,29 +1282,30 @@ mod tests {
 
     #[test]
     fn test_sync_progress_event_serialization() {
+        // Use deterministic UUIDs for test reproducibility
         let events = vec![
             SyncProgressEvent::Started {
-                peer_id: uuid::Uuid::new_v4(),
+                peer_id: uuid::Uuid::from_bytes([1u8; 16]),
                 total_peers: 3,
             },
             SyncProgressEvent::DigestExchanged {
-                peer_id: uuid::Uuid::new_v4(),
+                peer_id: uuid::Uuid::from_bytes([2u8; 16]),
                 status: DigestStatus::LocalBehind,
                 local_ops: 5,
                 remote_ops: 10,
             },
             SyncProgressEvent::Pulling {
-                peer_id: uuid::Uuid::new_v4(),
+                peer_id: uuid::Uuid::from_bytes([3u8; 16]),
                 pulled: 3,
                 total: 10,
             },
             SyncProgressEvent::Pushing {
-                peer_id: uuid::Uuid::new_v4(),
+                peer_id: uuid::Uuid::from_bytes([4u8; 16]),
                 pushed: 2,
                 total: 5,
             },
             SyncProgressEvent::PeerCompleted {
-                peer_id: uuid::Uuid::new_v4(),
+                peer_id: uuid::Uuid::from_bytes([5u8; 16]),
                 applied: 5,
                 success: true,
                 peers_remaining: 2,
@@ -1316,7 +1317,7 @@ mod tests {
                 failed_peers: 0,
             },
             SyncProgressEvent::PeerFailed {
-                peer_id: uuid::Uuid::new_v4(),
+                peer_id: uuid::Uuid::from_bytes([6u8; 16]),
                 error: "connection timeout".to_string(),
                 will_retry: true,
                 retry_attempt: 1,
@@ -1333,9 +1334,9 @@ mod tests {
     #[test]
     fn test_no_op_progress_callback() {
         let callback = NoOpProgressCallback;
-        // Should not panic
+        // Should not panic (use deterministic UUID)
         callback.on_progress(SyncProgressEvent::Started {
-            peer_id: uuid::Uuid::new_v4(),
+            peer_id: uuid::Uuid::from_bytes([7u8; 16]),
             total_peers: 1,
         });
     }
@@ -1378,7 +1379,7 @@ mod tests {
     #[test]
     fn test_custom_progress_callback() {
         let callback = TestProgressCallback::new();
-        let peer_id = uuid::Uuid::new_v4();
+        let peer_id = uuid::Uuid::from_bytes([8u8; 16]);
 
         callback.on_progress(SyncProgressEvent::Started {
             peer_id,

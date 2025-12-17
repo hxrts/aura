@@ -109,6 +109,87 @@ pub struct LanPeerInfo {
     pub display_name: Option<String>,
 }
 
+// =============================================================================
+// Invitation Bridge Types
+// =============================================================================
+
+/// Bridge-level invitation type (for RuntimeBridge API)
+///
+/// This is a minimal type for crossing the bridge boundary.
+/// Workflows convert this to view types with display fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvitationBridgeType {
+    /// Contact invitation with optional petname
+    Contact { petname: Option<String> },
+    /// Guardian invitation for a subject authority
+    Guardian { subject_authority: AuthorityId },
+    /// Channel/block invitation
+    Channel { block_id: String },
+}
+
+/// Bridge-level invitation status
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvitationBridgeStatus {
+    /// Invitation is pending response
+    Pending,
+    /// Invitation was accepted
+    Accepted,
+    /// Invitation was declined
+    Declined,
+    /// Invitation was cancelled by sender
+    Cancelled,
+    /// Invitation has expired
+    Expired,
+}
+
+/// Bridge-level invitation info returned from RuntimeBridge
+///
+/// Contains core invitation data without UI-specific display fields.
+/// Workflows convert this to `views::invitations::Invitation` with resolved names.
+#[derive(Debug, Clone)]
+pub struct InvitationInfo {
+    /// Unique invitation identifier
+    pub invitation_id: String,
+    /// Sender authority ID
+    pub sender_id: AuthorityId,
+    /// Receiver authority ID
+    pub receiver_id: AuthorityId,
+    /// Type of invitation
+    pub invitation_type: InvitationBridgeType,
+    /// Current status
+    pub status: InvitationBridgeStatus,
+    /// Creation timestamp (ms since epoch)
+    pub created_at_ms: u64,
+    /// Expiration timestamp (ms since epoch), if any
+    pub expires_at_ms: Option<u64>,
+    /// Optional message from sender
+    pub message: Option<String>,
+}
+
+// =============================================================================
+// Settings Bridge Types
+// =============================================================================
+
+/// Bridge-level settings state returned from RuntimeBridge
+///
+/// Contains persisted settings data. Device and contact lists
+/// are derived views obtained from signals, not from here.
+#[derive(Debug, Clone, Default)]
+pub struct SettingsBridgeState {
+    /// User's display name
+    pub display_name: String,
+    /// MFA policy setting
+    pub mfa_policy: String,
+    /// Threshold signing configuration (k of n)
+    pub threshold_k: u16,
+    /// Total guardians in threshold scheme
+    pub threshold_n: u16,
+    /// Number of registered devices
+    pub device_count: usize,
+    /// Number of contacts
+    pub contact_count: usize,
+}
+
 /// Bridge trait for runtime operations
 ///
 /// This trait defines the interface between the pure application core (`aura-app`)
@@ -302,6 +383,100 @@ pub trait RuntimeBridge: Send + Sync {
     /// a connection with this authority.
     async fn export_invitation(&self, invitation_id: &str) -> Result<String, IntentError>;
 
+    /// Create a contact invitation
+    ///
+    /// # Arguments
+    /// * `receiver` - Authority to invite as contact
+    /// * `petname` - Optional petname for the contact
+    /// * `message` - Optional message to include
+    /// * `ttl_ms` - Optional time-to-live in milliseconds
+    async fn create_contact_invitation(
+        &self,
+        receiver: AuthorityId,
+        petname: Option<String>,
+        message: Option<String>,
+        ttl_ms: Option<u64>,
+    ) -> Result<InvitationInfo, IntentError>;
+
+    /// Create a guardian invitation
+    ///
+    /// # Arguments
+    /// * `receiver` - Authority to invite as guardian
+    /// * `subject` - Authority to be guarded
+    /// * `message` - Optional message to include
+    /// * `ttl_ms` - Optional time-to-live in milliseconds
+    async fn create_guardian_invitation(
+        &self,
+        receiver: AuthorityId,
+        subject: AuthorityId,
+        message: Option<String>,
+        ttl_ms: Option<u64>,
+    ) -> Result<InvitationInfo, IntentError>;
+
+    /// Create a channel/block invitation
+    ///
+    /// # Arguments
+    /// * `receiver` - Authority to invite to channel
+    /// * `block_id` - Block/channel identifier
+    /// * `message` - Optional message to include
+    /// * `ttl_ms` - Optional time-to-live in milliseconds
+    async fn create_channel_invitation(
+        &self,
+        receiver: AuthorityId,
+        block_id: String,
+        message: Option<String>,
+        ttl_ms: Option<u64>,
+    ) -> Result<InvitationInfo, IntentError>;
+
+    /// Accept a received invitation
+    async fn accept_invitation(&self, invitation_id: &str) -> Result<(), IntentError>;
+
+    /// Decline a received invitation
+    async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError>;
+
+    /// Cancel a sent invitation
+    async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError>;
+
+    /// List pending invitations (sent and received)
+    async fn list_pending_invitations(&self) -> Vec<InvitationInfo>;
+
+    /// Import an invitation from a shareable code
+    ///
+    /// Parses the code and returns invitation info without accepting it.
+    async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError>;
+
+    // =========================================================================
+    // Settings Operations
+    // =========================================================================
+
+    /// Get current settings state
+    async fn get_settings(&self) -> SettingsBridgeState;
+
+    /// Update display name
+    async fn set_display_name(&self, name: &str) -> Result<(), IntentError>;
+
+    /// Update MFA policy
+    async fn set_mfa_policy(&self, policy: &str) -> Result<(), IntentError>;
+
+    // =========================================================================
+    // Recovery Operations
+    // =========================================================================
+
+    /// Respond to a guardian ceremony invitation
+    ///
+    /// Called by a guardian to accept or decline participation in a ceremony.
+    ///
+    /// # Arguments
+    /// * `ceremony_id` - The ceremony being responded to
+    /// * `accept` - Whether to accept (true) or decline (false)
+    /// * `reason` - Optional reason (used when declining)
+    async fn respond_to_guardian_ceremony(
+        &self,
+        ceremony_id: &str,
+        accept: bool,
+        reason: Option<String>,
+    ) -> Result<(), IntentError>;
+
     // =========================================================================
     // Authentication
     // =========================================================================
@@ -476,6 +651,97 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn export_invitation(&self, _invitation_id: &str) -> Result<String, IntentError> {
         Err(IntentError::no_agent(
             "Invitation export not available in offline mode",
+        ))
+    }
+
+    async fn create_contact_invitation(
+        &self,
+        _receiver: AuthorityId,
+        _petname: Option<String>,
+        _message: Option<String>,
+        _ttl_ms: Option<u64>,
+    ) -> Result<InvitationInfo, IntentError> {
+        Err(IntentError::no_agent(
+            "Invitation creation not available in offline mode",
+        ))
+    }
+
+    async fn create_guardian_invitation(
+        &self,
+        _receiver: AuthorityId,
+        _subject: AuthorityId,
+        _message: Option<String>,
+        _ttl_ms: Option<u64>,
+    ) -> Result<InvitationInfo, IntentError> {
+        Err(IntentError::no_agent(
+            "Invitation creation not available in offline mode",
+        ))
+    }
+
+    async fn create_channel_invitation(
+        &self,
+        _receiver: AuthorityId,
+        _block_id: String,
+        _message: Option<String>,
+        _ttl_ms: Option<u64>,
+    ) -> Result<InvitationInfo, IntentError> {
+        Err(IntentError::no_agent(
+            "Invitation creation not available in offline mode",
+        ))
+    }
+
+    async fn accept_invitation(&self, _invitation_id: &str) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Invitation acceptance not available in offline mode",
+        ))
+    }
+
+    async fn decline_invitation(&self, _invitation_id: &str) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Invitation decline not available in offline mode",
+        ))
+    }
+
+    async fn cancel_invitation(&self, _invitation_id: &str) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Invitation cancellation not available in offline mode",
+        ))
+    }
+
+    async fn list_pending_invitations(&self) -> Vec<InvitationInfo> {
+        Vec::new()
+    }
+
+    async fn import_invitation(&self, _code: &str) -> Result<InvitationInfo, IntentError> {
+        Err(IntentError::no_agent(
+            "Invitation import not available in offline mode",
+        ))
+    }
+
+    async fn get_settings(&self) -> SettingsBridgeState {
+        SettingsBridgeState::default()
+    }
+
+    async fn set_display_name(&self, _name: &str) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Settings update not available in offline mode",
+        ))
+    }
+
+    async fn set_mfa_policy(&self, _policy: &str) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Settings update not available in offline mode",
+        ))
+    }
+
+    async fn respond_to_guardian_ceremony(
+        &self,
+        _ceremony_id: &str,
+        _accept: bool,
+        _reason: Option<String>,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Guardian ceremony response not available in offline mode",
         ))
     }
 

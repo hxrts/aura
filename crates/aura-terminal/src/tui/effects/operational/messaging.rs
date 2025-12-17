@@ -21,6 +21,16 @@ use super::EffectCommand;
 // Re-export workflow functions for convenience
 pub use aura_app::workflows::messaging::{send_direct_message, start_direct_chat};
 
+/// Get current time in milliseconds since Unix epoch
+///
+/// Used to provide timestamps to pure workflow functions.
+fn current_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Handle messaging commands
 ///
 /// This is now a thin wrapper around workflow functions.
@@ -32,7 +42,8 @@ pub async fn handle_messaging(
     match command {
         EffectCommand::SendDirectMessage { target, content } => {
             // Use workflow for business logic
-            match send_direct_message(app_core, target, content).await {
+            let timestamp = current_time_ms();
+            match send_direct_message(app_core, target, content, timestamp).await {
                 Ok(dm_channel_id) => Some(Ok(OpResponse::Data(format!(
                     "Message sent to DM channel: {}",
                     dm_channel_id
@@ -46,7 +57,8 @@ pub async fn handle_messaging(
 
         EffectCommand::StartDirectChat { contact_id } => {
             // Use workflow for business logic
-            match start_direct_chat(app_core, contact_id).await {
+            let timestamp = current_time_ms();
+            match start_direct_chat(app_core, contact_id, timestamp).await {
                 Ok(dm_channel_id) => Some(Ok(OpResponse::Data(format!(
                     "Started DM chat: {}",
                     dm_channel_id

@@ -230,7 +230,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                         // Error handling - show as toast
                         UiUpdate::OperationFailed { operation, error } => {
-                            let toast_id = format!("{}-error-{}", operation, uuid::Uuid::new_v4());
+                            // Use atomic counter for deterministic unique ID (simulator-controllable)
+                            use std::sync::atomic::{AtomicU64, Ordering};
+                            static TOAST_COUNTER: AtomicU64 = AtomicU64::new(0);
+                            let counter = TOAST_COUNTER.fetch_add(1, Ordering::Relaxed);
+                            let toast_id = format!("{}-error-{}", operation, counter);
                             let toast = ToastMessage::error(
                                 toast_id,
                                 format!("{} failed: {}", operation, error),

@@ -6,8 +6,12 @@
 
 use crate::core::AuraAgent;
 use async_trait::async_trait;
-use aura_app::runtime_bridge::{LanPeerInfo, RendezvousStatus, RuntimeBridge, SyncStatus};
+use aura_app::runtime_bridge::{
+    InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo, RendezvousStatus,
+    RuntimeBridge, SettingsBridgeState, SyncStatus,
+};
 use aura_app::IntentError;
+use crate::handlers::invitation_service::InvitationService;
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
@@ -314,8 +318,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .rotate_guardian_keys(threshold_k, total_n, guardian_ids)
             .await?;
 
-        // Step 2: Create ceremony ID
-        let ceremony_id = format!("ceremony-{}-{}", new_epoch, uuid::Uuid::new_v4());
+        // Step 2: Create ceremony ID (epoch provides uniqueness)
+        // Using a monotonic counter for additional uniqueness within same process
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static CEREMONY_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let counter = CEREMONY_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let ceremony_id = format!("ceremony-{}-{}", new_epoch, counter);
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -423,6 +431,255 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| IntentError::internal_error(format!("Failed to export invitation: {}", e)))
     }
 
+    async fn create_contact_invitation(
+        &self,
+        receiver: AuthorityId,
+        petname: Option<String>,
+        message: Option<String>,
+        ttl_ms: Option<u64>,
+    ) -> Result<InvitationInfo, IntentError> {
+        let invitation_service = self.agent.invitations().await.map_err(|e| {
+            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+        })?;
+
+        let invitation = invitation_service
+            .invite_as_contact(receiver, petname, message, ttl_ms)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to create contact invitation: {}", e))
+            })?;
+
+        Ok(convert_invitation_to_bridge_info(&invitation))
+    }
+
+    async fn create_guardian_invitation(
+        &self,
+        receiver: AuthorityId,
+        subject: AuthorityId,
+        message: Option<String>,
+        ttl_ms: Option<u64>,
+    ) -> Result<InvitationInfo, IntentError> {
+        let invitation_service = self.agent.invitations().await.map_err(|e| {
+            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+        })?;
+
+        let invitation = invitation_service
+            .invite_as_guardian(receiver, subject, message, ttl_ms)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to create guardian invitation: {}", e))
+            })?;
+
+        Ok(convert_invitation_to_bridge_info(&invitation))
+    }
+
+    async fn create_channel_invitation(
+        &self,
+        receiver: AuthorityId,
+        block_id: String,
+        message: Option<String>,
+        ttl_ms: Option<u64>,
+    ) -> Result<InvitationInfo, IntentError> {
+        let invitation_service = self.agent.invitations().await.map_err(|e| {
+            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+        })?;
+
+        let invitation = invitation_service
+            .invite_to_channel(receiver, block_id, message, ttl_ms)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to create channel invitation: {}", e))
+            })?;
+
+        Ok(convert_invitation_to_bridge_info(&invitation))
+    }
+
+    async fn accept_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
+        let invitation_service = self.agent.invitations().await.map_err(|e| {
+            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+        })?;
+
+        let result = invitation_service.accept(invitation_id).await.map_err(|e| {
+            IntentError::internal_error(format!("Failed to accept invitation: {}", e))
+        })?;
+
+        if result.success {
+            Ok(())
+        } else {
+            Err(IntentError::internal_error(
+                result
+                    .error
+                    .unwrap_or_else(|| "Failed to accept invitation".to_string()),
+            ))
+        }
+    }
+
+    async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
+        let invitation_service = self.agent.invitations().await.map_err(|e| {
+            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+        })?;
+
+        let result = invitation_service
+            .decline(invitation_id)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to decline invitation: {}", e))
+            })?;
+
+        if result.success {
+            Ok(())
+        } else {
+            Err(IntentError::internal_error(
+                result
+                    .error
+                    .unwrap_or_else(|| "Failed to decline invitation".to_string()),
+            ))
+        }
+    }
+
+    async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
+        let invitation_service = self.agent.invitations().await.map_err(|e| {
+            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+        })?;
+
+        let result = invitation_service.cancel(invitation_id).await.map_err(|e| {
+            IntentError::internal_error(format!("Failed to cancel invitation: {}", e))
+        })?;
+
+        if result.success {
+            Ok(())
+        } else {
+            Err(IntentError::internal_error(
+                result
+                    .error
+                    .unwrap_or_else(|| "Failed to cancel invitation".to_string()),
+            ))
+        }
+    }
+
+    async fn list_pending_invitations(&self) -> Vec<InvitationInfo> {
+        if let Ok(invitation_service) = self.agent.invitations().await {
+            invitation_service
+                .list_pending()
+                .await
+                .iter()
+                .map(convert_invitation_to_bridge_info)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError> {
+        // Use the static method from InvitationService to parse the code
+        let shareable = InvitationService::import_code(code).map_err(|e| {
+            IntentError::validation_failed(format!("Invalid invitation code: {}", e))
+        })?;
+
+        // Convert shareable to bridge info
+        Ok(InvitationInfo {
+            invitation_id: shareable.invitation_id,
+            sender_id: shareable.sender_id,
+            receiver_id: self.agent.authority_id(), // Receiver is us (we're importing)
+            invitation_type: convert_invitation_type_to_bridge(&shareable.invitation_type),
+            status: InvitationBridgeStatus::Pending, // Imported invitations start as pending
+            created_at_ms: 0, // Not available in shareable format
+            expires_at_ms: shareable.expires_at,
+            message: shareable.message,
+        })
+    }
+
+    // =========================================================================
+    // Settings Operations
+    // =========================================================================
+
+    async fn get_settings(&self) -> SettingsBridgeState {
+        // Get threshold config if available
+        let (threshold_k, threshold_n) = if let Some(config) = self.get_threshold_config().await {
+            (config.threshold, config.total_participants)
+        } else {
+            (0, 0)
+        };
+
+        // TODO: Implement full settings retrieval when settings service is available
+        // For now, return defaults with threshold config
+        SettingsBridgeState {
+            display_name: String::new(),
+            mfa_policy: "disabled".to_string(),
+            threshold_k,
+            threshold_n,
+            device_count: 1, // Default to 1 device (self)
+            contact_count: 0,
+        }
+    }
+
+    async fn set_display_name(&self, _name: &str) -> Result<(), IntentError> {
+        // TODO: Implement when settings service is available
+        Err(IntentError::internal_error(
+            "Settings service not yet implemented",
+        ))
+    }
+
+    async fn set_mfa_policy(&self, _policy: &str) -> Result<(), IntentError> {
+        // TODO: Implement when settings service is available
+        Err(IntentError::internal_error(
+            "Settings service not yet implemented",
+        ))
+    }
+
+    // =========================================================================
+    // Recovery Operations
+    // =========================================================================
+
+    async fn respond_to_guardian_ceremony(
+        &self,
+        ceremony_id: &str,
+        accept: bool,
+        _reason: Option<String>,
+    ) -> Result<(), IntentError> {
+        // Verify the ceremony exists and get tracker
+        let tracker = self.agent.ceremony_tracker().await;
+        let _state = tracker.get(ceremony_id).await.map_err(|e| {
+            IntentError::validation_failed(format!("Ceremony not found: {}", e))
+        })?;
+
+        if accept {
+            // Record acceptance in ceremony tracker
+            let guardian_id = self.agent.authority_id().to_string();
+            tracker.mark_accepted(ceremony_id, guardian_id)
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to record guardian acceptance: {}",
+                        e
+                    ))
+                })?;
+            Ok(())
+        } else {
+            // Mark ceremony as failed due to decline
+            tracker.mark_failed(ceremony_id, Some("Guardian declined invitation".to_string()))
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to record guardian decline: {}",
+                        e
+                    ))
+                })?;
+            Ok(())
+        }
+    }
+
+    // =========================================================================
+    // Time Operations
+    // =========================================================================
+
+    fn current_time_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
     // =========================================================================
     // Authentication
     // =========================================================================
@@ -481,6 +738,60 @@ fn extract_timestamp_ms(ts: &TimeStamp) -> u64 {
             // Use earliest bound from range
             range.earliest_ms
         }
+    }
+}
+
+/// Convert domain Invitation to bridge InvitationInfo
+fn convert_invitation_to_bridge_info(
+    invitation: &crate::handlers::invitation::Invitation,
+) -> InvitationInfo {
+    InvitationInfo {
+        invitation_id: invitation.invitation_id.clone(),
+        sender_id: invitation.sender_id,
+        receiver_id: invitation.receiver_id,
+        invitation_type: convert_invitation_type_to_bridge(&invitation.invitation_type),
+        status: convert_invitation_status_to_bridge(&invitation.status),
+        created_at_ms: invitation.created_at,
+        expires_at_ms: invitation.expires_at,
+        message: invitation.message.clone(),
+    }
+}
+
+/// Convert domain InvitationType to bridge InvitationBridgeType
+fn convert_invitation_type_to_bridge(
+    inv_type: &crate::handlers::invitation::InvitationType,
+) -> InvitationBridgeType {
+    match inv_type {
+        crate::handlers::invitation::InvitationType::Contact { petname } => {
+            InvitationBridgeType::Contact {
+                petname: petname.clone(),
+            }
+        }
+        crate::handlers::invitation::InvitationType::Guardian { subject_authority } => {
+            InvitationBridgeType::Guardian {
+                subject_authority: *subject_authority,
+            }
+        }
+        crate::handlers::invitation::InvitationType::Channel { block_id } => {
+            InvitationBridgeType::Channel {
+                block_id: block_id.clone(),
+            }
+        }
+    }
+}
+
+/// Convert domain InvitationStatus to bridge InvitationBridgeStatus
+fn convert_invitation_status_to_bridge(
+    status: &crate::handlers::invitation::InvitationStatus,
+) -> InvitationBridgeStatus {
+    match status {
+        crate::handlers::invitation::InvitationStatus::Pending => InvitationBridgeStatus::Pending,
+        crate::handlers::invitation::InvitationStatus::Accepted => InvitationBridgeStatus::Accepted,
+        crate::handlers::invitation::InvitationStatus::Declined => InvitationBridgeStatus::Declined,
+        crate::handlers::invitation::InvitationStatus::Cancelled => {
+            InvitationBridgeStatus::Cancelled
+        }
+        crate::handlers::invitation::InvitationStatus::Expired => InvitationBridgeStatus::Expired,
     }
 }
 

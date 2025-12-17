@@ -25,20 +25,24 @@ use std::sync::Arc;
 ///
 /// **Note**: Full implementation would use Intent::SendMessage for persistence.
 /// Currently updates chat state locally for UI responsiveness.
+///
+/// # Arguments
+/// * `app_core` - The application core
+/// * `target` - Target contact ID
+/// * `content` - Message content
+/// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
 pub async fn send_direct_message(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
     content: &str,
+    timestamp_ms: u64,
 ) -> Result<String, AuraError> {
     let dm_channel_id = format!("dm:{}", target);
 
     let core = app_core.read().await;
     let mut chat_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now = timestamp_ms;
 
     // Ensure the DM channel exists (create if needed)
     if !chat_state.channels.iter().any(|c| c.id == dm_channel_id) {
@@ -95,9 +99,15 @@ pub async fn send_direct_message(
 /// 2. Creates DM channel if it doesn't exist
 /// 3. Selects the channel for active conversation
 /// 4. Emits CHAT_SIGNAL for UI updates
+///
+/// # Arguments
+/// * `app_core` - The application core
+/// * `contact_id` - Contact ID to start chat with
+/// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
 pub async fn start_direct_chat(
     app_core: &Arc<RwLock<AppCore>>,
     contact_id: &str,
+    timestamp_ms: u64,
 ) -> Result<String, AuraError> {
     let dm_channel_id = format!("dm:{}", contact_id);
 
@@ -114,10 +124,7 @@ pub async fn start_direct_chat(
             .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]))
     };
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now = timestamp_ms;
 
     // Create the DM channel
     let dm_channel = Channel {
