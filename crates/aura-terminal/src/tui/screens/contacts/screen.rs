@@ -349,8 +349,6 @@ pub fn ContactsScreen(
     let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let selected_contact = contacts.get(current_selected).cloned();
 
-    // NOTE: Modals have been moved to app.rs root level. See modal.rs for ModalFrame details.
-
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.
     // This component is purely presentational.

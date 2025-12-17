@@ -3,9 +3,9 @@
 //! Effect-based implementation of the status command.
 //! Returns structured `CliOutput` for testability.
 
+use crate::error::{TerminalError, TerminalResult};
+use crate::handlers::config::load_config_utf8;
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::Result;
-use aura_core::effects::StorageEffects;
 use std::path::Path;
 
 /// Handle status display through effects
@@ -16,8 +16,10 @@ use std::path::Path;
 /// - Clear separation of logic from I/O
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_status(ctx: &HandlerContext<'_>, config_path: &Path) -> Result<CliOutput> {
-    let effects = ctx.effects();
+pub async fn handle_status(
+    ctx: &HandlerContext<'_>,
+    config_path: &Path,
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.println(format!(
@@ -26,17 +28,6 @@ pub async fn handle_status(ctx: &HandlerContext<'_>, config_path: &Path) -> Resu
     ));
 
     let config_key = config_path.display().to_string();
-
-    // Check if config exists through storage effects
-    let config_exists = effects.exists(&config_key).await.unwrap_or(false);
-
-    if !config_exists {
-        output.eprintln(format!("Config file not found: {}", config_path.display()));
-        return Err(anyhow::anyhow!(
-            "Config file not found: {}",
-            config_path.display()
-        ));
-    }
 
     // Read and parse config through storage effects
     match read_config_through_effects(ctx, &config_key, &mut output).await {
@@ -57,21 +48,11 @@ async fn read_config_through_effects(
     ctx: &HandlerContext<'_>,
     config_key: &str,
     output: &mut CliOutput,
-) -> Result<DeviceConfig> {
-    let effects = ctx.effects();
+) -> TerminalResult<DeviceConfig> {
+    let config_str = load_config_utf8(ctx, config_key).await?;
 
-    let config_bytes = effects
-        .retrieve(config_key)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read config: {}", e))?
-        .ok_or_else(|| anyhow::anyhow!("Config {} not found in storage", config_key))?;
-
-    let config_str = String::from_utf8(config_bytes)
-        .map_err(|e| anyhow::anyhow!("Config is not valid UTF-8: {}", e))?;
-
-    // Parse TOML configuration
-    let config: DeviceConfig = toml::from_str(&config_str)
-        .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
+    let config: DeviceConfig =
+        toml::from_str(&config_str).map_err(|e| TerminalError::Config(e.to_string()))?;
 
     output.println("Configuration loaded successfully");
 

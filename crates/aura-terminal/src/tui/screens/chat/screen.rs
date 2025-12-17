@@ -248,8 +248,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let channels_focused = current_focus == ChatFocus::Channels;
     let messages_focused = current_focus == ChatFocus::Messages;
 
-    // NOTE: Modals have been moved to app.rs root level. See modal.rs for ModalFrame details.
-
     // Message list border color based on focus
     let msg_border = if messages_focused {
         Theme::BORDER_FOCUS
@@ -321,9 +319,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                     sending: false,
                 )
             }
-
-            // NOTE: All modals have been moved to app.rs root level and wrapped with ModalFrame
-            // for consistent positioning. See the "CHAT SCREEN MODALS" section in app.rs.
         }
     }
 }

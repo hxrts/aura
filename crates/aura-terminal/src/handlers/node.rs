@@ -3,10 +3,10 @@
 //! Effect-based implementation of the node command.
 //! Returns structured `CliOutput` for testability.
 
+use crate::error::{TerminalError, TerminalResult};
+use crate::handlers::config::load_config_utf8;
 use crate::handlers::{CliOutput, HandlerContext};
-use anyhow::Result;
 use aura_core::effects::PhysicalTimeEffects;
-use aura_protocol::effect_traits::StorageEffects;
 use aura_protocol::effects::EffectApiEffects;
 use std::path::Path;
 
@@ -20,7 +20,7 @@ pub async fn handle_node(
     port: u16,
     daemon: bool,
     config_path: &Path,
-) -> Result<CliOutput> {
+) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.println(format!(
@@ -28,20 +28,6 @@ pub async fn handle_node(
         port, daemon
     ));
     output.kv("Config", config_path.display().to_string());
-
-    // Validate config exists through storage effects
-    if ctx
-        .effects()
-        .retrieve(&config_path.display().to_string())
-        .await
-        .map_or(true, |data| data.is_none())
-    {
-        output.eprintln(format!("Config file not found: {}", config_path.display()));
-        return Err(anyhow::anyhow!(
-            "Config file not found: {}",
-            config_path.display()
-        ));
-    }
 
     // Load and validate configuration
     let _config = load_node_config(ctx, config_path, &mut output).await?;
@@ -62,19 +48,12 @@ async fn load_node_config(
     ctx: &HandlerContext<'_>,
     config_path: &Path,
     output: &mut CliOutput,
-) -> Result<NodeConfig> {
-    let config_data = ctx
-        .effects()
-        .retrieve(&config_path.display().to_string())
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read config: {}", e))?
-        .ok_or_else(|| anyhow::anyhow!("Config file not found: {}", config_path.display()))?;
+) -> TerminalResult<NodeConfig> {
+    let key = config_path.display().to_string();
+    let config_str = load_config_utf8(ctx, &key).await?;
 
-    let config_str = String::from_utf8(config_data)
-        .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in config: {}", e))?;
-
-    let config: NodeConfig = toml::from_str(&config_str)
-        .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
+    let config: NodeConfig =
+        toml::from_str(&config_str).map_err(|e| TerminalError::Config(e.to_string()))?;
 
     output.println("Node configuration loaded");
 
@@ -86,7 +65,7 @@ async fn run_daemon_mode(
     ctx: &HandlerContext<'_>,
     port: u16,
     output: &mut CliOutput,
-) -> Result<()> {
+) -> TerminalResult<()> {
     output.println("Initializing daemon mode...");
 
     // Simulate daemon initialization
@@ -103,7 +82,7 @@ async fn run_daemon_mode(
         ctx.effects()
             .sleep_ms(200)
             .await
-            .map_err(|e| anyhow::anyhow!("daemon heartbeat sleep failed: {}", e))?;
+            .map_err(|e| TerminalError::Operation(format!("daemon heartbeat sleep failed: {}", e)))?;
         let epoch = ctx.effects().current_epoch().await.unwrap_or(0);
         output.println(format!("Daemon heartbeat {} at epoch {}", idx + 1, epoch));
     }
@@ -116,7 +95,7 @@ async fn run_interactive_mode(
     ctx: &HandlerContext<'_>,
     port: u16,
     output: &mut CliOutput,
-) -> Result<()> {
+) -> TerminalResult<()> {
     output.println(format!(
         "Node started in interactive mode on port {}. Press Ctrl+C to stop.",
         port
@@ -134,7 +113,10 @@ async fn run_interactive_mode(
 }
 
 /// Simulate startup delay using time effects
-async fn simulate_startup_delay(ctx: &HandlerContext<'_>, output: &mut CliOutput) -> Result<()> {
+async fn simulate_startup_delay(
+    ctx: &HandlerContext<'_>,
+    output: &mut CliOutput,
+) -> TerminalResult<()> {
     let delay_start = ctx.effects().current_epoch().await.unwrap_or(0);
 
     // Simulate 1 second startup time
@@ -147,7 +129,7 @@ async fn simulate_startup_delay(ctx: &HandlerContext<'_>, output: &mut CliOutput
         ctx.effects()
             .sleep_ms(25)
             .await
-            .map_err(|e| anyhow::anyhow!("startup sleep failed: {}", e))?;
+            .map_err(|e| TerminalError::Operation(format!("startup sleep failed: {}", e)))?;
     }
 
     output.println("Startup complete");
@@ -159,7 +141,7 @@ async fn simulate_startup_delay(ctx: &HandlerContext<'_>, output: &mut CliOutput
 async fn simulate_interactive_session(
     ctx: &HandlerContext<'_>,
     output: &mut CliOutput,
-) -> Result<()> {
+) -> TerminalResult<()> {
     for i in 1..=3 {
         let current = ctx.effects().current_epoch().await.unwrap_or(0);
         output.println(format!("Interactive tick {} at epoch {}", i, current));
@@ -168,7 +150,7 @@ async fn simulate_interactive_session(
         ctx.effects()
             .sleep_ms(50)
             .await
-            .map_err(|e| anyhow::anyhow!("interactive sleep failed: {}", e))?;
+            .map_err(|e| TerminalError::Operation(format!("interactive sleep failed: {}", e)))?;
     }
 
     output.println("Interactive session ended (simulated)");

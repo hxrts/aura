@@ -378,8 +378,6 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let display_input_text = props.view.input_buffer.clone();
     let input_focused = props.view.insert_mode || current_focus == BlockFocus::Input;
 
-    // NOTE: Modals have been moved to app.rs root level. See modal.rs for ModalFrame details.
-
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.
     // This component is purely presentational.
@@ -420,9 +418,6 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                     sending: false,
                 )
             }
-
-            // NOTE: All modals have been moved to app.rs root level and wrapped with ModalFrame
-            // for consistent positioning. See the "BLOCK SCREEN MODALS" section in app.rs.
         }
     }
 }
