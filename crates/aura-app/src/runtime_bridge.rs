@@ -785,10 +785,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     fn current_time_ms(&self) -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
+        // Offline bridge returns constant time (no runtime available)
+        // Production implementations should use PhysicalTimeEffects
+        0
     }
 }
 

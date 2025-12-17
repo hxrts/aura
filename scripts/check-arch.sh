@@ -178,7 +178,8 @@ LAN_DISCOVERY_ALLOWLIST="crates/aura-rendezvous/src/lan_discovery.rs"
 SIMULATOR_ALLOWLIST="crates/aura-simulator/src/"
 
 # Runtime assembly (Layer 6) - where effects are composed with real impls
-RUNTIME_ALLOWLIST="crates/aura-agent/src/runtime/"
+# Includes runtime/ subdirectory and runtime_bridge_impl.rs (RuntimeBridge implementation)
+RUNTIME_ALLOWLIST="crates/aura-agent/src/runtime/|crates/aura-agent/src/runtime_bridge_impl.rs"
 
 # App core storage (Layer 5) - cfg-gated for native builds only (#[cfg(not(target_arch = "wasm32"))])
 APP_NATIVE_STORAGE_ALLOWLIST="crates/aura-app/src/core/app.rs"
@@ -403,7 +404,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-effects/" \
     | grep -v "crates/aura-testkit/" \
     | grep -v "crates/aura-simulator/" \
-    | grep -v "crates/aura-agent/src/runtime/" \
+    | grep -Ev "$RUNTIME_ALLOWLIST" \
     | grep -v "crates/aura-terminal/" \
     | grep -v "$LAN_DISCOVERY_ALLOWLIST" \
     | grep -v "/tests/" \
@@ -523,7 +524,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   entropy_id_hits=$(rg --no-heading "$entropy_id_pattern" crates -g "*.rs" || true)
   filtered_entropy_ids=$(echo "$entropy_id_hits" \
     | grep -v "$EFFECT_HANDLER_ALLOWLIST" \
-    | grep -v "$RUNTIME_ALLOWLIST" \
+    | grep -Ev "$RUNTIME_ALLOWLIST" \
     | grep -v "$CLI_ENTRY_ALLOWLIST" \
     | grep -Ev "$TEST_ALLOWLIST" || true)
   if [ -n "$filtered_entropy_ids" ]; then
@@ -557,7 +558,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   uuid_v4_hits=$(rg --no-heading "$uuid_v4_pattern" crates -g "*.rs" || true)
   filtered_uuid_v4=$(echo "$uuid_v4_hits" \
     | grep -v "$EFFECT_HANDLER_ALLOWLIST" \
-    | grep -v "$RUNTIME_ALLOWLIST" \
+    | grep -Ev "$RUNTIME_ALLOWLIST" \
     | grep -v "$CLI_ENTRY_ALLOWLIST" \
     | grep -Ev "$TEST_ALLOWLIST" || true)
   if [ -n "$filtered_uuid_v4" ]; then

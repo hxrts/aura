@@ -221,7 +221,7 @@ mod tests {
         ShareableInvitation {
             version: 1,
             invitation_id: "test-invitation-123".to_string(),
-            sender_id: AuthorityId::new(),
+            sender_id: AuthorityId::new_from_entropy([42u8; 32]),
             invitation_type,
             message: None,
             expires_at: None,
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn test_format_invitation_type_guardian() {
-        let subject = AuthorityId::new();
+        let subject = AuthorityId::new_from_entropy([99u8; 32]);
         let shareable = test_shareable(InvitationType::Guardian {
             subject_authority: subject,
         });
