@@ -3,9 +3,13 @@
 //! This module contains system-level operations that are portable across all frontends.
 //! These are mostly lightweight health-check and state refresh operations.
 
+use crate::signal_defs::{
+    ConnectionStatus, SettingsState, CONNECTION_STATUS_SIGNAL, SETTINGS_SIGNAL,
+};
 use crate::AppCore;
-use async_lock::RwLock;
+use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuraError;
+use async_lock::RwLock;
 use std::sync::Arc;
 
 /// Ping operation for health check
@@ -21,17 +25,57 @@ pub async fn ping(_app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
 
 /// Refresh account state
 ///
-/// **What it does**: Triggers state refresh
+/// **What it does**: Triggers state refresh across all signals
 /// **Returns**: Unit result
-/// **Signal pattern**: Could emit multiple signals for full refresh
+/// **Signal pattern**: Re-emits all major signals
 ///
-/// This operation triggers a state refresh by re-emitting all signals,
-/// causing subscribers to re-render with current state.
-///
-/// **TODO**: Implement full signal refresh once all workflows are complete.
-pub async fn refresh_account(_app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
-    // TODO: Re-emit all signals for full state refresh
-    // For now, this is a no-op
+/// This operation triggers a state refresh by calling domain-specific
+/// workflows that re-read and emit their respective signals.
+pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
+    // Refresh chat state
+    let _ = super::messaging::get_chat_state(app_core).await;
+
+    // Refresh contacts state
+    let _ = super::query::list_contacts(app_core).await;
+
+    // Refresh invitations state
+    let _ = super::invitation::list_invitations(app_core).await;
+
+    // Refresh settings state
+    let _ = super::settings::get_settings(app_core).await;
+
+    // Refresh recovery state
+    let _ = super::recovery::get_recovery_status(app_core).await;
+
+    // Refresh discovered peers
+    let _ = super::network::get_discovered_peers(app_core).await;
+
+    // Refresh connection status from runtime
+    let core = app_core.read().await;
+    if let Some(runtime) = core.runtime() {
+        let status = runtime.get_sync_status().await;
+        let connection = if status.connected_peers > 0 {
+            ConnectionStatus::Online {
+                peer_count: status.connected_peers,
+            }
+        } else {
+            ConnectionStatus::Offline
+        };
+        let _ = core.emit(&*CONNECTION_STATUS_SIGNAL, connection).await;
+
+        // Refresh settings from runtime
+        let settings = runtime.get_settings().await;
+        let settings_state = SettingsState {
+            display_name: settings.display_name,
+            mfa_policy: settings.mfa_policy,
+            threshold_k: settings.threshold_k as u8,
+            threshold_n: settings.threshold_n as u8,
+            devices: Vec::new(), // Devices list populated elsewhere
+            contact_count: settings.contact_count,
+        };
+        let _ = core.emit(&*SETTINGS_SIGNAL, settings_state).await;
+    }
+
     Ok(())
 }
 

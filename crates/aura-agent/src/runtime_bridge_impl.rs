@@ -617,29 +617,48 @@ impl RuntimeBridge for AgentRuntimeBridge {
             (0, 0)
         };
 
-        // TODO: Implement full settings retrieval when settings service is available
-        // For now, return defaults with threshold config
+        // Get contact count from invitations (accepted contact invitations)
+        let contact_count = if let Ok(service) = self.agent.invitations().await {
+            service
+                .list_pending()
+                .await
+                .iter()
+                .filter(|inv| {
+                    matches!(
+                        inv.invitation_type,
+                        crate::handlers::invitation::InvitationType::Contact { .. }
+                    ) && inv.status == crate::handlers::invitation::InvitationStatus::Accepted
+                })
+                .count()
+        } else {
+            0
+        };
+
+        // Settings service not yet implemented - return available data
+        // When implemented, would provide: display_name, mfa_policy from profile facts
         SettingsBridgeState {
-            display_name: String::new(),
-            mfa_policy: "disabled".to_string(),
+            display_name: String::new(), // Requires profile/settings service
+            mfa_policy: "disabled".to_string(), // Requires auth policy service
             threshold_k,
             threshold_n,
-            device_count: 1, // Default to 1 device (self)
-            contact_count: 0,
+            device_count: 1, // Requires device registry service
+            contact_count,
         }
     }
 
     async fn set_display_name(&self, _name: &str) -> Result<(), IntentError> {
-        // TODO: Implement when settings service is available
+        // Requires profile/settings service to persist display name as a fact
+        // Implementation would: create DisplayNameFact, persist via journal
         Err(IntentError::internal_error(
-            "Settings service not yet implemented",
+            "Profile service not yet implemented - display name cannot be persisted",
         ))
     }
 
     async fn set_mfa_policy(&self, _policy: &str) -> Result<(), IntentError> {
-        // TODO: Implement when settings service is available
+        // Requires auth policy service to persist MFA settings
+        // Implementation would: create MfaPolicyFact, persist via journal
         Err(IntentError::internal_error(
-            "Settings service not yet implemented",
+            "Auth policy service not yet implemented - MFA policy cannot be persisted",
         ))
     }
 

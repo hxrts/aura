@@ -16,16 +16,10 @@ use crate::InvitationAction;
 use aura_core::identifiers::AuthorityId;
 use std::str::FromStr;
 
-// Re-export workflow functions for backward compatibility
-// NOTE: Most operations require RuntimeBridge extension (see TODOs in aura-app)
+// CLI handlers use direct agent service access (more efficient for CLI context)
+// TUI handlers should use aura_app::workflows::invitation for portability
 use aura_agent::handlers::ShareableInvitation;
 use aura_agent::{AuraAgent, InvitationService};
-
-// NOTE: Workflow functions imported but not yet used (waiting for RuntimeBridge extension)
-// use aura_app::workflows::invitation::{
-//     accept_invitation, cancel_invitation, decline_invitation, export_invitation, import_invitation,
-//     list_invitations,
-// };
 
 /// Handle invitation-related CLI commands
 ///

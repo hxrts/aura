@@ -244,10 +244,99 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             toasts_state.set(toasts);
                         }
 
-                        // TODO: Handle remaining UiUpdate variants as callbacks are converted
-                        // For now, other variants are logged but not acted upon
+                        // Success notifications - show informational toasts
+                        UiUpdate::MessageSent { channel, .. } => {
+                            let toast = ToastMessage::info(
+                                format!("msg-sent-{}", channel),
+                                format!("Message sent to {}", channel),
+                            );
+                            let mut toasts = toasts_state.read().clone();
+                            toasts.push(toast);
+                            toasts_state.set(toasts);
+                        }
+
+                        UiUpdate::InvitationAccepted { invitation_id } => {
+                            let toast = ToastMessage::success(
+                                format!("inv-accepted-{}", invitation_id),
+                                "Invitation accepted".to_string(),
+                            );
+                            let mut toasts = toasts_state.read().clone();
+                            toasts.push(toast);
+                            toasts_state.set(toasts);
+                        }
+
+                        UiUpdate::InvitationDeclined { invitation_id } => {
+                            let toast = ToastMessage::info(
+                                format!("inv-declined-{}", invitation_id),
+                                "Invitation declined".to_string(),
+                            );
+                            let mut toasts = toasts_state.read().clone();
+                            toasts.push(toast);
+                            toasts_state.set(toasts);
+                        }
+
+                        UiUpdate::InvitationCreated { invitation_code } => {
+                            let toast = ToastMessage::success(
+                                format!("inv-created-{}", &invitation_code[..8.min(invitation_code.len())]),
+                                "Invitation created".to_string(),
+                            );
+                            let mut toasts = toasts_state.read().clone();
+                            toasts.push(toast);
+                            toasts_state.set(toasts);
+                        }
+
+                        UiUpdate::SyncCompleted => {
+                            let toast = ToastMessage::success(
+                                "sync-completed".to_string(),
+                                "Sync completed".to_string(),
+                            );
+                            let mut toasts = toasts_state.read().clone();
+                            toasts.push(toast);
+                            toasts_state.set(toasts);
+                        }
+
+                        UiUpdate::SyncFailed { error } => {
+                            let toast = ToastMessage::error(
+                                "sync-failed".to_string(),
+                                format!("Sync failed: {}", error),
+                            );
+                            let mut toasts = toasts_state.read().clone();
+                            toasts.push(toast);
+                            toasts_state.set(toasts);
+                        }
+
+                        UiUpdate::AccountCreated => {
+                            let toast = ToastMessage::success(
+                                "account-created".to_string(),
+                                "Account created successfully".to_string(),
+                            );
+                            let mut toasts = toasts_state.read().clone();
+                            toasts.push(toast);
+                            toasts_state.set(toasts);
+                        }
+
+                        UiUpdate::RecoveryStarted => {
+                            let toast = ToastMessage::info(
+                                "recovery-started".to_string(),
+                                "Recovery process started".to_string(),
+                            );
+                            let mut toasts = toasts_state.read().clone();
+                            toasts.push(toast);
+                            toasts_state.set(toasts);
+                        }
+
+                        // Navigation and state changes - no toast needed, handled by navigation system
+                        UiUpdate::ChannelSelected(_)
+                        | UiUpdate::ChannelCreated(_)
+                        | UiUpdate::BlockEntered { .. }
+                        | UiUpdate::NavigatedHome
+                        | UiUpdate::NavigatedToStreet
+                        | UiUpdate::NavigatedToNeighborhood => {
+                            // Navigation handled elsewhere - no additional UI update needed
+                        }
+
+                        // Other updates - log in debug mode only
                         _ => {
-                            // Other updates will be handled as we convert more callbacks
                             #[cfg(debug_assertions)]
                             eprintln!("[UiUpdate] Unhandled update: {:?}", update);
                         }
