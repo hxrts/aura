@@ -99,7 +99,7 @@ pub use budget::{
 };
 pub use context::{get_current_position, get_neighborhood_state, move_position, set_context};
 pub use invitation::{
-    accept_invitation, cancel_invitation, create_invitation, decline_invitation, export_invitation,
+    accept_invitation, cancel_invitation, decline_invitation, export_invitation,
     import_invitation, list_invitations,
 };
 pub use messaging::{get_chat_state, send_direct_message, start_direct_chat};

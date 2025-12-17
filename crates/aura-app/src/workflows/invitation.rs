@@ -1,28 +1,11 @@
 //! Invitation Workflow - Portable Business Logic
 //!
-//! This module contains invitation operations that should be portable
-//! across all frontends. Currently partially implemented due to
-//! RuntimeBridge limitations.
-//!
-//! ## TODO: RuntimeBridge Extension Needed
-//!
-//! To fully implement invitation workflows, RuntimeBridge needs these methods:
-//! - `create_invitation(receiver, role, ttl) -> Invitation`
-//! - `accept_invitation(invitation_id) -> Result<()>`
-//! - `decline_invitation(invitation_id) -> Result<()>`
-//! - `cancel_invitation(invitation_id) -> Result<()>`
-//! - `list_invitations() -> Vec<Invitation>`
-//! - `import_invitation(code) -> Invitation`
-//!
-//! Currently these operations are accessed via `agent.invitations()` in
-//! handlers, which breaks the aura-app portability abstraction.
+//! This module contains invitation operations that are portable across
+//! all frontends via the RuntimeBridge abstraction.
 
-use crate::{
-    views::invitations::{Invitation, InvitationsState},
-    AppCore, INVITATIONS_SIGNAL,
-};
+use crate::{views::invitations::InvitationsState, AppCore, INVITATIONS_SIGNAL};
 use async_lock::RwLock;
-use aura_core::{effects::reactive::ReactiveEffects, identifiers::AuthorityId, AuraError};
+use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::sync::Arc;
 
 /// Export an invitation code for sharing
@@ -64,106 +47,98 @@ pub async fn list_invitations(app_core: &Arc<RwLock<AppCore>>) -> InvitationsSta
 }
 
 // ============================================================================
-// TODO: The following functions need RuntimeBridge extension
+// Invitation Operations via RuntimeBridge
 // ============================================================================
-//
-// These operations currently require direct access to InvitationService
-// via the agent, which breaks the aura-app portability abstraction.
-//
-// To make them portable, we need to add corresponding methods to RuntimeBridge
-// and implement them in aura-agent.
 
-/// Create an invitation (TODO: Needs RuntimeBridge extension)
+/// Accept an invitation
 ///
-/// **What it does**: Creates a new invitation for another authority
-/// **Returns**: Invitation information
-/// **Signal pattern**: Emits INVITATIONS_SIGNAL after creation
-///
-/// **TODO**: Add `create_invitation` to RuntimeBridge trait.
-pub async fn create_invitation(
-    _app_core: &Arc<RwLock<AppCore>>,
-    _receiver: AuthorityId,
-    _role: String,
-    _ttl_secs: Option<u64>,
-) -> Result<Invitation, AuraError> {
-    // TODO: Implement via RuntimeBridge once extended
-    Err(AuraError::agent(
-        "create_invitation not yet implemented - needs RuntimeBridge extension",
-    ))
-}
-
-/// Accept an invitation (TODO: Needs RuntimeBridge extension)
-///
-/// **What it does**: Accepts a received invitation
+/// **What it does**: Accepts a received invitation via RuntimeBridge
 /// **Returns**: Unit result
-/// **Signal pattern**: Emits INVITATIONS_SIGNAL after acceptance
-///
-/// **TODO**: Add `accept_invitation` to RuntimeBridge trait.
+/// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn accept_invitation(
-    _app_core: &Arc<RwLock<AppCore>>,
-    _invitation_id: &str,
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
 ) -> Result<(), AuraError> {
-    // TODO: Implement via RuntimeBridge once extended
-    Err(AuraError::agent(
-        "accept_invitation not yet implemented - needs RuntimeBridge extension",
-    ))
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .accept_invitation(invitation_id)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {}", e)))
 }
 
-/// Decline an invitation (TODO: Needs RuntimeBridge extension)
+/// Decline an invitation
 ///
-/// **What it does**: Declines a received invitation
+/// **What it does**: Declines a received invitation via RuntimeBridge
 /// **Returns**: Unit result
-/// **Signal pattern**: Emits INVITATIONS_SIGNAL after declining
-///
-/// **TODO**: Add `decline_invitation` to RuntimeBridge trait.
+/// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn decline_invitation(
-    _app_core: &Arc<RwLock<AppCore>>,
-    _invitation_id: &str,
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
 ) -> Result<(), AuraError> {
-    // TODO: Implement via RuntimeBridge once extended
-    Err(AuraError::agent(
-        "decline_invitation not yet implemented - needs RuntimeBridge extension",
-    ))
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .decline_invitation(invitation_id)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to decline invitation: {}", e)))
 }
 
-/// Cancel an invitation (TODO: Needs RuntimeBridge extension)
+/// Cancel an invitation
 ///
-/// **What it does**: Cancels a sent invitation
+/// **What it does**: Cancels a sent invitation via RuntimeBridge
 /// **Returns**: Unit result
-/// **Signal pattern**: Emits INVITATIONS_SIGNAL after cancellation
-///
-/// **TODO**: Add `cancel_invitation` to RuntimeBridge trait.
+/// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn cancel_invitation(
-    _app_core: &Arc<RwLock<AppCore>>,
-    _invitation_id: &str,
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
 ) -> Result<(), AuraError> {
-    // TODO: Implement via RuntimeBridge once extended
-    Err(AuraError::agent(
-        "cancel_invitation not yet implemented - needs RuntimeBridge extension",
-    ))
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .cancel_invitation(invitation_id)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to cancel invitation: {}", e)))
 }
 
-/// Import an invitation from a shareable code (TODO: Needs RuntimeBridge extension)
+/// Import an invitation from a shareable code
 ///
-/// **What it does**: Validates and imports invitation code into state
+/// **What it does**: Parses and validates invitation code via RuntimeBridge
 /// **Returns**: Unit result
-/// **Signal pattern**: Emits INVITATIONS_SIGNAL after import
+/// **Signal pattern**: RuntimeBridge handles signal emission
 ///
-/// **TODO**: Add `import_invitation` to RuntimeBridge trait.
-///
-/// **Note**: For now, invitation parsing is handled in the terminal layer
-/// where aura-agent dependencies are available. This function is a placeholder
-/// for the future RuntimeBridge implementation.
+/// The code parsing and validation is handled by the RuntimeBridge implementation.
 pub async fn import_invitation(
-    _app_core: &Arc<RwLock<AppCore>>,
-    _code: &str,
+    app_core: &Arc<RwLock<AppCore>>,
+    code: &str,
 ) -> Result<(), AuraError> {
-    // TODO: Implement via RuntimeBridge once extended
-    // The parsing logic currently lives in the terminal handler
-    // where ShareableInvitation from aura-agent is available
-    Err(AuraError::agent(
-        "import_invitation not yet implemented - needs RuntimeBridge extension",
-    ))
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .import_invitation(code)
+        .await
+        .map(|_| ()) // Discard InvitationInfo, just return success
+        .map_err(|e| AuraError::agent(format!("Failed to import invitation: {}", e)))
 }
 
 #[cfg(test)]
