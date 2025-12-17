@@ -15,11 +15,11 @@ use serde::{Deserialize, Serialize};
 // Import app types from aura-app (pure layer)
 use aura_app::{AppConfig, AppCore};
 // Import agent types from aura-agent (runtime layer)
+use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
-use async_lock::RwLock;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]

@@ -30,8 +30,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use aura_app::AppCore;
 use async_lock::RwLock;
+use aura_app::AppCore;
 
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL,

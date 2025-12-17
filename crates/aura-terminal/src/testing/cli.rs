@@ -41,13 +41,13 @@ use crate::error::TerminalResult;
 use crate::handlers::{CliHandler, EffectContext};
 use crate::{ids, ContextAction, RecoveryAction};
 
+use async_lock::RwLock;
 use aura_agent::AgentBuilder;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::ExecutionMode;
 use aura_core::identifiers::DeviceId;
 use std::path::Path;
 use std::sync::Arc;
-use async_lock::RwLock;
 
 /// Captured output from CLI command execution
 #[derive(Debug, Clone, Default)]

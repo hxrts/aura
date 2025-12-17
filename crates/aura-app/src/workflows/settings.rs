@@ -3,7 +3,10 @@
 //! This module contains settings operations that are portable across all frontends.
 //! It follows the reactive signal pattern and emits SETTINGS_SIGNAL updates.
 
-use crate::{signal_defs::{SettingsState, SETTINGS_SIGNAL}, AppCore};
+use crate::{
+    signal_defs::{SettingsState, SETTINGS_SIGNAL},
+    AppCore,
+};
 use async_lock::RwLock;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::sync::Arc;
@@ -93,7 +96,6 @@ pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> SettingsState {
         Err(_) => SettingsState::default(),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

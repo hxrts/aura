@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 
+use async_lock::RwLock;
 use aura_app::runtime_bridge::InvitationBridgeType;
 use aura_app::AppCore;
-use async_lock::RwLock;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;

@@ -7,9 +7,9 @@ use crate::signal_defs::{
     ConnectionStatus, SettingsState, CONNECTION_STATUS_SIGNAL, SETTINGS_SIGNAL,
 };
 use crate::AppCore;
+use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuraError;
-use async_lock::RwLock;
 use std::sync::Arc;
 
 /// Ping operation for health check

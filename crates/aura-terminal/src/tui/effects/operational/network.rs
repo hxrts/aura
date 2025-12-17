@@ -5,13 +5,13 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use async_lock::RwLock;
 use aura_app::signal_defs::{
     ConnectionStatus, DiscoveredPeer, DiscoveredPeersState, CONNECTION_STATUS_SIGNAL,
     DISCOVERED_PEERS_SIGNAL,
 };
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
-use async_lock::RwLock;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
@@ -205,8 +205,7 @@ async fn emit_discovered_peers_signal(app_core: &AppCore) {
     let lan_peers = app_core.get_lan_peers().await;
 
     // Get invited peer IDs to mark peers as invited
-    let invited_ids: std::collections::HashSet<String> = if let Some(runtime) = app_core.runtime()
-    {
+    let invited_ids: std::collections::HashSet<String> = if let Some(runtime) = app_core.runtime() {
         runtime.get_invited_peer_ids().await.into_iter().collect()
     } else {
         std::collections::HashSet::new()

@@ -5,13 +5,13 @@
 //! `aura-agent` provides the implementation.
 
 use crate::core::AuraAgent;
+use crate::handlers::invitation_service::InvitationService;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo, RendezvousStatus,
     RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::IntentError;
-use crate::handlers::invitation_service::InvitationService;
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
@@ -499,18 +499,19 @@ impl RuntimeBridge for AgentRuntimeBridge {
             IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
-        let result = invitation_service.accept(invitation_id).await.map_err(|e| {
-            IntentError::internal_error(format!("Failed to accept invitation: {}", e))
-        })?;
+        let result = invitation_service
+            .accept(invitation_id)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to accept invitation: {}", e))
+            })?;
 
         if result.success {
             Ok(())
         } else {
-            Err(IntentError::internal_error(
-                result
-                    .error
-                    .unwrap_or_else(|| "Failed to accept invitation".to_string()),
-            ))
+            Err(IntentError::internal_error(result.error.unwrap_or_else(
+                || "Failed to accept invitation".to_string(),
+            )))
         }
     }
 
@@ -529,11 +530,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         if result.success {
             Ok(())
         } else {
-            Err(IntentError::internal_error(
-                result
-                    .error
-                    .unwrap_or_else(|| "Failed to decline invitation".to_string()),
-            ))
+            Err(IntentError::internal_error(result.error.unwrap_or_else(
+                || "Failed to decline invitation".to_string(),
+            )))
         }
     }
 
@@ -542,18 +541,19 @@ impl RuntimeBridge for AgentRuntimeBridge {
             IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
-        let result = invitation_service.cancel(invitation_id).await.map_err(|e| {
-            IntentError::internal_error(format!("Failed to cancel invitation: {}", e))
-        })?;
+        let result = invitation_service
+            .cancel(invitation_id)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to cancel invitation: {}", e))
+            })?;
 
         if result.success {
             Ok(())
         } else {
-            Err(IntentError::internal_error(
-                result
-                    .error
-                    .unwrap_or_else(|| "Failed to cancel invitation".to_string()),
-            ))
+            Err(IntentError::internal_error(result.error.unwrap_or_else(
+                || "Failed to cancel invitation".to_string(),
+            )))
         }
     }
 
@@ -583,7 +583,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             receiver_id: self.agent.authority_id(), // Receiver is us (we're importing)
             invitation_type: convert_invitation_type_to_bridge(&shareable.invitation_type),
             status: InvitationBridgeStatus::Pending, // Imported invitations start as pending
-            created_at_ms: 0, // Not available in shareable format
+            created_at_ms: 0,                        // Not available in shareable format
             expires_at_ms: shareable.expires_at,
             message: shareable.message,
         })
@@ -637,7 +637,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         // Settings service not yet implemented - return available data
         // When implemented, would provide: display_name, mfa_policy from profile facts
         SettingsBridgeState {
-            display_name: String::new(), // Requires profile/settings service
+            display_name: String::new(),        // Requires profile/settings service
             mfa_policy: "disabled".to_string(), // Requires auth policy service
             threshold_k,
             threshold_n,
@@ -674,14 +674,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
     ) -> Result<(), IntentError> {
         // Verify the ceremony exists and get tracker
         let tracker = self.agent.ceremony_tracker().await;
-        let _state = tracker.get(ceremony_id).await.map_err(|e| {
-            IntentError::validation_failed(format!("Ceremony not found: {}", e))
-        })?;
+        let _state = tracker
+            .get(ceremony_id)
+            .await
+            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
 
         if accept {
             // Record acceptance in ceremony tracker
             let guardian_id = self.agent.authority_id().to_string();
-            tracker.mark_accepted(ceremony_id, guardian_id)
+            tracker
+                .mark_accepted(ceremony_id, guardian_id)
                 .await
                 .map_err(|e| {
                     IntentError::internal_error(format!(
@@ -692,13 +694,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
             Ok(())
         } else {
             // Mark ceremony as failed due to decline
-            tracker.mark_failed(ceremony_id, Some("Guardian declined invitation".to_string()))
+            tracker
+                .mark_failed(
+                    ceremony_id,
+                    Some("Guardian declined invitation".to_string()),
+                )
                 .await
                 .map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to record guardian decline: {}",
-                        e
-                    ))
+                    IntentError::internal_error(format!("Failed to record guardian decline: {}", e))
                 })?;
             Ok(())
         }

@@ -59,8 +59,8 @@
 
 use std::sync::Arc;
 
-use aura_app::{AppCore, ReactiveState, ReactiveVec};
 use async_lock::RwLock;
+use aura_app::{AppCore, ReactiveState, ReactiveVec};
 
 use crate::tui::context::IoContext;
 

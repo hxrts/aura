@@ -5,6 +5,7 @@ use aura_core::AuraError;
 // Import app types from aura-app (pure layer)
 use aura_app::{AppConfig, AppCore};
 // Import agent types from aura-agent (runtime layer)
+use async_lock::RwLock;
 use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::effects::ExecutionMode;
 use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ThresholdArgs};
@@ -13,7 +14,6 @@ use aura_terminal::{CliHandler, SyncAction};
 use bpaf::{Args, Parser};
 use std::path::PathBuf;
 use std::sync::Arc;
-use async_lock::RwLock;
 
 /// Print a friendly usage message when no command is provided
 fn print_usage() {

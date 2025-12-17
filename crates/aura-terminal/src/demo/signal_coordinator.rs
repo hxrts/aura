@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use async_lock::RwLock;
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::views::chat::Message as ChatMessage;
 use aura_app::views::recovery::{Guardian, GuardianStatus, RecoveryProcessStatus};
@@ -18,7 +19,6 @@ use aura_app::views::{ChatState, RecoveryState};
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuthorityId;
-use async_lock::RwLock;
 use tokio::sync::mpsc;
 
 use super::{AgentEvent, AgentResponse, SimulatedBridge};

@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
-use aura_app::AppCore;
 use async_lock::RwLock;
+use aura_app::AppCore;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
@@ -76,10 +76,9 @@ pub async fn handle_messaging(
             // IRC-style /me action - use workflow
             let timestamp = current_time_ms();
             match send_action(app_core, channel, action, timestamp).await {
-                Ok(message_id) => Some(Ok(OpResponse::Data(format!(
-                    "Action sent: {}",
-                    message_id
-                )))),
+                Ok(message_id) => {
+                    Some(Ok(OpResponse::Data(format!("Action sent: {}", message_id))))
+                }
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to send action: {}",
                     e

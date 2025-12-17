@@ -105,10 +105,10 @@ pub use handlers::CliHandler;
 // Import app types from aura-app (pure layer)
 use aura_app::{AppConfig, AppCore};
 // Import agent types from aura-agent (runtime layer)
+use async_lock::RwLock;
 use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::{effects::ExecutionMode, identifiers::DeviceId, AuraError};
 use std::sync::Arc;
-use async_lock::RwLock;
 
 // Re-export unified terminal error types
 pub use error::{TerminalError, TerminalResult};

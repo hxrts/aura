@@ -69,11 +69,11 @@ use crate::cli::tui::TuiArgs;
 
 #[cfg(feature = "development")]
 use crate::{DemoCommands, ScenarioAction};
+use async_lock::RwLock;
 use aura_app::AppCore;
 use aura_core::identifiers::DeviceId;
 use std::path::Path;
 use std::sync::Arc;
-use async_lock::RwLock;
 
 // Re-export agent types through handler_context for convenience
 pub use handler_context::{AuraAgent, AuraEffectSystem, EffectContext};

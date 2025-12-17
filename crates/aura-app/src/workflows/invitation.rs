@@ -98,9 +98,7 @@ pub async fn create_channel_invitation(
 /// **What it does**: Gets all pending invitations from the RuntimeBridge
 /// **Returns**: Vector of InvitationInfo
 /// **Signal pattern**: Read-only operation (no emission)
-pub async fn list_pending_invitations(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Vec<InvitationInfo> {
+pub async fn list_pending_invitations(app_core: &Arc<RwLock<AppCore>>) -> Vec<InvitationInfo> {
     let runtime = {
         let core = app_core.read().await;
         match core.runtime() {

@@ -277,7 +277,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                         UiUpdate::InvitationCreated { invitation_code } => {
                             let toast = ToastMessage::success(
-                                format!("inv-created-{}", &invitation_code[..8.min(invitation_code.len())]),
+                                format!(
+                                    "inv-created-{}",
+                                    &invitation_code[..8.min(invitation_code.len())]
+                                ),
                                 "Invitation created".to_string(),
                             );
                             let mut toasts = toasts_state.read().clone();

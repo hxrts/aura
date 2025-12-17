@@ -45,13 +45,13 @@ pub mod types;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use async_lock::RwLock;
 use aura_app::signal_defs::{
     AppError, ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, ERROR_SIGNAL,
     SYNC_STATUS_SIGNAL,
 };
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
-use async_lock::RwLock;
 
 pub use types::{OpError, OpResponse, OpResult};
 
@@ -225,7 +225,10 @@ mod tests {
                     msg
                 );
             }
-            _ => panic!("Expected Failed error without RuntimeBridge, got: {:?}", result),
+            _ => panic!(
+                "Expected Failed error without RuntimeBridge, got: {:?}",
+                result
+            ),
         }
     }
 
