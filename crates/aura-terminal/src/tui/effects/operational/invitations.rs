@@ -9,13 +9,13 @@ use std::sync::Arc;
 
 use aura_agent::handlers::ShareableInvitation;
 use aura_app::AppCore;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::invitation::{export_invitation, list_invitations};
+pub use aura_app::workflows::invitation::export_invitation;
 
 /// Handle invitation commands
 pub async fn handle_invitations(

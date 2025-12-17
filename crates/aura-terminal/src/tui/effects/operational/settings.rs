@@ -8,15 +8,13 @@
 use std::sync::Arc;
 
 use aura_app::AppCore;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::settings::{
-    get_settings, set_channel_mode, update_mfa_policy, update_nickname,
-};
+pub use aura_app::workflows::settings::{set_channel_mode, update_mfa_policy, update_nickname};
 
 /// Handle settings commands
 pub async fn handle_settings(

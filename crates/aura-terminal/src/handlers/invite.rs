@@ -13,18 +13,19 @@
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::InvitationAction;
-use aura_app::views::invitations::Invitation;
 use aura_core::identifiers::AuthorityId;
 use std::str::FromStr;
 
 // Re-export workflow functions for backward compatibility
 // NOTE: Most operations require RuntimeBridge extension (see TODOs in aura-app)
-pub use aura_agent::{AuraAgent, InvitationService};
 use aura_agent::handlers::ShareableInvitation;
-use aura_app::workflows::invitation::{
-    accept_invitation, cancel_invitation, decline_invitation, export_invitation,
-    import_invitation, list_invitations,
-};
+use aura_agent::{AuraAgent, InvitationService};
+
+// NOTE: Workflow functions imported but not yet used (waiting for RuntimeBridge extension)
+// use aura_app::workflows::invitation::{
+//     accept_invitation, cancel_invitation, decline_invitation, export_invitation, import_invitation,
+//     list_invitations,
+// };
 
 /// Handle invitation-related CLI commands
 ///
@@ -47,7 +48,7 @@ pub async fn handle_invitation(
             ttl,
         } => {
             let mut output = CliOutput::new();
-            let invitation = create_invitation_agent(agent, account, invitee, role, *ttl).await?;
+            let invitation = create_invitation(agent, account, invitee, role, *ttl).await?;
             output.println(format!(
                 "Invitation created: id={} to={} role={} ttl={:?}",
                 invitation.invitation_id, invitee, role, ttl
@@ -181,7 +182,7 @@ fn format_invitation_type(shareable: &ShareableInvitation) -> String {
     }
 }
 
-async fn create_invitation_agent(
+async fn create_invitation(
     agent: &AuraAgent,
     account: &str,
     invitee: &str,

@@ -8,13 +8,13 @@
 use std::sync::Arc;
 
 use aura_app::AppCore;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::steward::{grant_steward, is_admin, revoke_steward};
+pub use aura_app::workflows::steward::{grant_steward, revoke_steward};
 
 /// Handle steward commands
 pub async fn handle_steward(

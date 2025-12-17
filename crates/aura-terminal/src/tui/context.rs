@@ -31,7 +31,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use aura_app::AppCore;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL,
@@ -462,7 +462,7 @@ impl IoContext {
     /// Returns None if the lock is busy.
     fn app_core_snapshot(&self) -> Option<aura_app::StateSnapshot> {
         // Use try_read to avoid blocking indefinitely
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             return Some(core.snapshot());
         }
         None
@@ -1062,7 +1062,7 @@ impl IoContext {
     ///
     /// Reads from the CONNECTION_STATUS_SIGNAL to determine connection state.
     pub async fn is_connected(&self) -> bool {
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             if let Ok(status) = core.read(&*CONNECTION_STATUS_SIGNAL).await {
                 return matches!(status, ConnectionStatus::Online { .. });
             }
@@ -1074,7 +1074,7 @@ impl IoContext {
     ///
     /// Reads from the ERROR_SIGNAL to get the most recent error.
     pub async fn last_error(&self) -> Option<String> {
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             if let Ok(error) = core.read(&*ERROR_SIGNAL).await {
                 return error.map(|e| e.message);
             }
@@ -1088,7 +1088,7 @@ impl IoContext {
     ///
     /// Reads from the SYNC_STATUS_SIGNAL to determine sync state.
     pub async fn is_syncing(&self) -> bool {
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             if let Ok(status) = core.read(&*SYNC_STATUS_SIGNAL).await {
                 return matches!(status, SyncStatus::Syncing { .. });
             }
@@ -1098,7 +1098,7 @@ impl IoContext {
 
     /// Get the timestamp of the last successful sync (ms since epoch)
     pub async fn last_sync_time(&self) -> Option<u64> {
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             if let Some(status) = core.sync_status().await {
                 if let Some(ts) = status.last_sync_ms {
                     return Some(ts);
@@ -1111,7 +1111,7 @@ impl IoContext {
 
     /// Get the number of known peers for sync operations
     pub async fn known_peers_count(&self) -> usize {
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             if let Some(status) = core.sync_status().await {
                 if status.connected_peers > 0 {
                     return status.connected_peers;

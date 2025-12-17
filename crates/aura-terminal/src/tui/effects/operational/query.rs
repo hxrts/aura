@@ -8,13 +8,13 @@
 use std::sync::Arc;
 
 use aura_app::AppCore;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::query::{get_user_info, list_contacts, list_participants};
+pub use aura_app::workflows::query::{get_user_info, list_participants};
 
 /// Handle query commands
 pub async fn handle_query(

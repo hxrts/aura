@@ -34,7 +34,7 @@ impl ChatCallbacks {
     pub fn new(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
-        app_core: Arc<tokio::sync::RwLock<aura_app::AppCore>>,
+        app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
     ) -> Self {
         Self {
             on_send: Self::make_send(ctx.clone(), tx.clone()),
@@ -103,7 +103,7 @@ impl ChatCallbacks {
     }
 
     fn make_channel_select(
-        app_core: Arc<tokio::sync::RwLock<aura_app::AppCore>>,
+        app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
         tx: UiUpdateSender,
     ) -> ChannelSelectCallback {
         Arc::new(move |channel_id: String| {
@@ -1078,7 +1078,7 @@ impl CallbackRegistry {
     pub fn new(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
-        app_core: Arc<tokio::sync::RwLock<aura_app::AppCore>>,
+        app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
     ) -> Self {
         Self {
             chat: ChatCallbacks::new(ctx.clone(), tx.clone(), app_core),

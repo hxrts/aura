@@ -13,13 +13,13 @@
 use std::sync::Arc;
 
 use aura_app::AppCore;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflow functions for convenience
-pub use aura_app::workflows::sync::{force_sync, get_sync_status, request_state};
+pub use aura_app::workflows::sync::{force_sync, request_state};
 
 /// Handle sync commands
 ///

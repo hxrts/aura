@@ -8,15 +8,13 @@
 use std::sync::Arc;
 
 use aura_app::AppCore;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::context::{
-    get_current_position, get_neighborhood_state, move_position, set_context,
-};
+pub use aura_app::workflows::context::{move_position, set_context};
 
 /// Handle context commands
 pub async fn handle_context(

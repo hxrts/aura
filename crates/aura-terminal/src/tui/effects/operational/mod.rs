@@ -51,7 +51,7 @@ use aura_app::signal_defs::{
 };
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 pub use types::{OpError, OpResponse, OpResult};
 
@@ -134,14 +134,14 @@ impl OperationalHandler {
 
     /// Update connection status signal
     pub async fn set_connection_status(&self, status: ConnectionStatus) {
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             let _ = core.emit(&*CONNECTION_STATUS_SIGNAL, status).await;
         }
     }
 
     /// Update sync status signal
     pub async fn set_sync_status(&self, status: SyncStatus) {
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             let _ = core.emit(&*SYNC_STATUS_SIGNAL, status).await;
         }
     }
@@ -149,14 +149,14 @@ impl OperationalHandler {
     /// Emit an error to the error signal
     pub async fn emit_error(&self, error: TerminalError) {
         let error = map_terminal_error(&error);
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             let _ = core.emit(&*ERROR_SIGNAL, Some(error)).await;
         }
     }
 
     /// Clear the error signal
     pub async fn clear_error(&self) {
-        if let Ok(core) = self.app_core.try_read() {
+        if let Some(core) = self.app_core.try_read() {
             let _ = core.emit(&*ERROR_SIGNAL, None).await;
         }
     }

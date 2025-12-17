@@ -8,13 +8,13 @@
 use std::sync::Arc;
 
 use aura_app::AppCore;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::system::{is_available, ping, refresh_account};
+pub use aura_app::workflows::system::{ping, refresh_account};
 
 /// Handle system commands
 pub async fn handle_system(

@@ -11,7 +11,7 @@ use aura_app::signal_defs::{
 };
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
@@ -29,7 +29,7 @@ pub async fn handle_network(
                 peers.insert(peer_id.clone());
                 let count = peers.len();
 
-                if let Ok(core) = app_core.try_read() {
+                if let Some(core) = app_core.try_read() {
                     let _ = core
                         .emit(
                             &*CONNECTION_STATUS_SIGNAL,
@@ -48,7 +48,7 @@ pub async fn handle_network(
                 peers.remove(peer_id);
                 let count = peers.len();
 
-                if let Ok(core) = app_core.try_read() {
+                if let Some(core) = app_core.try_read() {
                     let status = if count == 0 {
                         ConnectionStatus::Offline
                     } else {

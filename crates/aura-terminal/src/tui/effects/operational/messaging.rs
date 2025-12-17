@@ -13,13 +13,13 @@
 use std::sync::Arc;
 
 use aura_app::AppCore;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflow functions for convenience
-pub use aura_app::workflows::messaging::{get_chat_state, send_direct_message, start_direct_chat};
+pub use aura_app::workflows::messaging::{send_direct_message, start_direct_chat};
 
 /// Handle messaging commands
 ///
