@@ -8,12 +8,15 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use std::sync::Arc;
 
+// Use the registry module's EffectRegistry (not builder's)
+use super::registry::EffectRegistry;
+
 /// Executor for effect operations
 #[derive(Debug)]
 pub struct EffectExecutor {
     authority_id: AuthorityId,
     execution_mode: ExecutionMode,
-    registry: Arc<super::EffectRegistry>,
+    registry: Arc<EffectRegistry>,
 }
 
 impl EffectExecutor {
@@ -21,7 +24,7 @@ impl EffectExecutor {
     pub fn new(
         authority_id: AuthorityId,
         execution_mode: ExecutionMode,
-        registry: Arc<super::EffectRegistry>,
+        registry: Arc<EffectRegistry>,
     ) -> Self {
         Self {
             authority_id,
@@ -70,7 +73,7 @@ impl EffectExecutor {
     }
 
     /// Get the registry
-    pub fn registry(&self) -> Arc<super::EffectRegistry> {
+    pub fn registry(&self) -> Arc<EffectRegistry> {
         self.registry.clone()
     }
 
@@ -80,12 +83,12 @@ impl EffectExecutor {
     }
 
     /// Production constructor
-    pub fn production(authority_id: AuthorityId, registry: Arc<super::EffectRegistry>) -> Self {
+    pub fn production(authority_id: AuthorityId, registry: Arc<EffectRegistry>) -> Self {
         Self::new(authority_id, ExecutionMode::Production, registry)
     }
 
     /// Testing constructor
-    pub fn testing(authority_id: AuthorityId, registry: Arc<super::EffectRegistry>) -> Self {
+    pub fn testing(authority_id: AuthorityId, registry: Arc<EffectRegistry>) -> Self {
         Self::new(authority_id, ExecutionMode::Testing, registry)
     }
 
@@ -93,7 +96,7 @@ impl EffectExecutor {
     pub fn simulation(
         authority_id: AuthorityId,
         seed: u64,
-        registry: Arc<super::EffectRegistry>,
+        registry: Arc<EffectRegistry>,
     ) -> Self {
         Self::new(authority_id, ExecutionMode::Simulation { seed }, registry)
     }
@@ -105,7 +108,7 @@ impl EffectExecutor {
 pub struct EffectExecutorBuilder {
     authority_id: Option<AuthorityId>,
     execution_mode: Option<ExecutionMode>,
-    registry: Option<Arc<super::EffectRegistry>>,
+    registry: Option<Arc<EffectRegistry>>,
 }
 
 impl EffectExecutorBuilder {
@@ -135,7 +138,7 @@ impl EffectExecutorBuilder {
 
     /// Set the effect registry
     #[allow(dead_code)] // Part of future effect system API
-    pub fn with_registry(mut self, registry: Arc<super::EffectRegistry>) -> Self {
+    pub fn with_registry(mut self, registry: Arc<EffectRegistry>) -> Self {
         self.registry = Some(registry);
         self
     }
