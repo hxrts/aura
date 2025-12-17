@@ -3,10 +3,140 @@
 //! This module contains invitation operations that are portable across
 //! all frontends via the RuntimeBridge abstraction.
 
+use crate::runtime_bridge::InvitationInfo;
 use crate::{views::invitations::InvitationsState, AppCore, INVITATIONS_SIGNAL};
 use async_lock::RwLock;
+use aura_core::identifiers::AuthorityId;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::sync::Arc;
+
+// ============================================================================
+// Invitation Creation via RuntimeBridge
+// ============================================================================
+
+/// Create a contact invitation
+///
+/// **What it does**: Creates an invitation to become a contact
+/// **Returns**: InvitationInfo with the created invitation details
+/// **Signal pattern**: RuntimeBridge handles state updates
+pub async fn create_contact_invitation(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    petname: Option<String>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> Result<InvitationInfo, AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .create_contact_invitation(receiver, petname, message, ttl_ms)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to create contact invitation: {}", e)))
+}
+
+/// Create a guardian invitation
+///
+/// **What it does**: Creates an invitation to become a guardian
+/// **Returns**: InvitationInfo with the created invitation details
+/// **Signal pattern**: RuntimeBridge handles state updates
+pub async fn create_guardian_invitation(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    subject: AuthorityId,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> Result<InvitationInfo, AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .create_guardian_invitation(receiver, subject, message, ttl_ms)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to create guardian invitation: {}", e)))
+}
+
+/// Create a channel invitation
+///
+/// **What it does**: Creates an invitation to join a channel
+/// **Returns**: InvitationInfo with the created invitation details
+/// **Signal pattern**: RuntimeBridge handles state updates
+pub async fn create_channel_invitation(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    block_id: String,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> Result<InvitationInfo, AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .create_channel_invitation(receiver, block_id, message, ttl_ms)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to create channel invitation: {}", e)))
+}
+
+// ============================================================================
+// Invitation Queries via RuntimeBridge
+// ============================================================================
+
+/// List pending invitations via RuntimeBridge
+///
+/// **What it does**: Gets all pending invitations from the RuntimeBridge
+/// **Returns**: Vector of InvitationInfo
+/// **Signal pattern**: Read-only operation (no emission)
+pub async fn list_pending_invitations(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Vec<InvitationInfo> {
+    let runtime = {
+        let core = app_core.read().await;
+        match core.runtime() {
+            Some(r) => r.clone(),
+            None => return Vec::new(),
+        }
+    };
+
+    runtime.list_pending_invitations().await
+}
+
+/// Import and get invitation details from a shareable code
+///
+/// **What it does**: Parses invitation code and returns the details
+/// **Returns**: InvitationInfo with parsed details
+/// **Signal pattern**: Read-only until acceptance
+pub async fn import_invitation_details(
+    app_core: &Arc<RwLock<AppCore>>,
+    code: &str,
+) -> Result<InvitationInfo, AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .import_invitation(code)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to import invitation: {}", e)))
+}
+
+// ============================================================================
+// Export Operations via RuntimeBridge
+// ============================================================================
 
 /// Export an invitation code for sharing
 ///

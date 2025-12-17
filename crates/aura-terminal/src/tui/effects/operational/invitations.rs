@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use aura_agent::handlers::ShareableInvitation;
+use aura_app::runtime_bridge::InvitationBridgeType;
 use aura_app::AppCore;
 use async_lock::RwLock;
 
@@ -15,7 +15,7 @@ use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::invitation::export_invitation;
+pub use aura_app::workflows::invitation::{export_invitation, import_invitation_details};
 
 /// Handle invitation commands
 pub async fn handle_invitations(
@@ -42,19 +42,16 @@ pub async fn handle_invitations(
         }
 
         EffectCommand::ImportInvitation { code } => {
-            // Parse the invitation code
-            // TODO: Move to workflow once RuntimeBridge is extended
-            match ShareableInvitation::from_code(code) {
+            // Delegate to workflow for parsing via RuntimeBridge
+            match import_invitation_details(app_core, code).await {
                 Ok(invitation) => {
-                    use aura_invitation::InvitationType;
-
                     // Format invitation type for display
                     let invitation_type = match &invitation.invitation_type {
-                        InvitationType::Channel { block_id } => {
+                        InvitationBridgeType::Channel { block_id } => {
                             format!("channel:{}", block_id)
                         }
-                        InvitationType::Guardian { .. } => "guardian".to_string(),
-                        InvitationType::Contact { petname } => {
+                        InvitationBridgeType::Guardian { .. } => "guardian".to_string(),
+                        InvitationBridgeType::Contact { petname } => {
                             if let Some(name) = petname {
                                 format!("contact:{}", name)
                             } else {
@@ -67,27 +64,14 @@ pub async fn handle_invitations(
                         invitation_id: invitation.invitation_id,
                         sender_id: invitation.sender_id.to_string(),
                         invitation_type,
-                        expires_at: invitation.expires_at,
+                        expires_at: invitation.expires_at_ms,
                         message: invitation.message,
                     }))
                 }
-                Err(e) => {
-                    use aura_agent::handlers::ShareableInvitationError;
-
-                    let error_msg = match e {
-                        ShareableInvitationError::InvalidFormat => "Invalid invitation code format",
-                        ShareableInvitationError::UnsupportedVersion(_) => {
-                            "Unsupported invitation version"
-                        }
-                        ShareableInvitationError::DecodingFailed => {
-                            "Failed to decode invitation data"
-                        }
-                        ShareableInvitationError::ParsingFailed => {
-                            "Failed to parse invitation data"
-                        }
-                    };
-                    Some(Err(OpError::InvalidArgument(error_msg.to_string())))
-                }
+                Err(e) => Some(Err(OpError::InvalidArgument(format!(
+                    "Invalid invitation code: {}",
+                    e
+                )))),
             }
         }
 

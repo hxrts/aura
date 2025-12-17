@@ -99,8 +99,9 @@ pub use budget::{
 };
 pub use context::{get_current_position, get_neighborhood_state, move_position, set_context};
 pub use invitation::{
-    accept_invitation, cancel_invitation, decline_invitation, export_invitation,
-    import_invitation, list_invitations,
+    accept_invitation, cancel_invitation, create_channel_invitation, create_contact_invitation,
+    create_guardian_invitation, decline_invitation, export_invitation, import_invitation,
+    import_invitation_details, list_invitations, list_pending_invitations,
 };
 pub use messaging::{get_chat_state, send_direct_message, start_direct_chat};
 pub use network::{
