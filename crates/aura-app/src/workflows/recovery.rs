@@ -72,39 +72,49 @@ pub async fn start_recovery(
     Ok(ceremony_id)
 }
 
-/// Approve a recovery request as a guardian (TODO: Needs RuntimeBridge extension)
+/// Approve a recovery request as a guardian
 ///
 /// **What it does**: Records guardian approval for recovery ceremony
 /// **Returns**: Unit result
-/// **Signal pattern**: Emits RECOVERY_SIGNAL after approval
-///
-/// **TODO**: Add `approve_guardian_ceremony` to RuntimeBridge trait.
+/// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn approve_recovery(
-    _app_core: &Arc<RwLock<AppCore>>,
-    _ceremony_id: &str,
+    app_core: &Arc<RwLock<AppCore>>,
+    ceremony_id: &str,
 ) -> Result<(), AuraError> {
-    // TODO: Implement via RuntimeBridge once extended
-    Err(AuraError::agent(
-        "approve_recovery not yet implemented - needs RuntimeBridge extension",
-    ))
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .respond_to_guardian_ceremony(ceremony_id, true, None)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to approve recovery: {}", e)))
 }
 
-/// Dispute a recovery request (TODO: Needs RuntimeBridge extension)
+/// Dispute a recovery request
 ///
 /// **What it does**: Files a dispute against a recovery ceremony
 /// **Returns**: Unit result
-/// **Signal pattern**: Emits RECOVERY_SIGNAL after dispute
-///
-/// **TODO**: Add `dispute_guardian_ceremony` to RuntimeBridge trait.
+/// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn dispute_recovery(
-    _app_core: &Arc<RwLock<AppCore>>,
-    _ceremony_id: &str,
-    _reason: String,
+    app_core: &Arc<RwLock<AppCore>>,
+    ceremony_id: &str,
+    reason: String,
 ) -> Result<(), AuraError> {
-    // TODO: Implement via RuntimeBridge once extended
-    Err(AuraError::agent(
-        "dispute_recovery not yet implemented - needs RuntimeBridge extension",
-    ))
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
+            .clone()
+    };
+
+    runtime
+        .respond_to_guardian_ceremony(ceremony_id, false, Some(reason))
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to dispute recovery: {}", e)))
 }
 
 /// Get current recovery status
