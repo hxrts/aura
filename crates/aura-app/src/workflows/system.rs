@@ -4,9 +4,9 @@
 //! These are mostly lightweight health-check and state refresh operations.
 
 use crate::AppCore;
+use async_lock::RwLock;
 use aura_core::AuraError;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Ping operation for health check
 ///
@@ -41,7 +41,7 @@ pub async fn refresh_account(_app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aur
 /// **Returns**: Boolean indicating accessibility
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn is_available(app_core: &Arc<RwLock<AppCore>>) -> bool {
-    app_core.try_read().is_ok()
+    app_core.try_read().is_some()
 }
 
 #[cfg(test)]

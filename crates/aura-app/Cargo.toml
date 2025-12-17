@@ -96,8 +96,8 @@ cfg-if = "1"
 uuid = { version = "1.6", features = ["v4"] }
 async-trait = "0.1"
 
-# Async runtime (with platform-appropriate features)
-tokio = { version = "1", default-features = false, features = ["sync"] }
+# Runtime-agnostic async primitives (no tokio/async-std coupling)
+async-lock = "3"
 
 # Optional: Signals-based reactivity
 futures-signals = { version = "0.3", optional = true }
@@ -127,10 +127,6 @@ anyhow = { version = "1", optional = true }
 wasm-bindgen-futures = "0.4"
 # Use browser crypto instead of ring
 getrandom = { version = "0.2", features = ["js"] }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Native tokio with full features for non-WASM
-tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 
 [build-dependencies]
 uniffi = { version = "0.25", features = ["build"], optional = true }

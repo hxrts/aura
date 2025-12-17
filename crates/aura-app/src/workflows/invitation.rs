@@ -21,9 +21,9 @@ use crate::{
     views::invitations::{Invitation, InvitationsState},
     AppCore, INVITATIONS_SIGNAL,
 };
+use async_lock::RwLock;
 use aura_core::{effects::reactive::ReactiveEffects, identifiers::AuthorityId, AuraError};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Export an invitation code for sharing
 ///

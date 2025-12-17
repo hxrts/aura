@@ -42,7 +42,6 @@
 use aura_core::effects::reactive::Signal;
 use std::sync::LazyLock;
 
-use crate::budget::BlockFlowBudget;
 use crate::queries::{
     BlocksQuery, BoundSignal, ChatQuery, ContactsQuery, GuardiansQuery, InvitationsQuery,
     NeighborhoodQuery, RecoveryQuery,
@@ -51,6 +50,7 @@ use crate::views::{
     BlockState, BlocksState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
     RecoveryState,
 };
+use crate::workflows::budget::BlockFlowBudget;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Application Signal Definitions

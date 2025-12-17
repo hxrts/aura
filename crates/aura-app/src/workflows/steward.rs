@@ -4,9 +4,9 @@
 //! Stewards (Admins) have elevated permissions within a block.
 
 use crate::{views::block::ResidentRole, AppCore};
+use async_lock::RwLock;
 use aura_core::AuraError;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Grant steward (Admin) role to a resident
 ///
@@ -16,10 +16,7 @@ use tokio::sync::RwLock;
 ///
 /// Authorization: Only Owner or Admin can grant steward role.
 /// Cannot promote Owner (Owner is immutable).
-pub async fn grant_steward(
-    app_core: &Arc<RwLock<AppCore>>,
-    target: &str,
-) -> Result<(), AuraError> {
+pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result<(), AuraError> {
     let mut core = app_core.write().await;
     let mut blocks = core.views().get_blocks().clone();
 

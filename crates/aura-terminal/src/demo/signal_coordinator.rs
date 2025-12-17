@@ -18,7 +18,8 @@ use aura_app::views::{ChatState, RecoveryState};
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuthorityId;
-use tokio::sync::{mpsc, RwLock};
+use async_lock::RwLock;
+use tokio::sync::mpsc;
 
 use super::{AgentEvent, AgentResponse, SimulatedBridge};
 
@@ -214,7 +215,7 @@ impl DemoSignalCoordinator {
                 };
 
                 // Update chat signal with new message
-                if let Ok(core) = self.app_core.try_read() {
+                if let Some(core) = self.app_core.try_read() {
                     if let Ok(mut state) = core.read(&*CHAT_SIGNAL).await {
                         state.messages.push(new_message);
                         let _ = core.emit(&*CHAT_SIGNAL, state).await;
@@ -228,7 +229,7 @@ impl DemoSignalCoordinator {
                 account: _,
             } => {
                 // Update recovery signal with approval
-                if let Ok(core) = self.app_core.try_read() {
+                if let Some(core) = self.app_core.try_read() {
                     if let Ok(mut state) = core.read(&*RECOVERY_SIGNAL).await {
                         if let Some(ref mut active) = state.active_recovery {
                             if active.id == session_id {
@@ -274,7 +275,7 @@ impl DemoSignalCoordinator {
                 );
 
                 // Update CONTACTS_SIGNAL to mark contact as guardian
-                if let Ok(core) = self.app_core.try_read() {
+                if let Some(core) = self.app_core.try_read() {
                     if let Ok(mut contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
                         if let Some(contact) = contacts_state
                             .contacts
@@ -292,7 +293,7 @@ impl DemoSignalCoordinator {
                 }
 
                 // Update RECOVERY_SIGNAL to add guardian to recovery state
-                if let Ok(core) = self.app_core.try_read() {
+                if let Some(core) = self.app_core.try_read() {
                     if let Ok(mut recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
                         // Check if guardian already exists
                         let exists = recovery_state.guardians.iter().any(|g| g.id == guardian_id);

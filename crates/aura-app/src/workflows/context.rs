@@ -7,9 +7,9 @@ use crate::{
     views::neighborhood::{NeighborhoodState, TraversalPosition},
     AppCore,
 };
+use async_lock::RwLock;
 use aura_core::AuraError;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Set active context for navigation and command targeting
 ///
@@ -119,9 +119,7 @@ pub async fn get_neighborhood_state(app_core: &Arc<RwLock<AppCore>>) -> Neighbor
 /// **What it does**: Reads current position from neighborhood state
 /// **Returns**: Optional traversal position
 /// **Signal pattern**: Read-only operation (no emission)
-pub async fn get_current_position(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Option<TraversalPosition> {
+pub async fn get_current_position(app_core: &Arc<RwLock<AppCore>>) -> Option<TraversalPosition> {
     let core = app_core.read().await;
     let neighborhood = core.views().get_neighborhood();
     neighborhood.position.clone()

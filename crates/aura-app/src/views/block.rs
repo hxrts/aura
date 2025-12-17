@@ -3,7 +3,7 @@
 //! This module contains block state types including moderation functionality
 //! (bans, mutes, kicks) that were previously in TUI-only demo code.
 
-use crate::budget::BlockFlowBudget;
+use crate::workflows::budget::BlockFlowBudget;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

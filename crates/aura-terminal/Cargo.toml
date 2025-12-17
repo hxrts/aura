@@ -83,10 +83,10 @@ bpaf = "0.9"
 
 # Async
 tokio = { workspace = true }
+async-lock = "3"
 
 # Other dependencies
 thiserror = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }

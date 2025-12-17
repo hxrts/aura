@@ -108,7 +108,7 @@ use aura_app::{AppConfig, AppCore};
 use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::{effects::ExecutionMode, identifiers::DeviceId, AuraError};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 // Re-export unified terminal error types
 pub use error::{TerminalError, TerminalResult};

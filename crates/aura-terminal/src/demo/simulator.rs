@@ -13,6 +13,7 @@ use tokio::time::{interval, Duration};
 use aura_core::identifiers::AuthorityId;
 
 use super::{AgentFactory, AgentResponse, SimulatedAgent, SimulatedBridge};
+use crate::error::TerminalResult;
 
 /// Demo simulator that manages Alice and Carol peer agents
 pub struct DemoSimulator {

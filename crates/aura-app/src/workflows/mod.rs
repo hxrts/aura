@@ -76,18 +76,28 @@ pub mod system;
 
 // Re-export budget types and workflow functions
 pub use budget::{
-    // Types
-    BlockFlowBudget, BudgetBreakdown, BudgetError,
-    // Constants
-    BLOCK_TOTAL_SIZE, BYTE, KB, MAX_NEIGHBORHOODS, MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION,
-    RESIDENT_ALLOCATION,
     // Workflow functions
-    can_add_resident, can_join_neighborhood, can_pin_content, get_budget_breakdown,
-    get_current_budget, update_budget,
+    can_add_resident,
+    can_join_neighborhood,
+    can_pin_content,
+    get_budget_breakdown,
+    get_current_budget,
+    update_budget,
+    // Types
+    BlockFlowBudget,
+    BudgetBreakdown,
+    BudgetError,
+    // Constants
+    BLOCK_TOTAL_SIZE,
+    BYTE,
+    KB,
+    MAX_NEIGHBORHOODS,
+    MAX_RESIDENTS,
+    MB,
+    NEIGHBORHOOD_DONATION,
+    RESIDENT_ALLOCATION,
 };
-pub use context::{
-    get_current_position, get_neighborhood_state, move_position, set_context,
-};
+pub use context::{get_current_position, get_neighborhood_state, move_position, set_context};
 pub use invitation::{
     accept_invitation, cancel_invitation, create_invitation, decline_invitation, export_invitation,
     import_invitation, list_invitations,

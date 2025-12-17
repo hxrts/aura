@@ -8,9 +8,9 @@ use crate::{
     views::chat::{Channel, ChannelType, ChatState, Message},
     AppCore,
 };
+use async_lock::RwLock;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Send a direct message to a contact
 ///

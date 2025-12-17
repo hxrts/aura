@@ -10,9 +10,9 @@ use crate::{
     },
     AppCore,
 };
+use async_lock::RwLock;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::RwLock;
 
 /// List all known peers (sync and discovered)
 ///

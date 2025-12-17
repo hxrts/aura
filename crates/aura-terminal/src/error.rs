@@ -28,12 +28,6 @@ pub enum TerminalError {
     Operation(String),
 }
 
-impl From<anyhow::Error> for TerminalError {
-    fn from(err: anyhow::Error) -> Self {
-        TerminalError::Operation(err.to_string())
-    }
-}
-
 impl From<aura_core::AuraError> for TerminalError {
     fn from(err: aura_core::AuraError) -> Self {
         TerminalError::Operation(err.to_string())
@@ -63,6 +57,13 @@ impl From<aura_testkit::TestError> for TerminalError {
 #[cfg(feature = "development")]
 impl From<aura_core::effects::TestingError> for TerminalError {
     fn from(err: aura_core::effects::TestingError) -> Self {
+        TerminalError::Operation(err.to_string())
+    }
+}
+
+#[cfg(feature = "development")]
+impl From<aura_simulator::handlers::effect_composer::SimulationComposerError> for TerminalError {
+    fn from(err: aura_simulator::handlers::effect_composer::SimulationComposerError) -> Self {
         TerminalError::Operation(err.to_string())
     }
 }

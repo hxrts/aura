@@ -73,7 +73,7 @@ use aura_app::AppCore;
 use aura_core::identifiers::DeviceId;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 // Re-export agent types through handler_context for convenience
 pub use handler_context::{AuraAgent, AuraEffectSystem, EffectContext};

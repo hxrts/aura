@@ -4,9 +4,9 @@
 //! These are read-only operations that query contact and channel state.
 
 use crate::{views::Contact, AppCore};
+use async_lock::RwLock;
 use aura_core::AuraError;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// List participants in a channel
 ///
@@ -103,7 +103,9 @@ pub async fn get_user_info(
 pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
     let app_core_guard = app_core.read().await;
     let snapshot = app_core_guard.snapshot();
-    snapshot.contacts.filtered_contacts()
+    snapshot
+        .contacts
+        .filtered_contacts()
         .into_iter()
         .cloned()
         .collect()

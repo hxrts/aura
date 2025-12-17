@@ -9,9 +9,9 @@ use crate::{
     views::recovery::{RecoveryProcess, RecoveryProcessStatus, RecoveryState},
     AppCore, RECOVERY_SIGNAL,
 };
+use async_lock::RwLock;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Start a guardian recovery ceremony
 ///

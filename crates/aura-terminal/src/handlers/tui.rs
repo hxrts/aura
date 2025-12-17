@@ -19,7 +19,7 @@ use aura_agent::core::config::StorageConfig;
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]

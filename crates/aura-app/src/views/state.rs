@@ -256,6 +256,20 @@ cfg_if! {
                 &self.neighborhood
             }
 
+            /// Get a clone of the current neighborhood state
+            ///
+            /// This returns a snapshot of the neighborhood state for read-only access.
+            pub fn get_neighborhood(&self) -> NeighborhoodState {
+                self.neighborhood.clone()
+            }
+
+            /// Get a clone of the current blocks state
+            ///
+            /// This returns a snapshot of the blocks state for read-only access.
+            pub fn get_blocks(&self) -> BlocksState {
+                self.blocks.clone()
+            }
+
             /// Update chat state
             pub fn set_chat(&mut self, state: ChatState) {
                 self.chat = state;

@@ -7,9 +7,9 @@ use crate::{
     signal_defs::{DeviceInfo, SettingsState, SETTINGS_SIGNAL},
     AppCore,
 };
+use async_lock::RwLock;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Update MFA policy
 ///

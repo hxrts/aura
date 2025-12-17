@@ -309,6 +309,17 @@ pub trait RuntimeBridge: Send + Sync {
     /// Check if the runtime is authenticated
     async fn is_authenticated(&self) -> bool;
 
+    // =========================================================================
+    // Time Operations
+    // =========================================================================
+
+    /// Get current time in milliseconds since Unix epoch
+    ///
+    /// This provides a deterministic time source for simulation and testing.
+    /// Production implementations use wall-clock time; test implementations
+    /// can provide controlled time for reproducible tests.
+    fn current_time_ms(&self) -> u64;
+
     /// Get overall runtime status
     async fn get_status(&self) -> RuntimeStatus {
         RuntimeStatus {
@@ -470,6 +481,13 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn is_authenticated(&self) -> bool {
         false
+    }
+
+    fn current_time_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
     }
 }
 

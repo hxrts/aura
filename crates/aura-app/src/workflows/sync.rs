@@ -8,9 +8,9 @@ use crate::{
     signal_defs::{SyncStatus, SYNC_STATUS_SIGNAL},
     AppCore,
 };
+use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Force synchronization with peers
 ///

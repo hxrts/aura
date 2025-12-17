@@ -47,7 +47,7 @@ use aura_core::effects::ExecutionMode;
 use aura_core::identifiers::DeviceId;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 /// Captured output from CLI command execution
 #[derive(Debug, Clone, Default)]
@@ -95,14 +95,16 @@ impl CliTestHarness {
     /// Create a new test harness with default configuration
     ///
     /// This is async because agent construction requires an async runtime context.
-    pub async fn new() -> AnyhowTerminalResult<Self> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Self::with_device_id(DeviceId::from_bytes([0u8; 32])).await
     }
 
     /// Create a test harness with a specific device ID
     ///
     /// This is async because agent construction requires an async runtime context.
-    pub async fn with_device_id(device_id: DeviceId) -> AnyhowTerminalResult<Self> {
+    pub async fn with_device_id(
+        device_id: DeviceId,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let authority_id = ids::authority_id(&format!("cli:test-authority:{}", device_id));
         let context_id = ids::context_id(&format!("cli:test-context:{}", device_id));
         let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
@@ -111,14 +113,12 @@ impl CliTestHarness {
         let agent = AgentBuilder::new()
             .with_authority(authority_id)
             .build_testing_async(&effect_context)
-            .await
-            .map_err(|e| TerminalError::Operation("Agent build failed: {}", e))?;
+            .await?;
         let agent = Arc::new(agent);
 
         // Create AppCore with the runtime bridge
         let config = AppConfig::default();
-        let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())
-            .map_err(|e| TerminalError::Operation("AppCore creation failed: {}", e))?;
+        let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())?;
         let app_core = Arc::new(RwLock::new(app_core));
 
         let handler = CliHandler::with_agent(app_core, agent, device_id, effect_context);
@@ -149,7 +149,7 @@ impl CliTestHarness {
     // =========================================================================
 
     /// Execute the version command
-    pub async fn exec_version(&mut self) -> TerminalTerminalResult<()> {
+    pub async fn exec_version(&mut self) -> TerminalResult<()> {
         self.clear_output();
         // Version command prints directly, so we capture it
         // For now, we'll run it and note the output comes from println!
@@ -173,7 +173,7 @@ impl CliTestHarness {
         num_devices: u32,
         threshold: u32,
         output_path: &std::path::Path,
-    ) -> TerminalTerminalResult<()> {
+    ) -> TerminalResult<()> {
         self.clear_output();
         self.handler
             .handle_init(num_devices, threshold, output_path)
@@ -181,22 +181,19 @@ impl CliTestHarness {
     }
 
     /// Execute the status command
-    pub async fn exec_status(
-        &mut self,
-        config_path: &std::path::Path,
-    ) -> TerminalTerminalResult<()> {
+    pub async fn exec_status(&mut self, config_path: &std::path::Path) -> TerminalResult<()> {
         self.clear_output();
         self.handler.handle_status(config_path).await
     }
 
     /// Execute the recovery command
-    pub async fn exec_recovery(&mut self, action: &RecoveryAction) -> TerminalTerminalResult<()> {
+    pub async fn exec_recovery(&mut self, action: &RecoveryAction) -> TerminalResult<()> {
         self.clear_output();
         self.handler.handle_recovery(action).await
     }
 
     /// Execute the authority list command
-    pub async fn exec_authority_list(&mut self) -> TerminalTerminalResult<()> {
+    pub async fn exec_authority_list(&mut self) -> TerminalResult<()> {
         self.clear_output();
         use crate::AuthorityCommands;
         self.handler
@@ -209,7 +206,7 @@ impl CliTestHarness {
         &mut self,
         context_id: String,
         state_file: &Path,
-    ) -> TerminalTerminalResult<()> {
+    ) -> TerminalResult<()> {
         self.clear_output();
         let action = ContextAction::Inspect {
             context: context_id,
@@ -224,7 +221,7 @@ impl CliTestHarness {
         context_id: String,
         state_file: &Path,
         detailed: bool,
-    ) -> TerminalTerminalResult<()> {
+    ) -> TerminalResult<()> {
         self.clear_output();
         let action = ContextAction::Receipts {
             context: context_id,

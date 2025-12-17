@@ -13,7 +13,7 @@ use aura_terminal::{CliHandler, SyncAction};
 use bpaf::{Args, Parser};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 /// Print a friendly usage message when no command is provided
 fn print_usage() {

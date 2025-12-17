@@ -277,6 +277,27 @@ impl AppCore {
         self.runtime.is_some()
     }
 
+    // ==================== Time Operations ====================
+
+    /// Get current time in milliseconds since Unix epoch
+    ///
+    /// This provides time access through the RuntimeBridge for architectural purity.
+    /// Workflows should use this method instead of direct `std::time::SystemTime::now()`.
+    ///
+    /// - With runtime: Delegates to RuntimeBridge (enables simulation control)
+    /// - Without runtime: Falls back to system time
+    pub fn current_time_ms(&self) -> u64 {
+        if let Some(runtime) = &self.runtime {
+            runtime.current_time_ms()
+        } else {
+            // Fallback for demo/offline mode without RuntimeBridge
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        }
+    }
+
     // ==================== Reactive Effects ====================
 
     /// Get a reference to the reactive handler.

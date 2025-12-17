@@ -122,7 +122,6 @@ uniffi::custom_type!(ContextId, String);
 // =============================================================================
 
 pub mod bridge;
-pub mod budget;
 pub mod core;
 pub mod queries;
 pub mod runtime_bridge;
@@ -161,8 +160,8 @@ pub use crate::bridge::callback::StateObserver;
 #[cfg(feature = "signals")]
 pub use crate::reactive_state::{ReactiveState, ReactiveVec};
 
-// Re-export budget types
-pub use crate::budget::{
+// Re-export budget types (from workflows module)
+pub use crate::workflows::budget::{
     BlockFlowBudget, BudgetBreakdown, BudgetError, BLOCK_TOTAL_SIZE, KB, MAX_NEIGHBORHOODS,
     MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION, RESIDENT_ALLOCATION,
 };
