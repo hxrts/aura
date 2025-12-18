@@ -1052,8 +1052,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let peers = props.peer_count;
 
     // Layout: NavBar (3 rows) + Content (25 rows) + Footer (3 rows) = 31 = TOTAL_HEIGHT
+    // Position::Relative establishes a positioning context for absolute-positioned
+    // modal and toast overlays, ensuring they render correctly relative to this container.
     element! {
         View(
+            position: Position::Relative,
             flex_direction: FlexDirection::Column,
             width: dim::TOTAL_WIDTH,
             height: dim::TOTAL_HEIGHT,
