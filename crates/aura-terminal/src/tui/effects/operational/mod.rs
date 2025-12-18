@@ -160,6 +160,50 @@ impl OperationalHandler {
             let _ = core.emit(&*ERROR_SIGNAL, None).await;
         }
     }
+
+    /// Convert OpResult to Result<OpResponse, String> and emit errors to ERROR_SIGNAL.
+    ///
+    /// This helper simplifies error handling in operational command execution by:
+    /// 1. Converting OpError → TerminalError
+    /// 2. Emitting the error to ERROR_SIGNAL for UI feedback
+    /// 3. Returning a String error for call-site handling
+    ///
+    /// # Example
+    /// ```ignore
+    /// let result = self.operational.execute(&command).await;
+    /// match self.operational.handle_op_result(result).await {
+    ///     Ok(response) => // handle response
+    ///     Err(msg) => // error already emitted to ERROR_SIGNAL
+    /// }
+    /// ```
+    pub async fn handle_op_result(
+        &self,
+        result: Option<OpResult>,
+    ) -> Option<Result<OpResponse, String>> {
+        result.map(|r| match r {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                let terr: TerminalError = e.into();
+                // Spawn emission task to avoid blocking
+                let operational = self.clone();
+                let terr_clone = terr.clone();
+                tokio::spawn(async move {
+                    operational.emit_error(terr_clone).await;
+                });
+                Err(terr.to_string())
+            }
+        })
+    }
+}
+
+/// Helper to create OperationalHandler (for cloning)
+impl OperationalHandler {
+    fn clone(&self) -> Self {
+        Self {
+            app_core: self.app_core.clone(),
+            peers: self.peers.clone(),
+        }
+    }
 }
 
 /// Map terminal-facing errors onto AppError for signal emission.

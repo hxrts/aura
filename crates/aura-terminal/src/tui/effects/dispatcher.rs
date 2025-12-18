@@ -104,6 +104,52 @@ impl std::fmt::Display for DispatchError {
 
 impl std::error::Error for DispatchError {}
 
+/// Stub Biscuit capability checker for integration with RuntimeBridge.
+///
+/// This function provides a template for integrating Biscuit token verification
+/// into the command dispatcher. In production, this should delegate to
+/// RuntimeBridge.has_command_capability().
+///
+/// # Example Integration
+/// ```ignore
+/// use crate::tui::effects::dispatcher::{CommandDispatcher, biscuit_capability_stub};
+///
+/// let runtime_bridge = Arc::new(RwLock::new(runtime_bridge));
+/// let checker = move |cap: &CommandCapability| -> bool {
+///     if *cap == CommandCapability::None { return true; }
+///
+///     // Try RuntimeBridge capability check
+///     if let Some(bridge) = runtime_bridge.try_read() {
+///         bridge.has_command_capability(cap.as_str())
+///     } else {
+///         // Fallback: use stub or deny
+///         biscuit_capability_stub(cap)
+///     }
+/// };
+///
+/// let dispatcher = CommandDispatcher::with_biscuit_policy(Box::new(checker));
+/// ```
+pub fn biscuit_capability_stub(cap: &CommandCapability) -> bool {
+    // Stub implementation: Allow a baseline set of capabilities
+    // In production, this should check Biscuit tokens via RuntimeBridge
+    match cap {
+        CommandCapability::None => true,
+        CommandCapability::SendDm | CommandCapability::ViewMembers => {
+            // Basic messaging capabilities - allowed in stub
+            tracing::debug!("Biscuit stub: allowing basic capability {:?}", cap);
+            true
+        }
+        _ => {
+            // Advanced capabilities require Biscuit token verification
+            tracing::warn!(
+                "Biscuit stub: denying advanced capability {:?} (token verification not implemented)",
+                cap
+            );
+            false
+        }
+    }
+}
+
 /// Command dispatcher that maps IRC commands to effect commands
 ///
 /// The dispatcher converts IRC-style commands to effect commands with
@@ -134,6 +180,32 @@ impl CommandDispatcher {
             current_channel: None,
             capability_policy: policy,
         }
+    }
+
+    /// Create a dispatcher with Biscuit-based capability checking.
+    ///
+    /// This is a convenience constructor for integrating with Biscuit token
+    /// verification via RuntimeBridge. Pass a closure that checks capabilities
+    /// against Biscuit tokens.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let dispatcher = CommandDispatcher::with_biscuit_policy(Box::new(|cap| {
+    ///     runtime_bridge.has_command_capability(cap.as_str())
+    /// }));
+    /// ```
+    pub fn with_biscuit_policy(
+        checker: Box<dyn Fn(&CommandCapability) -> bool + Send + Sync>,
+    ) -> Self {
+        Self::with_policy(CapabilityPolicy::Custom(checker))
+    }
+
+    /// Create a dispatcher with the stub Biscuit checker.
+    ///
+    /// This uses the built-in `biscuit_capability_stub()` which allows basic
+    /// capabilities but denies advanced ones. Useful for development/testing.
+    pub fn with_stub_biscuit() -> Self {
+        Self::with_biscuit_policy(Box::new(biscuit_capability_stub))
     }
 
     /// Set the capability policy

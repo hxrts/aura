@@ -57,7 +57,29 @@ impl Theme {
     pub const MSG_OTHER: Color = Color::AnsiValue(238); // Darker grey for other messages
 }
 
+/// Border styles for consistent UI elements
+pub struct Borders;
+
+impl Borders {
+    /// Border style for primary containers (panels, modals, screens)
+    pub const PRIMARY: BorderStyle = BorderStyle::Round;
+
+    /// Border style for secondary/inner containers (sections within modals)
+    pub const SECONDARY: BorderStyle = BorderStyle::Single;
+
+    /// Border style for focused input fields
+    pub const INPUT: BorderStyle = BorderStyle::Round;
+
+    /// Border style for lists and scrollable content
+    pub const LIST: BorderStyle = BorderStyle::Round;
+}
+
 /// Spacing scale for consistent layout
+///
+/// **Usage guideline**: Always use these constants instead of hardcoded values.
+/// - For panels: Use `Spacing::PANEL_PADDING` instead of `padding: 1`
+/// - For modals: Use `Spacing::MODAL_PADDING` instead of `padding: 2`
+/// - For gaps: Use `Spacing::XS`, `Spacing::SM`, etc. instead of `gap: 1`, `gap: 2`
 pub struct Spacing;
 
 impl Spacing {
@@ -73,9 +95,9 @@ impl Spacing {
     pub const XL: u32 = 6;
 
     // Component-specific spacing
-    /// Standard panel padding
+    /// Standard panel padding (use instead of `padding: 1`)
     pub const PANEL_PADDING: u32 = 1;
-    /// Modal padding
+    /// Modal padding (use instead of `padding: 2`)
     pub const MODAL_PADDING: u32 = 2;
     /// List item padding
     pub const LIST_ITEM_PADDING: u32 = 1;
