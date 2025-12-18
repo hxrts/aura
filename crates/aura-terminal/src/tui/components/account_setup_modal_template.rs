@@ -4,7 +4,6 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 
 /// Props for AccountSetupModal
@@ -49,11 +48,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 
         return element! {
             View(
-                position: Position::Absolute,
-                top: 0u16,
-                left: 0u16,
-                width: dim::TOTAL_WIDTH,
-                height: dim::MIDDLE_HEIGHT,
+                width: 100pct,
+                height: 100pct,
                 flex_direction: FlexDirection::Column,
                 background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
@@ -128,11 +124,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     if creating {
         return element! {
             View(
-                position: Position::Absolute,
-                top: 0u16,
-                left: 0u16,
-                width: dim::TOTAL_WIDTH,
-                height: dim::MIDDLE_HEIGHT,
+                width: 100pct,
+                height: 100pct,
                 flex_direction: FlexDirection::Column,
                 background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
@@ -198,11 +191,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 
     element! {
         View(
-            position: Position::Absolute,
-            top: 0u16,
-            left: 0u16,
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
+            width: 100pct,
+            height: 100pct,
             flex_direction: FlexDirection::Column,
             background_color: Theme::BG_MODAL,
             border_style: BorderStyle::Round,

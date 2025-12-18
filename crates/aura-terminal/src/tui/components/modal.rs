@@ -129,14 +129,11 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
         Theme::TEXT_MUTED
     };
 
-    // Modal positioned at middle panel region (below nav bar)
+    // Modal content fills ModalFrame container
     element! {
         View(
-            position: Position::Absolute,
-            top: 0u16,
-            left: 0u16,
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
+            width: 100pct,
+            height: 100pct,
             flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
@@ -238,14 +235,11 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
         Theme::TEXT
     };
 
-    // Modal positioned at middle panel region (below nav bar)
+    // Modal content fills ModalFrame container
     element! {
         View(
-            position: Position::Absolute,
-            top: 0u16,
-            left: 0u16,
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
+            width: 100pct,
+            height: 100pct,
             flex_direction: FlexDirection::Column,
             background_color: Theme::BG_MODAL,
             border_style: BorderStyle::Round,

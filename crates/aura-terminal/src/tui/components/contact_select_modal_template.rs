@@ -5,7 +5,6 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
 use crate::tui::types::Contact;
 
@@ -57,11 +56,8 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
 
     element! {
         View(
-            position: Position::Absolute,
-            top: 0u16,
-            left: 0u16,
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
+            width: 100pct,
+            height: 100pct,
             flex_direction: FlexDirection::Column,
             background_color: Theme::BG_MODAL,
             border_style: BorderStyle::Round,
