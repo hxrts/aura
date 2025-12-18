@@ -37,10 +37,8 @@ pub enum CapabilityPolicy {
 
 impl Default for CapabilityPolicy {
     fn default() -> Self {
-        // Default to AllowAll since authorization is also checked in IoContext
-        // The dispatcher's capability check is a secondary layer for when
-        // more fine-grained Biscuit-based authorization is needed
-        Self::AllowAll
+        // Production-safe default: deny commands with non-None capability requirement
+        Self::DenyNonPublic
     }
 }
 
@@ -153,11 +151,7 @@ pub fn biscuit_capability_stub(cap: &CommandCapability) -> bool {
 /// Command dispatcher that maps IRC commands to effect commands
 ///
 /// The dispatcher converts IRC-style commands to effect commands with
-/// configurable capability checking. By default, all commands are allowed
-/// (authorization is also enforced by IoContext.check_authorization).
-///
-/// For stricter capability enforcement, configure a custom policy that
-/// integrates with Biscuit tokens via RuntimeBridge.
+/// configurable capability checking.
 pub struct CommandDispatcher {
     /// Current channel context
     current_channel: Option<String>,
@@ -166,7 +160,7 @@ pub struct CommandDispatcher {
 }
 
 impl CommandDispatcher {
-    /// Create a new command dispatcher with default policy (AllowAll)
+    /// Create a new command dispatcher with default policy (DenyNonPublic)
     pub fn new() -> Self {
         Self {
             current_channel: None,

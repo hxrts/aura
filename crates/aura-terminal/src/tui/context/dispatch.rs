@@ -8,7 +8,9 @@ use async_lock::RwLock;
 use aura_app::AppCore;
 
 use crate::error::TerminalError;
-use crate::tui::effects::{command_to_intent, CommandContext, EffectCommand, OpResponse, OperationalHandler};
+use crate::tui::effects::{
+    command_to_intent, CommandContext, EffectCommand, OpResponse, OperationalHandler,
+};
 
 /// Helper for dispatching commands
 #[derive(Clone)]

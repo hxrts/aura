@@ -101,13 +101,13 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
     };
 
     // Extract modal state from queue (all modals now use queue system)
-    let (create_visible, create_name, create_topic, create_field) =
-        match state.modal_queue.current() {
-            Some(QueuedModal::ChatCreate(s)) => {
-                (true, s.name.clone(), s.topic.clone(), s.active_field)
-            }
-            _ => (false, String::new(), String::new(), 0),
-        };
+    let (create_visible, create_name, create_topic, create_field) = match state
+        .modal_queue
+        .current()
+    {
+        Some(QueuedModal::ChatCreate(s)) => (true, s.name.clone(), s.topic.clone(), s.active_field),
+        _ => (false, String::new(), String::new(), 0),
+    };
 
     let (topic_visible, topic_value) = match state.modal_queue.current() {
         Some(QueuedModal::ChatTopic(s)) => (true, s.value.clone()),
@@ -466,9 +466,12 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         confirm_remove_device_name,
         confirm_remove_focused,
     ) = match state.modal_queue.current() {
-        Some(QueuedModal::SettingsRemoveDevice(s)) => {
-            (true, s.device_id.clone(), s.device_name.clone(), s.confirm_focused)
-        }
+        Some(QueuedModal::SettingsRemoveDevice(s)) => (
+            true,
+            s.device_id.clone(),
+            s.device_name.clone(),
+            s.confirm_focused,
+        ),
         _ => (false, String::new(), String::new(), false),
     };
 

@@ -60,6 +60,8 @@ pub fn ModalFrame<'a>(props: &mut ModalFrameProps<'a>) -> impl Into<AnyElement<'
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
+            // Ensure modal frame has solid background to prevent content bleeding through
+            background_color: Theme::BG_MODAL,
         ) {
             #(&mut props.children)
         }

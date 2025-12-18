@@ -165,6 +165,8 @@ pub fn ToastFrame<'a>(props: &mut ToastFrameProps<'a>) -> impl Into<AnyElement<'
             width: dim::TOTAL_WIDTH,
             height: dim::FOOTER_HEIGHT,  // Same height as footer (3 rows)
             overflow: Overflow::Hidden,
+            // Ensure toast frame has solid background to prevent content bleeding through
+            background_color: Theme::BG_MODAL,
         ) {
             #(&mut props.children)
         }

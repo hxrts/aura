@@ -162,18 +162,12 @@ impl TestTui {
 
     /// Assert modal is shown.
     pub fn assert_has_modal(&self) {
-        assert!(
-            self.state.has_queued_modal() || self.state.has_screen_modal(),
-            "Expected a modal to be shown"
-        );
+        assert!(self.state.has_modal(), "Expected a modal to be shown");
     }
 
     /// Assert no modal is shown.
     pub fn assert_no_modal(&self) {
-        assert!(
-            !self.state.has_queued_modal() && !self.state.has_screen_modal(),
-            "Expected no modal to be shown"
-        );
+        assert!(!self.state.has_modal(), "Expected no modal to be shown");
     }
 
     /// Assert an Exit command was generated.

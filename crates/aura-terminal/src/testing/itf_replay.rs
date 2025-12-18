@@ -260,7 +260,7 @@ impl ITFTraceReplayer {
 
     /// Create a TuiState matching the ITF state (for comparison)
     fn create_matching_tui_state(&self, itf: &TuiITFState) -> TuiState {
-        use crate::tui::state_machine::{ModalQueue, QueuedModal, AccountSetupModalState};
+        use crate::tui::state_machine::{AccountSetupModalState, ModalQueue, QueuedModal};
 
         // Convert ModalType to QueuedModal for queue-based system
         let mut modal_queue = ModalQueue::new();
@@ -269,16 +269,24 @@ impl ITFTraceReplayer {
                 modal_queue.enqueue(QueuedModal::AccountSetup(AccountSetupModalState::default()));
             }
             ModalType::Help => {
-                modal_queue.enqueue(QueuedModal::Help { current_screen: Some(itf.current_screen) });
+                modal_queue.enqueue(QueuedModal::Help {
+                    current_screen: Some(itf.current_screen),
+                });
             }
             ModalType::GuardianSelect => {
                 modal_queue.enqueue(QueuedModal::GuardianSelect(
-                    crate::tui::state_machine::ContactSelectModalState::single("Select Guardian", Vec::new()),
+                    crate::tui::state_machine::ContactSelectModalState::single(
+                        "Select Guardian",
+                        Vec::new(),
+                    ),
                 ));
             }
             ModalType::ContactSelect => {
                 modal_queue.enqueue(QueuedModal::ContactSelect(
-                    crate::tui::state_machine::ContactSelectModalState::single("Select Contact", Vec::new()),
+                    crate::tui::state_machine::ContactSelectModalState::single(
+                        "Select Contact",
+                        Vec::new(),
+                    ),
                 ));
             }
             ModalType::Confirm => {

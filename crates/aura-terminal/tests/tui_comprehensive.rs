@@ -24,7 +24,8 @@
 
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::state_machine::{
-    transition, BlockFocus, ChatFocus, DispatchCommand, ModalType, QueuedModal, TuiCommand, TuiState,
+    transition, BlockFocus, ChatFocus, DispatchCommand, ModalType, QueuedModal, TuiCommand,
+    TuiState,
 };
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
 use aura_terminal::tui::Screen;
@@ -444,10 +445,7 @@ mod chat_screen {
 
         // Type channel name
         tui.type_text("general");
-        assert_eq!(
-            tui.state.chat_create_modal_state().unwrap().name,
-            "general"
-        );
+        assert_eq!(tui.state.chat_create_modal_state().unwrap().name, "general");
 
         // Submit with Enter
         tui.clear_commands();
@@ -1067,7 +1065,9 @@ mod modals {
         assert_eq!(tui.modal_type(), ModalType::GuardianSelect);
 
         // Set up contacts for navigation to work (must modify the queued modal)
-        if let Some(QueuedModal::GuardianSelect(ref mut state)) = tui.state.modal_queue.current_mut() {
+        if let Some(QueuedModal::GuardianSelect(ref mut state)) =
+            tui.state.modal_queue.current_mut()
+        {
             state.contacts = vec![
                 ("id1".to_string(), "Contact 1".to_string()),
                 ("id2".to_string(), "Contact 2".to_string()),
@@ -1078,17 +1078,19 @@ mod modals {
         }
 
         // Navigate with j/k
-        let initial = if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
-            state.selected_index
-        } else {
-            0
-        };
+        let initial =
+            if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
+                state.selected_index
+            } else {
+                0
+            };
         tui.send_char('j');
-        let after = if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
-            state.selected_index
-        } else {
-            0
-        };
+        let after =
+            if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
+                state.selected_index
+            } else {
+                0
+            };
         assert_eq!(after, initial + 1);
 
         // Select with Enter
@@ -1538,7 +1540,8 @@ mod integration {
         assert!(tui.has_modal());
 
         // 2b. Populate contacts in the modal (shell would normally do this)
-        if let Some(QueuedModal::GuardianSelect(ref mut state)) = tui.state.modal_queue.current_mut()
+        if let Some(QueuedModal::GuardianSelect(ref mut state)) =
+            tui.state.modal_queue.current_mut()
         {
             state.contacts = vec![
                 ("id1".to_string(), "Contact 1".to_string()),

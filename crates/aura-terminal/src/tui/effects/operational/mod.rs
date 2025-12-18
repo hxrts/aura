@@ -132,6 +132,22 @@ impl OperationalHandler {
         None
     }
 
+    /// Execute and map failures to TerminalError while emitting ERROR_SIGNAL.
+    pub async fn execute_with_errors(
+        &self,
+        command: &EffectCommand,
+    ) -> Option<Result<OpResponse, TerminalError>> {
+        match self.execute(command).await {
+            Some(Ok(resp)) => Some(Ok(resp)),
+            Some(Err(err)) => {
+                let terr: TerminalError = err.into();
+                self.emit_error(terr.clone()).await;
+                Some(Err(terr))
+            }
+            None => None,
+        }
+    }
+
     /// Update connection status signal
     pub async fn set_connection_status(&self, status: ConnectionStatus) {
         if let Some(core) = self.app_core.try_read() {

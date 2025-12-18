@@ -174,8 +174,7 @@ pub use iocraft_adapter::{convert_iocraft_event, EventBridge, IocraftTerminalAda
 
 // Re-export state machine types
 pub use state_machine::{
-    transition, AccountSetupModalState, DispatchCommand, ModalState, ModalType, TuiCommand,
-    TuiState,
+    transition, AccountSetupModalState, DispatchCommand, ModalType, TuiCommand, TuiState,
 };
 
 // Re-export props extraction functions

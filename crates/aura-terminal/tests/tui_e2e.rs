@@ -947,8 +947,13 @@ async fn test_device_id_determinism() {
     let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
-    let ctx =
-        IoContext::with_account_status(app_core, false, test_dir.clone(), device_id.to_string(), TuiMode::Production);
+    let ctx = IoContext::with_account_status(
+        app_core,
+        false,
+        test_dir.clone(),
+        device_id.to_string(),
+        TuiMode::Production,
+    );
 
     ctx.create_account("Bob").expect("Failed to create account");
 
@@ -4250,8 +4255,8 @@ async fn test_authorization_checking() {
 async fn test_account_backup_restore_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
-    use aura_terminal::handlers::tui::{export_account_backup, import_account_backup};
     use aura_terminal::handlers::tui::TuiMode;
+    use aura_terminal::handlers::tui::{export_account_backup, import_account_backup};
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -4314,7 +4319,8 @@ async fn test_account_backup_restore_flow() {
     println!("\nPhase 3: Importing backup to new location");
 
     let (restored_authority, restored_context) =
-        import_account_backup(&test_dir_b, &backup_code, false, TuiMode::Production).expect("Failed to import backup");
+        import_account_backup(&test_dir_b, &backup_code, false, TuiMode::Production)
+            .expect("Failed to import backup");
     println!("  ✓ Backup imported to test_dir_b");
     println!("    Authority: {}", restored_authority);
     println!("    Context: {}", restored_context);
@@ -4379,7 +4385,8 @@ async fn test_account_backup_restore_flow() {
     println!("  ✓ Export correctly fails without account");
 
     // Try to import invalid backup code
-    let invalid_result = import_account_backup(&test_dir_c, "invalid-code", false, TuiMode::Production);
+    let invalid_result =
+        import_account_backup(&test_dir_c, "invalid-code", false, TuiMode::Production);
     assert!(
         invalid_result.is_err(),
         "Import should fail with invalid code"
@@ -4387,7 +4394,8 @@ async fn test_account_backup_restore_flow() {
     println!("  ✓ Import correctly fails with invalid code");
 
     // Try to import without overwrite when account exists
-    let no_overwrite_result = import_account_backup(&test_dir_b, &backup_code, false, TuiMode::Production);
+    let no_overwrite_result =
+        import_account_backup(&test_dir_b, &backup_code, false, TuiMode::Production);
     assert!(
         no_overwrite_result.is_err(),
         "Import should fail when account exists and overwrite=false"

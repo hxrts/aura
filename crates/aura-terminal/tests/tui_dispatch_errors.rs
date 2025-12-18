@@ -78,9 +78,7 @@ async fn test_handle_op_result_helper() {
     let failing_result = Err(OpError::Failed("test error".to_string()));
 
     // Use the handle_op_result helper
-    let result = operational
-        .handle_op_result(Some(failing_result))
-        .await;
+    let result = operational.handle_op_result(Some(failing_result)).await;
 
     assert!(result.is_some());
     let unwrapped = result.unwrap();
@@ -89,9 +87,7 @@ async fn test_handle_op_result_helper() {
 
     // Test successful result
     let success_result = Ok(OpResponse::Ok);
-    let result = operational
-        .handle_op_result(Some(success_result))
-        .await;
+    let result = operational.handle_op_result(Some(success_result)).await;
 
     assert!(result.is_some());
     assert!(result.unwrap().is_ok());

@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
-    ConfirmModal, ContactSelectModal, ContactSelectState, DiscoveredPeerInfo, Footer, HelpModal,
-    HelpModalState, ModalFrame, NavBar, ToastContainer, ToastLevel, ToastMessage,
+    ContactSelectModal, ContactSelectState, DiscoveredPeerInfo, Footer, HelpModal, HelpModalState,
+    ModalFrame, NavBar, ToastContainer, ToastLevel, ToastMessage,
 };
 use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
@@ -41,9 +41,7 @@ use crate::tui::props::{
     extract_invitations_view_props, extract_neighborhood_view_props, extract_recovery_view_props,
     extract_settings_view_props,
 };
-use crate::tui::state_machine::{
-    transition, DispatchCommand, QueuedModal, TuiCommand, TuiState,
-};
+use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{ui_update_channel, UiUpdate, UiUpdateReceiver, UiUpdateSender};
 use std::sync::Mutex;
 
@@ -141,17 +139,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // This replaces polling loops and detached tokio::spawn patterns.
     // =========================================================================
     let update_rx_holder = props.update_rx.clone();
-    let update_tx_holder = props.update_tx.clone();
+    let _update_tx_holder = props.update_tx.clone();
 
-    // Account setup modal state - renders based on TuiState but maintains local UI state
-    // for text input handling (hybrid architecture: state machine for transitions, local for rendering)
-    let account_state = hooks.use_ref(move || {
-        let mut state = AccountSetupState::new();
-        if show_setup {
-            state.show();
-        }
-        state
-    });
+    // Account setup modal state - LEGACY hook-based system for backwards compatibility
+    // NOTE: When show_setup is true, the queue-based system (TuiState.modal_queue) handles
+    // the account setup modal. The legacy state is NOT initialized to avoid dual-state issues.
+    // The queue-based system is the source of truth for account setup modals.
+    let account_state = hooks.use_ref(AccountSetupState::new);
     let account_version = hooks.use_state(|| 0usize);
 
     // Guardian selection modal state
@@ -264,8 +258,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::OperationFailed { operation, error } => {
                             // For account creation, show error in the modal instead of toast
                             if operation == "CreateAccount" {
+                                // Update both queue-based state and legacy hook state
+                                tui_state.write().modal_queue.update_active(|modal| {
+                                    if let QueuedModal::AccountSetup(ref mut s) = modal {
+                                        s.set_error(error.clone());
+                                    }
+                                });
                                 account_state.write().set_error(&error);
                                 account_version.set(account_version.get().wrapping_add(1));
+                                tui_state_version.set(tui_state_version.get().wrapping_add(1));
                             } else {
                                 // For other operations, show as toast via queue
                                 enqueue_toast!(
@@ -320,9 +321,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                         UiUpdate::AccountCreated => {
                             // Update the account setup modal to show success screen
-                            // (instead of a toast, which was confusing to users)
-                            account_state.write().set_success();
-                            account_version.set(account_version.get().wrapping_add(1));
+                            // Uses only the queue-based state (legacy state is deprecated)
+                            tui_state.write().account_created_queued();
+                            tui_state_version.set(tui_state_version.get().wrapping_add(1));
                         }
 
                         UiUpdate::RecoveryStarted => {
@@ -486,18 +487,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         _ => None,
     };
     let queue_help = match &queued_modal {
-        Some(QueuedModal::Help { current_screen }) => Some(current_screen.clone()),
+        Some(QueuedModal::Help { current_screen }) => current_screen.clone(),
         _ => None,
     };
     let queue_guardian_select = match &queued_modal {
         Some(QueuedModal::GuardianSelect(state)) => Some(state.clone()),
         _ => None,
     };
-    let queue_contact_select = match &queued_modal {
+    let _queue_contact_select = match &queued_modal {
         Some(QueuedModal::ContactSelect(state)) => Some(state.clone()),
         _ => None,
     };
-    let queue_confirm = match &queued_modal {
+    let _queue_confirm = match &queued_modal {
         Some(QueuedModal::Confirm {
             title,
             message,
@@ -505,6 +506,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         }) => Some((title.clone(), message.clone())),
         _ => None,
     };
+
+    // Pre-compute account setup modal props for cleaner rendering
+    let account_setup_props = queue_account_setup.as_ref().map(|state| {
+        (
+            state.display_name.clone(),
+            state.creating,
+            state.should_show_spinner(),
+            state.success,
+            state.error.clone().unwrap_or_default(),
+        )
+    });
 
     // Extract toast state from queue (type-enforced single toast at a time)
     let queued_toast = tui_state.read().toast_queue.current().cloned();
@@ -1052,16 +1064,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         }
     });
 
-    // Extract account setup state for rendering from use_ref
-    let state_ref = account_state.read();
-    let modal_visible = state_ref.visible;
-    let modal_creating = state_ref.creating;
-    let modal_success = state_ref.success;
-    let modal_display_name = state_ref.display_name.clone();
-    let modal_error = state_ref.error.clone().unwrap_or_default();
-    drop(state_ref); // Release the read lock
-                     // account_version is used for triggering re-renders (not directly in UI)
+    // Legacy account_state is kept for potential future use but not actively used.
+    // The queue-based system (TuiState.modal_queue) is the source of truth.
+    // Trigger version read to allow hooks system to track changes if needed later.
     let _ = account_version.get();
+    let _ = account_state.read(); // Keep ref active
 
     // Extract guardian select state for rendering from use_ref
     let guardian_state_ref = guardian_select_state.read();
@@ -1076,19 +1083,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Extract contact select state for rendering from use_ref
     let contact_state_ref = contact_select_state.read();
-    let contact_modal_visible = contact_state_ref.visible;
-    let contact_modal_title = contact_state_ref.title.clone();
-    let contact_modal_contacts = contact_state_ref.contacts.clone();
-    let contact_modal_selected = contact_state_ref.selected_index;
-    let contact_modal_error = contact_state_ref.error.clone().unwrap_or_default();
+    let _contact_modal_visible = contact_state_ref.visible;
+    let _contact_modal_title = contact_state_ref.title.clone();
+    let _contact_modal_contacts = contact_state_ref.contacts.clone();
+    let _contact_modal_selected = contact_state_ref.selected_index;
+    let _contact_modal_error = contact_state_ref.error.clone().unwrap_or_default();
     drop(contact_state_ref); // Release the read lock
                              // contact_select_version is used for triggering re-renders (not directly in UI)
     let _ = contact_select_version.get();
 
     // Extract confirm modal state for rendering
-    let confirm_visible = confirm_modal_visible.get();
-    let confirm_title = confirm_modal_title.read().clone();
-    let confirm_message = confirm_modal_message.read().clone();
+    let _confirm_visible = confirm_modal_visible.get();
+    let _confirm_title = confirm_modal_title.read().clone();
+    let _confirm_message = confirm_modal_message.read().clone();
     // confirm_modal_version is used for triggering re-renders (not directly in UI)
     let _ = confirm_modal_version.get();
 
@@ -1103,17 +1110,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let peers = props.peer_count;
 
     // Layout: NavBar (3 rows) + Content (25 rows) + Footer (3 rows) = 31 = TOTAL_HEIGHT
-    // Position::Relative establishes a positioning context for absolute-positioned
-    // modal and toast overlays, ensuring they render correctly relative to this container.
+    //
+    // Content always renders. Modals overlay via ModalFrame (Position::Absolute).
+    // ModalFrame positions at top: NAV_HEIGHT to overlay the content area.
+
     element! {
         View(
-            position: Position::Relative,
             flex_direction: FlexDirection::Column,
             width: dim::TOTAL_WIDTH,
             height: dim::TOTAL_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Nav bar area (3 rows) - always show nav bar
+            // Nav bar area (3 rows) - always visible
             NavBar(
                 active_screen: current_screen,
                 syncing: syncing,
@@ -1121,11 +1129,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 peer_count: peers,
             )
 
-            // Screen content - fixed 25 rows (MIDDLE_HEIGHT)
-            View(width: dim::TOTAL_WIDTH, height: dim::MIDDLE_HEIGHT, overflow: Overflow::Hidden) {
+            // Middle content area (25 rows) - always renders screen content
+            // Modals overlay via ModalFrame (absolute positioning)
+            View(
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
+                overflow: Overflow::Hidden,
+            ) {
                 #(match current_screen {
                     Screen::Block => vec![element! {
-                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
+                        View(width: 100pct, height: 100pct) {
                             BlockScreen(
                                 block_name: block_name.clone(),
                                 residents: residents.clone(),
@@ -1133,9 +1146,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 budget: block_budget.clone(),
                                 channel_name: channel_name.clone(),
                                 contacts: contacts.clone(),
-                                // View state: entire struct from extraction function (compile-time enforced)
                                 view: block_props.clone(),
-                                // Callbacks
                                 on_send: on_block_send.clone(),
                                 on_invite: on_block_invite.clone(),
                                 on_go_neighborhood: on_block_navigate_neighborhood.clone(),
@@ -1144,33 +1155,26 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             )
                         }
                     }],
-                    Screen::Chat => {
-                        vec![element! {
-                            View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
-                                ChatScreen(
-                                    // Domain data
-                                    channels: channels.clone(),
-                                    messages: messages.clone(),
-                                    // View state: entire struct from extraction function (compile-time enforced)
-                                    view: chat_props.clone(),
-                                    // Callbacks
-                                    on_send: on_send.clone(),
-                                    on_retry_message: on_retry_message.clone(),
-                                    on_channel_select: on_channel_select.clone(),
-                                    on_create_channel: on_create_channel.clone(),
-                                    on_set_topic: on_set_topic.clone(),
-                                )
-                            }
-                        }]
-                    }
+                    Screen::Chat => vec![element! {
+                        View(width: 100pct, height: 100pct) {
+                            ChatScreen(
+                                channels: channels.clone(),
+                                messages: messages.clone(),
+                                view: chat_props.clone(),
+                                on_send: on_send.clone(),
+                                on_retry_message: on_retry_message.clone(),
+                                on_channel_select: on_channel_select.clone(),
+                                on_create_channel: on_create_channel.clone(),
+                                on_set_topic: on_set_topic.clone(),
+                            )
+                        }
+                    }],
                     Screen::Contacts => vec![element! {
-                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
+                        View(width: 100pct, height: 100pct) {
                             ContactsScreen(
                                 contacts: contacts.clone(),
                                 discovered_peers: discovered_peers.clone(),
-                                // View state: entire struct from extraction function (compile-time enforced)
                                 view: contacts_props.clone(),
-                                // Callbacks
                                 on_update_petname: on_update_petname.clone(),
                                 on_start_chat: on_start_chat.clone(),
                                 on_invite_lan_peer: on_invite_lan_peer.clone(),
@@ -1179,15 +1183,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                     }],
                     Screen::Neighborhood => vec![element! {
-                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
+                        View(width: 100pct, height: 100pct) {
                             NeighborhoodScreen(
-                                // Domain data
                                 neighborhood_name: neighborhood_name.clone(),
                                 blocks: blocks.clone(),
                                 depth: traversal_depth,
-                                // View state: entire struct from extraction function (compile-time enforced)
                                 view: neighborhood_props.clone(),
-                                // Callbacks
                                 on_enter_block: on_enter_block.clone(),
                                 on_go_home: on_go_home.clone(),
                                 on_back_to_street: on_back_to_street.clone(),
@@ -1195,18 +1196,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                     }],
                     Screen::Settings => vec![element! {
-                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
+                        View(width: 100pct, height: 100pct) {
                             SettingsScreen(
-                                // Domain data - display_name is reactively polled from IoContext
                                 display_name: display_name.clone(),
                                 threshold_k: threshold_k,
                                 threshold_n: threshold_n,
                                 contact_count: contacts.len(),
                                 devices: devices.clone(),
                                 mfa_policy: mfa_policy,
-                                // View state: entire struct from extraction function (compile-time enforced)
                                 view: settings_props.clone(),
-                                // Callbacks
                                 on_update_mfa: on_update_mfa.clone(),
                                 on_update_nickname: on_update_nickname.clone(),
                                 on_update_threshold: on_update_threshold.clone(),
@@ -1216,17 +1214,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                     }],
                     Screen::Recovery => vec![element! {
-                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
+                        View(width: 100pct, height: 100pct) {
                             RecoveryScreen(
-                                // Domain data
                                 guardians: guardians.clone(),
                                 threshold_required: threshold_k as u32,
                                 threshold_total: threshold_n as u32,
                                 recovery_status: recovery_status.clone(),
                                 pending_requests: pending_requests.clone(),
-                                // View state: entire struct from extraction function (compile-time enforced)
                                 view: recovery_props.clone(),
-                                // Callbacks
                                 on_start_recovery: on_start_recovery.clone(),
                                 on_add_guardian: on_add_guardian.clone(),
                                 on_submit_approval: on_submit_approval.clone(),
@@ -1237,55 +1232,30 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             }
 
             // Footer with key hints (3 rows)
-            // Row 2: Screen-specific hints, Row 3: Global hints with navigation
-            // Show darkened hints when in insert mode (hotkeys inactive)
             Footer(hints: screen_hints.clone(), global_hints: global_hints.clone(), disabled: is_insert_mode)
 
-            // === MODAL OVERLAYS ===
-            // All modals are rendered at root level with ModalFrame for consistent positioning.
-            // See modal.rs for ModalFrame positioning details.
-
-            // Account setup modal overlay (queue-based rendering takes precedence)
-            #(if let Some(ref state) = queue_account_setup {
-                // NEW: Queue-based rendering - this is the preferred path
-                // show_spinner is debounced - only true if creating AND >300ms elapsed
-                let show_spinner = state.should_show_spinner();
+            // === GLOBAL MODALS (using ModalFrame overlay) ===
+            // Account setup modal (queue-based only - legacy state deprecated)
+            #(if let Some((display_name_prop, creating_prop, show_spinner_prop, success_prop, error_prop)) = account_setup_props.clone() {
                 Some(element! {
                     ModalFrame {
                         AccountSetupModal(
                             visible: true,
-                            display_name: state.display_name.clone(),
+                            display_name: display_name_prop,
                             focused: true,
-                            creating: state.creating,
-                            show_spinner: show_spinner,
-                            success: state.success,
-                            error: state.error.clone().unwrap_or_default(),
+                            creating: creating_prop,
+                            show_spinner: show_spinner_prop,
+                            success: success_prop,
+                            error: error_prop,
                         )
                     }
-                })
-            } else if modal_visible {
-                // LEGACY: Hook-based rendering - will be removed after full migration
-                // For legacy, always show spinner when creating (no debounce)
-                Some(element! {
-                    ModalFrame {
-                        AccountSetupModal(
-                            visible: true,
-                            display_name: modal_display_name.clone(),
-                            focused: true,
-                            creating: modal_creating,
-                            show_spinner: modal_creating,
-                            success: modal_success,
-                            error: modal_error.clone(),
-                        )
-                    }
-                })
+                }.into_any())
             } else {
                 None
             })
 
-            // Guardian selection modal overlay (queue-based rendering takes precedence)
+            // Guardian selection modal (queue-based)
             #(if let Some(ref state) = queue_guardian_select {
-                // NEW: Queue-based rendering - convert (id, name) tuples to Contact objects
                 let contacts_as_objects: Vec<Contact> = state.contacts.iter()
                     .map(|(id, name)| Contact::new(id.clone(), name.clone()))
                     .collect();
@@ -1299,9 +1269,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             error: String::new(),
                         )
                     }
-                })
+                }.into_any())
             } else if guardian_modal_visible {
-                // LEGACY: Hook-based rendering
+                // Guardian selection modal (legacy)
                 Some(element! {
                     ModalFrame {
                         ContactSelectModal(
@@ -1312,98 +1282,29 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             error: guardian_modal_error.clone(),
                         )
                     }
-                })
+                }.into_any())
             } else {
                 None
             })
 
-            // Generic contact selection modal overlay (queue-based rendering takes precedence)
-            #(if let Some(ref state) = queue_contact_select {
-                // NEW: Queue-based rendering - convert (id, name) tuples to Contact objects
-                let contacts_as_objects: Vec<Contact> = state.contacts.iter()
-                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
-                    .collect();
+            // Help modal
+            #(if let Some(ref screen_name) = queue_help {
                 Some(element! {
                     ModalFrame {
-                        ContactSelectModal(
-                            visible: true,
-                            title: state.title.clone(),
-                            contacts: contacts_as_objects,
-                            selected_index: state.selected_index,
-                            error: String::new(),
-                        )
+                        HelpModal(visible: true, current_screen: Some(screen_name.name().to_string()))
                     }
-                })
-            } else if contact_modal_visible {
-                // LEGACY: Hook-based rendering
-                Some(element! {
-                    ModalFrame {
-                        ContactSelectModal(
-                            visible: true,
-                            title: contact_modal_title.clone(),
-                            contacts: contact_modal_contacts.clone(),
-                            selected_index: contact_modal_selected,
-                            error: contact_modal_error.clone(),
-                        )
-                    }
-                })
-            } else {
-                None
-            })
-
-            // Confirm dialog modal overlay (queue-based rendering takes precedence)
-            #(if let Some((ref title, ref message)) = queue_confirm {
-                // NEW: Queue-based rendering
-                Some(element! {
-                    ModalFrame {
-                        ConfirmModal(
-                            visible: true,
-                            title: title.clone(),
-                            message: message.clone(),
-                            confirm_text: "Confirm".to_string(),
-                            cancel_text: "Cancel".to_string(),
-                            confirm_focused: true,
-                        )
-                    }
-                })
-            } else if confirm_visible {
-                // LEGACY: Hook-based rendering
-                Some(element! {
-                    ModalFrame {
-                        ConfirmModal(
-                            visible: true,
-                            title: confirm_title.clone(),
-                            message: confirm_message.clone(),
-                            confirm_text: "Confirm".to_string(),
-                            cancel_text: "Cancel".to_string(),
-                            confirm_focused: true,
-                        )
-                    }
-                })
-            } else {
-                None
-            })
-
-            // Help modal overlay (queue-based rendering takes precedence)
-            #(if queue_help.is_some() {
-                // NEW: Queue-based rendering
-                Some(element! {
-                    ModalFrame {
-                        HelpModal(visible: true, current_screen: Some(current_screen.name().to_string()))
-                    }
-                })
+                }.into_any())
             } else if help_modal_visible {
-                // LEGACY: Hook-based rendering
                 Some(element! {
                     ModalFrame {
                         HelpModal(visible: true, current_screen: Some(current_screen.name().to_string()))
                     }
-                })
+                }.into_any())
             } else {
                 None
             })
 
-            // === CONTACTS SCREEN MODALS ===
+            // === SCREEN-SPECIFIC MODALS ===
             // Rendered via modal_overlays module for maintainability
             #(render_petname_modal(&contacts_props))
             #(render_contacts_import_modal(&contacts_props))

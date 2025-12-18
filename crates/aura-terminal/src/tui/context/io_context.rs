@@ -698,7 +698,7 @@ impl IoContext {
                     Err(msg)
                 }
             }
-        } else if let Some(result) = self.operational.execute(&command).await {
+        } else if let Some(result) = self.operational.execute_with_errors(&command).await {
             // Handle operational command, checking for special responses
             match result {
                 Ok(OpResponse::ContextChanged { context_id }) => {
@@ -846,7 +846,7 @@ impl IoContext {
                     Err(msg)
                 }
             }
-        } else if let Some(result) = self.operational.execute(&command).await {
+        } else if let Some(result) = self.operational.execute_with_errors(&command).await {
             // Handle operational command, checking for special responses
             match result {
                 Ok(OpResponse::ContextChanged { context_id }) => {
