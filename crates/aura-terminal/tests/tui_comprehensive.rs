@@ -24,7 +24,7 @@
 
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::state_machine::{
-    transition, BlockFocus, ChatFocus, DispatchCommand, ModalType, TuiCommand, TuiState,
+    transition, BlockFocus, ChatFocus, DispatchCommand, ModalType, QueuedModal, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
 use aura_terminal::tui::Screen;
@@ -126,7 +126,7 @@ impl TestTui {
     }
 
     fn modal_type(&self) -> ModalType {
-        self.state.modal.modal_type.clone()
+        self.state.current_modal_type()
     }
 
     fn assert_modal(&self, expected: ModalType) {
@@ -260,16 +260,17 @@ mod block_screen {
 
         // Open invite modal with 'v'
         tui.send_char('v');
-        assert!(tui.state.block.invite_modal_open);
+        assert!(tui.state.is_block_invite_modal_active());
 
-        // Navigate selection
+        // Navigate selection - this now happens within the modal state
+        // The block.invite_selection is used for the modal's internal state
         let initial = tui.state.block.invite_selection;
         tui.send_char('j');
         assert_eq!(tui.state.block.invite_selection, initial + 1);
 
         // Close with Escape
         tui.send_escape();
-        assert!(!tui.state.block.invite_modal_open);
+        assert!(!tui.state.is_block_invite_modal_active());
     }
 
     #[test]
@@ -285,7 +286,7 @@ mod block_screen {
         tui.send_enter();
 
         // Modal should close
-        assert!(!tui.state.block.invite_modal_open);
+        assert!(!tui.state.is_block_invite_modal_active());
 
         // Dispatch command should be generated
         assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::InviteToBlock { .. })));
@@ -439,11 +440,14 @@ mod chat_screen {
         // Open create channel modal with 'n'
         tui.send_char('n');
         assert!(tui.has_modal());
-        assert!(tui.state.chat.create_modal.visible);
+        assert!(tui.state.is_chat_create_modal_active());
 
         // Type channel name
         tui.type_text("general");
-        assert_eq!(tui.state.chat.create_modal.name, "general");
+        assert_eq!(
+            tui.state.chat_create_modal_state().unwrap().name,
+            "general"
+        );
 
         // Submit with Enter
         tui.clear_commands();
@@ -463,11 +467,14 @@ mod chat_screen {
         // Open set topic modal with 't'
         tui.send_char('t');
         assert!(tui.has_modal());
-        assert!(tui.state.chat.topic_modal.visible);
+        assert!(tui.state.is_chat_topic_modal_active());
 
         // Type topic
         tui.type_text("Welcome to the channel!");
-        assert_eq!(tui.state.chat.topic_modal.value, "Welcome to the channel!");
+        assert_eq!(
+            tui.state.chat_topic_modal_state().unwrap().value,
+            "Welcome to the channel!"
+        );
 
         // Submit with Enter
         tui.clear_commands();
@@ -484,11 +491,11 @@ mod chat_screen {
         // Open channel info with 'o'
         tui.send_char('o');
         assert!(tui.has_modal());
-        assert!(tui.state.chat.info_modal.visible);
+        assert!(tui.state.is_chat_info_modal_active());
 
         // Close with Escape
         tui.send_escape();
-        assert!(!tui.state.chat.info_modal.visible);
+        assert!(!tui.state.is_chat_info_modal_active());
     }
 
     #[test]
@@ -559,9 +566,9 @@ mod contacts_screen {
         tui.clear_commands();
         tui.send_char('g');
 
-        // 'g' now opens the guardian setup modal instead of dispatching ToggleGuardian
+        // 'g' now opens the guardian setup modal via the queue system
         assert!(
-            tui.state.contacts.guardian_setup_modal.visible,
+            tui.state.is_guardian_setup_modal_active(),
             "Guardian setup modal should be visible after pressing 'g'"
         );
     }
@@ -1059,13 +1066,30 @@ mod modals {
         assert!(tui.has_modal());
         assert_eq!(tui.modal_type(), ModalType::GuardianSelect);
 
-        // Set up selection count for navigation to work
-        tui.state.modal.selection_count = 5;
+        // Set up contacts for navigation to work (must modify the queued modal)
+        if let Some(QueuedModal::GuardianSelect(ref mut state)) = tui.state.modal_queue.current_mut() {
+            state.contacts = vec![
+                ("id1".to_string(), "Contact 1".to_string()),
+                ("id2".to_string(), "Contact 2".to_string()),
+                ("id3".to_string(), "Contact 3".to_string()),
+                ("id4".to_string(), "Contact 4".to_string()),
+                ("id5".to_string(), "Contact 5".to_string()),
+            ];
+        }
 
         // Navigate with j/k
-        let initial = tui.state.modal.selection_index;
+        let initial = if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
+            state.selected_index
+        } else {
+            0
+        };
         tui.send_char('j');
-        assert_eq!(tui.state.modal.selection_index, initial + 1);
+        let after = if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
+            state.selected_index
+        } else {
+            0
+        };
+        assert_eq!(after, initial + 1);
 
         // Select with Enter
         tui.clear_commands();
@@ -1512,6 +1536,15 @@ mod integration {
         // 2. Add a guardian
         tui.send_char('a');
         assert!(tui.has_modal());
+
+        // 2b. Populate contacts in the modal (shell would normally do this)
+        if let Some(QueuedModal::GuardianSelect(ref mut state)) = tui.state.modal_queue.current_mut()
+        {
+            state.contacts = vec![
+                ("id1".to_string(), "Contact 1".to_string()),
+                ("id2".to_string(), "Contact 2".to_string()),
+            ];
+        }
 
         // 3. Select from list
         tui.send_char('j'); // Select second contact

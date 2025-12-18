@@ -12,6 +12,15 @@
 //! - `TuiCommand`: Side effects to be executed
 //! - `transition()`: Pure state transition function
 //!
+//! ## Modal and Toast Queue System
+//!
+//! All modals and toasts go through type-enforced queues:
+//! - `ModalQueue`: Ensures exactly 0 or 1 modal is visible at a time (FIFO)
+//! - `ToastQueue`: Ensures exactly 0 or 1 toast is visible at a time (FIFO)
+//!
+//! **IMPORTANT**: Do NOT use `visible: bool` fields on modal structs.
+//! All modals MUST be shown via `modal_queue.enqueue()`.
+//!
 //! ## Usage
 //!
 //! ```rust,ignore
@@ -27,9 +36,406 @@ use crate::tui::navigation::{navigate_list, GridNav, NavKey};
 use crate::tui::types::{InvitationFilter, MfaPolicy, RecoveryTab, SettingsSection};
 use crate::tui::{Router, Screen};
 use aura_core::effects::terminal::{KeyCode, KeyEvent, TerminalEvent};
+use std::collections::VecDeque;
 
 // ============================================================================
-// Modal State
+// Modal Queue System (Type-Enforced)
+// ============================================================================
+
+/// Unified modal enum - ALL modals MUST be one of these variants.
+///
+/// This enum enforces that all modals go through the queue system.
+/// Each variant carries its own state, eliminating scattered `visible: bool` fields.
+///
+/// ## Adding New Modals
+///
+/// When adding a new modal:
+/// 1. Add a variant here with the appropriate state struct
+/// 2. Add rendering in `shell.rs` via the `render_queued_modal` match
+/// 3. Use `modal_queue.enqueue(QueuedModal::YourModal(...))` to show it
+///
+/// **DO NOT** add `visible: bool` fields to modal state structs.
+#[derive(Clone, Debug)]
+pub enum QueuedModal {
+    // ========================================================================
+    // Global Modals (can appear from any screen)
+    // ========================================================================
+    /// Account setup wizard (shown before main UI)
+    AccountSetup(AccountSetupModalState),
+
+    /// Help modal with optional screen context
+    Help { current_screen: Option<Screen> },
+
+    /// Generic confirmation dialog
+    Confirm {
+        title: String,
+        message: String,
+        on_confirm: Option<ConfirmAction>,
+    },
+
+    /// Guardian selection from contacts
+    GuardianSelect(ContactSelectModalState),
+
+    /// Contact selection (generic)
+    ContactSelect(ContactSelectModalState),
+
+    // ========================================================================
+    // Chat Screen Modals
+    // ========================================================================
+    /// Create a new channel
+    ChatCreate(CreateChannelModalState),
+
+    /// Edit channel topic
+    ChatTopic(TopicModalState),
+
+    /// View channel info
+    ChatInfo(ChannelInfoModalState),
+
+    // ========================================================================
+    // Contacts Screen Modals
+    // ========================================================================
+    /// Edit contact petname
+    ContactsPetname(PetnameModalState),
+
+    /// Import invitation (contacts screen)
+    ContactsImport(ImportInvitationModalState),
+
+    /// Create invitation (contacts screen)
+    ContactsCreate(CreateInvitationModalState),
+
+    /// Show invitation code (contacts screen)
+    ContactsCode(InvitationCodeModalState),
+
+    /// Guardian setup wizard (multi-select + threshold + ceremony)
+    GuardianSetup(GuardianSetupModalState),
+
+    // ========================================================================
+    // Invitations Screen Modals
+    // ========================================================================
+    /// Create invitation
+    InvitationsCreate(CreateInvitationModalState),
+
+    /// Import invitation
+    InvitationsImport(ImportInvitationModalState),
+
+    /// Show invitation code
+    InvitationsCode(InvitationCodeModalState),
+
+    // ========================================================================
+    // Settings Screen Modals
+    // ========================================================================
+    /// Edit nickname
+    SettingsNickname(NicknameModalState),
+
+    /// Configure threshold
+    SettingsThreshold(ThresholdModalState),
+
+    /// Add device
+    SettingsAddDevice(AddDeviceModalState),
+
+    /// Confirm device removal
+    SettingsRemoveDevice(ConfirmRemoveModalState),
+
+    // ========================================================================
+    // Block Screen Modals
+    // ========================================================================
+    /// Invite contact to block
+    BlockInvite(ContactSelectModalState),
+}
+
+/// Action to perform on confirmation
+#[derive(Clone, Debug)]
+pub enum ConfirmAction {
+    /// Remove a device
+    RemoveDevice { device_id: String },
+    /// Delete a channel
+    DeleteChannel { channel_id: String },
+    /// Remove a contact
+    RemoveContact { contact_id: String },
+    /// Revoke an invitation
+    RevokeInvitation { invitation_id: String },
+}
+
+/// State for generic contact selection modal
+#[derive(Clone, Debug, Default)]
+pub struct ContactSelectModalState {
+    /// Title for the modal
+    pub title: String,
+    /// Available contacts (id, name)
+    pub contacts: Vec<(String, String)>,
+    /// Currently focused index
+    pub selected_index: usize,
+    /// Selected contact IDs (for multi-select)
+    pub selected_ids: Vec<String>,
+    /// Whether multi-select is enabled
+    pub multi_select: bool,
+}
+
+impl ContactSelectModalState {
+    /// Create a single-select contact picker
+    pub fn single(title: impl Into<String>, contacts: Vec<(String, String)>) -> Self {
+        Self {
+            title: title.into(),
+            contacts,
+            selected_index: 0,
+            selected_ids: Vec::new(),
+            multi_select: false,
+        }
+    }
+
+    /// Create a multi-select contact picker
+    pub fn multi(title: impl Into<String>, contacts: Vec<(String, String)>) -> Self {
+        Self {
+            title: title.into(),
+            contacts,
+            selected_index: 0,
+            selected_ids: Vec::new(),
+            multi_select: true,
+        }
+    }
+
+    /// Toggle selection of currently focused contact
+    pub fn toggle_selection(&mut self) {
+        if let Some((id, _)) = self.contacts.get(self.selected_index) {
+            if let Some(pos) = self.selected_ids.iter().position(|i| i == id) {
+                self.selected_ids.remove(pos);
+            } else {
+                self.selected_ids.push(id.clone());
+            }
+        }
+    }
+
+    /// Get the currently focused contact ID
+    pub fn focused_contact_id(&self) -> Option<&str> {
+        self.contacts.get(self.selected_index).map(|(id, _)| id.as_str())
+    }
+}
+
+/// Modal queue that ensures only one modal is visible at a time.
+///
+/// **Type Enforcement**: This is the ONLY way to show modals.
+/// All `visible: bool` fields have been removed from modal state structs.
+///
+/// ## Usage
+///
+/// ```rust,ignore
+/// // Show a modal
+/// state.modal_queue.enqueue(QueuedModal::Help { current_screen: Some(Screen::Chat) });
+///
+/// // Dismiss current modal (shows next in queue)
+/// state.modal_queue.dismiss();
+///
+/// // Check if modal is active
+/// if state.modal_queue.is_active() {
+///     // Render modal_queue.current()
+/// }
+/// ```
+#[derive(Clone, Debug, Default)]
+pub struct ModalQueue {
+    /// Queue of pending modals (FIFO - first in, first out)
+    pending: VecDeque<QueuedModal>,
+    /// Currently active modal (if any)
+    active: Option<QueuedModal>,
+}
+
+impl ModalQueue {
+    /// Create a new empty modal queue
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enqueue a modal. If no modal is active, it becomes active immediately.
+    pub fn enqueue(&mut self, modal: QueuedModal) {
+        if self.active.is_none() {
+            self.active = Some(modal);
+        } else {
+            self.pending.push_back(modal);
+        }
+    }
+
+    /// Dismiss the active modal and activate the next one in the queue (if any).
+    /// Returns the dismissed modal.
+    pub fn dismiss(&mut self) -> Option<QueuedModal> {
+        let dismissed = self.active.take();
+        self.active = self.pending.pop_front();
+        dismissed
+    }
+
+    /// Get a reference to the currently active modal (for rendering).
+    pub fn current(&self) -> Option<&QueuedModal> {
+        self.active.as_ref()
+    }
+
+    /// Get a mutable reference to the currently active modal (for input handling).
+    pub fn current_mut(&mut self) -> Option<&mut QueuedModal> {
+        self.active.as_mut()
+    }
+
+    /// Check if any modal is currently active.
+    pub fn is_active(&self) -> bool {
+        self.active.is_some()
+    }
+
+    /// Clear all modals (active and pending). Use for emergency reset.
+    pub fn clear(&mut self) {
+        self.active = None;
+        self.pending.clear();
+    }
+
+    /// Get the number of pending modals (not including active).
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Replace the active modal's state in place (for updating modal state during interaction).
+    /// Returns false if no active modal.
+    pub fn update_active<F>(&mut self, f: F) -> bool
+    where
+        F: FnOnce(&mut QueuedModal),
+    {
+        if let Some(modal) = &mut self.active {
+            f(modal);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+// ============================================================================
+// Toast Queue System (Type-Enforced)
+// ============================================================================
+
+/// Toast queue that ensures only one toast is visible at a time.
+///
+/// **Type Enforcement**: This is the ONLY way to show toasts.
+/// Remove `Vec<Toast>` fields and use this queue instead.
+///
+/// ## Behavior
+///
+/// - Toasts are shown in FIFO order
+/// - Auto-dismiss via `tick()` when `ticks_remaining` reaches 0
+/// - Manual dismiss via `dismiss()` or Escape key
+/// - One modal + one toast can coexist (different screen regions)
+#[derive(Clone, Debug, Default)]
+pub struct ToastQueue {
+    /// Queue of pending toasts (FIFO)
+    pending: VecDeque<QueuedToast>,
+    /// Currently active toast (if any)
+    active: Option<QueuedToast>,
+}
+
+/// A queued toast notification
+#[derive(Clone, Debug)]
+pub struct QueuedToast {
+    /// Unique ID for this toast
+    pub id: u64,
+    /// Toast message
+    pub message: String,
+    /// Severity level
+    pub level: ToastLevel,
+    /// Ticks remaining before auto-dismiss
+    pub ticks_remaining: u32,
+}
+
+impl QueuedToast {
+    /// Create a new toast with default duration (30 ticks = ~3 seconds at 100ms/tick)
+    pub fn new(id: u64, message: impl Into<String>, level: ToastLevel) -> Self {
+        Self {
+            id,
+            message: message.into(),
+            level,
+            ticks_remaining: 30,
+        }
+    }
+
+    /// Create with custom duration
+    pub fn with_duration(mut self, ticks: u32) -> Self {
+        self.ticks_remaining = ticks;
+        self
+    }
+
+    /// Create an info toast
+    pub fn info(id: u64, message: impl Into<String>) -> Self {
+        Self::new(id, message, ToastLevel::Info)
+    }
+
+    /// Create a success toast
+    pub fn success(id: u64, message: impl Into<String>) -> Self {
+        Self::new(id, message, ToastLevel::Success)
+    }
+
+    /// Create a warning toast
+    pub fn warning(id: u64, message: impl Into<String>) -> Self {
+        Self::new(id, message, ToastLevel::Warning)
+    }
+
+    /// Create an error toast
+    pub fn error(id: u64, message: impl Into<String>) -> Self {
+        Self::new(id, message, ToastLevel::Error)
+    }
+}
+
+impl ToastQueue {
+    /// Create a new empty toast queue
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enqueue a toast. If no toast is active, it becomes active immediately.
+    pub fn enqueue(&mut self, toast: QueuedToast) {
+        if self.active.is_none() {
+            self.active = Some(toast);
+        } else {
+            self.pending.push_back(toast);
+        }
+    }
+
+    /// Dismiss the active toast and activate the next one in the queue (if any).
+    /// Returns the dismissed toast.
+    pub fn dismiss(&mut self) -> Option<QueuedToast> {
+        let dismissed = self.active.take();
+        self.active = self.pending.pop_front();
+        dismissed
+    }
+
+    /// Get a reference to the currently active toast (for rendering).
+    pub fn current(&self) -> Option<&QueuedToast> {
+        self.active.as_ref()
+    }
+
+    /// Check if any toast is currently active.
+    pub fn is_active(&self) -> bool {
+        self.active.is_some()
+    }
+
+    /// Process a tick: decrement timer and auto-dismiss expired toasts.
+    /// Returns true if a toast was auto-dismissed.
+    pub fn tick(&mut self) -> bool {
+        if let Some(toast) = &mut self.active {
+            toast.ticks_remaining = toast.ticks_remaining.saturating_sub(1);
+            if toast.ticks_remaining == 0 {
+                self.active = self.pending.pop_front();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Clear all toasts (active and pending).
+    pub fn clear(&mut self) {
+        self.active = None;
+        self.pending.clear();
+    }
+
+    /// Get the number of pending toasts (not including active).
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+}
+
+// ============================================================================
+// Legacy Modal State (to be migrated)
 // ============================================================================
 
 /// Type of modal currently displayed
@@ -77,11 +483,16 @@ pub struct AccountSetupModalState {
     pub display_name: String,
     /// Whether account creation is in progress
     pub creating: bool,
+    /// Timestamp (ms since epoch) when creating started - for debounced spinner
+    pub creating_started_ms: Option<u64>,
     /// Whether account was created successfully
     pub success: bool,
     /// Error message if creation failed
     pub error: Option<String>,
 }
+
+/// Debounce threshold for showing spinner (ms)
+pub const SPINNER_DEBOUNCE_MS: u64 = 300;
 
 impl AccountSetupModalState {
     /// Whether we can submit the form
@@ -89,27 +500,51 @@ impl AccountSetupModalState {
         !self.display_name.trim().is_empty() && !self.creating && !self.success
     }
 
-    /// Start the creating state
+    /// Start the creating state with timestamp for debounced spinner
     pub fn start_creating(&mut self) {
         self.creating = true;
+        self.creating_started_ms = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        );
         self.error = None;
+    }
+
+    /// Check if spinner should be shown (creating AND elapsed > debounce threshold)
+    pub fn should_show_spinner(&self) -> bool {
+        if !self.creating {
+            return false;
+        }
+        let Some(started) = self.creating_started_ms else {
+            return false;
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        now.saturating_sub(started) >= SPINNER_DEBOUNCE_MS
     }
 
     /// Set success state
     pub fn set_success(&mut self) {
         self.creating = false;
+        self.creating_started_ms = None;
         self.success = true;
     }
 
     /// Set error state
     pub fn set_error(&mut self, msg: String) {
         self.creating = false;
+        self.creating_started_ms = None;
         self.error = Some(msg);
     }
 
     /// Reset to input state (for retry after error)
     pub fn reset_to_input(&mut self) {
         self.creating = false;
+        self.creating_started_ms = None;
         self.success = false;
         self.error = None;
     }
@@ -998,9 +1433,23 @@ pub struct TuiState {
     /// Screen navigation state
     pub router: Router,
 
-    /// Active modal (if any)
-    pub modal: ModalState,
+    // ========================================================================
+    // NEW: Queue-Based Modal/Toast System
+    // ========================================================================
+    /// Modal queue - type-enforced single modal at a time (FIFO)
+    /// **USE THIS** instead of scattered `visible: bool` fields
+    pub modal_queue: ModalQueue,
 
+    /// Toast queue - type-enforced single toast at a time (FIFO)
+    /// **USE THIS** instead of `Vec<Toast>`
+    pub toast_queue: ToastQueue,
+
+    /// Counter for generating unique toast IDs
+    pub next_toast_id: u64,
+
+    // ========================================================================
+    // Screen-Specific State
+    // ========================================================================
     /// Block screen state
     pub block: BlockViewState,
 
@@ -1025,9 +1474,9 @@ pub struct TuiState {
     /// Help screen state
     pub help: HelpViewState,
 
-    /// Toast messages (most recent first)
-    pub toasts: Vec<Toast>,
-
+    // ========================================================================
+    // Global State
+    // ========================================================================
     /// Terminal size
     pub terminal_size: (u16, u16),
 
@@ -1073,6 +1522,7 @@ impl ToastLevel {
 impl TuiState {
     /// Create a new TUI state with default values
     pub fn new() -> Self {
+        #[allow(deprecated)]
         Self {
             terminal_size: (80, 24),
             ..Default::default()
@@ -1081,19 +1531,18 @@ impl TuiState {
 
     /// Create a TUI state with specific terminal size
     pub fn with_size(width: u16, height: u16) -> Self {
+        #[allow(deprecated)]
         Self {
             terminal_size: (width, height),
             ..Default::default()
         }
     }
 
-    /// Create a TUI state with the account setup modal visible
+    /// Create a TUI state with the account setup modal visible (via queue)
     pub fn with_account_setup() -> Self {
-        Self {
-            modal: ModalState::account_setup(),
-            terminal_size: (80, 24),
-            ..Default::default()
-        }
+        let mut state = Self::new();
+        state.show_account_setup_queued();
+        state
     }
 
     /// Get the current screen
@@ -1101,41 +1550,99 @@ impl TuiState {
         self.router.current()
     }
 
-    /// Get the ID of the highest priority toast (for prioritized dismissal)
-    ///
-    /// Priority: Error (3) > Warning (2) > Info/Success (1)
-    /// Returns None if no toasts exist.
-    pub fn highest_priority_toast_id(&self) -> Option<u64> {
-        self.toasts
-            .iter()
-            .max_by_key(|t| t.level.priority())
-            .map(|t| t.id)
+    // ========================================================================
+    // NEW: Queue-Based Modal/Toast Methods
+    // ========================================================================
+
+    /// Show a modal via the queue (type-enforced)
+    pub fn show_modal(&mut self, modal: QueuedModal) {
+        self.modal_queue.enqueue(modal);
     }
 
-    /// Check if a modal is active (global or screen-specific)
-    pub fn has_modal(&self) -> bool {
-        self.modal.is_active() || self.has_screen_modal()
+    /// Dismiss the current modal (shows next in queue if any)
+    pub fn dismiss_modal(&mut self) -> Option<QueuedModal> {
+        self.modal_queue.dismiss()
     }
 
-    /// Check if any screen-specific modal is open
-    pub fn has_screen_modal(&self) -> bool {
-        // Check all screen-specific modals
-        self.block.invite_modal_open
-            || self.chat.create_modal.visible
-            || self.chat.topic_modal.visible
-            || self.chat.info_modal.visible
-            || self.contacts.petname_modal.visible
-            || self.contacts.import_modal.visible
-            || self.contacts.create_modal.visible
-            || self.contacts.code_modal.visible
-            || self.contacts.guardian_setup_modal.visible
-            || self.invitations.create_modal.visible
-            || self.invitations.import_modal.visible
-            || self.invitations.code_modal.visible
-            || self.settings.nickname_modal.visible
-            || self.settings.threshold_modal.visible
-            || self.settings.add_device_modal.visible
-            || self.settings.confirm_remove_modal.visible
+    /// Check if any modal is active (queue-based)
+    pub fn has_queued_modal(&self) -> bool {
+        self.modal_queue.is_active()
+    }
+
+    /// Show a toast via the queue (type-enforced)
+    pub fn show_toast_queued(&mut self, message: impl Into<String>, level: ToastLevel) {
+        let id = self.next_toast_id;
+        self.next_toast_id += 1;
+        self.toast_queue.enqueue(QueuedToast::new(id, message, level));
+    }
+
+    /// Show a success toast
+    pub fn toast_success(&mut self, message: impl Into<String>) {
+        self.show_toast_queued(message, ToastLevel::Success);
+    }
+
+    /// Show an error toast
+    pub fn toast_error(&mut self, message: impl Into<String>) {
+        self.show_toast_queued(message, ToastLevel::Error);
+    }
+
+    /// Show an info toast
+    pub fn toast_info(&mut self, message: impl Into<String>) {
+        self.show_toast_queued(message, ToastLevel::Info);
+    }
+
+    /// Show a warning toast
+    pub fn toast_warning(&mut self, message: impl Into<String>) {
+        self.show_toast_queued(message, ToastLevel::Warning);
+    }
+
+    /// Dismiss the current toast (shows next in queue if any)
+    pub fn dismiss_toast(&mut self) -> Option<QueuedToast> {
+        self.toast_queue.dismiss()
+    }
+
+    /// Check if any toast is active (queue-based)
+    pub fn has_queued_toast(&self) -> bool {
+        self.toast_queue.is_active()
+    }
+
+    /// Process a tick for the toast queue (auto-dismiss expired toasts)
+    pub fn tick_toasts(&mut self) -> bool {
+        self.toast_queue.tick()
+    }
+
+    /// Show the account setup modal via queue
+    pub fn show_account_setup_queued(&mut self) {
+        self.modal_queue.enqueue(QueuedModal::AccountSetup(AccountSetupModalState::default()));
+    }
+
+    /// Signal that account creation succeeded (queue-based)
+    pub fn account_created_queued(&mut self) {
+        if let Some(QueuedModal::AccountSetup(ref mut state)) = self.modal_queue.current_mut() {
+            state.set_success();
+        }
+    }
+
+    /// Signal that account creation failed (queue-based)
+    pub fn account_creation_failed_queued(&mut self, error: String) {
+        if let Some(QueuedModal::AccountSetup(ref mut state)) = self.modal_queue.current_mut() {
+            state.set_error(error);
+        }
+    }
+
+    /// Check if the current modal is a text input modal (queue-based)
+    pub fn is_queued_modal_text_input(&self) -> bool {
+        match self.modal_queue.current() {
+            Some(QueuedModal::AccountSetup(_)) => true,
+            Some(QueuedModal::ChatCreate(_)) => true,
+            Some(QueuedModal::ChatTopic(_)) => true,
+            Some(QueuedModal::ContactsPetname(_)) => true,
+            Some(QueuedModal::ContactsImport(_)) => true,
+            Some(QueuedModal::InvitationsImport(_)) => true,
+            Some(QueuedModal::SettingsNickname(_)) => true,
+            Some(QueuedModal::SettingsAddDevice(_)) => true,
+            _ => false,
+        }
     }
 
     /// Check if in insert mode (for text input)
@@ -1147,42 +1654,130 @@ impl TuiState {
         }
     }
 
-    /// Check if any text input modal is open (where typing goes to input)
+    /// Check if any screen-specific modal is open (legacy - all screens now use queue)
     ///
-    /// This checks all screen-specific modals that accept text input.
-    /// Generic `ModalType::TextInput` was removed to enforce compile-time safety.
-    pub fn is_modal_text_input(&self) -> bool {
-        self.modal.modal_type == ModalType::AccountSetup
-            || self.chat.create_modal.visible
-            || self.chat.topic_modal.visible
-            || self.contacts.petname_modal.visible
-            || self.contacts.import_modal.visible
-            || self.invitations.import_modal.visible
-            || self.settings.nickname_modal.visible
-            || self.settings.add_device_modal.visible
+    /// NOTE: All modals have been migrated to the queue system.
+    /// This method is kept for API compatibility but always returns false.
+    /// Use `has_queued_modal()` or `has_modal()` instead.
+    pub fn has_screen_modal(&self) -> bool {
+        // All modals are now handled through the queue system
+        false
     }
 
     // ========================================================================
-    // External state updates (for async feedback from runtime)
+    // Test Helper Methods (backwards compatibility for tests)
     // ========================================================================
 
-    /// Signal that account creation succeeded
+    /// Check if any modal is active (queued or screen-specific)
+    /// This is a convenience wrapper for tests.
+    pub fn has_modal(&self) -> bool {
+        self.has_queued_modal() || self.has_screen_modal()
+    }
+
+    /// Get the current modal type (for backwards compatibility in tests)
+    pub fn current_modal_type(&self) -> ModalType {
+        match self.modal_queue.current() {
+            Some(QueuedModal::AccountSetup(_)) => ModalType::AccountSetup,
+            Some(QueuedModal::Help { .. }) => ModalType::Help,
+            Some(QueuedModal::GuardianSelect(_)) => ModalType::GuardianSelect,
+            Some(QueuedModal::ContactSelect(_)) => ModalType::ContactSelect,
+            Some(QueuedModal::Confirm { .. }) => ModalType::Confirm,
+            Some(_) => ModalType::None, // Screen-specific modals
+            None => ModalType::None,
+        }
+    }
+
+    /// Get reference to account setup state if it's the active modal
+    pub fn account_setup_state(&self) -> Option<&AccountSetupModalState> {
+        match self.modal_queue.current() {
+            Some(QueuedModal::AccountSetup(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Get mutable reference to account setup state if it's the active modal
+    pub fn account_setup_state_mut(&mut self) -> Option<&mut AccountSetupModalState> {
+        match self.modal_queue.current_mut() {
+            Some(QueuedModal::AccountSetup(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Signal that account creation succeeded (legacy wrapper)
     pub fn account_created(&mut self) {
-        if self.modal.modal_type == ModalType::AccountSetup {
-            self.modal.account_setup.set_success();
-        }
+        self.account_created_queued();
     }
 
-    /// Signal that account creation failed
+    /// Signal that account creation failed (legacy wrapper)
     pub fn account_creation_failed(&mut self, error: String) {
-        if self.modal.modal_type == ModalType::AccountSetup {
-            self.modal.account_setup.set_error(error);
+        self.account_creation_failed_queued(error);
+    }
+
+    // ========================================================================
+    // Modal Type Checking (for tests and rendering)
+    // ========================================================================
+
+    /// Check if block invite modal is active
+    pub fn is_block_invite_modal_active(&self) -> bool {
+        matches!(self.modal_queue.current(), Some(QueuedModal::BlockInvite(_)))
+    }
+
+    /// Check if chat create modal is active
+    pub fn is_chat_create_modal_active(&self) -> bool {
+        matches!(
+            self.modal_queue.current(),
+            Some(QueuedModal::ChatCreate(_))
+        )
+    }
+
+    /// Get chat create modal state if active
+    pub fn chat_create_modal_state(&self) -> Option<&CreateChannelModalState> {
+        match self.modal_queue.current() {
+            Some(QueuedModal::ChatCreate(state)) => Some(state),
+            _ => None,
         }
     }
 
-    /// Show the account setup modal
-    pub fn show_account_setup(&mut self) {
-        self.modal = ModalState::account_setup();
+    /// Get mutable chat create modal state if active
+    pub fn chat_create_modal_state_mut(&mut self) -> Option<&mut CreateChannelModalState> {
+        match self.modal_queue.current_mut() {
+            Some(QueuedModal::ChatCreate(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Check if chat topic modal is active
+    pub fn is_chat_topic_modal_active(&self) -> bool {
+        matches!(self.modal_queue.current(), Some(QueuedModal::ChatTopic(_)))
+    }
+
+    /// Get chat topic modal state if active
+    pub fn chat_topic_modal_state(&self) -> Option<&TopicModalState> {
+        match self.modal_queue.current() {
+            Some(QueuedModal::ChatTopic(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Check if chat info modal is active
+    pub fn is_chat_info_modal_active(&self) -> bool {
+        matches!(self.modal_queue.current(), Some(QueuedModal::ChatInfo(_)))
+    }
+
+    /// Check if guardian setup modal is active
+    pub fn is_guardian_setup_modal_active(&self) -> bool {
+        matches!(
+            self.modal_queue.current(),
+            Some(QueuedModal::GuardianSetup(_))
+        )
+    }
+
+    /// Get guardian setup modal state if active
+    pub fn guardian_setup_modal_state(&self) -> Option<&GuardianSetupModalState> {
+        match self.modal_queue.current() {
+            Some(QueuedModal::GuardianSetup(state)) => Some(state),
+            _ => None,
+        }
     }
 }
 
@@ -1253,6 +1848,9 @@ pub enum DispatchCommand {
         channel_id: String,
         topic: String,
     },
+    DeleteChannel {
+        channel_id: String,
+    },
 
     // Contacts screen
     UpdatePetname {
@@ -1261,6 +1859,13 @@ pub enum DispatchCommand {
     },
     StartChat {
         contact_id: String,
+    },
+    RemoveContact {
+        contact_id: String,
+    },
+    /// Contact selection by index (for generic contact select modals)
+    SelectContactByIndex {
+        index: usize,
     },
 
     // Guardian ceremony
@@ -1287,6 +1892,9 @@ pub enum DispatchCommand {
         code: String,
     },
     ExportInvitation {
+        invitation_id: String,
+    },
+    RevokeInvitation {
         invitation_id: String,
     },
 
@@ -1363,11 +1971,8 @@ pub fn transition(state: &TuiState, event: TerminalEvent) -> (TuiState, Vec<TuiC
             new_state.terminal_size = (width, height);
         }
         TerminalEvent::Tick => {
-            // Time-based updates: decrement toast ticks and remove expired toasts
-            for toast in &mut new_state.toasts {
-                toast.ticks_remaining = toast.ticks_remaining.saturating_sub(1);
-            }
-            new_state.toasts.retain(|t| t.ticks_remaining > 0);
+            // Time-based updates: tick the toast queue (handles decrement and auto-dismiss)
+            new_state.toast_queue.tick();
         }
         _ => {
             // Ignore other events for now (mouse, focus, paste)
@@ -1379,8 +1984,8 @@ pub fn transition(state: &TuiState, event: TerminalEvent) -> (TuiState, Vec<TuiC
 
 /// Handle a key event
 fn handle_key_event(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
-    // Modal gets priority
-    if state.has_modal() {
+    // Queued modal gets priority (all modals are now queue-based)
+    if state.has_queued_modal() {
         handle_modal_key(state, commands, key);
         return;
     }
@@ -1423,13 +2028,13 @@ fn handle_global_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: 
         return true;
     }
 
-    // Escape - dismiss ONE toast at a time based on priority (when no modal is open)
-    // Priority: Error > Warning > Info/Success
+    // Escape - dismiss ONE toast at a time (when no modal is open)
     // Note: Modal escape handling is in handle_modal_key, so this only fires
     // when there's no modal open
     if key.code == KeyCode::Esc {
-        if let Some(toast_id) = state.highest_priority_toast_id() {
-            commands.push(TuiCommand::DismissToast { id: toast_id });
+        if state.toast_queue.is_active() {
+            // Dismiss the current toast (queue automatically shows next one)
+            state.toast_queue.dismiss();
         }
         // If no toasts, Esc does nothing here (modals handled in handle_modal_key)
         return true;
@@ -1437,7 +2042,9 @@ fn handle_global_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: 
 
     // Help (?)
     if key.code == KeyCode::Char('?') {
-        state.modal = ModalState::new(ModalType::Help);
+        state.modal_queue.enqueue(QueuedModal::Help {
+            current_screen: Some(state.screen()),
+        });
         return true;
     }
 
@@ -1466,786 +2073,11 @@ fn handle_global_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: 
     false
 }
 
-/// Handle modal key events
+/// Handle modal key events (queue-based only)
 fn handle_modal_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
-    // Check for screen-specific modals first
-    if state.has_screen_modal() {
-        handle_screen_modal_key(state, commands, key);
-        return;
-    }
-
-    // Escape - prioritized dismissal: toasts first, then modal
-    // Priority: Error > Warning > Info/Success toasts, then close modal
-    if key.code == KeyCode::Esc {
-        if let Some(toast_id) = state.highest_priority_toast_id() {
-            // Dismiss highest priority toast first
-            commands.push(TuiCommand::DismissToast { id: toast_id });
-        } else {
-            // No toasts left, close the modal
-            state.modal.close();
-        }
-        return;
-    }
-
-    // Global modal-specific handling
-    match state.modal.modal_type {
-        ModalType::Help => {
-            // Arrow keys for scrolling
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    state.help.scroll =
-                        navigate_list(state.help.scroll, state.help.scroll_max, NavKey::Up);
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    state.help.scroll =
-                        navigate_list(state.help.scroll, state.help.scroll_max, NavKey::Down);
-                }
-                _ => {}
-            }
-        }
-        ModalType::AccountSetup => {
-            handle_account_setup_key(state, commands, key);
-        }
-        ModalType::GuardianSelect => {
-            // Guardian selection modal
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    state.modal.selection_index = navigate_list(
-                        state.modal.selection_index,
-                        state.modal.selection_count,
-                        NavKey::Up,
-                    );
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    state.modal.selection_index = navigate_list(
-                        state.modal.selection_index,
-                        state.modal.selection_count,
-                        NavKey::Down,
-                    );
-                }
-                KeyCode::Enter => {
-                    // Dispatch selection by index - shell will map to contact_id
-                    // Note: Don't close modal here - let command handler do it after reading contacts
-                    let index = state.modal.selection_index;
-                    commands.push(TuiCommand::Dispatch(
-                        DispatchCommand::SelectGuardianByIndex { index },
-                    ));
-                }
-                _ => {}
-            }
-        }
-        _ => {
-            // Generic modal navigation
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    state.modal.selection_index = navigate_list(
-                        state.modal.selection_index,
-                        state.modal.selection_count,
-                        NavKey::Up,
-                    );
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    state.modal.selection_index = navigate_list(
-                        state.modal.selection_index,
-                        state.modal.selection_count,
-                        NavKey::Down,
-                    );
-                }
-                KeyCode::Enter => {
-                    // Confirm selection - dispatch command based on modal type
-                    // This will be expanded per modal
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-/// Handle screen-specific modal key events
-fn handle_screen_modal_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
-    // Escape - prioritized dismissal: toasts first, then fall through to close modal
-    // This ensures toasts are dismissed before any modal closes
-    if key.code == KeyCode::Esc {
-        if let Some(toast_id) = state.highest_priority_toast_id() {
-            commands.push(TuiCommand::DismissToast { id: toast_id });
-            return;
-        }
-        // No toasts - fall through to let individual modal handlers close the modal
-    }
-
-    // Block screen modals
-    if state.block.invite_modal_open {
-        handle_block_invite_modal_key(state, commands, key);
-        return;
-    }
-
-    // Chat screen modals
-    if state.chat.create_modal.visible {
-        handle_chat_create_modal_key(state, commands, key);
-        return;
-    }
-    if state.chat.topic_modal.visible {
-        handle_chat_topic_modal_key(state, commands, key);
-        return;
-    }
-    if state.chat.info_modal.visible {
-        if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
-            state.chat.info_modal.hide();
-        }
-        return;
-    }
-
-    // Contacts screen modals
-    if state.contacts.petname_modal.visible {
-        handle_contacts_petname_modal_key(state, commands, key);
-        return;
-    }
-    if state.contacts.import_modal.visible {
-        handle_contacts_import_modal_key(state, commands, key);
-        return;
-    }
-    if state.contacts.create_modal.visible {
-        handle_contacts_create_modal_key(state, commands, key);
-        return;
-    }
-    if state.contacts.code_modal.visible {
-        if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
-            state.contacts.code_modal.hide();
-        }
-        return;
-    }
-    if state.contacts.guardian_setup_modal.visible {
-        handle_guardian_setup_modal_key(state, commands, key);
-        return;
-    }
-
-    // Invitations screen modals
-    if state.invitations.create_modal.visible {
-        handle_invitations_create_modal_key(state, commands, key);
-        return;
-    }
-    if state.invitations.import_modal.visible {
-        handle_invitations_import_modal_key(state, commands, key);
-        return;
-    }
-    if state.invitations.code_modal.visible {
-        if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
-            state.invitations.code_modal.hide();
-        }
-        return;
-    }
-
-    // Settings screen modals
-    if state.settings.nickname_modal.visible {
-        handle_settings_nickname_modal_key(state, commands, key);
-        return;
-    }
-    if state.settings.threshold_modal.visible {
-        handle_settings_threshold_modal_key(state, commands, key);
-        return;
-    }
-    if state.settings.add_device_modal.visible {
-        handle_settings_add_device_modal_key(state, commands, key);
-        return;
-    }
-    if state.settings.confirm_remove_modal.visible {
-        handle_settings_confirm_remove_modal_key(state, commands, key);
-    }
-}
-
-/// Handle block invite modal keys
-fn handle_block_invite_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.block.invite_modal_open = false;
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.block.invite_selection = navigate_list(
-                state.block.invite_selection,
-                state.block.invite_contact_count,
-                NavKey::Up,
-            );
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.block.invite_selection = navigate_list(
-                state.block.invite_selection,
-                state.block.invite_contact_count,
-                NavKey::Down,
-            );
-        }
-        KeyCode::Enter => {
-            let index = state.block.invite_selection;
-            commands.push(TuiCommand::Dispatch(DispatchCommand::InviteToBlock {
-                contact_id: format!("__index:{}", index), // Shell maps index to contact_id
-            }));
-            state.block.invite_modal_open = false;
-        }
-        _ => {}
-    }
-}
-
-/// Handle chat create channel modal keys
-fn handle_chat_create_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.chat.create_modal.hide();
-        }
-        KeyCode::Tab => {
-            // Toggle between name and topic fields
-            state.chat.create_modal.active_field = (state.chat.create_modal.active_field + 1) % 2;
-        }
-        KeyCode::Char(c) => {
-            if state.chat.create_modal.active_field == 0 {
-                state.chat.create_modal.name.push(c);
-            } else {
-                state.chat.create_modal.topic.push(c);
-            }
-        }
-        KeyCode::Backspace => {
-            if state.chat.create_modal.active_field == 0 {
-                state.chat.create_modal.name.pop();
-            } else {
-                state.chat.create_modal.topic.pop();
-            }
-        }
-        KeyCode::Enter => {
-            if state.chat.create_modal.can_submit() {
-                let name = state.chat.create_modal.name.clone();
-                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
-                    name,
-                }));
-                state.chat.create_modal.hide();
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Handle chat topic modal keys
-fn handle_chat_topic_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.chat.topic_modal.hide();
-        }
-        KeyCode::Char(c) => {
-            state.chat.topic_modal.value.push(c);
-        }
-        KeyCode::Backspace => {
-            state.chat.topic_modal.value.pop();
-        }
-        KeyCode::Enter => {
-            let channel_id = state.chat.topic_modal.channel_id.clone();
-            let topic = state.chat.topic_modal.value.clone();
-            commands.push(TuiCommand::Dispatch(DispatchCommand::SetChannelTopic {
-                channel_id,
-                topic,
-            }));
-            state.chat.topic_modal.hide();
-        }
-        _ => {}
-    }
-}
-
-/// Handle contacts petname modal keys
-fn handle_contacts_petname_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.contacts.petname_modal.hide();
-        }
-        KeyCode::Char(c) => {
-            state.contacts.petname_modal.value.push(c);
-        }
-        KeyCode::Backspace => {
-            state.contacts.petname_modal.value.pop();
-        }
-        KeyCode::Enter => {
-            if state.contacts.petname_modal.can_submit() {
-                let contact_id = state.contacts.petname_modal.contact_id.clone();
-                let petname = state.contacts.petname_modal.value.clone();
-                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdatePetname {
-                    contact_id,
-                    petname,
-                }));
-                state.contacts.petname_modal.hide();
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Handle contacts import modal keys (accept invitation code)
-fn handle_contacts_import_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    // Check for demo mode shortcuts (Ctrl+a for Alice, Ctrl+l for Carol)
-    if key.modifiers.ctrl() {
-        match key.code {
-            KeyCode::Char('a') => {
-                if !state.contacts.demo_alice_code.is_empty() {
-                    state.contacts.import_modal.code = state.contacts.demo_alice_code.clone();
-                    state.contacts.import_modal.error = None;
-                }
-                return;
-            }
-            KeyCode::Char('l') => {
-                if !state.contacts.demo_carol_code.is_empty() {
-                    state.contacts.import_modal.code = state.contacts.demo_carol_code.clone();
-                    state.contacts.import_modal.error = None;
-                }
-                return;
-            }
-            _ => {}
-        }
-    }
-
-    match key.code {
-        KeyCode::Esc => {
-            state.contacts.import_modal.hide();
-        }
-        KeyCode::Char(c) => {
-            state.contacts.import_modal.code.push(c);
-        }
-        KeyCode::Backspace => {
-            state.contacts.import_modal.code.pop();
-        }
-        KeyCode::Enter => {
-            if state.contacts.import_modal.can_submit() {
-                let code = state.contacts.import_modal.code.clone();
-                commands.push(TuiCommand::Dispatch(DispatchCommand::ImportInvitation {
-                    code,
-                }));
-                state.contacts.import_modal.hide();
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Handle contacts create invitation modal keys (send invitation)
-fn handle_contacts_create_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    // Invitation types: guardian, friend, contact (3 options)
-    const INVITATION_TYPE_COUNT: usize = 3;
-
-    match key.code {
-        KeyCode::Esc => {
-            state.contacts.create_modal.hide();
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            if state.contacts.create_modal.step == 0 {
-                state.contacts.create_modal.type_index = navigate_list(
-                    state.contacts.create_modal.type_index,
-                    INVITATION_TYPE_COUNT,
-                    NavKey::Up,
-                );
-            }
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if state.contacts.create_modal.step == 0 {
-                state.contacts.create_modal.type_index = navigate_list(
-                    state.contacts.create_modal.type_index,
-                    INVITATION_TYPE_COUNT,
-                    NavKey::Down,
-                );
-            }
-        }
-        KeyCode::Tab => {
-            state.contacts.create_modal.next_step();
-        }
-        KeyCode::BackTab => {
-            state.contacts.create_modal.prev_step();
-        }
-        KeyCode::Char(c) => {
-            if state.contacts.create_modal.step == 1 {
-                state.contacts.create_modal.message.push(c);
-            }
-        }
-        KeyCode::Backspace => {
-            if state.contacts.create_modal.step == 1 {
-                state.contacts.create_modal.message.pop();
-            }
-        }
-        KeyCode::Enter => {
-            // Create invitation with selected type
-            let type_name = match state.contacts.create_modal.type_index {
-                0 => "guardian",
-                1 => "friend",
-                _ => "contact",
-            };
-            let message = if state.contacts.create_modal.message.is_empty() {
-                None
-            } else {
-                Some(state.contacts.create_modal.message.clone())
-            };
-            commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
-                invitation_type: type_name.to_string(),
-                message,
-            }));
-            state.contacts.create_modal.hide();
-        }
-        _ => {}
-    }
-}
-
-/// Handle guardian setup modal keys (multi-step wizard)
-fn handle_guardian_setup_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    let modal = &mut state.contacts.guardian_setup_modal;
-
-    match modal.step {
-        GuardianSetupStep::SelectContacts => {
-            match key.code {
-                KeyCode::Esc => {
-                    modal.hide();
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if modal.focused_index > 0 {
-                        modal.focused_index -= 1;
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if modal.focused_index + 1 < modal.contacts.len() {
-                        modal.focused_index += 1;
-                    }
-                }
-                KeyCode::Char(' ') => {
-                    // Toggle selection
-                    modal.toggle_selection();
-                }
-                KeyCode::Tab | KeyCode::Enter => {
-                    // Proceed to threshold step if enough guardians selected
-                    if modal.can_proceed_to_threshold() {
-                        modal.step = GuardianSetupStep::ChooseThreshold;
-                        // Ensure threshold is valid
-                        let n = modal.threshold_n();
-                        if modal.threshold_k > n {
-                            modal.threshold_k = n;
-                        }
-                        if modal.threshold_k < 1 && n > 0 {
-                            modal.threshold_k = 1;
-                        }
-                    } else {
-                        commands.push(TuiCommand::ShowToast {
-                            message: "Select at least 2 contacts to become guardians".to_string(),
-                            level: ToastLevel::Warning,
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-        GuardianSetupStep::ChooseThreshold => {
-            match key.code {
-                KeyCode::Esc | KeyCode::BackTab => {
-                    // Go back to contact selection
-                    modal.step = GuardianSetupStep::SelectContacts;
-                }
-                KeyCode::Left | KeyCode::Char('h') => {
-                    modal.decrement_k();
-                }
-                KeyCode::Right | KeyCode::Char('l') => {
-                    modal.increment_k();
-                }
-                KeyCode::Enter => {
-                    // Start the ceremony
-                    if modal.can_start_ceremony() {
-                        let contact_ids = modal.selected_contact_ids();
-                        let threshold_k = modal.threshold_k;
-                        commands.push(TuiCommand::Dispatch(
-                            DispatchCommand::StartGuardianCeremony {
-                                contact_ids,
-                                threshold_k,
-                            },
-                        ));
-                        // Note: The runtime will call modal.start_ceremony() with the actual ceremony_id
-                    }
-                }
-                _ => {}
-            }
-        }
-        GuardianSetupStep::CeremonyInProgress => {
-            match key.code {
-                KeyCode::Esc => {
-                    // Cancel the ceremony
-                    commands.push(TuiCommand::Dispatch(
-                        DispatchCommand::CancelGuardianCeremony,
-                    ));
-                    modal.fail_ceremony("Ceremony canceled by user");
-                }
-                _ => {
-                    // Other keys do nothing during ceremony - just wait for responses
-                }
-            }
-        }
-    }
-}
-
-/// Handle invitations create modal keys
-fn handle_invitations_create_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    // Invitation types: guardian, friend, contact (3 options)
-    const INVITATION_TYPE_COUNT: usize = 3;
-
-    match key.code {
-        KeyCode::Esc => {
-            state.invitations.create_modal.hide();
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            if state.invitations.create_modal.step == 0 {
-                state.invitations.create_modal.type_index = navigate_list(
-                    state.invitations.create_modal.type_index,
-                    INVITATION_TYPE_COUNT,
-                    NavKey::Up,
-                );
-            }
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if state.invitations.create_modal.step == 0 {
-                state.invitations.create_modal.type_index = navigate_list(
-                    state.invitations.create_modal.type_index,
-                    INVITATION_TYPE_COUNT,
-                    NavKey::Down,
-                );
-            }
-        }
-        KeyCode::Tab => {
-            state.invitations.create_modal.next_step();
-        }
-        KeyCode::BackTab => {
-            state.invitations.create_modal.prev_step();
-        }
-        KeyCode::Char(c) => {
-            if state.invitations.create_modal.step == 1 {
-                state.invitations.create_modal.message.push(c);
-            }
-        }
-        KeyCode::Backspace => {
-            if state.invitations.create_modal.step == 1 {
-                state.invitations.create_modal.message.pop();
-            }
-        }
-        KeyCode::Enter => {
-            // Create invitation with selected type
-            let type_name = match state.invitations.create_modal.type_index {
-                0 => "guardian",
-                1 => "friend",
-                _ => "contact",
-            };
-            let message = if state.invitations.create_modal.message.is_empty() {
-                None
-            } else {
-                Some(state.invitations.create_modal.message.clone())
-            };
-            commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
-                invitation_type: type_name.to_string(),
-                message,
-            }));
-            state.invitations.create_modal.hide();
-        }
-        _ => {}
-    }
-}
-
-/// Handle invitations import modal keys
-fn handle_invitations_import_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    // Check for demo mode shortcuts (Ctrl+a for Alice, Ctrl+l for Carol)
-    if key.modifiers.ctrl() {
-        match key.code {
-            KeyCode::Char('a') => {
-                if !state.invitations.demo_alice_code.is_empty() {
-                    state.invitations.import_modal.code = state.invitations.demo_alice_code.clone();
-                    state.invitations.import_modal.error = None;
-                }
-                return;
-            }
-            KeyCode::Char('l') => {
-                if !state.invitations.demo_carol_code.is_empty() {
-                    state.invitations.import_modal.code = state.invitations.demo_carol_code.clone();
-                    state.invitations.import_modal.error = None;
-                }
-                return;
-            }
-            _ => {}
-        }
-    }
-
-    match key.code {
-        KeyCode::Esc => {
-            state.invitations.import_modal.hide();
-        }
-        KeyCode::Char(c) => {
-            state.invitations.import_modal.code.push(c);
-        }
-        KeyCode::Backspace => {
-            state.invitations.import_modal.code.pop();
-        }
-        KeyCode::Enter => {
-            if state.invitations.import_modal.can_submit() {
-                let code = state.invitations.import_modal.code.clone();
-                commands.push(TuiCommand::Dispatch(DispatchCommand::ImportInvitation {
-                    code,
-                }));
-                state.invitations.import_modal.hide();
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Handle settings nickname modal keys
-fn handle_settings_nickname_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.settings.nickname_modal.hide();
-        }
-        KeyCode::Char(c) => {
-            state.settings.nickname_modal.value.push(c);
-        }
-        KeyCode::Backspace => {
-            state.settings.nickname_modal.value.pop();
-        }
-        KeyCode::Enter => {
-            if state.settings.nickname_modal.can_submit() {
-                let nickname = state.settings.nickname_modal.value.clone();
-                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateNickname {
-                    nickname,
-                }));
-                state.settings.nickname_modal.hide();
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Handle settings threshold modal keys
-fn handle_settings_threshold_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.settings.threshold_modal.hide();
-        }
-        KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
-            // Toggle between k and n fields
-            state.settings.threshold_modal.active_field =
-                (state.settings.threshold_modal.active_field + 1) % 2;
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            if state.settings.threshold_modal.active_field == 0 {
-                state.settings.threshold_modal.increment_k();
-            } else {
-                state.settings.threshold_modal.increment_n();
-            }
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if state.settings.threshold_modal.active_field == 0 {
-                state.settings.threshold_modal.decrement_k();
-            } else {
-                state.settings.threshold_modal.decrement_n();
-            }
-        }
-        KeyCode::Enter => {
-            if state.settings.threshold_modal.can_submit() {
-                let k = state.settings.threshold_modal.k;
-                let n = state.settings.threshold_modal.n;
-                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateThreshold {
-                    k,
-                    n,
-                }));
-                state.settings.threshold_modal.hide();
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Handle settings add device modal keys
-fn handle_settings_add_device_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.settings.add_device_modal.hide();
-        }
-        KeyCode::Char(c) => {
-            state.settings.add_device_modal.name.push(c);
-        }
-        KeyCode::Backspace => {
-            state.settings.add_device_modal.name.pop();
-        }
-        KeyCode::Enter => {
-            if state.settings.add_device_modal.can_submit() {
-                let name = state.settings.add_device_modal.name.clone();
-                commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice { name }));
-                state.settings.add_device_modal.hide();
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Handle settings confirm remove modal keys
-fn handle_settings_confirm_remove_modal_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.settings.confirm_remove_modal.hide();
-        }
-        KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
-            state.settings.confirm_remove_modal.toggle_focus();
-        }
-        KeyCode::Enter => {
-            if state.settings.confirm_remove_modal.confirm_focused {
-                let device_id = state.settings.confirm_remove_modal.device_id.clone();
-                commands.push(TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
-                    device_id,
-                }));
-            }
-            state.settings.confirm_remove_modal.hide();
-        }
-        _ => {}
+    // Handle queued modal key events
+    if let Some(queued_modal) = state.modal_queue.current().cloned() {
+        handle_queued_modal_key(state, commands, key, queued_modal);
     }
 }
 
@@ -2348,50 +2180,935 @@ fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, 
     }
 }
 
-/// Handle account setup modal keys
-fn handle_account_setup_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
-    let account_state = &mut state.modal.account_setup;
-
+/// Handle account setup modal keys (queue-based)
+fn handle_account_setup_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    current_state: AccountSetupModalState,
+) {
     // If we're in success state, Enter dismisses
-    if account_state.success {
+    if current_state.success {
         if key.code == KeyCode::Enter {
-            state.modal.close();
+            state.modal_queue.dismiss();
         }
         return;
     }
 
     // If we're in error state, Enter resets to input
-    if account_state.error.is_some() {
+    if current_state.error.is_some() {
         if key.code == KeyCode::Enter {
-            account_state.reset_to_input();
+            // Reset to input state
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::AccountSetup(ref mut s) = modal {
+                    s.reset_to_input();
+                }
+            });
         }
         return;
     }
 
     // If we're creating, don't process input
-    if account_state.creating {
+    if current_state.creating {
         return;
     }
 
     // Normal input handling
     match key.code {
         KeyCode::Char(c) => {
-            account_state.display_name.push(c);
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::AccountSetup(ref mut s) = modal {
+                    s.display_name.push(c);
+                }
+            });
         }
         KeyCode::Backspace => {
-            account_state.display_name.pop();
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::AccountSetup(ref mut s) = modal {
+                    s.display_name.pop();
+                }
+            });
         }
         KeyCode::Enter => {
-            if account_state.can_submit() {
-                let name = account_state.display_name.clone();
-                account_state.start_creating();
-                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateAccount {
-                    name,
-                }));
+            if current_state.can_submit() {
+                let name = current_state.display_name.clone();
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::AccountSetup(ref mut s) = modal {
+                        s.start_creating();
+                    }
+                });
+                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }));
             }
         }
         KeyCode::Esc => {
-            state.modal.close();
+            state.modal_queue.dismiss();
+        }
+        _ => {}
+    }
+}
+
+/// Handle queue-based modal key events (unified dispatcher)
+///
+/// This routes key events to the appropriate handler based on the QueuedModal variant.
+/// All new modal handlers should use this queue-based system.
+fn handle_queued_modal_key(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal: QueuedModal,
+) {
+    // First, check for toast dismissal on Esc (toasts have priority)
+    if key.code == KeyCode::Esc {
+        if let Some(toast_id) = state.toast_queue.current().map(|t| t.id.clone()) {
+            state.toast_queue.dismiss();
+            commands.push(TuiCommand::DismissToast { id: toast_id });
+            return;
+        }
+    }
+
+    // Route to specific handlers based on modal type
+    match modal {
+        QueuedModal::AccountSetup(modal_state) => {
+            handle_account_setup_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::Help { .. } => {
+            handle_help_modal_key_queue(state, key);
+        }
+        QueuedModal::Confirm { on_confirm, .. } => {
+            handle_confirm_modal_key_queue(state, commands, key, on_confirm);
+        }
+        QueuedModal::GuardianSelect(modal_state) => {
+            handle_guardian_select_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::ContactSelect(modal_state) => {
+            handle_contact_select_key_queue(state, commands, key, modal_state);
+        }
+        // Block screen modals
+        QueuedModal::BlockInvite(modal_state) => {
+            handle_block_invite_key_queue(state, commands, key, modal_state);
+        }
+        // Chat screen modals
+        QueuedModal::ChatCreate(modal_state) => {
+            handle_chat_create_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::ChatTopic(modal_state) => {
+            handle_chat_topic_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::ChatInfo(_) => {
+            // Info modal is read-only - just Esc to dismiss
+            if key.code == KeyCode::Esc {
+                state.modal_queue.dismiss();
+            }
+        }
+        // Contacts screen modals
+        QueuedModal::ContactsPetname(modal_state) => {
+            handle_petname_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::ContactsImport(modal_state) => {
+            handle_import_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
+        }
+        QueuedModal::ContactsCreate(modal_state) => {
+            handle_create_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
+        }
+        QueuedModal::ContactsCode(_) => {
+            // Code display modal is read-only - just Esc to dismiss
+            if key.code == KeyCode::Esc {
+                state.modal_queue.dismiss();
+            }
+        }
+        QueuedModal::GuardianSetup(modal_state) => {
+            handle_guardian_setup_key_queue(state, commands, key, modal_state);
+        }
+        // Invitations screen modals (invitations are under Contacts screen)
+        QueuedModal::InvitationsCreate(modal_state) => {
+            handle_create_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
+        }
+        QueuedModal::InvitationsImport(modal_state) => {
+            handle_import_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
+        }
+        QueuedModal::InvitationsCode(_) => {
+            // Code display modal is read-only - just Esc to dismiss
+            if key.code == KeyCode::Esc {
+                state.modal_queue.dismiss();
+            }
+        }
+        // Settings screen modals
+        QueuedModal::SettingsNickname(modal_state) => {
+            handle_settings_nickname_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::SettingsThreshold(modal_state) => {
+            handle_settings_threshold_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::SettingsAddDevice(modal_state) => {
+            handle_settings_add_device_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::SettingsRemoveDevice(modal_state) => {
+            handle_settings_remove_device_key_queue(state, commands, key, modal_state);
+        }
+    }
+}
+
+/// Handle help modal keys (queue-based)
+fn handle_help_modal_key_queue(state: &mut TuiState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.help.scroll = navigate_list(state.help.scroll, state.help.scroll_max, NavKey::Up);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.help.scroll =
+                navigate_list(state.help.scroll, state.help.scroll_max, NavKey::Down);
+        }
+        _ => {}
+    }
+}
+
+/// Handle confirm modal keys (queue-based)
+fn handle_confirm_modal_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    on_confirm: Option<ConfirmAction>,
+) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+            // Execute confirm action if provided
+            if let Some(action) = on_confirm {
+                match action {
+                    ConfirmAction::DeleteChannel { channel_id } => {
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::DeleteChannel {
+                            channel_id,
+                        }));
+                    }
+                    ConfirmAction::RemoveContact { contact_id } => {
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::RemoveContact {
+                            contact_id,
+                        }));
+                    }
+                    ConfirmAction::RevokeInvitation { invitation_id } => {
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::RevokeInvitation {
+                            invitation_id,
+                        }));
+                    }
+                    ConfirmAction::RemoveDevice { device_id } => {
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
+                            device_id,
+                        }));
+                    }
+                }
+            }
+            state.modal_queue.dismiss();
+        }
+        _ => {}
+    }
+}
+
+/// Handle guardian select modal keys (queue-based)
+fn handle_guardian_select_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: ContactSelectModalState,
+) {
+    let contact_count = modal_state.contacts.len();
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::GuardianSelect(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
+                }
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::GuardianSelect(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
+                }
+            });
+        }
+        KeyCode::Enter => {
+            if contact_count > 0 {
+                commands.push(TuiCommand::Dispatch(
+                    DispatchCommand::SelectGuardianByIndex {
+                        index: modal_state.selected_index,
+                    },
+                ));
+            }
+            // Note: Don't dismiss here - let command handler do it
+        }
+        _ => {}
+    }
+}
+
+/// Handle contact select modal keys (queue-based)
+fn handle_contact_select_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: ContactSelectModalState,
+) {
+    let contact_count = modal_state.contacts.len();
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ContactSelect(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
+                }
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ContactSelect(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
+                }
+            });
+        }
+        KeyCode::Enter => {
+            if contact_count > 0 {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::SelectContactByIndex {
+                    index: modal_state.selected_index,
+                }));
+            }
+            // Note: Don't dismiss here - let command handler do it
+        }
+        _ => {}
+    }
+}
+
+// ============================================================================
+// Queue-Based Modal Handlers (New System)
+// ============================================================================
+
+/// Handle block invite modal keys (queue-based)
+///
+/// Note: Navigation uses `state.block.invite_contact_count` and `state.block.invite_selection`
+/// because actual contact data is populated by the shell at render time. The modal state
+/// just tracks the title and selection mode.
+fn handle_block_invite_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    _modal_state: ContactSelectModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            // Use block.invite_selection and block.invite_contact_count (like legacy handler)
+            state.block.invite_selection = navigate_list(
+                state.block.invite_selection,
+                state.block.invite_contact_count,
+                NavKey::Up,
+            );
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            // Use block.invite_selection and block.invite_contact_count (like legacy handler)
+            state.block.invite_selection = navigate_list(
+                state.block.invite_selection,
+                state.block.invite_contact_count,
+                NavKey::Down,
+            );
+        }
+        KeyCode::Enter => {
+            // Shell maps index to contact_id - no need to check for contacts here
+            let index = state.block.invite_selection;
+            commands.push(TuiCommand::Dispatch(DispatchCommand::InviteToBlock {
+                contact_id: format!("__index:{}", index),
+            }));
+            state.modal_queue.dismiss();
+        }
+        _ => {}
+    }
+}
+
+/// Handle chat create channel modal keys (queue-based)
+fn handle_chat_create_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: CreateChannelModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Tab => {
+            // Toggle between name and topic fields
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ChatCreate(ref mut s) = modal {
+                    s.active_field = (s.active_field + 1) % 2;
+                }
+            });
+        }
+        KeyCode::Enter => {
+            if modal_state.can_submit() {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
+                    name: modal_state.name.clone(),
+                }));
+                state.modal_queue.dismiss();
+            }
+        }
+        KeyCode::Char(c) => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ChatCreate(ref mut s) = modal {
+                    if s.active_field == 0 {
+                        s.name.push(c);
+                    } else {
+                        s.topic.push(c);
+                    }
+                }
+            });
+        }
+        KeyCode::Backspace => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ChatCreate(ref mut s) = modal {
+                    if s.active_field == 0 {
+                        s.name.pop();
+                    } else {
+                        s.topic.pop();
+                    }
+                }
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Handle chat topic edit modal keys (queue-based)
+fn handle_chat_topic_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: TopicModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Enter => {
+            commands.push(TuiCommand::Dispatch(DispatchCommand::SetChannelTopic {
+                channel_id: modal_state.channel_id.clone(),
+                topic: modal_state.value.clone(),
+            }));
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Char(c) => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ChatTopic(ref mut s) = modal {
+                    s.value.push(c);
+                }
+            });
+        }
+        KeyCode::Backspace => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ChatTopic(ref mut s) = modal {
+                    s.value.pop();
+                }
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Handle petname edit modal keys (queue-based)
+fn handle_petname_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: PetnameModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Enter => {
+            if modal_state.can_submit() {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdatePetname {
+                    contact_id: modal_state.contact_id.clone(),
+                    petname: modal_state.value.clone(),
+                }));
+                state.modal_queue.dismiss();
+            }
+        }
+        KeyCode::Char(c) => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ContactsPetname(ref mut s) = modal {
+                    s.value.push(c);
+                }
+            });
+        }
+        KeyCode::Backspace => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ContactsPetname(ref mut s) = modal {
+                    s.value.pop();
+                }
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Handle import invitation modal keys (queue-based)
+fn handle_import_invitation_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: ImportInvitationModalState,
+    _source_screen: Screen,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Enter => {
+            if modal_state.can_submit() {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::ImportInvitation {
+                    code: modal_state.code.clone(),
+                }));
+                state.modal_queue.dismiss();
+            }
+        }
+        KeyCode::Char(c) => {
+            state.modal_queue.update_active(|modal| {
+                match modal {
+                    QueuedModal::ContactsImport(ref mut s) => s.code.push(c),
+                    QueuedModal::InvitationsImport(ref mut s) => s.code.push(c),
+                    _ => {}
+                }
+            });
+        }
+        KeyCode::Backspace => {
+            state.modal_queue.update_active(|modal| {
+                match modal {
+                    QueuedModal::ContactsImport(ref mut s) => { s.code.pop(); }
+                    QueuedModal::InvitationsImport(ref mut s) => { s.code.pop(); }
+                    _ => {}
+                }
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Handle create invitation modal keys (queue-based)
+fn handle_create_invitation_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: CreateInvitationModalState,
+    _source_screen: Screen,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Tab => {
+            // Navigate to next step
+            state.modal_queue.update_active(|modal| {
+                match modal {
+                    QueuedModal::ContactsCreate(ref mut s) => s.next_step(),
+                    QueuedModal::InvitationsCreate(ref mut s) => s.next_step(),
+                    _ => {}
+                }
+            });
+        }
+        KeyCode::BackTab => {
+            // Navigate to previous step
+            state.modal_queue.update_active(|modal| {
+                match modal {
+                    QueuedModal::ContactsCreate(ref mut s) => s.prev_step(),
+                    QueuedModal::InvitationsCreate(ref mut s) => s.prev_step(),
+                    _ => {}
+                }
+            });
+        }
+        KeyCode::Enter => {
+            // On final step, submit
+            if modal_state.step == 2 {
+                // Convert type_index to invitation type string
+                let invitation_type = match modal_state.type_index {
+                    0 => "personal".to_string(),
+                    1 => "group".to_string(),
+                    2 => "guardian".to_string(),
+                    _ => "personal".to_string(),
+                };
+                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
+                    invitation_type,
+                    message: if modal_state.message.is_empty() {
+                        None
+                    } else {
+                        Some(modal_state.message.clone())
+                    },
+                }));
+                state.modal_queue.dismiss();
+            } else {
+                // Advance to next step
+                state.modal_queue.update_active(|modal| {
+                    match modal {
+                        QueuedModal::ContactsCreate(ref mut s) => s.next_step(),
+                        QueuedModal::InvitationsCreate(ref mut s) => s.next_step(),
+                        _ => {}
+                    }
+                });
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            // In step 0, cycle type selection
+            if modal_state.step == 0 {
+                state.modal_queue.update_active(|modal| {
+                    match modal {
+                        QueuedModal::ContactsCreate(ref mut s) => {
+                            s.type_index = s.type_index.saturating_sub(1);
+                        }
+                        QueuedModal::InvitationsCreate(ref mut s) => {
+                            s.type_index = s.type_index.saturating_sub(1);
+                        }
+                        _ => {}
+                    }
+                });
+            } else if modal_state.step == 2 {
+                // In step 2, increase TTL
+                state.modal_queue.update_active(|modal| {
+                    match modal {
+                        QueuedModal::ContactsCreate(ref mut s) => {
+                            s.ttl_hours = s.ttl_hours.saturating_add(24);
+                        }
+                        QueuedModal::InvitationsCreate(ref mut s) => {
+                            s.ttl_hours = s.ttl_hours.saturating_add(24);
+                        }
+                        _ => {}
+                    }
+                });
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            // In step 0, cycle type selection
+            if modal_state.step == 0 {
+                state.modal_queue.update_active(|modal| {
+                    match modal {
+                        QueuedModal::ContactsCreate(ref mut s) => {
+                            s.type_index = (s.type_index + 1).min(2); // 3 types max
+                        }
+                        QueuedModal::InvitationsCreate(ref mut s) => {
+                            s.type_index = (s.type_index + 1).min(2);
+                        }
+                        _ => {}
+                    }
+                });
+            } else if modal_state.step == 2 {
+                // In step 2, decrease TTL
+                state.modal_queue.update_active(|modal| {
+                    match modal {
+                        QueuedModal::ContactsCreate(ref mut s) => {
+                            s.ttl_hours = s.ttl_hours.saturating_sub(24).max(1);
+                        }
+                        QueuedModal::InvitationsCreate(ref mut s) => {
+                            s.ttl_hours = s.ttl_hours.saturating_sub(24).max(1);
+                        }
+                        _ => {}
+                    }
+                });
+            }
+        }
+        KeyCode::Char(c) => {
+            // In step 1, type message
+            if modal_state.step == 1 {
+                state.modal_queue.update_active(|modal| {
+                    match modal {
+                        QueuedModal::ContactsCreate(ref mut s) => s.message.push(c),
+                        QueuedModal::InvitationsCreate(ref mut s) => s.message.push(c),
+                        _ => {}
+                    }
+                });
+            }
+        }
+        KeyCode::Backspace => {
+            if modal_state.step == 1 {
+                state.modal_queue.update_active(|modal| {
+                    match modal {
+                        QueuedModal::ContactsCreate(ref mut s) => { s.message.pop(); }
+                        QueuedModal::InvitationsCreate(ref mut s) => { s.message.pop(); }
+                        _ => {}
+                    }
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Handle guardian setup modal keys (queue-based)
+fn handle_guardian_setup_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: GuardianSetupModalState,
+) {
+    match modal_state.step {
+        GuardianSetupStep::SelectContacts => {
+            match key.code {
+                KeyCode::Esc => {
+                    state.modal_queue.dismiss();
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                            if s.focused_index > 0 {
+                                s.focused_index -= 1;
+                            }
+                        }
+                    });
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                            if s.focused_index + 1 < s.contacts.len() {
+                                s.focused_index += 1;
+                            }
+                        }
+                    });
+                }
+                KeyCode::Char(' ') => {
+                    // Toggle selection
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                            s.toggle_selection();
+                        }
+                    });
+                }
+                KeyCode::Enter => {
+                    if modal_state.can_proceed_to_threshold() {
+                        state.modal_queue.update_active(|modal| {
+                            if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                                s.step = GuardianSetupStep::ChooseThreshold;
+                            }
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        GuardianSetupStep::ChooseThreshold => {
+            match key.code {
+                KeyCode::Esc => {
+                    // Go back to contact selection
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                            s.step = GuardianSetupStep::SelectContacts;
+                        }
+                    });
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                            s.increment_k();
+                        }
+                    });
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                            s.decrement_k();
+                        }
+                    });
+                }
+                KeyCode::Enter => {
+                    if modal_state.can_start_ceremony() {
+                        // Dispatch command to start guardian setup ceremony
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::StartGuardianCeremony {
+                            contact_ids: modal_state.selected_contact_ids(),
+                            threshold_k: modal_state.threshold_k,
+                        }));
+                        state.modal_queue.dismiss();
+                    }
+                }
+                _ => {}
+            }
+        }
+        GuardianSetupStep::CeremonyInProgress => {
+            // During ceremony, only allow escape to cancel
+            if key.code == KeyCode::Esc {
+                state.modal_queue.dismiss();
+            }
+        }
+    }
+}
+
+/// Handle settings nickname modal keys (queue-based)
+fn handle_settings_nickname_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: NicknameModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Enter => {
+            if modal_state.can_submit() {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateNickname {
+                    nickname: modal_state.value.clone(),
+                }));
+                state.modal_queue.dismiss();
+            }
+        }
+        KeyCode::Char(c) => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsNickname(ref mut s) = modal {
+                    s.value.push(c);
+                }
+            });
+        }
+        KeyCode::Backspace => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsNickname(ref mut s) = modal {
+                    s.value.pop();
+                }
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Handle settings threshold modal keys (queue-based)
+fn handle_settings_threshold_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: ThresholdModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Tab => {
+            // Toggle between k and n fields
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsThreshold(ref mut s) = modal {
+                    s.active_field = (s.active_field + 1) % 2;
+                }
+            });
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsThreshold(ref mut s) = modal {
+                    if s.active_field == 0 {
+                        s.increment_k();
+                    } else {
+                        s.increment_n();
+                    }
+                }
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsThreshold(ref mut s) = modal {
+                    if s.active_field == 0 {
+                        s.decrement_k();
+                    } else {
+                        s.decrement_n();
+                    }
+                }
+            });
+        }
+        KeyCode::Enter => {
+            if modal_state.can_submit() {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateThreshold {
+                    k: modal_state.k,
+                    n: modal_state.n,
+                }));
+                state.modal_queue.dismiss();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Handle settings add device modal keys (queue-based)
+fn handle_settings_add_device_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: AddDeviceModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Enter => {
+            if modal_state.can_submit() {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
+                    name: modal_state.name.clone(),
+                }));
+                state.modal_queue.dismiss();
+            }
+        }
+        KeyCode::Char(c) => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsAddDevice(ref mut s) = modal {
+                    s.name.push(c);
+                }
+            });
+        }
+        KeyCode::Backspace => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsAddDevice(ref mut s) = modal {
+                    s.name.pop();
+                }
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Handle settings remove device modal keys (queue-based)
+fn handle_settings_remove_device_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: ConfirmRemoveModalState,
+) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsRemoveDevice(ref mut s) = modal {
+                    s.toggle_focus();
+                }
+            });
+        }
+        KeyCode::Enter => {
+            if modal_state.confirm_focused {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
+                    device_id: modal_state.device_id.clone(),
+                }));
+            }
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            commands.push(TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
+                device_id: modal_state.device_id.clone(),
+            }));
+            state.modal_queue.dismiss();
         }
         _ => {}
     }
@@ -2402,38 +3119,7 @@ fn handle_account_setup_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>
 // ============================================================================
 
 fn handle_block_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
-    // Handle invite modal if open
-    if state.block.invite_modal_open {
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                state.block.invite_selection = navigate_list(
-                    state.block.invite_selection,
-                    state.block.invite_contact_count,
-                    NavKey::Up,
-                );
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                state.block.invite_selection = navigate_list(
-                    state.block.invite_selection,
-                    state.block.invite_contact_count,
-                    NavKey::Down,
-                );
-            }
-            KeyCode::Enter => {
-                // Confirm invite
-                commands.push(TuiCommand::Dispatch(DispatchCommand::InviteToBlock {
-                    contact_id: String::new(), // Will be filled by runtime based on invite_selection
-                }));
-                state.block.invite_modal_open = false;
-            }
-            KeyCode::Esc => {
-                state.block.invite_modal_open = false;
-            }
-            _ => {}
-        }
-        return;
-    }
-
+    // Block invite modal is now handled via queue system
     match key.code {
         KeyCode::Char('i') => {
             state.block.insert_mode = true;
@@ -2491,9 +3177,10 @@ fn handle_block_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: K
             BlockFocus::Input => {}
         },
         KeyCode::Char('v') => {
-            // Open invite modal
-            state.block.invite_modal_open = true;
-            state.block.invite_selection = 0;
+            // Open invite modal via queue (contacts populated by shell)
+            state.modal_queue.enqueue(QueuedModal::BlockInvite(
+                ContactSelectModalState::single("Invite to Block", Vec::new()),
+            ));
         }
         KeyCode::Char('g') => {
             // Grant steward to selected resident
@@ -2577,17 +3264,23 @@ fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: Ke
             _ => {}
         },
         KeyCode::Char('n') => {
-            // Open create channel modal (screen-specific modal)
-            state.chat.create_modal.show();
+            // Open create channel modal via queue
+            let mut modal_state = CreateChannelModalState::default();
+            modal_state.visible = true;
+            state.modal_queue.enqueue(QueuedModal::ChatCreate(modal_state));
         }
         KeyCode::Char('t') => {
-            // Open topic edit modal (screen-specific modal)
+            // Open topic edit modal via queue
             // Channel ID will be set based on currently selected channel
-            state.chat.topic_modal.show("", "");
+            let mut modal_state = TopicModalState::default();
+            modal_state.visible = true;
+            state.modal_queue.enqueue(QueuedModal::ChatTopic(modal_state));
         }
         KeyCode::Char('o') => {
-            // Open channel info modal (screen-specific modal)
-            state.chat.info_modal.show("", "", None);
+            // Open channel info modal via queue
+            let mut modal_state = ChannelInfoModalState::default();
+            modal_state.visible = true;
+            state.modal_queue.enqueue(QueuedModal::ChatInfo(modal_state));
         }
         KeyCode::Char('r') => {
             // Retry message (when focused on messages)
@@ -2618,17 +3311,17 @@ fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
             );
         }
         KeyCode::Char('e') => {
-            // Open petname edit modal (uses screen-specific modal)
-            state.contacts.petname_modal.visible = true;
+            // Open petname edit modal via queue
+            state.modal_queue.enqueue(QueuedModal::ContactsPetname(
+                PetnameModalState::default(),
+            ));
         }
         KeyCode::Char('g') => {
-            // Open guardian setup modal (if no pending ceremony)
-            // Note: The modal's show() method will be called by the runtime
-            // with the actual contacts list, after this command signals intent.
-            // For now, just mark the modal as visible - the runtime will populate it.
+            // Open guardian setup modal via queue (if no pending ceremony)
             if !state.contacts.guardian_setup_modal.has_pending_ceremony {
-                state.contacts.guardian_setup_modal.visible = true;
-                state.contacts.guardian_setup_modal.step = GuardianSetupStep::SelectContacts;
+                state.modal_queue.enqueue(QueuedModal::GuardianSetup(
+                    GuardianSetupModalState::default(),
+                ));
             } else {
                 commands.push(TuiCommand::ShowToast {
                     message: "A guardian ceremony is already in progress".to_string(),
@@ -2643,12 +3336,16 @@ fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
             }));
         }
         KeyCode::Char('i') => {
-            // Open import invitation modal (accept an invitation code)
-            state.contacts.import_modal.show();
+            // Open import invitation modal via queue (accept an invitation code)
+            state.modal_queue.enqueue(QueuedModal::ContactsImport(
+                ImportInvitationModalState::default(),
+            ));
         }
         KeyCode::Char('n') => {
-            // Open create invitation modal (send an invitation)
-            state.contacts.create_modal.show();
+            // Open create invitation modal via queue (send an invitation)
+            state.modal_queue.enqueue(QueuedModal::ContactsCreate(
+                CreateInvitationModalState::default(),
+            ));
         }
         KeyCode::Enter => {
             commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat {
@@ -2722,12 +3419,16 @@ fn handle_invitations_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, 
             }));
         }
         KeyCode::Char('n') => {
-            // Open create invitation modal (screen-specific)
-            state.invitations.create_modal.visible = true;
+            // Open create invitation modal via queue
+            state.modal_queue.enqueue(QueuedModal::InvitationsCreate(
+                CreateInvitationModalState::default(),
+            ));
         }
         KeyCode::Char('i') => {
-            // Open import modal (screen-specific)
-            state.invitations.import_modal.visible = true;
+            // Open import modal via queue
+            state.modal_queue.enqueue(QueuedModal::InvitationsImport(
+                ImportInvitationModalState::default(),
+            ));
         }
         KeyCode::Char('e') => {
             // Export invitation
@@ -2764,31 +3465,43 @@ fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
         }
         KeyCode::Char('e') => {
             if state.settings.section == SettingsSection::Profile {
-                // Open nickname edit modal (screen-specific modal)
-                state.settings.nickname_modal.visible = true;
+                // Open nickname edit modal via queue
+                state.modal_queue.enqueue(QueuedModal::SettingsNickname(
+                    NicknameModalState::default(),
+                ));
             }
         }
         KeyCode::Enter => {
             match state.settings.section {
                 SettingsSection::Profile => {
-                    // Open nickname edit modal (screen-specific modal)
-                    state.settings.nickname_modal.visible = true;
+                    // Open nickname edit modal via queue
+                    state.modal_queue.enqueue(QueuedModal::SettingsNickname(
+                        NicknameModalState::default(),
+                    ));
                 }
                 SettingsSection::Threshold => {
-                    state.settings.threshold_modal.visible = true;
+                    // Open threshold edit modal via queue
+                    state.modal_queue.enqueue(QueuedModal::SettingsThreshold(
+                        ThresholdModalState::default(),
+                    ));
                 }
                 _ => {}
             }
         }
         KeyCode::Char('t') => {
             if state.settings.section == SettingsSection::Threshold {
-                state.settings.threshold_modal.visible = true;
+                // Open threshold edit modal via queue
+                state.modal_queue.enqueue(QueuedModal::SettingsThreshold(
+                    ThresholdModalState::default(),
+                ));
             }
         }
         KeyCode::Char('a') => {
             if state.settings.section == SettingsSection::Devices {
-                // Open add device modal (screen-specific modal)
-                state.settings.add_device_modal.visible = true;
+                // Open add device modal via queue
+                state.modal_queue.enqueue(QueuedModal::SettingsAddDevice(
+                    AddDeviceModalState::default(),
+                ));
             }
         }
         _ => {}
@@ -2821,7 +3534,10 @@ fn handle_recovery_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
         }
         KeyCode::Char('a') => {
             if state.recovery.tab == RecoveryTab::Guardians {
-                state.modal = ModalState::new(ModalType::GuardianSelect);
+                // Show guardian select modal via queue (contacts will be filled by shell)
+                state.modal_queue.enqueue(QueuedModal::GuardianSelect(
+                    ContactSelectModalState::single("Select Guardian", Vec::new()),
+                ));
             }
         }
         KeyCode::Enter => {
@@ -2905,7 +3621,7 @@ mod tests {
         // Press '?' to open help
         let (new_state, _) = transition(&state, events::char('?'));
         assert!(new_state.has_modal());
-        assert_eq!(new_state.modal.modal_type, ModalType::Help);
+        assert_eq!(new_state.current_modal_type(), ModalType::Help);
 
         // Press Escape to close
         let (new_state, _) = transition(&new_state, events::escape());
@@ -2942,7 +3658,7 @@ mod tests {
 
         // Modal should be visible
         assert!(state.has_modal());
-        assert_eq!(state.modal.modal_type, ModalType::AccountSetup);
+        assert_eq!(state.current_modal_type(), ModalType::AccountSetup);
 
         // Type a name
         let (state, _) = transition(&state, events::char('A'));
@@ -2950,11 +3666,11 @@ mod tests {
         let (state, _) = transition(&state, events::char('i'));
         let (state, _) = transition(&state, events::char('c'));
         let (state, _) = transition(&state, events::char('e'));
-        assert_eq!(state.modal.account_setup.display_name, "Alice");
+        assert_eq!(state.account_setup_state().unwrap().display_name, "Alice");
 
         // Submit should dispatch CreateAccount and set creating flag
         let (state, commands) = transition(&state, events::enter());
-        assert!(state.modal.account_setup.creating);
+        assert!(state.account_setup_state().unwrap().creating);
         assert!(commands.iter().any(|c| matches!(
             c,
             TuiCommand::Dispatch(DispatchCommand::CreateAccount { name })
@@ -2965,13 +3681,13 @@ mod tests {
     #[test]
     fn test_account_setup_async_feedback() {
         let mut state = TuiState::with_account_setup();
-        state.modal.account_setup.display_name = "Alice".to_string();
-        state.modal.account_setup.creating = true;
+        state.account_setup_state_mut().unwrap().display_name = "Alice".to_string();
+        state.account_setup_state_mut().unwrap().creating = true;
 
         // Simulate success callback
         state.account_created();
-        assert!(state.modal.account_setup.success);
-        assert!(!state.modal.account_setup.creating);
+        assert!(state.account_setup_state().unwrap().success);
+        assert!(!state.account_setup_state().unwrap().creating);
 
         // Enter should close modal
         let (state, _) = transition(&state, events::enter());
@@ -2981,22 +3697,22 @@ mod tests {
     #[test]
     fn test_account_setup_error_recovery() {
         let mut state = TuiState::with_account_setup();
-        state.modal.account_setup.display_name = "Alice".to_string();
-        state.modal.account_setup.creating = true;
+        state.account_setup_state_mut().unwrap().display_name = "Alice".to_string();
+        state.account_setup_state_mut().unwrap().creating = true;
 
         // Simulate error callback
         state.account_creation_failed("Network error".to_string());
-        assert!(!state.modal.account_setup.creating);
+        assert!(!state.account_setup_state().unwrap().creating);
         assert_eq!(
-            state.modal.account_setup.error,
+            state.account_setup_state().unwrap().error,
             Some("Network error".to_string())
         );
 
         // Enter should reset to input state
         let (state, _) = transition(&state, events::enter());
-        assert!(state.modal.account_setup.error.is_none());
-        assert!(!state.modal.account_setup.success);
-        assert_eq!(state.modal.account_setup.display_name, "Alice"); // Name preserved
+        assert!(state.account_setup_state().unwrap().error.is_none());
+        assert!(!state.account_setup_state().unwrap().success);
+        assert_eq!(state.account_setup_state().unwrap().display_name, "Alice"); // Name preserved
     }
 
     #[test]
@@ -3011,10 +3727,10 @@ mod tests {
     #[test]
     fn test_account_setup_backspace() {
         let mut state = TuiState::with_account_setup();
-        state.modal.account_setup.display_name = "Alice".to_string();
+        state.account_setup_state_mut().unwrap().display_name = "Alice".to_string();
 
         // Backspace should remove character
         let (state, _) = transition(&state, events::backspace());
-        assert_eq!(state.modal.account_setup.display_name, "Alic");
+        assert_eq!(state.account_setup_state().unwrap().display_name, "Alic");
     }
 }

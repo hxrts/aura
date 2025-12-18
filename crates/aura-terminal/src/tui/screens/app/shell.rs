@@ -41,7 +41,9 @@ use crate::tui::props::{
     extract_invitations_view_props, extract_neighborhood_view_props, extract_recovery_view_props,
     extract_settings_view_props,
 };
-use crate::tui::state_machine::{transition, DispatchCommand, ModalType, TuiCommand, TuiState};
+use crate::tui::state_machine::{
+    transition, DispatchCommand, QueuedModal, TuiCommand, TuiState,
+};
 use crate::tui::updates::{ui_update_channel, UiUpdate, UiUpdateReceiver, UiUpdateSender};
 use std::sync::Mutex;
 
@@ -130,7 +132,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // =========================================================================
     // UI Update Channel - Single reactive channel for all async callback results
-    // =========================================================================
+    //
     // Callbacks in run_app_with_context send their results through this channel.
     // The update processor (use_future below) awaits on this channel and updates
     // State<T> values, which automatically trigger re-renders via iocraft's waker.
@@ -170,9 +172,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let help_modal_state = hooks.use_ref(HelpModalState::new);
     let help_modal_version = hooks.use_state(|| 0usize);
 
-    // Toast notifications state - State<T> automatically triggers re-renders on .set()
-    let toasts_state = hooks.use_state(|| Vec::<ToastMessage>::new());
-
     // Display name state - State<T> automatically triggers re-renders on .set()
     let display_name_state = hooks.use_state({
         let initial = props.display_name.clone();
@@ -197,10 +196,27 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     if let Some(rx_holder) = update_rx_holder {
         hooks.use_future({
             let mut display_name_state = display_name_state.clone();
-            let mut toasts_state = toasts_state.clone();
             let mut account_state = account_state.clone();
             let mut account_version = account_version.clone();
+            // Toast queue migration: use TuiState.toast_queue instead of toasts_state
+            let mut tui_state = tui_state.clone();
+            let mut tui_state_version = tui_state_version.clone();
             async move {
+                // Helper macro-like function to add a toast to the queue
+                // (Inline to avoid borrow checker issues with closures)
+                macro_rules! enqueue_toast {
+                    ($msg:expr, $level:expr) => {{
+                        let mut state = tui_state.write();
+                        let toast_id = state.next_toast_id;
+                        state.next_toast_id += 1;
+                        let toast =
+                            crate::tui::state_machine::QueuedToast::new(toast_id, $msg, $level);
+                        state.toast_queue.enqueue(toast);
+                        drop(state);
+                        tui_state_version.set(tui_state_version.get().wrapping_add(1));
+                    }};
+                }
+
                 // Take the receiver from the holder (only happens once)
                 #[allow(clippy::expect_used)]
                 // TUI initialization - panic is appropriate if channel setup failed
@@ -217,19 +233,31 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             display_name_state.set(name);
                         }
 
-                        // Toast notifications - State<T>.set() triggers re-render automatically
+                        // Toast notifications - now use queue system
                         UiUpdate::ToastAdded(toast) => {
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
+                            // Convert ToastMessage to QueuedToast and enqueue
+                            let level = match toast.level {
+                                ToastLevel::Info => crate::tui::state_machine::ToastLevel::Info,
+                                ToastLevel::Success => {
+                                    crate::tui::state_machine::ToastLevel::Success
+                                }
+                                ToastLevel::Warning => {
+                                    crate::tui::state_machine::ToastLevel::Warning
+                                }
+                                ToastLevel::Error | ToastLevel::Conflict => {
+                                    crate::tui::state_machine::ToastLevel::Error
+                                }
+                            };
+                            enqueue_toast!(toast.message, level);
                         }
-                        UiUpdate::ToastDismissed { toast_id } => {
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.retain(|t| t.id != toast_id);
-                            toasts_state.set(toasts);
+                        UiUpdate::ToastDismissed { toast_id: _ } => {
+                            // Dismiss from queue (FIFO, ignores ID)
+                            tui_state.write().toast_queue.dismiss();
+                            tui_state_version.set(tui_state_version.get().wrapping_add(1));
                         }
                         UiUpdate::ToastsCleared => {
-                            toasts_state.set(Vec::new());
+                            tui_state.write().toast_queue.clear();
+                            tui_state_version.set(tui_state_version.get().wrapping_add(1));
                         }
 
                         // Error handling - show in modal or as toast depending on operation
@@ -239,83 +267,55 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 account_state.write().set_error(&error);
                                 account_version.set(account_version.get().wrapping_add(1));
                             } else {
-                                // For other operations, show as toast
-                                use std::sync::atomic::{AtomicU64, Ordering};
-                                static TOAST_COUNTER: AtomicU64 = AtomicU64::new(0);
-                                let counter = TOAST_COUNTER.fetch_add(1, Ordering::Relaxed);
-                                let toast_id = format!("{}-error-{}", operation, counter);
-                                let toast = ToastMessage::error(
-                                    toast_id,
+                                // For other operations, show as toast via queue
+                                enqueue_toast!(
                                     format!("{} failed: {}", operation, error),
+                                    crate::tui::state_machine::ToastLevel::Error
                                 );
-                                let mut toasts = toasts_state.read().clone();
-                                toasts.push(toast);
-                                toasts_state.set(toasts);
                             }
                         }
 
-                        // Success notifications - show informational toasts
+                        // Success notifications - show informational toasts via queue
                         UiUpdate::MessageSent { channel, .. } => {
-                            let toast = ToastMessage::info(
-                                format!("msg-sent-{}", channel),
+                            enqueue_toast!(
                                 format!("Message sent to {}", channel),
+                                crate::tui::state_machine::ToastLevel::Info
                             );
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
                         }
 
-                        UiUpdate::InvitationAccepted { invitation_id } => {
-                            let toast = ToastMessage::success(
-                                format!("inv-accepted-{}", invitation_id),
+                        UiUpdate::InvitationAccepted { invitation_id: _ } => {
+                            enqueue_toast!(
                                 "Invitation accepted".to_string(),
+                                crate::tui::state_machine::ToastLevel::Success
                             );
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
                         }
 
-                        UiUpdate::InvitationDeclined { invitation_id } => {
-                            let toast = ToastMessage::info(
-                                format!("inv-declined-{}", invitation_id),
+                        UiUpdate::InvitationDeclined { invitation_id: _ } => {
+                            enqueue_toast!(
                                 "Invitation declined".to_string(),
+                                crate::tui::state_machine::ToastLevel::Info
                             );
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
                         }
 
-                        UiUpdate::InvitationCreated { invitation_code } => {
-                            let toast = ToastMessage::success(
-                                format!(
-                                    "inv-created-{}",
-                                    &invitation_code[..8.min(invitation_code.len())]
-                                ),
+                        UiUpdate::InvitationCreated { invitation_code: _ } => {
+                            enqueue_toast!(
                                 "Invitation created".to_string(),
+                                crate::tui::state_machine::ToastLevel::Success
                             );
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
                         }
 
                         UiUpdate::SyncCompleted => {
-                            let toast = ToastMessage::success(
-                                "sync-completed".to_string(),
+                            enqueue_toast!(
                                 "Sync completed".to_string(),
+                                crate::tui::state_machine::ToastLevel::Success
                             );
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
                         }
 
                         UiUpdate::SyncFailed { error } => {
-                            let toast = ToastMessage::error(
-                                "sync-failed".to_string(),
+                            enqueue_toast!(
                                 format!("Sync failed: {}", error),
+                                crate::tui::state_machine::ToastLevel::Error
                             );
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
                         }
 
                         UiUpdate::AccountCreated => {
@@ -326,13 +326,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
 
                         UiUpdate::RecoveryStarted => {
-                            let toast = ToastMessage::info(
-                                "recovery-started".to_string(),
+                            enqueue_toast!(
                                 "Recovery process started".to_string(),
+                                crate::tui::state_machine::ToastLevel::Info
                             );
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
                         }
 
                         // Navigation and state changes - no toast needed, handled by navigation system
@@ -479,6 +476,39 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let recovery_props = extract_recovery_view_props(&tui_state.read());
     let neighborhood_props = extract_neighborhood_view_props(&tui_state.read());
 
+    // =========================================================================
+    // NEW: Extract modal state from queue (type-enforced single modal at a time)
+    // This will replace the legacy hook-based modal state extraction above.
+    // =========================================================================
+    let queued_modal = tui_state.read().modal_queue.current().cloned();
+    let queue_account_setup = match &queued_modal {
+        Some(QueuedModal::AccountSetup(state)) => Some(state.clone()),
+        _ => None,
+    };
+    let queue_help = match &queued_modal {
+        Some(QueuedModal::Help { current_screen }) => Some(current_screen.clone()),
+        _ => None,
+    };
+    let queue_guardian_select = match &queued_modal {
+        Some(QueuedModal::GuardianSelect(state)) => Some(state.clone()),
+        _ => None,
+    };
+    let queue_contact_select = match &queued_modal {
+        Some(QueuedModal::ContactSelect(state)) => Some(state.clone()),
+        _ => None,
+    };
+    let queue_confirm = match &queued_modal {
+        Some(QueuedModal::Confirm {
+            title,
+            message,
+            on_confirm: _,
+        }) => Some((title.clone(), message.clone())),
+        _ => None,
+    };
+
+    // Extract toast state from queue (type-enforced single toast at a time)
+    let queued_toast = tui_state.read().toast_queue.current().cloned();
+
     // Global hints that appear on all screens (bottom row)
     let global_hints = vec![
         KeyHint::new("↑↓←→", "Navigate"),
@@ -526,9 +556,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         ],
     };
 
-    // Clone contacts for guardian modal
-    let contacts_for_modal = contacts.clone();
-
     hooks.use_terminal_events({
         let mut screen = screen.clone();
         let mut should_exit = should_exit.clone();
@@ -546,9 +573,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut confirm_modal_version = confirm_modal_version.clone();
         let mut help_modal_state = help_modal_state.clone();
         let mut help_modal_version = help_modal_version.clone();
-        let contacts_for_modal = contacts_for_modal.clone();
-        // Clone update_tx for toast operations (via UiUpdate channel)
-        let update_tx_for_toasts = update_tx_holder.clone();
         // Clone IoContext for ceremony operations
         let io_ctx_for_ceremony = app_ctx.io_context.clone();
         // Clone AppCore for key rotation operations
@@ -572,9 +596,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     should_exit.set(true);
                 }
 
-                // Sync modal state from TuiState to iocraft hooks
-                match new_state.modal.modal_type {
-                    ModalType::AccountSetup => {
+                // Sync modal queue state from TuiState to iocraft hooks
+                match new_state.modal_queue.current() {
+                    Some(QueuedModal::AccountSetup(state)) => {
                         // Sync account setup modal state
                         let legacy_visible = account_state.read().visible;
                         if !legacy_visible {
@@ -583,30 +607,59 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         // Sync the display_name and other fields
                         let mut legacy = account_state.write();
-                        legacy.display_name = new_state.modal.account_setup.display_name.clone();
-                        legacy.creating = new_state.modal.account_setup.creating;
-                        legacy.success = new_state.modal.account_setup.success;
-                        legacy.error = new_state.modal.account_setup.error.clone();
+                        legacy.display_name = state.display_name.clone();
+                        legacy.creating = state.creating;
+                        legacy.success = state.success;
+                        legacy.error = state.error.clone();
                         drop(legacy);
                         account_version.set(account_version.get().wrapping_add(1));
                     }
-                    ModalType::Help => {
+                    Some(QueuedModal::Help { .. }) => {
                         if !help_modal_state.read().visible {
                             help_modal_state.write().show();
                             help_modal_version.set(help_modal_version.get().wrapping_add(1));
                         }
                     }
-                    ModalType::GuardianSelect => {
+                    Some(QueuedModal::GuardianSelect(state)) => {
                         if !guardian_select_state.read().visible {
+                            // Convert contacts to the format expected by the modal
+                            let contacts: Vec<Contact> = state
+                                .contacts
+                                .iter()
+                                .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                                .collect();
                             guardian_select_state
                                 .write()
-                                .show("Select Guardian", contacts_for_modal.clone());
+                                .show("Select Guardian", contacts);
                             guardian_select_version
                                 .set(guardian_select_version.get().wrapping_add(1));
                         }
                     }
-                    ModalType::None => {
-                        // Close any open modals
+                    Some(QueuedModal::ContactSelect(state)) => {
+                        if !contact_select_state.read().visible {
+                            let contacts: Vec<Contact> = state
+                                .contacts
+                                .iter()
+                                .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                                .collect();
+                            contact_select_state
+                                .write()
+                                .show(&state.title, contacts);
+                            contact_select_version
+                                .set(contact_select_version.get().wrapping_add(1));
+                        }
+                    }
+                    Some(QueuedModal::Confirm { title, message, .. }) => {
+                        if !confirm_modal_visible.get() {
+                            confirm_modal_visible.set(true);
+                            *confirm_modal_title.write() = title.clone();
+                            *confirm_modal_message.write() = message.clone();
+                            confirm_modal_version
+                                .set(confirm_modal_version.get().wrapping_add(1));
+                        }
+                    }
+                    None => {
+                        // Close any open modal hooks when no queued modal
                         if account_state.read().visible {
                             account_state.write().hide();
                             account_version.set(account_version.get().wrapping_add(1));
@@ -631,26 +684,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 .set(confirm_modal_version.get().wrapping_add(1));
                         }
                     }
-                    ModalType::ContactSelect => {
-                        // Show contact selection modal (generic contact picker)
-                        if !contact_select_state.read().visible {
-                            contact_select_state
-                                .write()
-                                .show("Select Contact", contacts_for_modal.clone());
-                            contact_select_version
-                                .set(contact_select_version.get().wrapping_add(1));
-                        }
-                    }
-                    ModalType::Confirm => {
-                        // Show confirmation modal
-                        if !confirm_modal_visible.get() {
-                            confirm_modal_visible.set(true);
-                            *confirm_modal_title.write() = "Confirm Action".to_string();
-                            *confirm_modal_message.write() = "Are you sure you want to proceed?".to_string();
-                            confirm_modal_version
-                                .set(confirm_modal_version.get().wrapping_add(1));
-                        }
-                    }
+                    // Other queued modal types don't need iocraft hook sync
+                    _ => {}
                 }
 
                 // Execute commands using callbacks registry
@@ -682,8 +717,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         guardian_select_version
                                             .set(guardian_select_version.get().wrapping_add(1));
 
-                                        // Also close in TuiState
-                                        tui_state.write().modal.close();
+                                        // Also dismiss the modal from the queue
+                                        tui_state.write().modal_queue.dismiss();
 
                                         // Call the callback with contact_id
                                         if let Some(contact_id) = contact_id {
@@ -729,6 +764,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::SetChannelTopic { channel_id, topic } => {
                                         (cb.chat.on_set_topic)(channel_id, topic);
                                     }
+                                    DispatchCommand::DeleteChannel { channel_id } => {
+                                        // TODO: Implement channel deletion callback
+                                        tracing::info!("Delete channel requested: {}", channel_id);
+                                    }
 
                                     // === Contacts Screen Commands ===
                                     DispatchCommand::UpdatePetname {
@@ -739,6 +778,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::StartChat { contact_id } => {
                                         (cb.contacts.on_start_chat)(contact_id);
+                                    }
+                                    DispatchCommand::RemoveContact { contact_id } => {
+                                        // TODO: Implement contact removal callback
+                                        tracing::info!("Remove contact requested: {}", contact_id);
+                                    }
+                                    DispatchCommand::SelectContactByIndex { index } => {
+                                        // Generic contact selection by index
+                                        // This is used by ContactSelect modal - map index to contact_id
+                                        tracing::info!("Contact selected by index: {}", index);
+                                        // Dismiss the modal after selection
+                                        tui_state.write().modal_queue.dismiss();
+                                        tui_state_version.set(tui_state_version.get() + 1);
                                     }
 
                                     // === Invitations Screen Commands ===
@@ -760,6 +811,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::ExportInvitation { invitation_id } => {
                                         (cb.invitations.on_export)(invitation_id);
+                                    }
+                                    DispatchCommand::RevokeInvitation { invitation_id } => {
+                                        // TODO: Implement invitation revocation callback
+                                        tracing::info!("Revoke invitation requested: {}", invitation_id);
                                     }
 
                                     // === Recovery Screen Commands ===
@@ -911,37 +966,28 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 }
                             }
                             TuiCommand::ShowToast { message, level } => {
-                                // Send toast through UiUpdate channel (reactive)
-                                if let Some(ref tx) = update_tx_for_toasts {
-                                    let toast_level = match level {
-                                        crate::tui::state_machine::ToastLevel::Info => ToastLevel::Info,
-                                        crate::tui::state_machine::ToastLevel::Success => ToastLevel::Success,
-                                        crate::tui::state_machine::ToastLevel::Warning => ToastLevel::Warning,
-                                        crate::tui::state_machine::ToastLevel::Error => ToastLevel::Error,
-                                    };
-                                    let toast_id = format!(
-                                        "toast-{}",
-                                        std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .map(|d| d.as_millis())
-                                            .unwrap_or(0)
-                                    );
-                                    let toast = ToastMessage::new(toast_id, message).with_level(toast_level);
-                                    let _ = tx.send(UiUpdate::ToastAdded(toast));
-                                }
+                                // Add toast to queue (type-enforced single toast at a time)
+                                let mut state = tui_state.write();
+                                let toast_id = state.next_toast_id;
+                                state.next_toast_id += 1;
+                                let toast = crate::tui::state_machine::QueuedToast::new(
+                                    toast_id,
+                                    message,
+                                    level,
+                                );
+                                state.toast_queue.enqueue(toast);
+                                drop(state);
+                                tui_state_version.set(tui_state_version.get().wrapping_add(1));
                             }
-                            TuiCommand::DismissToast { id } => {
-                                // Dismiss specific toast via UiUpdate channel
-                                if let Some(ref tx) = update_tx_for_toasts {
-                                    let toast_id = format!("toast-{}", id);
-                                    let _ = tx.send(UiUpdate::ToastDismissed { toast_id });
-                                }
+                            TuiCommand::DismissToast { id: _ } => {
+                                // Dismiss current toast from queue (ignores ID - FIFO semantics)
+                                tui_state.write().toast_queue.dismiss();
+                                tui_state_version.set(tui_state_version.get().wrapping_add(1));
                             }
                             TuiCommand::ClearAllToasts => {
-                                // Clear all toasts via UiUpdate channel
-                                if let Some(ref tx) = update_tx_for_toasts {
-                                    let _ = tx.send(UiUpdate::ToastsCleared);
-                                }
+                                // Clear all toasts from queue
+                                tui_state.write().toast_queue.clear();
+                                tui_state_version.set(tui_state_version.get().wrapping_add(1));
                             }
                             TuiCommand::Render => {
                                 // Render is handled by iocraft automatically
@@ -957,12 +1003,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 // from the reactive contacts data
                 {
                     let mut state = tui_state.write();
-                    if state.contacts.guardian_setup_modal.visible
-                        && state.contacts.guardian_setup_modal.contacts.is_empty()
-                    {
+                    // Check queue for GuardianSetup modal and populate contacts if empty
+                    let needs_population = matches!(
+                        state.modal_queue.current(),
+                        Some(QueuedModal::GuardianSetup(s)) if s.contacts.is_empty()
+                    );
+
+                    if needs_population {
                         // Populate from the contacts prop (which comes from reactive signals)
                         // We need to convert Contact -> GuardianCandidate
-                        state.contacts.guardian_setup_modal.contacts = contacts_for_modal_populate
+                        let candidates: Vec<_> = contacts_for_modal_populate
                             .iter()
                             .map(|c| crate::tui::state_machine::GuardianCandidate {
                                 id: c.id.clone(),
@@ -972,20 +1022,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             .collect();
 
                         // Pre-select existing guardians
-                        state.contacts.guardian_setup_modal.selected_indices = state
-                            .contacts
-                            .guardian_setup_modal
-                            .contacts
+                        let selected: Vec<_> = candidates
                             .iter()
                             .enumerate()
                             .filter(|(_, c)| c.is_current_guardian)
                             .map(|(i, _)| i)
                             .collect();
 
-                        tracing::debug!(
-                            "Populated guardian modal with {} contacts",
-                            state.contacts.guardian_setup_modal.contacts.len()
-                        );
+                        let count = candidates.len();
+
+                        // Update the modal in the queue
+                        state.modal_queue.update_active(|modal| {
+                            if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                                s.contacts = candidates.clone();
+                                s.selected_indices = selected.clone();
+                            }
+                        });
+
+                        tracing::debug!("Populated guardian modal with {} contacts", count);
                     }
                 }
 
@@ -1042,9 +1096,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let help_modal_visible = help_modal_state.read().visible;
     // help_modal_version is used for triggering re-renders (not directly in UI)
     let _ = help_modal_version.get();
-
-    // Get current toasts for rendering - State<T> triggers re-renders automatically
-    let current_toasts = toasts_state.read().clone();
 
     // Extract sync status from props
     let syncing = props.sync_in_progress;
@@ -1194,8 +1245,27 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // All modals are rendered at root level with ModalFrame for consistent positioning.
             // See modal.rs for ModalFrame positioning details.
 
-            // Account setup modal overlay
-            #(if modal_visible {
+            // Account setup modal overlay (queue-based rendering takes precedence)
+            #(if let Some(ref state) = queue_account_setup {
+                // NEW: Queue-based rendering - this is the preferred path
+                // show_spinner is debounced - only true if creating AND >300ms elapsed
+                let show_spinner = state.should_show_spinner();
+                Some(element! {
+                    ModalFrame {
+                        AccountSetupModal(
+                            visible: true,
+                            display_name: state.display_name.clone(),
+                            focused: true,
+                            creating: state.creating,
+                            show_spinner: show_spinner,
+                            success: state.success,
+                            error: state.error.clone().unwrap_or_default(),
+                        )
+                    }
+                })
+            } else if modal_visible {
+                // LEGACY: Hook-based rendering - will be removed after full migration
+                // For legacy, always show spinner when creating (no debounce)
                 Some(element! {
                     ModalFrame {
                         AccountSetupModal(
@@ -1203,6 +1273,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             display_name: modal_display_name.clone(),
                             focused: true,
                             creating: modal_creating,
+                            show_spinner: modal_creating,
                             success: modal_success,
                             error: modal_error.clone(),
                         )
@@ -1212,8 +1283,25 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 None
             })
 
-            // Guardian selection modal overlay
-            #(if guardian_modal_visible {
+            // Guardian selection modal overlay (queue-based rendering takes precedence)
+            #(if let Some(ref state) = queue_guardian_select {
+                // NEW: Queue-based rendering - convert (id, name) tuples to Contact objects
+                let contacts_as_objects: Vec<Contact> = state.contacts.iter()
+                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                    .collect();
+                Some(element! {
+                    ModalFrame {
+                        ContactSelectModal(
+                            visible: true,
+                            title: state.title.clone(),
+                            contacts: contacts_as_objects,
+                            selected_index: state.selected_index,
+                            error: String::new(),
+                        )
+                    }
+                })
+            } else if guardian_modal_visible {
+                // LEGACY: Hook-based rendering
                 Some(element! {
                     ModalFrame {
                         ContactSelectModal(
@@ -1229,8 +1317,25 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 None
             })
 
-            // Generic contact selection modal overlay
-            #(if contact_modal_visible {
+            // Generic contact selection modal overlay (queue-based rendering takes precedence)
+            #(if let Some(ref state) = queue_contact_select {
+                // NEW: Queue-based rendering - convert (id, name) tuples to Contact objects
+                let contacts_as_objects: Vec<Contact> = state.contacts.iter()
+                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                    .collect();
+                Some(element! {
+                    ModalFrame {
+                        ContactSelectModal(
+                            visible: true,
+                            title: state.title.clone(),
+                            contacts: contacts_as_objects,
+                            selected_index: state.selected_index,
+                            error: String::new(),
+                        )
+                    }
+                })
+            } else if contact_modal_visible {
+                // LEGACY: Hook-based rendering
                 Some(element! {
                     ModalFrame {
                         ContactSelectModal(
@@ -1246,8 +1351,23 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 None
             })
 
-            // Confirm dialog modal overlay
-            #(if confirm_visible {
+            // Confirm dialog modal overlay (queue-based rendering takes precedence)
+            #(if let Some((ref title, ref message)) = queue_confirm {
+                // NEW: Queue-based rendering
+                Some(element! {
+                    ModalFrame {
+                        ConfirmModal(
+                            visible: true,
+                            title: title.clone(),
+                            message: message.clone(),
+                            confirm_text: "Confirm".to_string(),
+                            cancel_text: "Cancel".to_string(),
+                            confirm_focused: true,
+                        )
+                    }
+                })
+            } else if confirm_visible {
+                // LEGACY: Hook-based rendering
                 Some(element! {
                     ModalFrame {
                         ConfirmModal(
@@ -1264,8 +1384,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 None
             })
 
-            // Help modal overlay (context-sensitive)
-            #(if help_modal_visible {
+            // Help modal overlay (queue-based rendering takes precedence)
+            #(if queue_help.is_some() {
+                // NEW: Queue-based rendering
+                Some(element! {
+                    ModalFrame {
+                        HelpModal(visible: true, current_screen: Some(current_screen.name().to_string()))
+                    }
+                })
+            } else if help_modal_visible {
+                // LEGACY: Hook-based rendering
                 Some(element! {
                     ModalFrame {
                         HelpModal(visible: true, current_screen: Some(current_screen.name().to_string()))
@@ -1307,9 +1435,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // === TOAST OVERLAY ===
             // Toast notifications overlay the footer when active
-            #(if !current_toasts.is_empty() {
+            // All toasts now go through the queue system (type-enforced single toast at a time)
+            #(if let Some(ref toast) = queued_toast {
                 Some(element! {
-                    ToastContainer(toasts: current_toasts.clone())
+                    ToastContainer(toasts: vec![ToastMessage {
+                        id: toast.id.to_string(),
+                        message: toast.message.clone(),
+                        level: match toast.level {
+                            crate::tui::state_machine::ToastLevel::Info => ToastLevel::Info,
+                            crate::tui::state_machine::ToastLevel::Success => ToastLevel::Success,
+                            crate::tui::state_machine::ToastLevel::Warning => ToastLevel::Warning,
+                            crate::tui::state_machine::ToastLevel::Error => ToastLevel::Error,
+                        },
+                    }])
                 })
             } else {
                 None

@@ -45,6 +45,7 @@ use aura_app::signal_defs::{
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::AuthorityId;
+use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::IoContext;
 use aura_terminal::tui::effects::EffectCommand;
 
@@ -96,6 +97,7 @@ impl TestAgent {
             false,
             test_dir.clone(),
             format!("test-device-{}", name),
+            TuiMode::Production,
         );
 
         Self {

@@ -136,22 +136,23 @@ impl<T: TerminalEffects> TuiRuntime<T> {
                 // Exit is handled by the run loop checking should_exit
             }
             TuiCommand::ShowToast { message, level } => {
-                // Add toast to state
-                let toast = crate::tui::state_machine::Toast {
-                    id: self.state.toasts.len() as u64,
+                // Add toast to queue
+                let toast_id = self.state.next_toast_id;
+                self.state.next_toast_id += 1;
+                let toast = crate::tui::state_machine::QueuedToast {
+                    id: toast_id,
                     message,
                     level,
-                    duration_ms: 3000,
-                    created_at: 0,       // In headless mode, we don't track real time
                     ticks_remaining: 30, // ~3 seconds at 100ms/tick
                 };
-                self.state.toasts.push(toast);
+                self.state.toast_queue.enqueue(toast);
             }
-            TuiCommand::DismissToast { id } => {
-                self.state.toasts.retain(|t| t.id != id);
+            TuiCommand::DismissToast { id: _ } => {
+                // Dismiss current toast from queue
+                self.state.toast_queue.dismiss();
             }
             TuiCommand::ClearAllToasts => {
-                self.state.toasts.clear();
+                self.state.toast_queue.clear();
             }
             TuiCommand::Dispatch(dispatch_cmd) => {
                 if let Some(ref callback) = self.dispatch_callback {

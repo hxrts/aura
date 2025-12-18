@@ -39,6 +39,7 @@ use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL, R
 use aura_app::views::{Contact as ViewContact, Message, RecoveryProcess, RecoveryProcessStatus};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::IoContext;
 use aura_terminal::tui::effects::EffectCommand;
 use aura_terminal::tui::types::MfaPolicy;
@@ -69,6 +70,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         false,
         test_dir,
         format!("test-device-{}", name),
+        TuiMode::Production,
     );
 
     // Create account for testing

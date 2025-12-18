@@ -33,6 +33,7 @@ use aura_app::signal_defs::{CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, SYNC_STATUS_S
 use aura_app::views::chat::ChannelType;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::IoContext;
 use aura_terminal::tui::effects::EffectCommand;
 
@@ -62,6 +63,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         false,
         test_dir,
         format!("test-device-{}", name),
+        TuiMode::Production,
     );
 
     // Create account for testing

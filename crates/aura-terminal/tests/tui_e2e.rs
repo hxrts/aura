@@ -811,6 +811,7 @@ use aura_terminal::tui::{
 async fn test_account_creation_callback_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
 
@@ -833,6 +834,7 @@ async fn test_account_creation_callback_flow() {
         false, // No existing account
         test_dir.clone(),
         "test-device-callback".to_string(),
+        TuiMode::Production,
     );
 
     // STEP 3: Verify initial state
@@ -922,6 +924,7 @@ async fn test_account_creation_callback_flow() {
 async fn test_device_id_determinism() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
 
@@ -945,7 +948,7 @@ async fn test_device_id_determinism() {
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx =
-        IoContext::with_account_status(app_core, false, test_dir.clone(), device_id.to_string());
+        IoContext::with_account_status(app_core, false, test_dir.clone(), device_id.to_string(), TuiMode::Production);
 
     ctx.create_account("Bob").expect("Failed to create account");
 
@@ -977,6 +980,7 @@ async fn test_device_id_determinism() {
         false,
         test_dir.clone(),
         device_id.to_string(), // SAME device_id
+        TuiMode::Production,
     );
 
     ctx2.create_account("Bob Again")
@@ -1015,6 +1019,7 @@ async fn test_device_id_determinism() {
         false,
         test_dir.clone(),
         different_device_id.to_string(), // DIFFERENT device_id
+        TuiMode::Production,
     );
 
     ctx3.create_account("Bob New Device")
@@ -1070,6 +1075,7 @@ async fn test_device_id_determinism() {
 async fn test_guardian_recovery_preserves_cryptographic_identity() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
 
@@ -1099,6 +1105,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
         false,
         test_dir.clone(),
         original_device_id.to_string(),
+        TuiMode::Production,
     );
 
     ctx.create_account("Bob").expect("Failed to create account");
@@ -1142,6 +1149,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
         false,
         test_dir.clone(),
         new_device_id.to_string(),
+        TuiMode::Production,
     );
 
     ctx_wrong
@@ -1207,6 +1215,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
         false,
         test_dir.clone(),
         new_device_id.to_string(), // Different device, but we'll restore original authority
+        TuiMode::Production,
     );
 
     // THIS IS THE KEY CALL: restore_recovered_account() with the ORIGINAL authority_id
@@ -1596,6 +1605,7 @@ async fn test_invitation_export_import_roundtrip() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_core::identifiers::AuthorityId;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use serde::Deserialize;
@@ -1627,6 +1637,7 @@ async fn test_invitation_export_import_roundtrip() {
         false,
         test_dir.clone(),
         "test-device-invitation".to_string(),
+        TuiMode::Production,
     );
 
     // Create account first
@@ -1731,6 +1742,7 @@ async fn test_invitation_export_import_roundtrip() {
 async fn test_moderation_commands_dispatch() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -1751,6 +1763,7 @@ async fn test_moderation_commands_dispatch() {
         false,
         test_dir.clone(),
         "test-device-moderation".to_string(),
+        TuiMode::Production,
     );
 
     // Create account first
@@ -1821,6 +1834,7 @@ async fn test_moderation_commands_dispatch() {
 async fn test_peer_discovery_commands() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -1841,6 +1855,7 @@ async fn test_peer_discovery_commands() {
         false,
         test_dir.clone(),
         "test-device-peers".to_string(),
+        TuiMode::Production,
     );
 
     // Create account first
@@ -1903,6 +1918,7 @@ async fn test_peer_discovery_commands() {
 async fn test_lan_peer_invitation_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -1923,6 +1939,7 @@ async fn test_lan_peer_invitation_flow() {
         false,
         test_dir.clone(),
         "test-device-lan".to_string(),
+        TuiMode::Production,
     );
 
     // Create account first
@@ -2031,6 +2048,7 @@ async fn test_lan_peer_invitation_flow() {
 async fn test_direct_messaging_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -2050,6 +2068,7 @@ async fn test_direct_messaging_flow() {
         false,
         test_dir.clone(),
         "test-device-dm".to_string(),
+        TuiMode::Production,
     );
 
     // Create account first
@@ -2164,6 +2183,7 @@ async fn test_direct_messaging_flow() {
 async fn test_display_name_editing_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -2184,6 +2204,7 @@ async fn test_display_name_editing_flow() {
         false,
         test_dir.clone(),
         "test-device-display-name".to_string(),
+        TuiMode::Production,
     );
 
     // Create account first
@@ -2271,6 +2292,7 @@ async fn test_display_name_editing_flow() {
 async fn test_threshold_configuration_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use aura_terminal::tui::ThresholdState;
@@ -2395,6 +2417,7 @@ async fn test_threshold_configuration_flow() {
         false,
         test_dir.clone(),
         "test-device-threshold".to_string(),
+        TuiMode::Production,
     );
 
     // Create account first
@@ -2453,6 +2476,7 @@ async fn test_threshold_configuration_flow() {
 async fn test_mfa_policy_configuration_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use aura_terminal::tui::types::MfaPolicy;
@@ -2518,6 +2542,7 @@ async fn test_mfa_policy_configuration_flow() {
         false,
         test_dir.clone(),
         "test-device-mfa".to_string(),
+        TuiMode::Production,
     );
 
     // Create account
@@ -2606,6 +2631,7 @@ async fn test_mfa_policy_configuration_flow() {
 async fn test_block_messaging_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -2627,6 +2653,7 @@ async fn test_block_messaging_flow() {
         false,
         test_dir.clone(),
         "test-device-block".to_string(),
+        TuiMode::Production,
     );
 
     // Create account
@@ -2742,6 +2769,7 @@ async fn test_block_messaging_flow() {
 async fn test_set_context_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -2763,6 +2791,7 @@ async fn test_set_context_flow() {
         false,
         test_dir.clone(),
         "test-device-context".to_string(),
+        TuiMode::Production,
     );
 
     // Create account
@@ -2878,6 +2907,7 @@ async fn test_steward_role_flow() {
     use async_lock::RwLock;
     use aura_app::views::block::{BlockState, Resident, ResidentRole};
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -2899,6 +2929,7 @@ async fn test_steward_role_flow() {
         false,
         test_dir.clone(),
         "test-device-steward".to_string(),
+        TuiMode::Production,
     );
 
     // Create account
@@ -3081,6 +3112,7 @@ async fn test_neighborhood_navigation_flow() {
         AdjacencyType, NeighborBlock, NeighborhoodState, TraversalPosition,
     };
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -3103,6 +3135,7 @@ async fn test_neighborhood_navigation_flow() {
         false,
         test_dir.clone(),
         "test-device-nav".to_string(),
+        TuiMode::Production,
     );
 
     // Create account
@@ -3463,6 +3496,7 @@ async fn test_retry_message_command() {
 
 #[tokio::test]
 async fn test_channel_mode_operations() {
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use aura_terminal::tui::types::ChannelMode;
@@ -3555,6 +3589,7 @@ async fn test_channel_mode_operations() {
         false,
         test_dir.clone(),
         "test-device-channel-mode".to_string(),
+        TuiMode::Production,
     );
 
     // Create account
@@ -3892,7 +3927,6 @@ async fn test_context_sensitive_help() {
 #[tokio::test]
 async fn test_error_toast_display() {
     use aura_terminal::tui::components::{ToastLevel, ToastMessage};
-    use aura_terminal::tui::context::IoContext;
 
     println!("\n=== Error Toast Display Test ===\n");
 
@@ -3933,6 +3967,7 @@ async fn test_error_toast_display() {
     println!("\nPhase 3: Testing IoContext toast operations");
 
     // Create a mock IoContext (using with_defaults for testing)
+    use aura_terminal::tui::context::IoContext;
     let io_ctx = IoContext::with_defaults();
 
     // Initially should have no toasts
@@ -4010,6 +4045,7 @@ async fn test_error_toast_display() {
 async fn test_authorization_checking() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::{CommandAuthorizationLevel, EffectCommand};
     use std::sync::Arc;
@@ -4098,6 +4134,7 @@ async fn test_authorization_checking() {
         false,
         test_dir.clone(),
         "test-device-auth".to_string(),
+        TuiMode::Production,
     );
 
     // Create account
@@ -4214,6 +4251,7 @@ async fn test_account_backup_restore_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::{export_account_backup, import_account_backup};
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -4241,6 +4279,7 @@ async fn test_account_backup_restore_flow() {
         false,
         test_dir_a.clone(),
         "test-device-backup-a".to_string(),
+        TuiMode::Production,
     );
 
     // Create account
@@ -4275,7 +4314,7 @@ async fn test_account_backup_restore_flow() {
     println!("\nPhase 3: Importing backup to new location");
 
     let (restored_authority, restored_context) =
-        import_account_backup(&test_dir_b, &backup_code, false).expect("Failed to import backup");
+        import_account_backup(&test_dir_b, &backup_code, false, TuiMode::Production).expect("Failed to import backup");
     println!("  ✓ Backup imported to test_dir_b");
     println!("    Authority: {}", restored_authority);
     println!("    Context: {}", restored_context);
@@ -4300,6 +4339,7 @@ async fn test_account_backup_restore_flow() {
         true, // has_account = true since we imported
         test_dir_b.clone(),
         "test-device-backup-b".to_string(),
+        TuiMode::Production,
     );
 
     assert!(
@@ -4334,12 +4374,12 @@ async fn test_account_backup_restore_flow() {
     std::fs::create_dir_all(&test_dir_c).expect("Failed to create test dir C");
 
     // Try to export from empty directory
-    let export_result = export_account_backup(&test_dir_c, None);
+    let export_result = export_account_backup(&test_dir_c, None, TuiMode::Production);
     assert!(export_result.is_err(), "Export should fail without account");
     println!("  ✓ Export correctly fails without account");
 
     // Try to import invalid backup code
-    let invalid_result = import_account_backup(&test_dir_c, "invalid-code", false);
+    let invalid_result = import_account_backup(&test_dir_c, "invalid-code", false, TuiMode::Production);
     assert!(
         invalid_result.is_err(),
         "Import should fail with invalid code"
@@ -4347,7 +4387,7 @@ async fn test_account_backup_restore_flow() {
     println!("  ✓ Import correctly fails with invalid code");
 
     // Try to import without overwrite when account exists
-    let no_overwrite_result = import_account_backup(&test_dir_b, &backup_code, false);
+    let no_overwrite_result = import_account_backup(&test_dir_b, &backup_code, false, TuiMode::Production);
     assert!(
         no_overwrite_result.is_err(),
         "Import should fail when account exists and overwrite=false"
@@ -4380,6 +4420,7 @@ async fn test_device_management() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_core::identifiers::AuthorityId;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
@@ -4401,6 +4442,7 @@ async fn test_device_management() {
         false,
         test_dir.clone(),
         device_id.to_string(),
+        TuiMode::Production,
     );
 
     // Create account first to have an authority
@@ -4488,6 +4530,7 @@ async fn test_snapshot_data_accuracy() {
     use aura_app::AppCore;
     use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::identifiers::AuthorityId;
+    use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
 
@@ -4519,6 +4562,7 @@ async fn test_snapshot_data_accuracy() {
         true, // has_account
         test_dir.clone(),
         "test-device-snapshot".to_string(),
+        TuiMode::Production,
     );
 
     println!("Phase 1: Testing BlockInfo.created_at");

@@ -59,6 +59,7 @@ use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::AuthorityId;
+use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::IoContext;
 use aura_terminal::tui::effects::EffectCommand;
 use base64::Engine;
@@ -115,6 +116,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         false,
         test_dir,
         format!("test-device-{}", name),
+        TuiMode::Production,
     );
 
     ctx.create_account(&format!("TestUser-{}", name))

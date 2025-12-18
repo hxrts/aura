@@ -18,6 +18,8 @@ pub struct AccountSetupModalProps {
     pub focused: bool,
     /// Whether account creation is in progress
     pub creating: bool,
+    /// Whether to show the spinner (debounced - only after 300ms)
+    pub show_spinner: bool,
     /// Whether account was created successfully
     pub success: bool,
     /// Error message if creation failed
@@ -119,53 +121,12 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         .into_any();
     }
 
-    // Show creating spinner
-    if creating {
-        return element! {
-            ModalContent(
-                flex_direction: FlexDirection::Column,
-                border_style: BorderStyle::Round,
-                border_color: Some(Theme::PRIMARY),
-            ) {
-                // Header
-                View(
-                    width: 100pct,
-                    padding: 2,
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
-                ) {
-                    Text(
-                        content: "Creating Account",
-                        weight: Weight::Bold,
-                        color: Theme::PRIMARY,
-                    )
-                }
+    // NOTE: We no longer show a full-screen "creating" view.
+    // Instead, the input form shows an inline spinner in the button when creating.
+    // The spinner is debounced - only shows after 300ms to avoid flicker for fast operations.
 
-                // Creating content
-                View(
-                    width: 100pct,
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    padding: 3,
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                ) {
-                    Text(content: "Generating Ed25519 signing key...", color: Theme::TEXT_MUTED)
-                    View(margin_top: 1) {
-                        Text(content: "Please wait...", color: Theme::TEXT_MUTED)
-                    }
-                }
-            }
-        }
-        .into_any();
-    }
-
-    // Show input form (default state)
-    let can_submit = !display_name.is_empty();
+    // Show input form (default state, or creating state with inline spinner)
+    let can_submit = !display_name.is_empty() && !creating;
 
     let placeholder = if display_name.is_empty() {
         "Enter your name...".to_string()
@@ -255,7 +216,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 }
             }
 
-            // Footer with hints and button
+            // Footer with hints and button (or spinner when creating)
             View(
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
@@ -266,20 +227,53 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                View(flex_direction: FlexDirection::Row, gap: 1) {
-                    Text(content: "Enter", color: Theme::SECONDARY)
-                    Text(content: "to create", color: Theme::TEXT_MUTED)
-                }
+                #(if creating {
+                    // Creating state - show spinner hint on left, spinner button on right
+                    Some(element! {
+                        View(flex_direction: FlexDirection::Row, gap: 1) {
+                            Text(content: "Creating account...", color: Theme::TEXT_MUTED)
+                        }
+                    })
+                } else {
+                    // Normal state - show Enter hint
+                    Some(element! {
+                        View(flex_direction: FlexDirection::Row, gap: 1) {
+                            Text(content: "Enter", color: Theme::SECONDARY)
+                            Text(content: "to create", color: Theme::TEXT_MUTED)
+                        }
+                    })
+                })
                 View(
                     padding_left: 2,
                     padding_right: 2,
                     border_style: BorderStyle::Round,
-                    border_color: if can_submit { Theme::PRIMARY } else { Theme::BORDER },
+                    border_color: if creating { Theme::SECONDARY } else if can_submit { Theme::PRIMARY } else { Theme::BORDER },
                 ) {
-                    Text(
-                        content: "Create Account",
-                        color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
-                    )
+                    #(if creating && props.show_spinner {
+                        // Show spinner (debounced - only after 300ms)
+                        Some(element! {
+                            Text(
+                                content: "Creating...",
+                                color: Theme::SECONDARY,
+                            )
+                        })
+                    } else if creating {
+                        // Creating but spinner not yet visible (under 300ms)
+                        Some(element! {
+                            Text(
+                                content: "Create Account",
+                                color: Theme::TEXT_MUTED,
+                            )
+                        })
+                    } else {
+                        // Normal state
+                        Some(element! {
+                            Text(
+                                content: "Create Account",
+                                color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                            )
+                        })
+                    })
                 }
             }
         }

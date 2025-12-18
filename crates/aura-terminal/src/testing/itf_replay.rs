@@ -260,12 +260,42 @@ impl ITFTraceReplayer {
 
     /// Create a TuiState matching the ITF state (for comparison)
     fn create_matching_tui_state(&self, itf: &TuiITFState) -> TuiState {
+        use crate::tui::state_machine::{ModalQueue, QueuedModal, AccountSetupModalState};
+
+        // Convert ModalType to QueuedModal for queue-based system
+        let mut modal_queue = ModalQueue::new();
+        match itf.current_modal {
+            ModalType::AccountSetup => {
+                modal_queue.enqueue(QueuedModal::AccountSetup(AccountSetupModalState::default()));
+            }
+            ModalType::Help => {
+                modal_queue.enqueue(QueuedModal::Help { current_screen: Some(itf.current_screen) });
+            }
+            ModalType::GuardianSelect => {
+                modal_queue.enqueue(QueuedModal::GuardianSelect(
+                    crate::tui::state_machine::ContactSelectModalState::single("Select Guardian", Vec::new()),
+                ));
+            }
+            ModalType::ContactSelect => {
+                modal_queue.enqueue(QueuedModal::ContactSelect(
+                    crate::tui::state_machine::ContactSelectModalState::single("Select Contact", Vec::new()),
+                ));
+            }
+            ModalType::Confirm => {
+                modal_queue.enqueue(QueuedModal::Confirm {
+                    title: "Confirm".to_string(),
+                    message: "Are you sure?".to_string(),
+                    on_confirm: None,
+                });
+            }
+            ModalType::None => {
+                // No modal - leave queue empty
+            }
+        }
+
         TuiState {
             router: Router::new(itf.current_screen),
-            modal: crate::tui::state_machine::ModalState {
-                modal_type: itf.current_modal.clone(),
-                ..Default::default()
-            },
+            modal_queue,
             block: crate::tui::state_machine::BlockViewState {
                 insert_mode: itf.block_insert_mode,
                 ..Default::default()
