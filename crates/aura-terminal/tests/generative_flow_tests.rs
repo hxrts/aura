@@ -1,4 +1,13 @@
-#![allow(clippy::expect_used, clippy::unwrap_used, clippy::disallowed_methods)]
+#![allow(
+    missing_docs,
+    dead_code,
+    unused,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::all
+)]
 //! # Generative Flow Tests
 //!
 //! These tests use Quint-generated ITF traces to verify that the TUI flow

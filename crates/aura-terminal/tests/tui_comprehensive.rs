@@ -1,3 +1,13 @@
+#![allow(
+    missing_docs,
+    dead_code,
+    unused,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::all
+)]
 //! # Comprehensive TUI State Machine Tests
 //!
 //! This test file provides comprehensive coverage of all TUI screens, modals,

@@ -1,3 +1,13 @@
+#![allow(
+    missing_docs,
+    dead_code,
+    unused,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::all
+)]
 //! # Deterministic TUI Tests
 //!
 //! These tests validate TUI behavior using the pure state machine model.

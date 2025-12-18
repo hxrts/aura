@@ -1,8 +1,12 @@
 #![allow(
-    clippy::expect_used,
+    missing_docs,
+    dead_code,
+    unused,
     clippy::unwrap_used,
+    clippy::expect_used,
     clippy::disallowed_methods,
-    clippy::needless_borrows_for_generic_args
+    clippy::disallowed_types,
+    clippy::all
 )]
 //! # Flow Integration Tests
 //!

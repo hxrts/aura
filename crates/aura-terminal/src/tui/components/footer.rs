@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_key_hint_formatting() {
-        let hints = vec![KeyHint::new("Esc", "back"), KeyHint::new("Enter", "select")];
+        let hints = [KeyHint::new("Esc", "back"), KeyHint::new("Enter", "select")];
 
         let formatted: Vec<String> = hints
             .iter()
