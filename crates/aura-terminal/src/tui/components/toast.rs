@@ -143,11 +143,11 @@ pub struct ToastContainerProps {
     pub toasts: Vec<ToastMessage>,
 }
 
-/// Toast bar that replaces the nav bar when active.
+/// Toast notification overlay that appears over the footer.
 ///
-/// This is a regular flow component (not absolute positioned) that occupies
-/// the same NAV_HEIGHT x TOTAL_WIDTH space as the nav bar. Use conditional
-/// rendering in app.rs to show either NavBar or ToastBar, not both.
+/// This component uses absolute positioning to overlay the footer area
+/// (rows 28-30) with the same dimensions (FOOTER_HEIGHT x TOTAL_WIDTH).
+/// Rendered conditionally in app.rs when toasts are active.
 #[component]
 pub fn ToastContainer(props: &ToastContainerProps) -> impl Into<AnyElement<'static>> {
     let toasts = props.toasts.clone();
@@ -157,14 +157,13 @@ pub fn ToastContainer(props: &ToastContainerProps) -> impl Into<AnyElement<'stat
         Some(t) => t,
         None => {
             // Return empty element - no toasts to show
-            // Note: When this returns empty, app.rs should render NavBar instead
             return element! { View {} };
         }
     };
     let icon = toast.level.icon().to_string();
     let color = toast.level.color();
 
-    // Truncate long messages to fit in nav bar width
+    // Truncate long messages to fit in footer width
     let max_msg_len = 60; // Leave room for icon and dismiss hint
     let message = if toast.message.len() > max_msg_len {
         format!("{}...", &toast.message[..max_msg_len - 3])
@@ -172,11 +171,14 @@ pub fn ToastContainer(props: &ToastContainerProps) -> impl Into<AnyElement<'stat
         toast.message.clone()
     };
 
-    // Regular flow component - same dimensions as nav bar
+    // Absolute positioned overlay - same dimensions and position as footer
     element! {
         View(
+            position: Position::Absolute,
+            top: dim::NAV_HEIGHT + dim::MIDDLE_HEIGHT,  // Row 28 (footer start)
+            left: 0u16,
             width: dim::TOTAL_WIDTH,
-            height: dim::NAV_HEIGHT,
+            height: dim::FOOTER_HEIGHT,  // Same height as footer (3 rows)
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
             background_color: Theme::BG_MODAL,

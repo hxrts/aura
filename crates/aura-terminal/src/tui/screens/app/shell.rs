@@ -1301,6 +1301,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             #(render_invitations_create_modal(&invitations_props))
             #(render_invitation_code_modal(&invitations_props))
             #(render_invitations_import_modal(&invitations_props, props.demo_mode))
+
+            // === TOAST OVERLAY ===
+            // Toast notifications overlay the footer when active
+            #(if !current_toasts.is_empty() {
+                Some(element! {
+                    ToastContainer(toasts: current_toasts.clone())
+                })
+            } else {
+                None
+            })
         }
     }
 }
