@@ -2614,6 +2614,45 @@ fn handle_import_invitation_key_queue(
     modal_state: ImportInvitationModalState,
     _source_screen: Screen,
 ) {
+    // Demo shortcuts: Ctrl+A / Ctrl+L fill Alice/Carol invite codes.
+    // These are handled at the state machine layer so they work consistently
+    // across ContactsImport and InvitationsImport modals.
+    if key.modifiers.ctrl() {
+        match key.code {
+            KeyCode::Char('a') => {
+                let code = if !state.contacts.demo_alice_code.is_empty() {
+                    state.contacts.demo_alice_code.clone()
+                } else {
+                    state.invitations.demo_alice_code.clone()
+                };
+                if !code.is_empty() {
+                    state.modal_queue.update_active(|modal| match modal {
+                        QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
+                        QueuedModal::InvitationsImport(ref mut s) => s.code = code.clone(),
+                        _ => {}
+                    });
+                    return;
+                }
+            }
+            KeyCode::Char('l') => {
+                let code = if !state.contacts.demo_carol_code.is_empty() {
+                    state.contacts.demo_carol_code.clone()
+                } else {
+                    state.invitations.demo_carol_code.clone()
+                };
+                if !code.is_empty() {
+                    state.modal_queue.update_active(|modal| match modal {
+                        QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
+                        QueuedModal::InvitationsImport(ref mut s) => s.code = code.clone(),
+                        _ => {}
+                    });
+                    return;
+                }
+            }
+            _ => {}
+        }
+    }
+
     match key.code {
         KeyCode::Esc => {
             state.modal_queue.dismiss();

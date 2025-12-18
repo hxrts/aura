@@ -27,7 +27,7 @@
 
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::state_machine::{
-    transition, ChatFocus, DispatchCommand, TuiCommand, TuiState,
+    transition, ChatFocus, DispatchCommand, QueuedModal, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
 use aura_terminal::tui::Screen;
@@ -144,6 +144,35 @@ fn test_screen_navigation_deterministic() {
     // Navigate back to Block screen (1)
     tui.send_char('1');
     tui.assert_screen(Screen::Block);
+}
+
+#[test]
+fn test_demo_shortcuts_fill_contacts_import_modal() {
+    let mut tui = TestTui::new();
+    tui.state.contacts.demo_alice_code = "ALICECODE".to_string();
+    tui.state.contacts.demo_carol_code = "CAROLCODE".to_string();
+
+    // Go to Contacts screen
+    tui.send_char('3');
+    tui.assert_screen(Screen::Contacts);
+
+    // Open Contacts import modal
+    tui.send_char('i');
+    assert!(tui.state.has_modal());
+
+    // Ctrl+A fills Alice code
+    tui.send(events::ctrl('a'));
+    match tui.state.modal_queue.current() {
+        Some(QueuedModal::ContactsImport(s)) => assert_eq!(s.code, "ALICECODE"),
+        other => panic!("Expected ContactsImport modal, got {:?}", other),
+    }
+
+    // Ctrl+L fills Carol code
+    tui.send(events::ctrl('l'));
+    match tui.state.modal_queue.current() {
+        Some(QueuedModal::ContactsImport(s)) => assert_eq!(s.code, "CAROLCODE"),
+        other => panic!("Expected ContactsImport modal, got {:?}", other),
+    }
 }
 
 // ============================================================================
