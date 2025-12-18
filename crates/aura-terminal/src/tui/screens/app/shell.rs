@@ -200,7 +200,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let mut toasts_state = toasts_state.clone();
             async move {
                 // Take the receiver from the holder (only happens once)
-                #[allow(clippy::expect_used)] // TUI initialization - panic is appropriate if channel setup failed
+                #[allow(clippy::expect_used)]
+                // TUI initialization - panic is appropriate if channel setup failed
                 let mut rx = {
                     let mut guard = rx_holder.lock().expect("Failed to lock update_rx");
                     guard.take().expect("UI update receiver already taken")

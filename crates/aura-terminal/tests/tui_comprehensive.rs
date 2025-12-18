@@ -1432,10 +1432,7 @@ proptest! {
             }
         }
 
-        // All indices should be >= 0 (which they always are since they're usize)
-        prop_assert!(tui.state.contacts.selected_index >= 0);
-        prop_assert!(tui.state.invitations.selected_index >= 0);
-        prop_assert!(tui.state.recovery.selected_index >= 0);
+        // All indices are always >= 0 since they're usize - no need to check
     }
 
     /// Insert mode only on Block and Chat

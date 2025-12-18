@@ -260,14 +260,24 @@ impl ITFTraceReplayer {
 
     /// Create a TuiState matching the ITF state (for comparison)
     fn create_matching_tui_state(&self, itf: &TuiITFState) -> TuiState {
-        let mut state = TuiState::default();
-        state.router = Router::new(itf.current_screen);
-        state.modal.modal_type = itf.current_modal.clone();
-        state.block.insert_mode = itf.block_insert_mode;
-        state.chat.insert_mode = itf.chat_insert_mode;
-        state.should_exit = itf.should_exit;
-        state.terminal_size = (itf.terminal_width, itf.terminal_height);
-        state
+        TuiState {
+            router: Router::new(itf.current_screen),
+            modal: crate::tui::state_machine::ModalState {
+                modal_type: itf.current_modal.clone(),
+                ..Default::default()
+            },
+            block: crate::tui::state_machine::BlockViewState {
+                insert_mode: itf.block_insert_mode,
+                ..Default::default()
+            },
+            chat: crate::tui::state_machine::ChatViewState {
+                insert_mode: itf.chat_insert_mode,
+                ..Default::default()
+            },
+            should_exit: itf.should_exit,
+            terminal_size: (itf.terminal_width, itf.terminal_height),
+            ..Default::default()
+        }
     }
 }
 

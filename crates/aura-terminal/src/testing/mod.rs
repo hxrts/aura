@@ -329,12 +329,14 @@ pub fn create_test_runtime(events: Vec<TerminalEvent>) -> TuiRuntime<TestTermina
 /// ];
 /// ```
 #[macro_export]
-#[allow(clippy::vec_init_then_push)]
 macro_rules! test_events {
     ($($event:tt)*) => {{
-        let mut events = Vec::new();
-        $crate::test_events_inner!(events, $($event)*);
-        events
+        #[allow(clippy::vec_init_then_push)]
+        {
+            let mut events = Vec::new();
+            $crate::test_events_inner!(events, $($event)*);
+            events
+        }
     }};
 }
 

@@ -49,10 +49,7 @@ async fn handle_amp_inspect(
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {}", e)))?;
 
-    output.section(format!(
-        "Channel State for {}:{}",
-        context_str, channel_str
-    ));
+    output.section(format!("Channel State for {}:{}", context_str, channel_str));
     output.kv("Current Epoch", state.chan_epoch.to_string());
     output.kv("Current Generation", state.current_gen.to_string());
     output.kv("Last Checkpoint Gen", state.last_checkpoint_gen.to_string());
