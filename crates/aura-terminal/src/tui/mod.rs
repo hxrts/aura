@@ -34,9 +34,12 @@
 //!
 //! See `tests/tui_deterministic.rs` for examples.
 
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 // Core iocraft modules
 pub mod components;
 pub mod context;
+pub(crate) mod fullscreen_stdio;
 pub mod hooks;
 pub mod iocraft_adapter;
 pub mod layout;
@@ -61,7 +64,7 @@ pub mod recovery_session;
 pub use components::{
     calculate_scroll, get_help_commands, get_help_commands_for_screen, AccountSetupModal,
     AccountSetupState, Badge, CommandItem, CommandPalette, CompactMessage, ConfirmModal,
-    ContactSelectModal, ContactSelectState, DemoHintBar, DemoInviteCodes, DiscoveredPeerInfo,
+    ContactSelectModal, ContactSelectState, DiscoveredPeerInfo,
     DiscoveredPeersPanel, DiscoveredPeersState, Divider, EmptyState, FormField, FormFieldComponent,
     FormModal, FormModalState, Heading, HelpCommand, HelpModal, HelpModalState, InputModal,
     InvitePeerCallback, KeyValue, List, ListEntry, ListItem, ListNavigation, LoadingState,
@@ -71,6 +74,8 @@ pub use components::{
     TextInputState, TextStyle, Textarea, TextareaState, Toast, ToastContainer, ToastLevel,
     ToastMessage,
 };
+#[cfg(feature = "development")]
+pub use components::{DemoHintBar, DemoInviteCodes};
 // Screen-specific modals are now in screen directories
 pub use context::IoContext;
 pub use hooks::{

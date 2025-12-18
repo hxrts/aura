@@ -388,6 +388,13 @@ pub enum EffectCommand {
         /// The backup code to import
         backup_code: String,
     },
+
+    // === Test-only Commands (not user-parsed) ===
+    /// Intentionally unmapped command used to exercise error paths in tests.
+    ///
+    /// This is not produced by the command parser and is not handled by the
+    /// intent mapper or operational handlers.
+    UnknownCommandForTest,
 }
 
 impl EffectCommand {
@@ -411,7 +418,8 @@ impl EffectCommand {
             | Self::ListLanPeers
             | Self::Ping
             | Self::ListParticipants { .. }
-            | Self::GetUserInfo { .. } => CommandAuthorizationLevel::Public,
+            | Self::GetUserInfo { .. }
+            | Self::UnknownCommandForTest => CommandAuthorizationLevel::Public,
 
             // Basic - user token required
             Self::SendMessage { .. }

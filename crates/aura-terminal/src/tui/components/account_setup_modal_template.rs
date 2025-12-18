@@ -44,46 +44,34 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 
     // Show success/error result view
     if success || has_error {
-        let (status_icon, status_text, status_color) = if success {
-            ("✓", "Account created successfully!", Theme::SUCCESS)
+        let (status_icon, status_text, status_color, title) = if success {
+            ("✓", "Account created successfully!", Theme::SUCCESS, "Account Created")
         } else {
-            ("✗", error.as_str(), Theme::ERROR)
+            ("✗", error.as_str(), Theme::ERROR, "Account Creation Failed")
         };
 
         return element! {
             ModalContent(
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,
-                border_color: Some(if success { Theme::SUCCESS } else { Theme::ERROR }),
+                border_color: Some(status_color),
+                justify_content: Some(JustifyContent::Center),
+                align_items: Some(AlignItems::Center),
             ) {
-                // Header
                 View(
-                    width: 100pct,
+                    width: Percent(70.0),
                     padding: 2,
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::BORDER,
+                    border_style: BorderStyle::Round,
+                    border_color: status_color,
                 ) {
                     Text(
-                        content: if success { "Account Created" } else { "Account Creation Failed" },
+                        content: title,
                         weight: Weight::Bold,
                         color: status_color,
                     )
-                }
-
-                // Status content
-                View(
-                    width: 100pct,
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    padding: 3,
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                ) {
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
+                    View(margin_top: 2, flex_direction: FlexDirection::Row, gap: 2) {
                         Text(content: status_icon, color: status_color, weight: Weight::Bold)
                         Text(content: status_text, color: status_color)
                     }
@@ -99,21 +87,12 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     } else {
                         None
                     })
-                }
-
-                // Footer
-                View(
-                    width: 100pct,
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::Center,
-                    padding: 2,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Top,
-                    border_color: Theme::BORDER,
-                ) {
-                    View(flex_direction: FlexDirection::Row, gap: 1) {
+                    View(margin_top: 2, flex_direction: FlexDirection::Row, gap: 1) {
                         Text(content: "Enter", color: Theme::SECONDARY)
-                        Text(content: if success { "to continue" } else { "to try again" }, color: Theme::TEXT_MUTED)
+                        Text(
+                            content: if success { "to continue" } else { "to try again" },
+                            color: Theme::TEXT_MUTED,
+                        )
                     }
                 }
             }

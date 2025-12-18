@@ -30,7 +30,7 @@
 use iocraft::prelude::*;
 
 use crate::tui::layout::dim;
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Spacing, Theme};
 
 // =============================================================================
 // Modal Frame
@@ -220,13 +220,13 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
             flex_direction: FlexDirection::Column,
             justify_content: Some(JustifyContent::Center),
             align_items: Some(AlignItems::Center),
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: Some(Theme::BORDER_FOCUS),
         ) {
             // Title bar
             View(
                 width: 100pct,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
@@ -238,7 +238,7 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
                 width: 100pct,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
             ) {
@@ -249,24 +249,24 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::End,
-                gap: 2,
-                padding: 1,
+                gap: Spacing::SM,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
                 View(
-                    padding_left: 2,
-                    padding_right: 2,
-                    border_style: BorderStyle::Round,
+                    padding_left: Spacing::SM,
+                    padding_right: Spacing::SM,
+                    border_style: Borders::PRIMARY,
                     border_color: cancel_border,
                 ) {
                     Text(content: cancel_text, color: cancel_fg)
                 }
                 View(
-                    padding_left: 2,
-                    padding_right: 2,
-                    border_style: BorderStyle::Round,
+                    padding_left: Spacing::SM,
+                    padding_right: Spacing::SM,
+                    border_style: Borders::PRIMARY,
                     border_color: confirm_border,
                 ) {
                     Text(content: confirm_text, color: confirm_fg)
@@ -322,13 +322,13 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
     element! {
         ModalContent(
             flex_direction: FlexDirection::Column,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: Some(Theme::BORDER_FOCUS),
         ) {
             // Title bar
             View(
                 width: 100pct,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
@@ -338,18 +338,18 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
             // Label + Input
             View(
                 width: 100pct,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
-                gap: 1,
+                gap: Spacing::XS,
             ) {
                 Text(content: label, color: Theme::TEXT_MUTED)
                 View(
-                    border_style: BorderStyle::Round,
+                    border_style: Borders::INPUT,
                     border_color: Theme::BORDER_FOCUS,
-                    padding_left: 1,
-                    padding_right: 1,
+                    padding_left: Spacing::LIST_ITEM_PADDING,
+                    padding_right: Spacing::LIST_ITEM_PADDING,
                 ) {
                     Text(content: display_text, color: text_color)
                 }
@@ -357,7 +357,7 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
             // Hints
             View(
                 width: 100pct,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,

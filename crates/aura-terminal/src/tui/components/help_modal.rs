@@ -5,7 +5,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Spacing, Theme};
 
 use super::help_data::{get_help_commands_for_screen, HelpCommand};
 use super::modal::ModalContent;
@@ -73,7 +73,11 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
                     let key = cmd.name.clone();
                     let desc = cmd.description.clone();
                     element! {
-                        View(flex_direction: FlexDirection::Row, width: 50pct, padding_right: 1) {
+                        View(
+                            flex_direction: FlexDirection::Row,
+                            width: 50pct,
+                            padding_right: Spacing::LIST_ITEM_PADDING,
+                        ) {
                             View(width: 10) {
                                 Text(content: key, weight: Weight::Bold, color: Theme::SECONDARY)
                             }
@@ -103,13 +107,13 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
     element! {
         ModalContent(
             flex_direction: FlexDirection::Column,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: Some(Theme::PRIMARY),
         ) {
             // Header
             View(
                 width: 100pct,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
                 border_style: BorderStyle::Single,
@@ -126,7 +130,7 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
             // Body - display grouped commands in grid
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
@@ -140,7 +144,7 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,

@@ -5,7 +5,7 @@
 use iocraft::prelude::*;
 
 use super::modal::ModalContent;
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Spacing, Theme};
 
 /// A form field definition
 #[derive(Clone, Debug, Default)]
@@ -98,13 +98,13 @@ pub fn FormFieldComponent(props: &FormFieldProps) -> impl Into<AnyElement<'stati
     let full_label = format!("{}{}", label, required_marker);
 
     element! {
-        View(flex_direction: FlexDirection::Column, margin_bottom: 1) {
+        View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
             Text(content: full_label, color: Theme::TEXT_MUTED)
             View(
-                border_style: BorderStyle::Round,
+                border_style: Borders::INPUT,
                 border_color: border_color,
-                padding_left: 1,
-                padding_right: 1,
+                padding_left: Spacing::LIST_ITEM_PADDING,
+                padding_right: Spacing::LIST_ITEM_PADDING,
             ) {
                 Text(content: display_text, color: text_color)
             }
@@ -166,13 +166,13 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
     element! {
         ModalContent(
             flex_direction: FlexDirection::Column,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: Some(Theme::BORDER_FOCUS),
         ) {
             // Title bar
             View(
                 width: 100pct,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
@@ -182,7 +182,7 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
             // Form fields - fills available space
             View(
                 width: 100pct,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
@@ -207,28 +207,28 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::SpaceBetween,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                    View(flex_direction: FlexDirection::Row, gap: 1) {
+                    View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                         Text(content: "Tab", color: Theme::SECONDARY)
                         Text(content: "Next field", color: Theme::TEXT_MUTED)
                     }
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
+                    View(flex_direction: FlexDirection::Row, gap: Spacing::SM) {
                         View(
-                            padding_left: 2,
-                            padding_right: 2,
-                            border_style: BorderStyle::Round,
+                            padding_left: Spacing::SM,
+                            padding_right: Spacing::SM,
+                            border_style: Borders::PRIMARY,
                             border_color: Theme::BORDER,
                         ) {
                             Text(content: cancel_text, color: Theme::TEXT)
                         }
                         View(
-                            padding_left: 2,
-                            padding_right: 2,
-                            border_style: BorderStyle::Round,
+                            padding_left: Spacing::SM,
+                            padding_right: Spacing::SM,
+                            border_style: Borders::PRIMARY,
                             border_color: if can_submit { Theme::PRIMARY } else { Theme::BORDER },
                         ) {
                             Text(

@@ -4,7 +4,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::{Icons, Spacing, Theme};
+use crate::tui::theme::{Borders, Icons, Spacing, Theme};
 use crate::tui::types::DeliveryStatus;
 
 /// Props for MessageBubble
@@ -56,7 +56,7 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
             View(
                 flex_direction: FlexDirection::Column,
                 max_width: 70pct,
-                border_style: BorderStyle::Round,
+                border_style: Borders::PRIMARY,
                 border_color: border_color,
                 padding: Spacing::PANEL_PADDING,
             ) {
@@ -108,11 +108,11 @@ pub fn CompactMessage(props: &CompactMessageProps) -> impl Into<AnyElement<'stat
         View(
             flex_direction: FlexDirection::Row,
             max_width: 70pct,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: border_color,
             padding_left: Spacing::PANEL_PADDING,
             padding_right: Spacing::PANEL_PADDING,
-            margin_bottom: 1u32,
+            margin_bottom: Spacing::XS,
             gap: Spacing::SM,
         ) {
             View(flex_grow: 1.0) {

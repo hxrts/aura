@@ -4,7 +4,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::Theme;
+use crate::tui::theme::{focus_border_color, Borders, Spacing, Theme};
 
 /// Props for MessageInput
 #[derive(Default, Props)]
@@ -26,11 +26,7 @@ pub struct MessageInputProps {
 /// State management handled by parent component.
 #[component]
 pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>> {
-    let border_color = if props.focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
+    let border_color = focus_border_color(props.focused);
 
     let is_empty = props.value.is_empty();
     let display_text = if is_empty {
@@ -53,7 +49,7 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
         View(
             flex_direction: FlexDirection::Column,
             width: 100pct,
-            border_style: BorderStyle::Round,
+            border_style: Borders::INPUT,
             border_color: border_color,
         ) {
             // Reply context (if any)
@@ -62,8 +58,8 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
                 Some(element! {
                     View(
                         flex_direction: FlexDirection::Row,
-                        padding_left: 1,
-                        padding_right: 1,
+                        padding_left: Spacing::LIST_ITEM_PADDING,
+                        padding_right: Spacing::LIST_ITEM_PADDING,
                         border_style: BorderStyle::Single,
                         border_edges: Edges::Bottom,
                         border_color: border_color,
@@ -80,8 +76,8 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
             // Input area
             View(
                 flex_direction: FlexDirection::Row,
-                padding_left: 1,
-                padding_right: 1,
+                padding_left: Spacing::LIST_ITEM_PADDING,
+                padding_right: Spacing::LIST_ITEM_PADDING,
                 align_items: AlignItems::Center,
             ) {
                 Text(content: if sending { "> " } else { "> " }, color: Theme::PRIMARY)
@@ -90,8 +86,8 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
             // Hint bar - border color matches focus state
             View(
                 flex_direction: FlexDirection::Row,
-                padding_left: 1,
-                padding_right: 1,
+                padding_left: Spacing::LIST_ITEM_PADDING,
+                padding_right: Spacing::LIST_ITEM_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: border_color,

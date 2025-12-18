@@ -15,8 +15,7 @@ pub mod io_context;
 pub mod snapshots;
 pub mod toasts;
 
-pub use dispatch::DispatchHelper;
+pub use dispatch::{AccountFilesHelper, DispatchHelper};
 pub use io_context::IoContext;
+pub use snapshots::SnapshotHelper;
 pub use toasts::ToastHelper;
-
-// SnapshotHelper is not yet used - snapshot logic remains in IoContext for now

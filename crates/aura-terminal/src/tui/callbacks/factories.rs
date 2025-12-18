@@ -760,12 +760,24 @@ impl BlockCallbacks {
             let tx = tx.clone();
             let content_clone = content.clone();
             tokio::spawn(async move {
-                let block_snap = ctx.snapshot_block();
-                let block_id = block_snap
-                    .block
-                    .as_ref()
-                    .map(|b| b.id.clone())
-                    .unwrap_or_else(|| "home".to_string());
+                let block_id = {
+                    use aura_app::signal_defs::{BLOCKS_SIGNAL, BLOCK_SIGNAL};
+                    use aura_core::effects::reactive::ReactiveEffects;
+
+                    let core = ctx.app_core().read().await;
+
+                    // Prefer multi-block selection; fall back to legacy singular block.
+                    if let Ok(blocks) = core.read(&*BLOCKS_SIGNAL).await {
+                        blocks
+                            .current_block_id
+                            .clone()
+                            .unwrap_or_else(|| "home".to_string())
+                    } else if let Ok(block) = core.read(&*BLOCK_SIGNAL).await {
+                        block.id.clone()
+                    } else {
+                        "home".to_string()
+                    }
+                };
                 let channel = format!("block:{}", block_id);
                 let block_id_clone = block_id.clone();
                 let cmd = EffectCommand::SendMessage {
@@ -1024,34 +1036,42 @@ impl AppCallbacks {
         Arc::new(move |display_name: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            // First create the account file synchronously
-            match ctx.create_account(&display_name) {
-                Ok(()) => {
-                    // Then dispatch the intent to create a journal fact
-                    let cmd = EffectCommand::CreateAccount {
-                        display_name: display_name.clone(),
-                    };
-                    tokio::spawn(async move {
+            tokio::spawn(async move {
+                // First create the account file (disk I/O) off the async runtime.
+                let ctx_for_files = ctx.clone();
+                let display_name_for_files = display_name.clone();
+                let file_result = tokio::task::spawn_blocking(move || {
+                    ctx_for_files.create_account(&display_name_for_files)
+                })
+                .await
+                .map_err(|e| format!("Account creation task failed: {}", e));
+
+                match file_result {
+                    Ok(Ok(())) => {
+                        // Then dispatch the intent to create a journal fact.
+                        let cmd = EffectCommand::CreateAccount {
+                            display_name: display_name.clone(),
+                        };
+
                         match ctx.dispatch(cmd).await {
                             Ok(_) => {
                                 let _ = tx.send(UiUpdate::AccountCreated);
                             }
                             Err(e) => {
-                                // Non-fatal: file was created, journal fact is optional
+                                // Non-fatal: file was created, journal fact is optional.
                                 tracing::warn!("Journal fact creation failed: {}", e);
-                                // Still signal account created since file was written
                                 let _ = tx.send(UiUpdate::AccountCreated);
                             }
                         }
-                    });
+                    }
+                    Ok(Err(e)) | Err(e) => {
+                        let _ = tx.send(UiUpdate::OperationFailed {
+                            operation: "CreateAccount".to_string(),
+                            error: e.to_string(),
+                        });
+                    }
                 }
-                Err(e) => {
-                    let _ = tx.send(UiUpdate::OperationFailed {
-                        operation: "CreateAccount".to_string(),
-                        error: e.to_string(),
-                    });
-                }
-            }
+            });
         })
     }
 }

@@ -10,6 +10,7 @@
 mod account_setup_modal_template;
 mod command_palette;
 mod contact_select_modal_template;
+#[cfg(feature = "development")]
 mod demo_hint;
 mod detail_panel;
 mod discovered_peers;
@@ -37,6 +38,7 @@ mod toast;
 pub use account_setup_modal_template::{AccountSetupModal, AccountSetupState};
 pub use command_palette::{CommandItem, CommandPalette, PaletteCommand};
 pub use contact_select_modal_template::{ContactSelectModal, ContactSelectState};
+#[cfg(feature = "development")]
 pub use demo_hint::{DemoHintBar, DemoInviteCodes};
 pub use detail_panel::DetailPanel;
 pub use discovered_peers::{

@@ -387,6 +387,7 @@ pub fn command_to_intent(cmd: &EffectCommand, ctx: &CommandContext) -> Option<In
         | EffectCommand::StartDirectChat { .. }
         | EffectCommand::SendAction { .. }
         | EffectCommand::InviteUser { .. }
+        | EffectCommand::UnknownCommandForTest
         | EffectCommand::ExportAccountBackup
         | EffectCommand::ImportAccountBackup { .. } => None,
     }

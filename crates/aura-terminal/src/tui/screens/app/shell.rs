@@ -345,8 +345,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                         // Other updates - log in debug mode only
                         _ => {
-                            #[cfg(debug_assertions)]
-                            eprintln!("[UiUpdate] Unhandled update: {:?}", update);
+                            // Intentionally no stdout/stderr logging here: writing to the terminal
+                            // while iocraft is in fullscreen mode can scroll the buffer and create
+                            // visual artifacts (e.g., duplicated nav bar).
                         }
                     }
                 }
@@ -1428,6 +1429,14 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // - `hooks.use_context::<AppCoreContext>()` for reactive signal subscription
     // - `hooks.use_context::<CallbackContext>()` for accessing domain callbacks
     {
+        // Prevent any stray stdout/stderr writes while iocraft is in fullscreen.
+        // This avoids terminal scroll artifacts (e.g., "duplicated" nav bar).
+        let _stdio_guard = if std::env::var_os("AURA_TUI_ALLOW_STDIO").is_some() {
+            None
+        } else {
+            Some(crate::tui::fullscreen_stdio::FullscreenStdioGuard::redirect_to_null()?)
+        };
+
         let app_context = app_core_context;
         let cb_context = callback_context;
         element! {

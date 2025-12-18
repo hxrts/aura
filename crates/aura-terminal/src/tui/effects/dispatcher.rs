@@ -529,18 +529,17 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_default_policy_allows_all() {
+    fn test_default_policy_denies_non_public() {
         let dispatcher = CommandDispatcher::new();
 
-        // Default policy (AllowAll) should allow commands requiring capabilities
+        // Default policy (DenyNonPublic) should deny commands requiring capabilities
         let cmd = IrcCommand::Msg {
             target: "alice".to_string(),
             text: "hello".to_string(),
         };
 
-        // dispatch() now succeeds because default policy is AllowAll
         let result = dispatcher.dispatch(cmd);
-        assert!(result.is_ok());
+        assert!(result.is_err());
     }
 
     #[test]
@@ -620,15 +619,15 @@ mod tests {
     fn test_set_policy() {
         let mut dispatcher = CommandDispatcher::new();
 
-        // Start with AllowAll
+        // Start with DenyNonPublic
         let cmd = IrcCommand::Msg {
             target: "alice".to_string(),
             text: "hello".to_string(),
         };
-        assert!(dispatcher.dispatch(cmd.clone()).is_ok());
+        assert!(dispatcher.dispatch(cmd.clone()).is_err());
 
-        // Change to DenyNonPublic
-        dispatcher.set_policy(CapabilityPolicy::DenyNonPublic);
-        assert!(dispatcher.dispatch(cmd).is_err());
+        // Change to AllowAll
+        dispatcher.set_policy(CapabilityPolicy::AllowAll);
+        assert!(dispatcher.dispatch(cmd).is_ok());
     }
 }

@@ -4,7 +4,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::{focus_border_color, list_item_colors_with_muted, Theme};
+use crate::tui::theme::{focus_border_color, list_item_colors_with_muted, Borders, Spacing, Theme};
 
 // =============================================================================
 // List Item
@@ -51,9 +51,9 @@ pub fn ListItem(props: &ListItemProps) -> impl Into<AnyElement<'static>> {
         View(
             flex_direction: FlexDirection::Row,
             background_color: bg,
-            padding_left: 1,
-            padding_right: 1,
-            gap: 1,
+            padding_left: Spacing::LIST_ITEM_PADDING,
+            padding_right: Spacing::LIST_ITEM_PADDING,
+            gap: Spacing::XS,
         ) {
             #(if has_icon {
                 Some(element! {
@@ -153,7 +153,7 @@ pub fn List(props: &ListProps) -> impl Into<AnyElement<'static>> {
             #(if has_title {
                 Some(element! {
                     View(
-                        padding_bottom: 1,
+                        padding_bottom: Spacing::XS,
                         border_style: BorderStyle::Single,
                         border_edges: Edges::Bottom,
                         border_color: Theme::BORDER,
@@ -184,9 +184,9 @@ pub fn List(props: &ListProps) -> impl Into<AnyElement<'static>> {
     if bordered {
         element! {
             View(
-                border_style: BorderStyle::Round,
+                border_style: Borders::LIST,
                 border_color: focus_border_color(focused),
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
             ) {
                 #(content)
             }

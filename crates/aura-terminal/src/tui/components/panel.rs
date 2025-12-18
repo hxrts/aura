@@ -4,7 +4,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::{focus_border_color, Spacing, Theme};
+use crate::tui::theme::{focus_border_color, Borders, Spacing, Theme};
 
 /// Props for Panel
 #[derive(Default, Props)]
@@ -44,7 +44,7 @@ pub fn Panel(props: &PanelProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: focus_border_color(props.focused),
             background_color: props.background.unwrap_or(Color::Reset),
             flex_grow: props.flex_grow.unwrap_or(0.0),
@@ -67,9 +67,9 @@ pub fn Panel(props: &PanelProps) -> impl Into<AnyElement<'static>> {
                         Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
                         #(badge.map(|b| element! {
                             View(
-                                padding_left: 1,
-                                padding_right: 1,
-                                border_style: BorderStyle::Round,
+                                padding_left: Spacing::XS,
+                                padding_right: Spacing::XS,
+                                border_style: Borders::PRIMARY,
                                 border_color: badge_color,
                             ) {
                                 Text(content: b, color: badge_color, weight: Weight::Bold)

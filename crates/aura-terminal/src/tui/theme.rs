@@ -105,6 +105,20 @@ impl Spacing {
     pub const SECTION_GAP: u32 = 2;
 }
 
+/// Layout tokens for common absolute/overlay positioning and sizing.
+pub struct Layout;
+
+impl Layout {
+    /// Standard top padding for full-screen overlays (command palette, etc).
+    pub const OVERLAY_TOP_PADDING: u32 = 5;
+
+    /// Command palette width as a percentage of terminal width.
+    pub const COMMAND_PALETTE_WIDTH_PCT: f32 = 60.0;
+
+    /// Command palette max height as a percentage of terminal height.
+    pub const COMMAND_PALETTE_MAX_HEIGHT_PCT: f32 = 70.0;
+}
+
 /// Unicode icons for status indicators and UI elements (no emoji)
 pub struct Icons;
 

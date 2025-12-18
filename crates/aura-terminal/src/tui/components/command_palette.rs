@@ -4,7 +4,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Layout, Spacing, Theme};
 
 /// A command in the palette
 #[derive(Clone, Debug, Default)]
@@ -62,11 +62,11 @@ pub fn CommandItem(props: &CommandItemProps) -> impl Into<AnyElement<'static>> {
         View(
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::SpaceBetween,
-            padding_left: 1,
-            padding_right: 1,
+            padding_left: Spacing::LIST_ITEM_PADDING,
+            padding_right: Spacing::LIST_ITEM_PADDING,
         ) {
             Text(content: pointer, color: Theme::PRIMARY)
-            View(flex_direction: FlexDirection::Row, gap: 2) {
+            View(flex_direction: FlexDirection::Row, gap: Spacing::SM) {
                 Text(content: name, color: name_color)
                 Text(content: description, color: Theme::TEXT_MUTED)
             }
@@ -130,25 +130,25 @@ pub fn CommandPalette(props: &CommandPaletteProps) -> impl Into<AnyElement<'stat
             height: 100pct,
             justify_content: JustifyContent::FlexStart,
             align_items: AlignItems::Center,
-            padding_top: 5,
+            padding_top: Layout::OVERLAY_TOP_PADDING,
 
         ) {
             View(
-                width: Percent(60.0),
-                max_height: Percent(70.0),
+                width: Percent(Layout::COMMAND_PALETTE_WIDTH_PCT),
+                max_height: Percent(Layout::COMMAND_PALETTE_MAX_HEIGHT_PCT),
                 flex_direction: FlexDirection::Column,
                 background_color: Theme::BG_MODAL,
-                border_style: BorderStyle::Round,
+                border_style: Borders::PRIMARY,
                 border_color: Theme::BORDER_FOCUS,
             ) {
                 // Search input
                 View(
-                    padding: 1,
+                    padding: Spacing::PANEL_PADDING,
                     border_style: BorderStyle::Single,
                     border_edges: Edges::Bottom,
                     border_color: Theme::BORDER,
                 ) {
-                    View(flex_direction: FlexDirection::Row, gap: 1) {
+                    View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                         Text(content: ">", color: Theme::PRIMARY)
                         Text(content: display_text, color: text_color)
                     }
@@ -158,7 +158,7 @@ pub fn CommandPalette(props: &CommandPaletteProps) -> impl Into<AnyElement<'stat
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
                     overflow: Overflow::Scroll,
-                    padding: 1,
+                    padding: Spacing::PANEL_PADDING,
                 ) {
                     #(if commands.is_empty() {
                         vec![element! {
@@ -179,12 +179,12 @@ pub fn CommandPalette(props: &CommandPaletteProps) -> impl Into<AnyElement<'stat
                 }
                 // Hints
                 View(
-                    padding: 1,
+                    padding: Spacing::PANEL_PADDING,
                     border_style: BorderStyle::Single,
                     border_edges: Edges::Top,
                     border_color: Theme::BORDER,
                     flex_direction: FlexDirection::Row,
-                    gap: 3,
+                    gap: Spacing::MD,
                 ) {
                     Text(content: "↑↓ Navigate", color: Theme::TEXT_MUTED)
                     Text(content: "Enter Select", color: Theme::TEXT_MUTED)

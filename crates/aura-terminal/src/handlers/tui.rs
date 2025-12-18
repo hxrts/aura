@@ -153,7 +153,6 @@ fn try_load_account(base_path: &Path, mode: TuiMode) -> Result<AccountLoadResult
         .map_err(|_| AuraError::internal("Invalid context_id length (expected 16 bytes)"))?;
     let context_id = ContextId::from_uuid(uuid::Uuid::from_bytes(context_bytes));
 
-    println!("Loaded existing account from {}", account_path.display());
     Ok(AccountLoadResult::Loaded {
         authority: authority_id,
         context: context_id,
@@ -226,7 +225,6 @@ pub fn create_account(
     std::fs::write(&account_path, content)
         .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
 
-    println!("Created new account at {}", account_path.display());
     Ok((authority_id, context_id))
 }
 
@@ -287,11 +285,6 @@ pub fn restore_recovered_account(
     std::fs::write(&account_path, content)
         .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
 
-    println!(
-        "Restored recovered account at {} (authority: {})",
-        account_path.display(),
-        recovered_authority_id
-    );
     Ok((recovered_authority_id, context_id))
 }
 
@@ -474,12 +467,6 @@ pub fn import_account_backup(
         std::fs::write(&journal_path, journal_content)
             .map_err(|e| AuraError::internal(format!("Failed to write journal: {}", e)))?;
     }
-
-    println!(
-        "Restored account from backup at {} (authority: {})",
-        account_path.display(),
-        authority_id
-    );
 
     Ok((authority_id, context_id))
 }
