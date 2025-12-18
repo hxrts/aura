@@ -74,3 +74,6 @@ verification/lean/.lake/
 verification/lean/build/
 verification/lean/Generated/
 verification/lean/.lean_build/
+
+# Apalache model checker artifacts
+_apalache-out/
