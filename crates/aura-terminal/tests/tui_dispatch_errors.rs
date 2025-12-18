@@ -9,13 +9,11 @@
 use async_lock::RwLock;
 use std::sync::Arc;
 
-use aura_app::signal_defs::ERROR_SIGNAL;
 use aura_app::{AppConfig, AppCore};
-use aura_core::effects::reactive::ReactiveEffects;
 use aura_terminal::error::TerminalError;
 use aura_terminal::tui::commands::CommandCapability;
 use aura_terminal::tui::effects::{
-    CapabilityPolicy, CommandDispatcher, DispatchError, EffectCommand, OperationalHandler,
+    CapabilityPolicy, CommandDispatcher, DispatchError, OperationalHandler,
 };
 
 /// Helper to create a test AppCore with signals initialized
@@ -102,7 +100,7 @@ async fn test_handle_op_result_helper() {
 #[tokio::test]
 async fn test_capability_policy_variants() {
     // AllowAll policy - should always pass
-    let allow_all = CommandDispatcher::with_policy(CapabilityPolicy::AllowAll);
+    let _allow_all = CommandDispatcher::with_policy(CapabilityPolicy::AllowAll);
     // Note: CommandDispatcher takes IrcCommand, not EffectCommand
     // The actual capability checking happens in the IRC command parsing
 
