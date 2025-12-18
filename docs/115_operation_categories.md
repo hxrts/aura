@@ -456,4 +456,3 @@ channel.set_effect_policy(RemoveFromChannel, EffectTiming::Immediate);
 - [Choreography Guide](107_mpst_and_choreography.md) - Session types for Category C
 - [Transport](108_transport_and_information_flow.md) - Sync status tracking
 - [Effect System](106_effect_system_and_runtime.md) - Effect policies
-- [Design Document](../work/optimistic.md) - Full design rationale

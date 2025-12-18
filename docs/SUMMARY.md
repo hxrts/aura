@@ -22,6 +22,7 @@
 - [Aura Messaging Protocol (AMP)](112_amp.md)
 - [Database Architecture](113_database.md)
 - [Social Architecture](114_social_architecture.md)
+- [Operation Categories](115_operation_categories.md)
 - [Terminal User Interface](115_tui.md)
 - [Cryptographic Architecture](116_crypto.md)
 - [Hello World Guide](801_hello_world_guide.md)
