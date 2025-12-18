@@ -32,7 +32,6 @@ pub use hints::DemoHints;
 pub use signal_coordinator::DemoSignalCoordinator;
 pub use simulator::DemoSimulator;
 
-use crate::error::TerminalError;
 use crate::error::TerminalResult;
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;

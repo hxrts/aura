@@ -198,6 +198,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         hooks.use_future({
             let mut display_name_state = display_name_state.clone();
             let mut toasts_state = toasts_state.clone();
+            let mut account_state = account_state.clone();
+            let mut account_version = account_version.clone();
             async move {
                 // Take the receiver from the holder (only happens once)
                 #[allow(clippy::expect_used)]
@@ -230,20 +232,26 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             toasts_state.set(Vec::new());
                         }
 
-                        // Error handling - show as toast
+                        // Error handling - show in modal or as toast depending on operation
                         UiUpdate::OperationFailed { operation, error } => {
-                            // Use atomic counter for deterministic unique ID (simulator-controllable)
-                            use std::sync::atomic::{AtomicU64, Ordering};
-                            static TOAST_COUNTER: AtomicU64 = AtomicU64::new(0);
-                            let counter = TOAST_COUNTER.fetch_add(1, Ordering::Relaxed);
-                            let toast_id = format!("{}-error-{}", operation, counter);
-                            let toast = ToastMessage::error(
-                                toast_id,
-                                format!("{} failed: {}", operation, error),
-                            );
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
+                            // For account creation, show error in the modal instead of toast
+                            if operation == "CreateAccount" {
+                                account_state.write().set_error(&error);
+                                account_version.set(account_version.get().wrapping_add(1));
+                            } else {
+                                // For other operations, show as toast
+                                use std::sync::atomic::{AtomicU64, Ordering};
+                                static TOAST_COUNTER: AtomicU64 = AtomicU64::new(0);
+                                let counter = TOAST_COUNTER.fetch_add(1, Ordering::Relaxed);
+                                let toast_id = format!("{}-error-{}", operation, counter);
+                                let toast = ToastMessage::error(
+                                    toast_id,
+                                    format!("{} failed: {}", operation, error),
+                                );
+                                let mut toasts = toasts_state.read().clone();
+                                toasts.push(toast);
+                                toasts_state.set(toasts);
+                            }
                         }
 
                         // Success notifications - show informational toasts
@@ -311,13 +319,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
 
                         UiUpdate::AccountCreated => {
-                            let toast = ToastMessage::success(
-                                "account-created".to_string(),
-                                "Account created successfully".to_string(),
-                            );
-                            let mut toasts = toasts_state.read().clone();
-                            toasts.push(toast);
-                            toasts_state.set(toasts);
+                            // Update the account setup modal to show success screen
+                            // (instead of a toast, which was confusing to users)
+                            account_state.write().set_success();
+                            account_version.set(account_version.get().wrapping_add(1));
                         }
 
                         UiUpdate::RecoveryStarted => {
@@ -1054,21 +1059,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             height: dim::TOTAL_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Nav bar area (3 rows) - shows toast if active, otherwise nav bar
-            #(if current_toasts.is_empty() {
-                element! {
-                    NavBar(
-                        active_screen: current_screen,
-                        syncing: syncing,
-                        last_sync_time: last_sync,
-                        peer_count: peers,
-                    )
-                }.into_any()
-            } else {
-                element! {
-                    ToastContainer(toasts: current_toasts.clone())
-                }.into_any()
-            })
+            // Nav bar area (3 rows) - always show nav bar
+            NavBar(
+                active_screen: current_screen,
+                syncing: syncing,
+                last_sync_time: last_sync,
+                peer_count: peers,
+            )
 
             // Screen content - fixed 25 rows (MIDDLE_HEIGHT)
             View(width: dim::TOTAL_WIDTH, height: dim::MIDDLE_HEIGHT, overflow: Overflow::Hidden) {
