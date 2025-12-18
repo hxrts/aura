@@ -48,10 +48,7 @@ use crate::tui::hooks::{
     BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
-use crate::tui::types::{
-    BlockBudget, Channel, ChannelMode, Contact, Guardian, Invitation, Message, RecoveryStatus,
-    Resident,
-};
+use crate::tui::types::ChannelMode;
 
 /// iocraft-friendly context
 ///
