@@ -65,4 +65,6 @@ pub use text_input::TextInput;
 pub use text_input_modal_template::{TextInputModal, TextInputState};
 pub use text_styled::{Badge, Divider, Heading, KeyValue, StyledText, TextStyle};
 pub use textarea::{Textarea, TextareaState};
-pub use toast::{StatusBar, Toast, ToastContainer, ToastLevel, ToastMessage};
+pub use toast::{
+    StatusBar, Toast, ToastContainer, ToastContent, ToastFrame, ToastLevel, ToastMessage,
+};
