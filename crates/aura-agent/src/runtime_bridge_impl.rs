@@ -711,6 +711,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // Time Operations
     // =========================================================================
 
+    #[allow(clippy::disallowed_methods)] // RuntimeBridge is the boundary where effects are implemented
     fn current_time_ms(&self) -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

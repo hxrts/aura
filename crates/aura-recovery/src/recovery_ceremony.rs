@@ -115,6 +115,7 @@ pub struct CeremonyRecoveryRequest {
 
 impl CeremonyRecoveryRequest {
     /// Compute hash of the request for ceremony ID derivation.
+    #[allow(clippy::expect_used)] // serde_json serialization of simple structs is infallible
     pub fn compute_hash(&self) -> Hash32 {
         let bytes = serde_json::to_vec(self).expect("CeremonyRecoveryRequest should serialize");
         Hash32::from_bytes(&bytes)

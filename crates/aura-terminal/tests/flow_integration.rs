@@ -30,9 +30,9 @@
 //! cargo test --package aura-terminal --test flow_integration -- --nocapture
 //! ```
 
+use async_lock::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use async_lock::RwLock;
 
 use aura_app::signal_defs::{
     BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,

@@ -888,9 +888,7 @@ impl ThresholdModalState {
     }
 
     pub fn increment_n(&mut self) {
-        if self.n < 255 {
-            self.n += 1;
-        }
+        self.n = self.n.saturating_add(1);
     }
 
     pub fn decrement_n(&mut self) {
@@ -1652,7 +1650,6 @@ fn handle_screen_modal_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
     }
     if state.settings.confirm_remove_modal.visible {
         handle_settings_confirm_remove_modal_key(state, commands, key);
-        return;
     }
 }
 

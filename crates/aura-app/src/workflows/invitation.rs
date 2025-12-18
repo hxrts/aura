@@ -168,10 +168,7 @@ pub async fn export_invitation(
 pub async fn list_invitations(app_core: &Arc<RwLock<AppCore>>) -> InvitationsState {
     let core = app_core.read().await;
 
-    match core.read(&*INVITATIONS_SIGNAL).await {
-        Ok(state) => state,
-        Err(_) => InvitationsState::default(),
-    }
+    core.read(&*INVITATIONS_SIGNAL).await.unwrap_or_default()
 }
 
 // ============================================================================

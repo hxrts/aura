@@ -105,7 +105,7 @@ async fn show_receipts(
         return Ok(output);
     }
 
-    output.section(&format!(
+    output.section(format!(
         "Receipts for context {} ({} total)",
         snapshot.context,
         snapshot.receipts.len()

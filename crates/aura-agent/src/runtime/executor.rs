@@ -93,11 +93,7 @@ impl EffectExecutor {
     }
 
     /// Simulation constructor
-    pub fn simulation(
-        authority_id: AuthorityId,
-        seed: u64,
-        registry: Arc<EffectRegistry>,
-    ) -> Self {
+    pub fn simulation(authority_id: AuthorityId, seed: u64, registry: Arc<EffectRegistry>) -> Self {
         Self::new(authority_id, ExecutionMode::Simulation { seed }, registry)
     }
 }

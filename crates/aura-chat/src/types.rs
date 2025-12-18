@@ -25,9 +25,10 @@ use uuid::Uuid;
 /// let syncing = SyncStatus::Syncing { peers_synced: 2, peers_total: 5 };
 /// assert!(syncing.is_partial());
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SyncStatus {
     /// Fact committed locally only, not yet synced to any peer
+    #[default]
     LocalOnly,
 
     /// Fact is being synced to peers
@@ -50,12 +51,6 @@ pub enum SyncStatus {
         /// Optional error message
         error: Option<String>,
     },
-}
-
-impl Default for SyncStatus {
-    fn default() -> Self {
-        SyncStatus::LocalOnly
-    }
 }
 
 impl SyncStatus {
@@ -145,9 +140,10 @@ impl SyncStatus {
 /// Message delivery status for tracking message delivery and read receipts
 ///
 /// This extends SyncStatus with message-specific delivery semantics.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DeliveryStatus {
     /// Message is being sent
+    #[default]
     Sending,
 
     /// Message sent to server/relay but not yet delivered to recipient
@@ -181,12 +177,6 @@ pub enum DeliveryStatus {
         /// Number of retry attempts
         retry_count: u32,
     },
-}
-
-impl Default for DeliveryStatus {
-    fn default() -> Self {
-        DeliveryStatus::Sending
-    }
 }
 
 impl DeliveryStatus {
@@ -297,9 +287,10 @@ impl DeliveryStatus {
 ///
 /// Tracks distributed confirmation for optimistic operations that require
 /// agreement from multiple parties (e.g., channel creation, permission changes).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ConfirmationStatus {
     /// Applied locally only, no confirmation ceremony started
+    #[default]
     LocalOnly,
 
     /// Background confirmation ceremony in progress
@@ -345,12 +336,6 @@ pub enum ConfirmationStatus {
         /// Timestamp when rollback occurred
         rolled_back_at_ms: u64,
     },
-}
-
-impl Default for ConfirmationStatus {
-    fn default() -> Self {
-        ConfirmationStatus::LocalOnly
-    }
 }
 
 impl ConfirmationStatus {

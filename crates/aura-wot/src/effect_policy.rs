@@ -37,6 +37,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use aura_core::ContextId;
 
@@ -167,44 +168,6 @@ impl OperationType {
         }
     }
 
-    /// Parse operation type from string
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "send_message" => Some(OperationType::SendMessage),
-            "edit_message" => Some(OperationType::EditMessage),
-            "delete_message" => Some(OperationType::DeleteMessage),
-            "react_to_message" => Some(OperationType::ReactToMessage),
-            "create_channel" => Some(OperationType::CreateChannel),
-            "update_channel_topic" => Some(OperationType::UpdateChannelTopic),
-            "archive_channel" => Some(OperationType::ArchiveChannel),
-            "delete_channel" => Some(OperationType::DeleteChannel),
-            "pin_message" => Some(OperationType::PinMessage),
-            "add_channel_member" => Some(OperationType::AddChannelMember),
-            "remove_channel_member" => Some(OperationType::RemoveChannelMember),
-            "change_channel_permissions" => Some(OperationType::ChangeChannelPermissions),
-            "transfer_channel_ownership" => Some(OperationType::TransferChannelOwnership),
-            "add_contact" => Some(OperationType::AddContact),
-            "block_contact" => Some(OperationType::BlockContact),
-            "unblock_contact" => Some(OperationType::UnblockContact),
-            "set_contact_petname" => Some(OperationType::SetContactPetname),
-            "create_group" => Some(OperationType::CreateGroup),
-            "add_group_member" => Some(OperationType::AddGroupMember),
-            "remove_group_member" => Some(OperationType::RemoveGroupMember),
-            "update_profile" => Some(OperationType::UpdateProfile),
-            "update_preferences" => Some(OperationType::UpdatePreferences),
-            "rotate_guardians" => Some(OperationType::RotateGuardians),
-            "execute_recovery" => Some(OperationType::ExecuteRecovery),
-            "approve_recovery" => Some(OperationType::ApproveRecovery),
-            "add_device" => Some(OperationType::AddDevice),
-            "revoke_device" => Some(OperationType::RevokeDevice),
-            "propose_ota_update" => Some(OperationType::ProposeOTAUpdate),
-            "activate_ota" => Some(OperationType::ActivateOTA),
-            "join_social_block" => Some(OperationType::JoinSocialBlock),
-            "propose_block_adjacency" => Some(OperationType::ProposeBlockAdjacency),
-            _ => None,
-        }
-    }
-
     /// Get the default security level for this operation
     pub fn default_security_level(&self) -> SecurityLevel {
         match self {
@@ -246,6 +209,47 @@ impl OperationType {
             | OperationType::RevokeDevice
             | OperationType::ProposeOTAUpdate
             | OperationType::ActivateOTA => SecurityLevel::Critical,
+        }
+    }
+}
+
+impl FromStr for OperationType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "send_message" => Ok(OperationType::SendMessage),
+            "edit_message" => Ok(OperationType::EditMessage),
+            "delete_message" => Ok(OperationType::DeleteMessage),
+            "react_to_message" => Ok(OperationType::ReactToMessage),
+            "create_channel" => Ok(OperationType::CreateChannel),
+            "update_channel_topic" => Ok(OperationType::UpdateChannelTopic),
+            "archive_channel" => Ok(OperationType::ArchiveChannel),
+            "delete_channel" => Ok(OperationType::DeleteChannel),
+            "pin_message" => Ok(OperationType::PinMessage),
+            "add_channel_member" => Ok(OperationType::AddChannelMember),
+            "remove_channel_member" => Ok(OperationType::RemoveChannelMember),
+            "change_channel_permissions" => Ok(OperationType::ChangeChannelPermissions),
+            "transfer_channel_ownership" => Ok(OperationType::TransferChannelOwnership),
+            "add_contact" => Ok(OperationType::AddContact),
+            "block_contact" => Ok(OperationType::BlockContact),
+            "unblock_contact" => Ok(OperationType::UnblockContact),
+            "set_contact_petname" => Ok(OperationType::SetContactPetname),
+            "create_group" => Ok(OperationType::CreateGroup),
+            "add_group_member" => Ok(OperationType::AddGroupMember),
+            "remove_group_member" => Ok(OperationType::RemoveGroupMember),
+            "update_profile" => Ok(OperationType::UpdateProfile),
+            "update_preferences" => Ok(OperationType::UpdatePreferences),
+            "rotate_guardians" => Ok(OperationType::RotateGuardians),
+            "execute_recovery" => Ok(OperationType::ExecuteRecovery),
+            "approve_recovery" => Ok(OperationType::ApproveRecovery),
+            "add_device" => Ok(OperationType::AddDevice),
+            "revoke_device" => Ok(OperationType::RevokeDevice),
+            "propose_ota_update" => Ok(OperationType::ProposeOTAUpdate),
+            "activate_ota" => Ok(OperationType::ActivateOTA),
+            "join_social_block" => Ok(OperationType::JoinSocialBlock),
+            "propose_block_adjacency" => Ok(OperationType::ProposeBlockAdjacency),
+            _ => Err(format!("Unknown operation type: {}", s)),
         }
     }
 }
@@ -380,7 +384,7 @@ impl ApprovalThreshold {
             ApprovalThreshold::Unanimous => approvals >= total_eligible,
             ApprovalThreshold::Threshold { required } => approvals >= *required,
             ApprovalThreshold::Percentage { percent } => {
-                let required = (total_eligible * (*percent as usize) + 99) / 100;
+                let required = (total_eligible * (*percent as usize)).div_ceil(100);
                 approvals >= required
             }
         }
@@ -736,7 +740,7 @@ mod tests {
 
         for op in operations {
             let s = op.as_str();
-            let parsed = OperationType::from_str(s).unwrap();
+            let parsed: OperationType = s.parse().unwrap();
             assert_eq!(op, parsed);
         }
     }

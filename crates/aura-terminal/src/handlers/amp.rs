@@ -49,7 +49,7 @@ async fn handle_amp_inspect(
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {}", e)))?;
 
-    output.section(&format!(
+    output.section(format!(
         "Channel State for {}:{}",
         context_str, channel_str
     ));
@@ -157,7 +157,7 @@ async fn handle_amp_checkpoint(
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to create checkpoint: {}", e)))?;
 
-    output.section(&format!(
+    output.section(format!(
         "Checkpoint created for {}:{}",
         context_str, channel_str
     ));

@@ -125,10 +125,7 @@ pub async fn dispute_recovery(
 pub async fn get_recovery_status(app_core: &Arc<RwLock<AppCore>>) -> RecoveryState {
     let core = app_core.read().await;
 
-    match core.read(&*RECOVERY_SIGNAL).await {
-        Ok(state) => state,
-        Err(_) => RecoveryState::default(),
-    }
+    core.read(&*RECOVERY_SIGNAL).await.unwrap_or_default()
 }
 
 /// Get ceremony status from runtime

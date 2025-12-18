@@ -66,7 +66,7 @@ impl ChatCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "SendMessage".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -93,7 +93,7 @@ impl ChatCallbacks {
                         Err(e) => {
                             let _ = tx.send(UiUpdate::OperationFailed {
                                 operation: "RetryMessage".to_string(),
-                                error: format!("{}", e),
+                                error: e.to_string(),
                             });
                         }
                     }
@@ -136,7 +136,7 @@ impl ChatCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "CreateChannel".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -165,7 +165,7 @@ impl ChatCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "SetTopic".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -218,7 +218,7 @@ impl ContactsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "UpdatePetname".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -242,7 +242,7 @@ impl ContactsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "StartChat".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -266,7 +266,7 @@ impl ContactsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "ImportInvitation".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -297,7 +297,7 @@ impl ContactsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "InviteLanPeer".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -347,7 +347,7 @@ impl InvitationsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "AcceptInvitation".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -371,7 +371,7 @@ impl InvitationsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "DeclineInvitation".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -400,7 +400,7 @@ impl InvitationsCallbacks {
                         Err(e) => {
                             let _ = tx.send(UiUpdate::OperationFailed {
                                 operation: "CreateInvitation".to_string(),
-                                error: format!("{}", e),
+                                error: e.to_string(),
                             });
                         }
                     }
@@ -445,7 +445,7 @@ impl InvitationsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "ImportInvitation".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -490,7 +490,7 @@ impl RecoveryCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "StartRecovery".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -513,7 +513,7 @@ impl RecoveryCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "AddGuardian".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -539,7 +539,7 @@ impl RecoveryCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "SelectGuardian".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -565,7 +565,7 @@ impl RecoveryCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "SubmitApproval".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -618,7 +618,7 @@ impl SettingsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "UpdateMfaPolicy".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -641,7 +641,7 @@ impl SettingsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "UpdateNickname".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -668,7 +668,7 @@ impl SettingsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "UpdateThreshold".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -696,7 +696,7 @@ impl SettingsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "AddDevice".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -720,7 +720,7 @@ impl SettingsCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "RemoveDevice".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -782,7 +782,7 @@ impl BlockCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "SendBlockMessage".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -808,7 +808,7 @@ impl BlockCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "SendBlockInvitation".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -833,7 +833,7 @@ impl BlockCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "NavigateToNeighborhood".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -859,7 +859,7 @@ impl BlockCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "GrantSteward".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -885,7 +885,7 @@ impl BlockCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "RevokeSteward".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -944,7 +944,7 @@ impl NeighborhoodCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "EnterBlock".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -969,7 +969,7 @@ impl NeighborhoodCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "GoHome".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -994,7 +994,7 @@ impl NeighborhoodCallbacks {
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "BackToStreet".to_string(),
-                            error: format!("{}", e),
+                            error: e.to_string(),
                         });
                     }
                 }
@@ -1048,7 +1048,7 @@ impl AppCallbacks {
                 Err(e) => {
                     let _ = tx.send(UiUpdate::OperationFailed {
                         operation: "CreateAccount".to_string(),
-                        error: format!("{}", e),
+                        error: e.to_string(),
                     });
                 }
             }

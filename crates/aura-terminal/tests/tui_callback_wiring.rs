@@ -32,8 +32,8 @@
 //! cargo test --package aura-terminal --test tui_callback_wiring -- --nocapture
 //! ```
 
-use std::sync::Arc;
 use async_lock::RwLock;
+use std::sync::Arc;
 
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::views::{Contact as ViewContact, Message, RecoveryProcess, RecoveryProcessStatus};

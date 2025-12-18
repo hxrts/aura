@@ -8,8 +8,8 @@
 //! in the subscribe implementation that spawns an async task before returning.
 //! The subscription may not be fully established before emit is called.
 
-use std::sync::Arc;
 use async_lock::RwLock;
+use std::sync::Arc;
 
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, RECOVERY_SIGNAL,

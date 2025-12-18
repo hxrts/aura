@@ -166,10 +166,7 @@ pub async fn start_direct_chat(
 pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> ChatState {
     let core = app_core.read().await;
 
-    match core.read(&*CHAT_SIGNAL).await {
-        Ok(state) => state,
-        Err(_) => ChatState::default(),
-    }
+    core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
 }
 
 /// Send an action/emote message to a channel

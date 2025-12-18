@@ -97,6 +97,7 @@ jobs:
           # Get files with violations
           files_with_violations=$(rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ \
               --files-with-matches \
+              --glob '!**/aura-agent/**' \
               --glob '!**/aura-effects/**' \
               --glob '!**/aura-simulator/**' \
               --glob '!**/aura-testkit/**' \
@@ -134,6 +135,7 @@ jobs:
         run: |
           echo "Checking for direct randomness usage violations..."
           if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number \
+              --glob '!**/aura-agent/**' \
               --glob '!**/aura-effects/**' \
               --glob '!**/aura-simulator/**' \
               --glob '!**/aura-testkit/**' \

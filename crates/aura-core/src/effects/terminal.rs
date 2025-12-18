@@ -832,7 +832,7 @@ mod tests {
     fn test_event_helpers() {
         use events::*;
 
-        let events = vec![char('h'), char('i'), enter(), escape()];
+        let events = [char('h'), char('i'), enter(), escape()];
 
         assert_eq!(events.len(), 4);
 

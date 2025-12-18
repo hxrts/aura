@@ -265,10 +265,9 @@ pub fn DeliveryStatusIndicator(
         (Icons::CHECK_DOUBLE, Theme::TEXT_MUTED) // Gray for delivered
     } else if props.sent {
         (Icons::CHECK, Theme::TEXT_MUTED) // Single gray check
-    } else if props.sending {
-        (Icons::PENDING, Theme::TEXT_MUTED)
     } else {
-        (Icons::PENDING, Theme::TEXT_MUTED) // Default to pending
+        // sending or default case
+        (Icons::PENDING, Theme::TEXT_MUTED)
     };
 
     element! {

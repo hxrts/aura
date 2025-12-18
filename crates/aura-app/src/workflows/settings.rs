@@ -91,10 +91,7 @@ pub async fn set_channel_mode(
 pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> SettingsState {
     let core = app_core.read().await;
 
-    match core.read(&*SETTINGS_SIGNAL).await {
-        Ok(state) => state,
-        Err(_) => SettingsState::default(),
-    }
+    core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default()
 }
 
 #[cfg(test)]

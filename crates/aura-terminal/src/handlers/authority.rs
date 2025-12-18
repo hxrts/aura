@@ -123,7 +123,7 @@ async fn list_authorities(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput>
     if keys.is_empty() {
         output.println("No authorities stored yet");
     } else {
-        output.section(&format!("Stored authorities ({})", keys.len()));
+        output.section(format!("Stored authorities ({})", keys.len()));
         for key in keys {
             output.println(format!("  - {}", key));
         }

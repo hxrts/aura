@@ -144,6 +144,7 @@ impl UpgradeProposal {
     }
 
     /// Compute hash of the upgrade proposal.
+    #[allow(clippy::expect_used)] // serde_json serialization of simple structs is infallible
     pub fn compute_hash(&self) -> Hash32 {
         let bytes = serde_json::to_vec(self).expect("UpgradeProposal should serialize");
         Hash32::from_bytes(&bytes)

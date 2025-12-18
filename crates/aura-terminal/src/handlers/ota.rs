@@ -205,7 +205,7 @@ async fn list_proposals(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
         return Ok(output);
     }
 
-    output.section(&format!("Upgrade Proposals ({})", proposals.len()));
+    output.section(format!("Upgrade Proposals ({})", proposals.len()));
 
     for proposal in proposals {
         output.println(format!(

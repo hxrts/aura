@@ -57,7 +57,7 @@ pub const KB: u64 = 1024;
 pub const MB: u64 = 1024 * KB;
 
 /// v1 constraints
-
+///
 /// Total block storage allocation (10 MB)
 pub const BLOCK_TOTAL_SIZE: u64 = 10 * MB;
 /// Storage allocated per resident (200 KB)
@@ -65,7 +65,7 @@ pub const RESIDENT_ALLOCATION: u64 = 200 * KB;
 /// Maximum number of residents per block
 pub const MAX_RESIDENTS: u8 = 8;
 /// Storage donated per neighborhood membership (1 MB)
-pub const NEIGHBORHOOD_DONATION: u64 = 1 * MB;
+pub const NEIGHBORHOOD_DONATION: u64 = MB;
 /// Maximum number of neighborhoods a block can join
 pub const MAX_NEIGHBORHOODS: u8 = 4;
 
@@ -384,14 +384,8 @@ impl std::error::Error for BudgetError {}
 pub async fn get_current_budget(app_core: &Arc<RwLock<AppCore>>) -> BlockFlowBudget {
     let core = app_core.read().await;
 
-    // Try to read from BUDGET_SIGNAL
-    match core.read(&*BUDGET_SIGNAL).await {
-        Ok(budget) => budget,
-        Err(_) => {
-            // Fall back to default budget if signal not available
-            BlockFlowBudget::default()
-        }
-    }
+    // Try to read from BUDGET_SIGNAL, fallback to default
+    core.read(&*BUDGET_SIGNAL).await.unwrap_or_default()
 }
 
 /// Get a budget breakdown with computed allocation values

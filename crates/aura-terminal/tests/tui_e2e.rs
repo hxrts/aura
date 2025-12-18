@@ -809,10 +809,10 @@ use aura_terminal::tui::{
 /// UI callback invokes when the user presses Enter in the account setup modal.
 #[tokio::test]
 async fn test_account_creation_callback_flow() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     // Create a unique test directory
     let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{}", std::process::id()));
@@ -920,10 +920,10 @@ async fn test_account_creation_callback_flow() {
 /// ```
 #[tokio::test]
 async fn test_device_id_determinism() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Device ID Determinism Test ===\n");
     println!("NOTE: This tests device_id → authority_id derivation, NOT guardian recovery.\n");
@@ -1068,10 +1068,10 @@ async fn test_device_id_determinism() {
 /// does not yet write account.json with the recovered authority. See TODO below.
 #[tokio::test]
 async fn test_guardian_recovery_preserves_cryptographic_identity() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Guardian Recovery: Cryptographic Identity Test ===\n");
 
@@ -1592,13 +1592,13 @@ fn test_text_input_state_machine() {
 /// 5. Verify the parsed data matches
 #[tokio::test]
 async fn test_invitation_export_import_roundtrip() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_core::identifiers::AuthorityId;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use serde::Deserialize;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     /// Account config format stored on disk
     #[derive(Deserialize)]
@@ -1728,11 +1728,11 @@ async fn test_invitation_export_import_roundtrip() {
 /// not via the EffectCommand fields. The command uses 'target' for user.
 #[tokio::test]
 async fn test_moderation_commands_dispatch() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Moderation Commands Dispatch Test ===\n");
 
@@ -1818,11 +1818,11 @@ async fn test_moderation_commands_dispatch() {
 /// 3. ListLanPeers returns a list (empty in test without network)
 #[tokio::test]
 async fn test_peer_discovery_commands() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Peer Discovery Commands Test ===\n");
 
@@ -1900,11 +1900,11 @@ async fn test_peer_discovery_commands() {
 /// 5. Invitation status is tracked properly
 #[tokio::test]
 async fn test_lan_peer_invitation_flow() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== LAN Peer Invitation Flow Test ===\n");
 
@@ -2027,11 +2027,11 @@ async fn test_lan_peer_invitation_flow() {
 /// 4. Messages are tracked in the channel
 #[tokio::test]
 async fn test_direct_messaging_flow() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Direct Messaging Flow Test ===\n");
 
@@ -2159,11 +2159,11 @@ async fn test_direct_messaging_flow() {
 /// 5. Display name can be changed multiple times
 #[tokio::test]
 async fn test_display_name_editing_flow() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Display Name Editing Flow Test ===\n");
 
@@ -2266,12 +2266,12 @@ async fn test_display_name_editing_flow() {
 /// 5. UpdateThreshold command dispatches successfully
 #[tokio::test]
 async fn test_threshold_configuration_flow() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use aura_terminal::tui::ThresholdState;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Threshold Configuration Flow Test ===\n");
 
@@ -2447,12 +2447,12 @@ async fn test_threshold_configuration_flow() {
 /// 4. Policy cycling through all states
 #[tokio::test]
 async fn test_mfa_policy_configuration_flow() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use aura_terminal::tui::types::MfaPolicy;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== MFA Policy Configuration Flow Test ===\n");
 
@@ -2600,11 +2600,11 @@ async fn test_mfa_policy_configuration_flow() {
 /// 3. Block channel naming convention (block:<block_id>)
 #[tokio::test]
 async fn test_block_messaging_flow() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Block Messaging Flow Test ===\n");
 
@@ -2736,11 +2736,11 @@ async fn test_block_messaging_flow() {
 /// 4. Context can be cleared by setting empty string
 #[tokio::test]
 async fn test_set_context_flow() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== SetContext Flow Test ===\n");
 
@@ -2871,12 +2871,12 @@ async fn test_set_context_flow() {
 /// 4. Role validation (can't modify Owner, can only revoke Admin)
 #[tokio::test]
 async fn test_steward_role_flow() {
+    use async_lock::RwLock;
     use aura_app::views::block::{BlockState, Resident, ResidentRole};
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Steward Role Flow Test ===\n");
 
@@ -3072,6 +3072,7 @@ async fn test_steward_role_flow() {
 /// 6. Position persistence across navigation
 #[tokio::test]
 async fn test_neighborhood_navigation_flow() {
+    use async_lock::RwLock;
     use aura_app::views::neighborhood::{
         AdjacencyType, NeighborBlock, NeighborhoodState, TraversalPosition,
     };
@@ -3079,7 +3080,6 @@ async fn test_neighborhood_navigation_flow() {
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Neighborhood Navigation Flow Test ===\n");
 
@@ -3533,10 +3533,10 @@ async fn test_channel_mode_operations() {
     // Phase 5: Test IoContext channel mode storage
     println!("\nPhase 5: Testing IoContext channel mode storage");
 
+    use async_lock::RwLock;
     use aura_app::views::block::{BlockState, ResidentRole};
     use aura_app::AppCore;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     let test_dir =
         std::env::temp_dir().join(format!("aura-channel-mode-test-{}", std::process::id()));
@@ -4004,11 +4004,11 @@ async fn test_error_toast_display() {
 /// 4. Permission denied errors have appropriate messages
 #[tokio::test]
 async fn test_authorization_checking() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::{CommandAuthorizationLevel, EffectCommand};
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Authorization Checking Test ===\n");
 
@@ -4207,12 +4207,12 @@ async fn test_authorization_checking() {
 /// 5. EffectCommand variants for backup/restore work correctly
 #[tokio::test]
 async fn test_account_backup_restore_flow() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::{export_account_backup, import_account_backup};
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Account Backup/Restore Flow Test ===\n");
 
@@ -4373,12 +4373,12 @@ async fn test_account_backup_restore_flow() {
 /// 3. RemoveDevice intent dispatch succeeds
 #[tokio::test]
 async fn test_device_management() {
+    use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_core::identifiers::AuthorityId;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Device Management E2E Test ===\n");
 
@@ -4477,6 +4477,7 @@ async fn test_device_management() {
 /// 3. Contact.has_pending_suggestion is derived correctly
 #[tokio::test]
 async fn test_snapshot_data_accuracy() {
+    use async_lock::RwLock;
     use aura_app::signal_defs::BLOCK_SIGNAL;
     use aura_app::views::block::BlockState;
     use aura_app::views::contacts::{Contact, ContactsState};
@@ -4485,7 +4486,6 @@ async fn test_snapshot_data_accuracy() {
     use aura_core::identifiers::AuthorityId;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
-    use async_lock::RwLock;
 
     println!("\n=== Snapshot Data Accuracy E2E Test ===\n");
 

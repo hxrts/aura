@@ -103,7 +103,7 @@ async fn start_recovery(
 ) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
-    output.section(&format!("Starting {} recovery", priority));
+    output.section(format!("Starting {} recovery", priority));
     output.kv("Account", account);
     output.kv("Guardians", guardians);
     output.kv("Threshold", threshold.to_string());

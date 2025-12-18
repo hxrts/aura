@@ -92,7 +92,7 @@ async fn main() -> Result<(), AuraError> {
     let cli_handler = CliHandler::with_agent(app_core, agent, device_id, effect_context);
 
     // Execute command through effect system
-    Ok(match command {
+    match command {
         Commands::Init(init) => cli_handler
             .handle_init(init.num_devices, init.threshold, &init.output)
             .await
@@ -189,7 +189,9 @@ async fn main() -> Result<(), AuraError> {
             .handle_version()
             .await
             .map_err(|e| AuraError::agent(format!("{}", e)))?,
-    })
+    }
+
+    Ok(())
 }
 
 /// Resolve the configuration file path from command line arguments
@@ -206,7 +208,7 @@ async fn resolve_config_path(
     }
 
     eprintln!("No config file specified. Use -c or --config to specify a config file.");
-    return Err(AuraError::invalid("No config file specified"));
+    Err(AuraError::invalid("No config file specified"))
 }
 
 #[cfg(test)]

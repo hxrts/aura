@@ -147,8 +147,10 @@ impl MockTerminalHandler {
     /// Events will be consumed in order by `next_event()`. When all events
     /// are consumed, `next_event()` returns `TerminalError::EndOfInput`.
     pub fn with_events(events: Vec<TerminalEvent>) -> Self {
-        let mut state = MockTerminalState::default();
-        state.event_queue = events.into();
+        let state = MockTerminalState {
+            event_queue: events.into(),
+            ..Default::default()
+        };
         Self {
             state: Arc::new(Mutex::new(state)),
         }
@@ -156,8 +158,10 @@ impl MockTerminalHandler {
 
     /// Create a handler with custom terminal size
     pub fn with_size(width: u16, height: u16) -> Self {
-        let mut state = MockTerminalState::default();
-        state.size = (width, height);
+        let state = MockTerminalState {
+            size: (width, height),
+            ..Default::default()
+        };
         Self {
             state: Arc::new(Mutex::new(state)),
         }
@@ -165,9 +169,11 @@ impl MockTerminalHandler {
 
     /// Create a handler with events and custom size
     pub fn with_events_and_size(events: Vec<TerminalEvent>, width: u16, height: u16) -> Self {
-        let mut state = MockTerminalState::default();
-        state.event_queue = events.into();
-        state.size = (width, height);
+        let state = MockTerminalState {
+            event_queue: events.into(),
+            size: (width, height),
+            ..Default::default()
+        };
         Self {
             state: Arc::new(Mutex::new(state)),
         }
@@ -183,8 +189,10 @@ impl MockTerminalHandler {
     where
         F: FnMut() -> Option<TerminalEvent> + Send + 'static,
     {
-        let mut state = MockTerminalState::default();
-        state.event_generator = Some(Box::new(generator));
+        let state = MockTerminalState {
+            event_generator: Some(Box::new(generator)),
+            ..Default::default()
+        };
         Self {
             state: Arc::new(Mutex::new(state)),
         }
@@ -269,7 +277,7 @@ impl MockTerminalHandler {
                 "Expected frame {} to contain '{}', but it was not found.\nFrame content:\n{}",
                 index,
                 text,
-                frame.to_string()
+                frame
             );
         } else {
             panic!(
@@ -299,7 +307,7 @@ impl MockTerminalHandler {
             assert!(
                 predicate(&frame),
                 "Frame assertion failed.\nFrame content:\n{}",
-                frame.to_string()
+                frame
             );
         } else {
             panic!("No frames captured");

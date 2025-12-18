@@ -33,8 +33,8 @@
 //! | StartDirectChat     | CHAT_SIGNAL      | ✓      |
 //! | UpdatePetname       | CONTACTS_SIGNAL  | ✓      |
 
-use std::sync::Arc;
 use async_lock::RwLock;
+use std::sync::Arc;
 
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::{AppConfig, AppCore};
