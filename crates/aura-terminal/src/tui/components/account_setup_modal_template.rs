@@ -4,6 +4,7 @@
 
 use iocraft::prelude::*;
 
+use super::modal::ModalContent;
 use crate::tui::theme::Theme;
 
 /// Props for AccountSetupModal
@@ -29,7 +30,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     if !props.visible {
         return element! {
             View {}
-        };
+        }
+        .into_any();
     }
 
     let display_name = props.display_name.clone();
@@ -47,14 +49,10 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         };
 
         return element! {
-            View(
-                width: 100pct,
-                height: 100pct,
+            ModalContent(
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
-                border_color: if success { Theme::SUCCESS } else { Theme::ERROR },
-                overflow: Overflow::Hidden,
+                border_color: Some(if success { Theme::SUCCESS } else { Theme::ERROR }),
             ) {
                 // Header
                 View(
@@ -117,20 +115,17 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     }
                 }
             }
-        };
+        }
+        .into_any();
     }
 
     // Show creating spinner
     if creating {
         return element! {
-            View(
-                width: 100pct,
-                height: 100pct,
+            ModalContent(
                 flex_direction: FlexDirection::Column,
-                background_color: Theme::BG_MODAL,
                 border_style: BorderStyle::Round,
-                border_color: Theme::PRIMARY,
-                overflow: Overflow::Hidden,
+                border_color: Some(Theme::PRIMARY),
             ) {
                 // Header
                 View(
@@ -165,7 +160,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     }
                 }
             }
-        };
+        }
+        .into_any();
     }
 
     // Show input form (default state)
@@ -190,14 +186,10 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     };
 
     element! {
-        View(
-            width: 100pct,
-            height: 100pct,
+        ModalContent(
             flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
             border_style: BorderStyle::Round,
-            border_color: Theme::PRIMARY,
-            overflow: Overflow::Hidden,
+            border_color: Some(Theme::PRIMARY),
         ) {
             // Welcome header
             View(
@@ -292,6 +284,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
             }
         }
     }
+    .into_any()
 }
 
 /// State for account setup modal

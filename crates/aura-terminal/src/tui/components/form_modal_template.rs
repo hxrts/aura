@@ -4,6 +4,7 @@
 
 use iocraft::prelude::*;
 
+use super::modal::ModalContent;
 use crate::tui::theme::Theme;
 
 /// A form field definition
@@ -143,7 +144,8 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
     if !props.visible {
         return element! {
             View {}
-        };
+        }
+        .into_any();
     }
 
     let title = props.title.clone();
@@ -162,14 +164,10 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
     let can_submit = props.can_submit;
 
     element! {
-        View(
-            width: 100pct,
-            height: 100pct,
+        ModalContent(
             flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
             border_style: BorderStyle::Round,
-            border_color: Theme::BORDER_FOCUS,
-            overflow: Overflow::Hidden,
+            border_color: Some(Theme::BORDER_FOCUS),
         ) {
             // Title bar
             View(
@@ -242,6 +240,7 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
             }
         }
     }
+    .into_any()
 }
 
 /// State helper for form modal

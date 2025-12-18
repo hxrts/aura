@@ -52,7 +52,7 @@ pub use list::{navigate_list, List, ListEntry, ListItem, ListNavigation};
 pub use list_panel::ListPanel;
 pub use message_bubble::{CompactMessage, MessageBubble, MessageGroupHeader, SystemMessage};
 pub use message_input::{MessageInput, MessageInputState};
-pub use modal::{ConfirmModal, InputModal, ModalFrame};
+pub use modal::{ConfirmModal, InputModal, ModalContent, ModalFrame};
 pub use nav_bar::{NavBar, NavBarProps};
 pub use panel::{Panel, PanelStyle};
 pub use scrollable::{calculate_scroll, ScrollDirection, Scrollable};

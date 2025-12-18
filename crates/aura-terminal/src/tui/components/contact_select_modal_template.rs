@@ -5,6 +5,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use super::modal::ModalContent;
 use crate::tui::theme::Theme;
 use crate::tui::types::Contact;
 
@@ -39,7 +40,8 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     if !props.visible {
         return element! {
             View {}
-        };
+        }
+        .into_any();
     }
 
     let title = props.title.clone();
@@ -55,14 +57,10 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     };
 
     element! {
-        View(
-            width: 100pct,
-            height: 100pct,
+        ModalContent(
             flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
             border_style: BorderStyle::Round,
-            border_color: border_color,
-            overflow: Overflow::Hidden,
+            border_color: Some(border_color),
         ) {
             // Header
             View(
@@ -155,6 +153,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
             }
         }
     }
+    .into_any()
 }
 
 /// State for contact select modal

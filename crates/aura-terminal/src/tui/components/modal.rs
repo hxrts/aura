@@ -49,6 +49,7 @@ pub struct ModalFrameProps<'a> {
 /// appear at exactly the same location: filling the middle panel (rows 3-27).
 ///
 /// Use this as the outermost wrapper for ALL modal components.
+/// Children should use `ModalContent` as their root element.
 #[component]
 pub fn ModalFrame<'a>(props: &mut ModalFrameProps<'a>) -> impl Into<AnyElement<'a>> {
     element! {
@@ -59,6 +60,87 @@ pub fn ModalFrame<'a>(props: &mut ModalFrameProps<'a>) -> impl Into<AnyElement<'
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
+        ) {
+            #(&mut props.children)
+        }
+    }
+}
+
+// =============================================================================
+// Modal Content - Compile-time safe modal body wrapper
+// =============================================================================
+
+/// Props for ModalContent - intentionally does NOT include position props
+/// to prevent the nested absolute positioning bug at compile time.
+///
+/// Use this as the root element for all modal body content.
+#[derive(Default, Props)]
+pub struct ModalContentProps<'a> {
+    /// Child content
+    pub children: Vec<AnyElement<'a>>,
+    /// Flex direction for content layout
+    pub flex_direction: FlexDirection,
+    /// Background color (defaults to BG_MODAL)
+    pub background_color: Option<Color>,
+    /// Border style
+    pub border_style: BorderStyle,
+    /// Border color (defaults to BORDER_FOCUS)
+    pub border_color: Option<Color>,
+    /// Whether to hide overflow (defaults to true)
+    pub overflow_hidden: bool,
+    /// Justify content (defaults to FlexStart)
+    pub justify_content: Option<JustifyContent>,
+    /// Align items (defaults to Stretch)
+    pub align_items: Option<AlignItems>,
+}
+
+/// Modal content wrapper that fills its ModalFrame container.
+///
+/// **IMPORTANT**: Use this component as the root element for ALL modal bodies.
+/// It automatically handles sizing (100% width and height) and prevents
+/// the nested absolute positioning bug at compile time by not exposing
+/// position props.
+///
+/// # Example
+/// ```ignore
+/// element! {
+///     ModalFrame {
+///         ModalContent(
+///             flex_direction: FlexDirection::Column,
+///             border_style: BorderStyle::Round,
+///             border_color: Theme::PRIMARY,
+///         ) {
+///             // Your modal content here
+///         }
+///     }
+/// }
+/// ```
+#[component]
+pub fn ModalContent<'a>(props: &mut ModalContentProps<'a>) -> impl Into<AnyElement<'a>> {
+    let bg = props.background_color.unwrap_or(Theme::BG_MODAL);
+    let border = props.border_color.unwrap_or(Theme::BORDER_FOCUS);
+    let justify = props.justify_content.unwrap_or(JustifyContent::FlexStart);
+    let align = props.align_items.unwrap_or(AlignItems::Stretch);
+    let overflow = if props.overflow_hidden {
+        Overflow::Hidden
+    } else {
+        Overflow::Visible
+    };
+
+    element! {
+        View(
+            // Size is always 100% - this is enforced, not configurable
+            width: 100pct,
+            height: 100pct,
+            // Layout props from user
+            flex_direction: props.flex_direction,
+            justify_content: justify,
+            align_items: align,
+            // Styling props from user
+            background_color: bg,
+            border_style: props.border_style,
+            border_color: border,
+            overflow: overflow,
         ) {
             #(&mut props.children)
         }
@@ -92,7 +174,8 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
     if !props.visible {
         return element! {
             View {}
-        };
+        }
+        .into_any();
     }
 
     let title = props.title.clone();
@@ -129,18 +212,14 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
         Theme::TEXT_MUTED
     };
 
-    // Modal content fills ModalFrame container
+    // Use ModalContent to prevent nested absolute positioning bugs
     element! {
-        View(
-            width: 100pct,
-            height: 100pct,
+        ModalContent(
             flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            background_color: Theme::BG_MODAL,
+            justify_content: Some(JustifyContent::Center),
+            align_items: Some(AlignItems::Center),
             border_style: BorderStyle::Round,
-            border_color: Theme::BORDER_FOCUS,
-            overflow: Overflow::Hidden,
+            border_color: Some(Theme::BORDER_FOCUS),
         ) {
             // Title bar
             View(
@@ -193,6 +272,7 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
             }
         }
     }
+    .into_any()
 }
 
 // =============================================================================
@@ -220,7 +300,8 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
     if !props.visible {
         return element! {
             View {}
-        };
+        }
+        .into_any();
     }
 
     let title = props.title.clone();
@@ -235,16 +316,12 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
         Theme::TEXT
     };
 
-    // Modal content fills ModalFrame container
+    // Use ModalContent to prevent nested absolute positioning bugs
     element! {
-        View(
-            width: 100pct,
-            height: 100pct,
+        ModalContent(
             flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
             border_style: BorderStyle::Round,
-            border_color: Theme::BORDER_FOCUS,
-            overflow: Overflow::Hidden,
+            border_color: Some(Theme::BORDER_FOCUS),
         ) {
             // Title bar
             View(
@@ -287,6 +364,7 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
             }
         }
     }
+    .into_any()
 }
 
 // =============================================================================
