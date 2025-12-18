@@ -166,7 +166,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
                 ) {
-                    Text(content: "Generating FROST threshold keys...", color: Theme::TEXT_MUTED)
+                    Text(content: "Generating Ed25519 signing key...", color: Theme::TEXT_MUTED)
                     View(margin_top: 1) {
                         Text(content: "Please wait...", color: Theme::TEXT_MUTED)
                     }
@@ -226,7 +226,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 )
                 View(margin_top: 1) {
                     Text(
-                        content: "Create your threshold identity",
+                        content: "Create your identity",
                         color: Theme::TEXT_MUTED,
                     )
                 }
@@ -243,7 +243,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 // Description
                 View(margin_bottom: 2) {
                     Text(
-                        content: "Your account uses FROST threshold signatures for security.",
+                        content: "Your account uses Ed25519 signatures for security.",
                         color: Theme::TEXT_MUTED,
                     )
                 }
@@ -252,7 +252,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     color: Theme::TEXT_MUTED,
                 )
                 Text(
-                    content: "in Settings to enable social recovery.",
+                    content: "in Settings to enable threshold signing and social recovery.",
                     color: Theme::TEXT_MUTED,
                 )
 
