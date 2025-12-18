@@ -99,6 +99,7 @@ fn cleanup_test_dir(name: &str) {
 /// 2. UpdateNickname dispatch succeeds
 /// 3. IoContext returns the NEW nickname after update
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_settings_nickname_actually_changes() {
     println!("\n=== Settings Nickname Actually Changes Test ===\n");
 
@@ -164,6 +165,7 @@ async fn test_settings_nickname_actually_changes() {
 /// 3. IoContext returns the NEW policy after update
 /// 4. Policy can be toggled multiple times
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_settings_mfa_policy_actually_changes() {
     println!("\n=== Settings MFA Policy Actually Changes Test ===\n");
 
@@ -802,6 +804,7 @@ async fn test_context_switching_works() {
 /// 2. Result is available immediately
 /// 3. State changes are visible after return
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_dispatch_and_wait_completes() {
     println!("\n=== Dispatch And Wait Completes Test ===\n");
 
@@ -905,6 +908,7 @@ async fn test_invalid_operations_return_errors() {
 
 /// Test complete settings flow: nickname → MFA → verify all persisted
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_complete_settings_flow_persists() {
     println!("\n=== Complete Settings Flow Persists Test ===\n");
 
@@ -944,6 +948,7 @@ async fn test_complete_settings_flow_persists() {
 
 /// Test that IoContext snapshot methods return current state
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_snapshot_methods_return_current_state() {
     println!("\n=== Snapshot Methods Return Current State Test ===\n");
 

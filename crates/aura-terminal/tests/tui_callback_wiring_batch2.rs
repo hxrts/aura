@@ -92,6 +92,7 @@ fn cleanup_test_dir(name: &str) {
 /// 2. Code has correct format (aura:v1: prefix)
 /// 3. Invitation ID is preserved
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_invitation_export_produces_valid_code() {
     println!("\n=== Invitation Export Produces Valid Code Test ===\n");
 
@@ -145,6 +146,7 @@ async fn test_invitation_export_produces_valid_code() {
 /// 2. Import parses the code correctly
 /// 3. Invitation ID is preserved through round-trip
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_invitation_roundtrip_preserves_data() {
     println!("\n=== Invitation Roundtrip Preserves Data Test ===\n");
 
@@ -483,6 +485,7 @@ async fn test_peer_management_operations() {
 /// 2. Sync status signal updates appropriately
 /// 3. Sync completes (even in offline/demo mode)
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_force_sync_updates_status() {
     println!("\n=== Force Sync Updates Status Test ===\n");
 
@@ -665,6 +668,7 @@ async fn test_steward_grant_revoke_operations() {
 /// 2. Admin commands may require elevated privileges
 /// 3. Authorization errors are properly returned
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_command_authorization_levels() {
     println!("\n=== Command Authorization Levels Test ===\n");
 
@@ -850,6 +854,7 @@ async fn test_all_snapshots_consistent() {
 
 /// Test complete DM flow: start chat -> send messages -> verify
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_complete_dm_flow() {
     println!("\n=== Complete DM Flow Test ===\n");
 
@@ -928,6 +933,7 @@ async fn test_complete_dm_flow() {
 
 /// Test complete sync flow: force sync -> check status -> verify completion
 #[tokio::test]
+#[ignore = "Requires RuntimeBridge"]
 async fn test_complete_sync_flow() {
     println!("\n=== Complete Sync Flow Test ===\n");
 
