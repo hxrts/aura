@@ -92,6 +92,9 @@ pub struct IoContext {
     /// Device ID string (needed for account file creation)
     device_id_str: String,
 
+    /// TUI mode (Production or Demo) - determines account filename
+    mode: crate::handlers::tui::TuiMode,
+
     /// Demo mode hints (None in production mode)
     #[cfg(feature = "development")]
     demo_hints: Option<crate::demo::DemoHints>,
@@ -132,6 +135,7 @@ impl IoContext {
         app_core: Arc<RwLock<AppCore>>,
         base_path: std::path::PathBuf,
         device_id_str: String,
+        mode: crate::handlers::tui::TuiMode,
     ) -> Self {
         let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
@@ -140,6 +144,7 @@ impl IoContext {
             has_existing_account: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             base_path,
             device_id_str,
+            mode,
             #[cfg(feature = "development")]
             demo_hints: None,
             invited_lan_peers: Arc::new(RwLock::new(HashSet::new())),
@@ -160,6 +165,7 @@ impl IoContext {
         has_existing_account: bool,
         base_path: std::path::PathBuf,
         device_id_str: String,
+        mode: crate::handlers::tui::TuiMode,
     ) -> Self {
         let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
@@ -170,6 +176,7 @@ impl IoContext {
             )),
             base_path,
             device_id_str,
+            mode,
             #[cfg(feature = "development")]
             demo_hints: None,
             invited_lan_peers: Arc::new(RwLock::new(HashSet::new())),
@@ -192,6 +199,7 @@ impl IoContext {
         has_existing_account: bool,
         base_path: std::path::PathBuf,
         device_id_str: String,
+        mode: crate::handlers::tui::TuiMode,
     ) -> Self {
         let operational = Arc::new(OperationalHandler::new(app_core.clone()));
         Self {
@@ -202,6 +210,7 @@ impl IoContext {
             )),
             base_path,
             device_id_str,
+            mode,
             demo_hints: Some(hints),
             invited_lan_peers: Arc::new(RwLock::new(HashSet::new())),
             display_name: Arc::new(RwLock::new(String::new())),
@@ -278,6 +287,7 @@ impl IoContext {
             has_existing_account: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             base_path: std::path::PathBuf::from("./aura-data"),
             device_id_str: "default-device".to_string(),
+            mode: crate::handlers::tui::TuiMode::Production,
             #[cfg(feature = "development")]
             demo_hints: None,
             invited_lan_peers: Arc::new(RwLock::new(HashSet::new())),
@@ -330,7 +340,7 @@ impl IoContext {
         use crate::handlers::tui::create_account;
 
         // Create the account file on disk
-        match create_account(&self.base_path, &self.device_id_str) {
+        match create_account(&self.base_path, &self.device_id_str, self.mode) {
             Ok((authority_id, context_id)) => {
                 // Update the flag to indicate account exists
                 self.set_account_created();
@@ -375,6 +385,7 @@ impl IoContext {
             &self.base_path,
             recovered_authority_id,
             recovered_context_id,
+            self.mode,
         ) {
             Ok((authority_id, context_id)) => {
                 // Update the flag to indicate account exists
@@ -412,7 +423,7 @@ impl IoContext {
             return Err("No account exists to backup".to_string());
         }
 
-        match export_account_backup(&self.base_path, Some(&self.device_id_str)) {
+        match export_account_backup(&self.base_path, Some(&self.device_id_str), self.mode) {
             Ok(backup_code) => {
                 tracing::info!("Account backup exported successfully");
                 Ok(backup_code)
@@ -437,7 +448,7 @@ impl IoContext {
         use crate::handlers::tui::import_account_backup;
 
         // Allow overwrite for restoration
-        match import_account_backup(&self.base_path, backup_code, true) {
+        match import_account_backup(&self.base_path, backup_code, true, self.mode) {
             Ok((authority_id, context_id)) => {
                 // Update the flag to indicate account exists
                 self.set_account_created();
@@ -1681,6 +1692,7 @@ mod tests {
             false, // No existing account
             test_dir.clone(),
             "test-device".to_string(),
+            crate::handlers::tui::TuiMode::Production,
         );
 
         // Verify no account exists initially

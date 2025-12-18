@@ -60,12 +60,25 @@ pub enum AccountLoadResult {
 /// Sentinel prefix for placeholder authority IDs (used before account setup)
 pub const PLACEHOLDER_AUTHORITY_PREFIX: &str = "placeholder:";
 
+/// Get the account filename based on TUI mode
+///
+/// - Production mode: `account.json`
+/// - Demo mode: `demo-account.json`
+///
+/// This ensures demo mode never overwrites a real account file.
+fn account_filename(mode: TuiMode) -> &'static str {
+    match mode {
+        TuiMode::Production => "account.json",
+        TuiMode::Demo { .. } => "demo-account.json",
+    }
+}
+
 /// Try to load an existing account configuration
 ///
 /// Returns `Loaded` if account exists, `NotFound` otherwise.
 /// Does NOT auto-create accounts - this allows the TUI to show an account setup modal.
-fn try_load_account(base_path: &Path) -> Result<AccountLoadResult, AuraError> {
-    let account_path = base_path.join("account.json");
+fn try_load_account(base_path: &Path, mode: TuiMode) -> Result<AccountLoadResult, AuraError> {
+    let account_path = base_path.join(account_filename(mode));
 
     if !account_path.exists() {
         return Ok(AccountLoadResult::NotFound);
@@ -128,8 +141,9 @@ fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
 pub fn create_account(
     base_path: &Path,
     device_id_str: &str,
+    mode: TuiMode,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let account_path = base_path.join("account.json");
+    let account_path = base_path.join(account_filename(mode));
 
     // Create new account with deterministic IDs based on device_id
     // This ensures the same device_id always creates the same account
@@ -186,8 +200,9 @@ pub fn restore_recovered_account(
     base_path: &Path,
     recovered_authority_id: AuthorityId,
     recovered_context_id: Option<ContextId>,
+    mode: TuiMode,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let account_path = base_path.join("account.json");
+    let account_path = base_path.join(account_filename(mode));
 
     // Use the recovered authority directly (NOT derived from device_id)
     // This is the key difference from create_account()
@@ -269,14 +284,16 @@ pub struct AccountBackup {
 /// # Arguments
 /// * `base_path` - Data directory containing account.json and journal.json
 /// * `device_id` - Optional device ID to include in backup metadata
+/// * `mode` - TUI mode (determines which account file to export)
 ///
 /// # Returns
 /// * Portable backup code string
 pub fn export_account_backup(
     base_path: &Path,
     device_id: Option<&str>,
+    mode: TuiMode,
 ) -> Result<String, AuraError> {
-    let account_path = base_path.join("account.json");
+    let account_path = base_path.join(account_filename(mode));
     let journal_path = base_path.join("journal.json");
 
     // Load account configuration
@@ -326,6 +343,7 @@ pub fn export_account_backup(
 /// * `base_path` - Data directory to restore account to
 /// * `backup_code` - The backup code from `export_account_backup`
 /// * `overwrite` - If true, overwrite existing account; if false, fail if account exists
+/// * `mode` - TUI mode (determines which account file to import to)
 ///
 /// # Returns
 /// * The restored authority and context IDs
@@ -333,8 +351,9 @@ pub fn import_account_backup(
     base_path: &Path,
     backup_code: &str,
     overwrite: bool,
+    mode: TuiMode,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let account_path = base_path.join("account.json");
+    let account_path = base_path.join(account_filename(mode));
     let journal_path = base_path.join("journal.json");
 
     // Check for existing account
@@ -435,7 +454,7 @@ pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
         let demo_data_dir = args
             .data_dir
             .clone()
-            .unwrap_or_else(|| "./aura-demo-data".to_string());
+            .unwrap_or_else(|| "./aura-data".to_string());
         let demo_device_id = args
             .device_id
             .clone()
@@ -488,7 +507,8 @@ async fn handle_tui_launch(
     let device_id_for_account = device_id_str.unwrap_or("tui:production-device");
 
     // Try to load existing account, or use placeholders if no account exists
-    let (authority_id, context_id, has_existing_account) = match try_load_account(&base_path)? {
+    let (authority_id, context_id, has_existing_account) = match try_load_account(&base_path, mode)?
+    {
         AccountLoadResult::Loaded { authority, context } => {
             println!("Authority: {}", authority);
             println!("Context: {}", context);
@@ -716,6 +736,7 @@ async fn handle_tui_launch(
                 has_existing_account,
                 base_path.clone(),
                 device_id_for_account.to_string(),
+                mode,
             )
         }
         TuiMode::Production => IoContext::with_account_status(
@@ -723,6 +744,7 @@ async fn handle_tui_launch(
             has_existing_account,
             base_path.clone(),
             device_id_for_account.to_string(),
+            mode,
         ),
     };
 
@@ -732,6 +754,7 @@ async fn handle_tui_launch(
         has_existing_account,
         base_path.clone(),
         device_id_for_account.to_string(),
+        mode,
     );
 
     // Without development feature, demo mode just shows a warning
