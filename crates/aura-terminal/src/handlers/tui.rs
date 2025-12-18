@@ -73,6 +73,54 @@ fn account_filename(mode: TuiMode) -> &'static str {
     }
 }
 
+/// Get the journal filename based on TUI mode
+///
+/// - Production mode: `journal.json`
+/// - Demo mode: `demo-journal.json`
+///
+/// This ensures demo mode never overwrites a real journal file.
+fn journal_filename(mode: TuiMode) -> &'static str {
+    match mode {
+        TuiMode::Production => "journal.json",
+        TuiMode::Demo { .. } => "demo-journal.json",
+    }
+}
+
+/// Clean up demo files before starting demo mode
+///
+/// In demo mode, we want users to go through the account creation flow each time.
+/// This function deletes demo-account.json and demo-journal.json if they exist.
+///
+/// This is ONLY called in demo mode - production files are NEVER deleted.
+fn cleanup_demo_files(base_path: &Path) {
+    let demo_account = base_path.join("demo-account.json");
+    let demo_journal = base_path.join("demo-journal.json");
+
+    if demo_account.exists() {
+        if let Err(e) = std::fs::remove_file(&demo_account) {
+            eprintln!(
+                "Warning: Failed to remove demo account file: {} - {}",
+                demo_account.display(),
+                e
+            );
+        } else {
+            println!("Removed existing demo account file");
+        }
+    }
+
+    if demo_journal.exists() {
+        if let Err(e) = std::fs::remove_file(&demo_journal) {
+            eprintln!(
+                "Warning: Failed to remove demo journal file: {} - {}",
+                demo_journal.display(),
+                e
+            );
+        } else {
+            println!("Removed existing demo journal file");
+        }
+    }
+}
+
 /// Try to load an existing account configuration
 ///
 /// Returns `Loaded` if account exists, `NotFound` otherwise.
@@ -282,9 +330,9 @@ pub struct AccountBackup {
 /// Format: `aura:backup:v1:<base64>`
 ///
 /// # Arguments
-/// * `base_path` - Data directory containing account.json and journal.json
+/// * `base_path` - Data directory containing account and journal files
 /// * `device_id` - Optional device ID to include in backup metadata
-/// * `mode` - TUI mode (determines which account file to export)
+/// * `mode` - TUI mode (determines which account/journal files to export)
 ///
 /// # Returns
 /// * Portable backup code string
@@ -294,7 +342,7 @@ pub fn export_account_backup(
     mode: TuiMode,
 ) -> Result<String, AuraError> {
     let account_path = base_path.join(account_filename(mode));
-    let journal_path = base_path.join("journal.json");
+    let journal_path = base_path.join(journal_filename(mode));
 
     // Load account configuration
     if !account_path.exists() {
@@ -354,7 +402,7 @@ pub fn import_account_backup(
     mode: TuiMode,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let account_path = base_path.join(account_filename(mode));
-    let journal_path = base_path.join("journal.json");
+    let journal_path = base_path.join(journal_filename(mode));
 
     // Check for existing account
     if account_path.exists() && !overwrite {
@@ -495,6 +543,16 @@ async fn handle_tui_launch(
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("./aura-data"));
 
+    // In demo mode, clean up existing demo files so users go through account creation
+    // This is ONLY done in demo mode - production files are NEVER deleted
+    if matches!(mode, TuiMode::Demo { .. }) {
+        // Ensure the data directory exists before cleanup
+        if let Err(e) = std::fs::create_dir_all(&base_path) {
+            eprintln!("Warning: Failed to create data directory: {}", e);
+        }
+        cleanup_demo_files(&base_path);
+    }
+
     // Determine device ID
     let device_id = device_id_str
         .map(|id| crate::ids::device_id(id))
@@ -608,7 +666,7 @@ async fn handle_tui_launch(
     // Create AppCore with runtime bridge - the portable application core from aura-app
     // This provides intent-based state management with reactive ViewState
     // The agent implements RuntimeBridge, enabling the dependency inversion
-    let journal_path = base_path.join("journal.json");
+    let journal_path = base_path.join(journal_filename(mode));
     let app_config = AppConfig {
         data_dir: base_path.to_string_lossy().to_string(),
         debug: false,
