@@ -1434,7 +1434,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         let _stdio_guard = if std::env::var_os("AURA_TUI_ALLOW_STDIO").is_some() {
             None
         } else {
-            Some(crate::tui::fullscreen_stdio::FullscreenStdioGuard::redirect_to_null()?)
+            Some(crate::tui::fullscreen_stdio::FullscreenStdioGuard::redirect_stderr_to_null()?)
         };
 
         let app_context = app_core_context;

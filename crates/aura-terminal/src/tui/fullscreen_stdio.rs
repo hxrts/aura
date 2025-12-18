@@ -16,16 +16,18 @@ mod imp {
     use nix::libc;
     use nix::unistd::{close, dup, dup2};
 
-    /// Redirects stdout/stderr to `/dev/null` while alive.
+    /// Redirects stderr to `/dev/null` while alive.
+    ///
+    /// IMPORTANT: We intentionally do **not** redirect stdout because iocraft
+    /// renders to stdout.
     ///
     /// Use `AURA_TUI_ALLOW_STDIO=1` to disable redirection for debugging.
     pub struct FullscreenStdioGuard {
-        saved_stdout: i32,
         saved_stderr: i32,
     }
 
     impl FullscreenStdioGuard {
-        pub fn redirect_to_null() -> io::Result<Self> {
+        pub fn redirect_stderr_to_null() -> io::Result<Self> {
             // Flush before we steal the fds.
             let _ = io::stdout().lock().flush();
             let _ = io::stderr().lock().flush();
@@ -33,15 +35,12 @@ mod imp {
             let null = OpenOptions::new().write(true).open("/dev/null")?;
             let null_fd = null.as_raw_fd();
 
-            // Duplicate current stdout/stderr so we can restore later.
-            let saved_stdout = dup(libc::STDOUT_FILENO).map_err(nix_err)?;
+            // Duplicate current stderr so we can restore later.
             let saved_stderr = dup(libc::STDERR_FILENO).map_err(nix_err)?;
 
-            // Redirect both stdout and stderr to /dev/null.
-            if let Err(e) = dup2(null_fd, libc::STDOUT_FILENO).and_then(|_| dup2(null_fd, libc::STDERR_FILENO)) {
-                let _ = dup2(saved_stdout, libc::STDOUT_FILENO);
+            // Redirect stderr to /dev/null.
+            if let Err(e) = dup2(null_fd, libc::STDERR_FILENO) {
                 let _ = dup2(saved_stderr, libc::STDERR_FILENO);
-                let _ = close(saved_stdout);
                 let _ = close(saved_stderr);
                 return Err(nix_err(e));
             }
@@ -49,19 +48,14 @@ mod imp {
             // Keep `null` alive until after dup2 calls by holding it in scope.
             drop(null);
 
-            Ok(Self {
-                saved_stdout,
-                saved_stderr,
-            })
+            Ok(Self { saved_stderr })
         }
     }
 
     impl Drop for FullscreenStdioGuard {
         fn drop(&mut self) {
-            // Restore stdout/stderr even if callers panicked.
-            let _ = dup2(self.saved_stdout, libc::STDOUT_FILENO);
+            // Restore stderr even if callers panicked.
             let _ = dup2(self.saved_stderr, libc::STDERR_FILENO);
-            let _ = close(self.saved_stdout);
             let _ = close(self.saved_stderr);
 
             let _ = io::stdout().lock().flush();
@@ -83,7 +77,7 @@ mod imp {
     pub struct FullscreenStdioGuard;
 
     impl FullscreenStdioGuard {
-        pub fn redirect_to_null() -> io::Result<Self> {
+        pub fn redirect_stderr_to_null() -> io::Result<Self> {
             Ok(Self)
         }
     }
