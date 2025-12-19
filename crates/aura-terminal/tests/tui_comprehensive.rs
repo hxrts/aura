@@ -1093,11 +1093,24 @@ mod modals {
             };
         assert_eq!(after, initial + 1);
 
+        let expected_contact_id =
+            if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
+                state.contacts
+                    .get(state.selected_index)
+                    .map(|(id, _)| id.clone())
+                    .unwrap()
+            } else {
+                unreachable!("guardian select modal missing after navigation")
+            };
+
         // Select with Enter
         tui.clear_commands();
         tui.send_enter();
 
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::SelectGuardianByIndex { .. })));
+        assert!(tui.has_dispatch(|d| matches!(
+            d,
+            DispatchCommand::AddGuardian { contact_id } if contact_id == &expected_contact_id
+        )));
     }
 }
 
@@ -1551,10 +1564,22 @@ mod integration {
 
         // 3. Select from list
         tui.send_char('j'); // Select second contact
+        let expected_contact_id =
+            if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
+                state.contacts
+                    .get(state.selected_index)
+                    .map(|(id, _)| id.clone())
+                    .unwrap()
+            } else {
+                unreachable!("guardian select modal missing after navigation")
+            };
         tui.clear_commands();
         tui.send_enter();
 
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::SelectGuardianByIndex { .. })));
+        assert!(tui.has_dispatch(|d| matches!(
+            d,
+            DispatchCommand::AddGuardian { contact_id } if contact_id == &expected_contact_id
+        )));
     }
 
     #[test]

@@ -19,11 +19,12 @@ use aura_core::effects::reactive::ReactiveEffects;
 use crate::error::TerminalError;
 use crate::tui::context::{AccountFilesHelper, DispatchHelper, SnapshotHelper, ToastHelper};
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
+use crate::tui::types::ChannelMode;
+
 use crate::tui::hooks::{
     BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
-use crate::tui::types::ChannelMode;
 
 /// iocraft-friendly context.
 #[derive(Clone)]

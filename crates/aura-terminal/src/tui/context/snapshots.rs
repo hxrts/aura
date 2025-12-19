@@ -13,6 +13,7 @@ use async_lock::RwLock;
 use aura_app::AppCore;
 
 use crate::tui::effects::CommandContext;
+
 use crate::tui::hooks::{
     BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
@@ -48,12 +49,16 @@ impl SnapshotHelper {
             .map(CommandContext::from_snapshot)
             .unwrap_or_else(CommandContext::empty)
     }
+}
 
-    // ─── Snapshot Accessors ────────────────────────────────────────────────
-    //
-    // These methods provide synchronous snapshot access for tests and for
-    // non-reactive code paths. Screens should subscribe to signals directly.
-
+// ─── Snapshot Accessors ────────────────────────────────────────────────────
+//
+// These methods are best-effort and intentionally non-reactive.
+//
+// Production TUI screens should subscribe to signals (reactive) rather than
+// relying on snapshots for rendering; snapshots exist for command context,
+// dispatch gating, and some test/dev flows.
+impl SnapshotHelper {
     pub fn snapshot_chat(&self) -> ChatSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             ChatSnapshot {

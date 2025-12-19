@@ -5,13 +5,14 @@
 //! This is the root TUI component that coordinates all screens, handles
 //! events, manages the state machine, and renders modals.
 
-use super::account_setup_modal::{AccountSetupModal, AccountSetupState};
 use super::modal_overlays::{
-    render_add_device_modal, render_block_invite_modal, render_channel_info_modal,
-    render_chat_create_modal, render_contacts_create_modal, render_contacts_import_modal,
-    render_guardian_setup_modal, render_invitation_code_modal, render_invitations_create_modal,
-    render_invitations_import_modal, render_nickname_modal, render_petname_modal,
-    render_remove_device_modal, render_threshold_modal, render_topic_modal,
+    render_account_setup_modal, render_add_device_modal, render_block_invite_modal,
+    render_channel_info_modal, render_chat_create_modal, render_confirm_modal, render_contact_modal,
+    render_contacts_create_modal, render_contacts_import_modal, render_guardian_modal,
+    render_guardian_setup_modal, render_help_modal,
+    render_invitation_code_modal, render_invitations_create_modal, render_invitations_import_modal,
+    render_nickname_modal, render_petname_modal, render_remove_device_modal,
+    render_threshold_modal, render_topic_modal, GlobalModalProps,
 };
 
 use iocraft::prelude::*;
@@ -19,8 +20,7 @@ use std::sync::Arc;
 
 use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
-    ContactSelectModal, ContactSelectState, DiscoveredPeerInfo, Footer, HelpModal, HelpModalState,
-    ModalFrame, NavBar, ToastContainer, ToastLevel, ToastMessage,
+    DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastLevel, ToastMessage,
 };
 use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
@@ -141,31 +141,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let update_rx_holder = props.update_rx.clone();
     let _update_tx_holder = props.update_tx.clone();
 
-    // Account setup modal state - LEGACY hook-based system for backwards compatibility
-    // NOTE: When show_setup is true, the queue-based system (TuiState.modal_queue) handles
-    // the account setup modal. The legacy state is NOT initialized to avoid dual-state issues.
-    // The queue-based system is the source of truth for account setup modals.
-    let account_state = hooks.use_ref(AccountSetupState::new);
-    let account_version = hooks.use_state(|| 0usize);
-
-    // Guardian selection modal state
-    let guardian_select_state = hooks.use_ref(ContactSelectState::new);
-    let guardian_select_version = hooks.use_state(|| 0usize);
-
-    // Contact selection modal state (generic contact picker)
-    let contact_select_state = hooks.use_ref(ContactSelectState::new);
-    let contact_select_version = hooks.use_state(|| 0usize);
-
-    // Confirm modal state
-    let confirm_modal_visible = hooks.use_state(|| false);
-    let confirm_modal_title = hooks.use_ref(String::new);
-    let confirm_modal_message = hooks.use_ref(String::new);
-    let confirm_modal_version = hooks.use_state(|| 0usize);
-
-    // Help modal state
-    let help_modal_state = hooks.use_ref(HelpModalState::new);
-    let help_modal_version = hooks.use_state(|| 0usize);
-
     // Display name state - State<T> automatically triggers re-renders on .set()
     let display_name_state = hooks.use_state({
         let initial = props.display_name.clone();
@@ -190,8 +165,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     if let Some(rx_holder) = update_rx_holder {
         hooks.use_future({
             let mut display_name_state = display_name_state.clone();
-            let mut account_state = account_state.clone();
-            let mut account_version = account_version.clone();
             // Toast queue migration: use TuiState.toast_queue instead of toasts_state
             let mut tui_state = tui_state.clone();
             let mut tui_state_version = tui_state_version.clone();
@@ -258,14 +231,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::OperationFailed { operation, error } => {
                             // For account creation, show error in the modal instead of toast
                             if operation == "CreateAccount" {
-                                // Update both queue-based state and legacy hook state
+                                // Update queue-based state
                                 tui_state.write().modal_queue.update_active(|modal| {
                                     if let QueuedModal::AccountSetup(ref mut s) = modal {
                                         s.set_error(error.clone());
                                     }
                                 });
-                                account_state.write().set_error(&error);
-                                account_version.set(account_version.get().wrapping_add(1));
                                 tui_state_version.set(tui_state_version.get().wrapping_add(1));
                             } else {
                                 // For other operations, show as toast via queue
@@ -479,45 +450,59 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let neighborhood_props = extract_neighborhood_view_props(&tui_state.read());
 
     // =========================================================================
-    // NEW: Extract modal state from queue (type-enforced single modal at a time)
-    // This will replace the legacy hook-based modal state extraction above.
+    // Global modal overlays
     // =========================================================================
-    let queued_modal = tui_state.read().modal_queue.current().cloned();
-    let queue_account_setup = match &queued_modal {
-        Some(QueuedModal::AccountSetup(state)) => Some(state.clone()),
-        _ => None,
-    };
-    let queue_help = match &queued_modal {
-        Some(QueuedModal::Help { current_screen }) => current_screen.clone(),
-        _ => None,
-    };
-    let queue_guardian_select = match &queued_modal {
-        Some(QueuedModal::GuardianSelect(state)) => Some(state.clone()),
-        _ => None,
-    };
-    let _queue_contact_select = match &queued_modal {
-        Some(QueuedModal::ContactSelect(state)) => Some(state.clone()),
-        _ => None,
-    };
-    let _queue_confirm = match &queued_modal {
-        Some(QueuedModal::Confirm {
-            title,
-            message,
-            on_confirm: _,
-        }) => Some((title.clone(), message.clone())),
-        _ => None,
-    };
+    let mut global_modals = GlobalModalProps::default();
+    global_modals.current_screen_name = current_screen.name().to_string();
 
-    // Pre-compute account setup modal props for cleaner rendering
-    let account_setup_props = queue_account_setup.as_ref().map(|state| {
-        (
-            state.display_name.clone(),
-            state.creating,
-            state.should_show_spinner(),
-            state.success,
-            state.error.clone().unwrap_or_default(),
-        )
-    });
+    if let Some(modal) = tui_state.read().modal_queue.current() {
+        match modal {
+            QueuedModal::AccountSetup(state) => {
+                global_modals.account_setup_visible = true;
+                global_modals.account_setup_display_name = state.display_name.clone();
+                global_modals.account_setup_creating = state.creating;
+                global_modals.account_setup_show_spinner = state.should_show_spinner();
+                global_modals.account_setup_success = state.success;
+                global_modals.account_setup_error = state.error.clone();
+            }
+            QueuedModal::GuardianSelect(state) => {
+                global_modals.guardian_modal_visible = true;
+                global_modals.guardian_modal_title = state.title.clone();
+                global_modals.guardian_modal_contacts = state
+                    .contacts
+                    .iter()
+                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                    .collect();
+                global_modals.guardian_modal_selected = state.selected_index;
+            }
+            QueuedModal::ContactSelect(state) => {
+                global_modals.contact_modal_visible = true;
+                global_modals.contact_modal_title = state.title.clone();
+                global_modals.contact_modal_contacts = state
+                    .contacts
+                    .iter()
+                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                    .collect();
+                global_modals.contact_modal_selected = state.selected_index;
+            }
+            QueuedModal::Confirm {
+                title,
+                message,
+                on_confirm: _,
+            } => {
+                global_modals.confirm_visible = true;
+                global_modals.confirm_title = title.clone();
+                global_modals.confirm_message = message.clone();
+            }
+            QueuedModal::Help { current_screen } => {
+                global_modals.help_modal_visible = true;
+                if let Some(help_screen) = current_screen {
+                    global_modals.current_screen_name = help_screen.name().to_string();
+                }
+            }
+            _ => {}
+        }
+    }
 
     // Extract toast state from queue (type-enforced single toast at a time)
     let queued_toast = tui_state.read().toast_queue.current().cloned();
@@ -574,18 +559,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut should_exit = should_exit.clone();
         let mut tui_state = tui_state.clone();
         let mut tui_state_version = tui_state_version.clone();
-        let mut account_state = account_state.clone();
-        let mut account_version = account_version.clone();
-        let mut guardian_select_state = guardian_select_state.clone();
-        let mut guardian_select_version = guardian_select_version.clone();
-        let mut contact_select_state = contact_select_state.clone();
-        let mut contact_select_version = contact_select_version.clone();
-        let mut confirm_modal_visible = confirm_modal_visible.clone();
-        let mut confirm_modal_title = confirm_modal_title.clone();
-        let mut confirm_modal_message = confirm_modal_message.clone();
-        let mut confirm_modal_version = confirm_modal_version.clone();
-        let mut help_modal_state = help_modal_state.clone();
-        let mut help_modal_version = help_modal_version.clone();
         // Clone IoContext for ceremony operations
         let io_ctx_for_ceremony = app_ctx.io_context.clone();
         // Clone AppCore for key rotation operations
@@ -609,98 +582,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     should_exit.set(true);
                 }
 
-                // Sync modal queue state from TuiState to iocraft hooks
-                match new_state.modal_queue.current() {
-                    Some(QueuedModal::AccountSetup(state)) => {
-                        // Sync account setup modal state
-                        let legacy_visible = account_state.read().visible;
-                        if !legacy_visible {
-                            account_state.write().show();
-                            account_version.set(account_version.get().wrapping_add(1));
-                        }
-                        // Sync the display_name and other fields
-                        let mut legacy = account_state.write();
-                        legacy.display_name = state.display_name.clone();
-                        legacy.creating = state.creating;
-                        legacy.success = state.success;
-                        legacy.error = state.error.clone();
-                        drop(legacy);
-                        account_version.set(account_version.get().wrapping_add(1));
-                    }
-                    Some(QueuedModal::Help { .. }) => {
-                        if !help_modal_state.read().visible {
-                            help_modal_state.write().show();
-                            help_modal_version.set(help_modal_version.get().wrapping_add(1));
-                        }
-                    }
-                    Some(QueuedModal::GuardianSelect(state)) => {
-                        if !guardian_select_state.read().visible {
-                            // Convert contacts to the format expected by the modal
-                            let contacts: Vec<Contact> = state
-                                .contacts
-                                .iter()
-                                .map(|(id, name)| Contact::new(id.clone(), name.clone()))
-                                .collect();
-                            guardian_select_state
-                                .write()
-                                .show("Select Guardian", contacts);
-                            guardian_select_version
-                                .set(guardian_select_version.get().wrapping_add(1));
-                        }
-                    }
-                    Some(QueuedModal::ContactSelect(state)) => {
-                        if !contact_select_state.read().visible {
-                            let contacts: Vec<Contact> = state
-                                .contacts
-                                .iter()
-                                .map(|(id, name)| Contact::new(id.clone(), name.clone()))
-                                .collect();
-                            contact_select_state
-                                .write()
-                                .show(&state.title, contacts);
-                            contact_select_version
-                                .set(contact_select_version.get().wrapping_add(1));
-                        }
-                    }
-                    Some(QueuedModal::Confirm { title, message, .. }) => {
-                        if !confirm_modal_visible.get() {
-                            confirm_modal_visible.set(true);
-                            *confirm_modal_title.write() = title.clone();
-                            *confirm_modal_message.write() = message.clone();
-                            confirm_modal_version
-                                .set(confirm_modal_version.get().wrapping_add(1));
-                        }
-                    }
-                    None => {
-                        // Close any open modal hooks when no queued modal
-                        if account_state.read().visible {
-                            account_state.write().hide();
-                            account_version.set(account_version.get().wrapping_add(1));
-                        }
-                        if help_modal_state.read().visible {
-                            help_modal_state.write().hide();
-                            help_modal_version.set(help_modal_version.get().wrapping_add(1));
-                        }
-                        if guardian_select_state.read().visible {
-                            guardian_select_state.write().hide();
-                            guardian_select_version
-                                .set(guardian_select_version.get().wrapping_add(1));
-                        }
-                        if contact_select_state.read().visible {
-                            contact_select_state.write().hide();
-                            contact_select_version
-                                .set(contact_select_version.get().wrapping_add(1));
-                        }
-                        if confirm_modal_visible.get() {
-                            confirm_modal_visible.set(false);
-                            confirm_modal_version
-                                .set(confirm_modal_version.get().wrapping_add(1));
-                        }
-                    }
-                    // Other queued modal types don't need iocraft hook sync
-                    _ => {}
-                }
-
                 // Execute commands using callbacks registry
                 if let Some(ref cb) = callbacks {
                     for cmd in commands {
@@ -716,27 +597,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::AddGuardian { contact_id } => {
                                         (cb.recovery.on_select_guardian)(contact_id);
-                                    }
-                                    DispatchCommand::SelectGuardianByIndex { index } => {
-                                        // Map index to contact_id from legacy modal state
-                                        let contact_id = guardian_select_state
-                                            .read()
-                                            .contacts
-                                            .get(index)
-                                            .map(|c| c.id.clone());
-
-                                        // Hide the modal
-                                        guardian_select_state.write().hide();
-                                        guardian_select_version
-                                            .set(guardian_select_version.get().wrapping_add(1));
-
-                                        // Also dismiss the modal from the queue
-                                        tui_state.write().modal_queue.dismiss();
-
-                                        // Call the callback with contact_id
-                                        if let Some(contact_id) = contact_id {
-                                            (cb.recovery.on_select_guardian)(contact_id);
-                                        }
                                     }
 
                                     // === Block Screen Commands ===
@@ -1060,50 +920,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             }
 
             // All key events are handled by the state machine above.
-            // Modal handling (AccountSetup, GuardianSelect, Help) goes through
-            // transition() -> sync to legacy state -> command execution.
+            // Modal handling goes through transition() -> command execution.
         }
     });
-
-    // Legacy account_state is kept for potential future use but not actively used.
-    // The queue-based system (TuiState.modal_queue) is the source of truth.
-    // Trigger version read to allow hooks system to track changes if needed later.
-    let _ = account_version.get();
-    let _ = account_state.read(); // Keep ref active
-
-    // Extract guardian select state for rendering from use_ref
-    let guardian_state_ref = guardian_select_state.read();
-    let guardian_modal_visible = guardian_state_ref.visible;
-    let guardian_modal_title = guardian_state_ref.title.clone();
-    let guardian_modal_contacts = guardian_state_ref.contacts.clone();
-    let guardian_modal_selected = guardian_state_ref.selected_index;
-    let guardian_modal_error = guardian_state_ref.error.clone().unwrap_or_default();
-    drop(guardian_state_ref); // Release the read lock
-                              // guardian_select_version is used for triggering re-renders (not directly in UI)
-    let _ = guardian_select_version.get();
-
-    // Extract contact select state for rendering from use_ref
-    let contact_state_ref = contact_select_state.read();
-    let _contact_modal_visible = contact_state_ref.visible;
-    let _contact_modal_title = contact_state_ref.title.clone();
-    let _contact_modal_contacts = contact_state_ref.contacts.clone();
-    let _contact_modal_selected = contact_state_ref.selected_index;
-    let _contact_modal_error = contact_state_ref.error.clone().unwrap_or_default();
-    drop(contact_state_ref); // Release the read lock
-                             // contact_select_version is used for triggering re-renders (not directly in UI)
-    let _ = contact_select_version.get();
-
-    // Extract confirm modal state for rendering
-    let _confirm_visible = confirm_modal_visible.get();
-    let _confirm_title = confirm_modal_title.read().clone();
-    let _confirm_message = confirm_modal_message.read().clone();
-    // confirm_modal_version is used for triggering re-renders (not directly in UI)
-    let _ = confirm_modal_version.get();
-
-    // Extract help modal state for rendering from use_ref
-    let help_modal_visible = help_modal_state.read().visible;
-    // help_modal_version is used for triggering re-renders (not directly in UI)
-    let _ = help_modal_version.get();
 
     // Extract sync status from props
     let syncing = props.sync_in_progress;
@@ -1235,75 +1054,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Footer with key hints (3 rows)
             Footer(hints: screen_hints.clone(), global_hints: global_hints.clone(), disabled: is_insert_mode)
 
-            // === GLOBAL MODALS (using ModalFrame overlay) ===
-            // Account setup modal (queue-based only - legacy state deprecated)
-            #(if let Some((display_name_prop, creating_prop, show_spinner_prop, success_prop, error_prop)) = account_setup_props.clone() {
-                Some(element! {
-                    ModalFrame {
-                        AccountSetupModal(
-                            visible: true,
-                            display_name: display_name_prop,
-                            focused: true,
-                            creating: creating_prop,
-                            show_spinner: show_spinner_prop,
-                            success: success_prop,
-                            error: error_prop,
-                        )
-                    }
-                }.into_any())
-            } else {
-                None
-            })
-
-            // Guardian selection modal (queue-based)
-            #(if let Some(ref state) = queue_guardian_select {
-                let contacts_as_objects: Vec<Contact> = state.contacts.iter()
-                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
-                    .collect();
-                Some(element! {
-                    ModalFrame {
-                        ContactSelectModal(
-                            visible: true,
-                            title: state.title.clone(),
-                            contacts: contacts_as_objects,
-                            selected_index: state.selected_index,
-                            error: String::new(),
-                        )
-                    }
-                }.into_any())
-            } else if guardian_modal_visible {
-                // Guardian selection modal (legacy)
-                Some(element! {
-                    ModalFrame {
-                        ContactSelectModal(
-                            visible: true,
-                            title: guardian_modal_title.clone(),
-                            contacts: guardian_modal_contacts.clone(),
-                            selected_index: guardian_modal_selected,
-                            error: guardian_modal_error.clone(),
-                        )
-                    }
-                }.into_any())
-            } else {
-                None
-            })
-
-            // Help modal
-            #(if let Some(ref screen_name) = queue_help {
-                Some(element! {
-                    ModalFrame {
-                        HelpModal(visible: true, current_screen: Some(screen_name.name().to_string()))
-                    }
-                }.into_any())
-            } else if help_modal_visible {
-                Some(element! {
-                    ModalFrame {
-                        HelpModal(visible: true, current_screen: Some(current_screen.name().to_string()))
-                    }
-                }.into_any())
-            } else {
-                None
-            })
+            // === GLOBAL MODALS ===
+            #(render_account_setup_modal(&global_modals))
+            #(render_guardian_modal(&global_modals))
+            #(render_contact_modal(&global_modals))
+            #(render_confirm_modal(&global_modals))
+            #(render_help_modal(&global_modals))
 
             // === SCREEN-SPECIFIC MODALS ===
             // Rendered via modal_overlays module for maintainability

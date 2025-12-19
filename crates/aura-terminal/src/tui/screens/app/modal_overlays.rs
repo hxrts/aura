@@ -5,9 +5,6 @@
 //!
 //! This module provides standalone render functions that can be called from IoApp.
 
-// Global modal render functions are prepared for future integration
-#![allow(dead_code)]
-
 use iocraft::prelude::*;
 
 use crate::tui::components::{
@@ -33,6 +30,7 @@ pub struct GlobalModalProps {
     pub account_setup_visible: bool,
     pub account_setup_display_name: String,
     pub account_setup_creating: bool,
+    pub account_setup_show_spinner: bool,
     pub account_setup_success: bool,
     pub account_setup_error: Option<String>,
 
@@ -74,6 +72,7 @@ pub fn render_account_setup_modal(global: &GlobalModalProps) -> Option<AnyElemen
                         display_name: global.account_setup_display_name.clone(),
                         focused: true,
                         creating: global.account_setup_creating,
+                        show_spinner: global.account_setup_show_spinner,
                         success: global.account_setup_success,
                         error: global.account_setup_error.clone().unwrap_or_default(),
                     )

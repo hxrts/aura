@@ -6,7 +6,7 @@
 //! helpers that each handle a specific concern:
 //!
 //! - `dispatch`: Command dispatch through Intent and Operational handlers
-//! - `snapshots`: ViewState snapshot access for initial rendering
+//! - `snapshots`: Best-effort AppCore snapshots (dispatch context + tests; screens should use signals)
 //! - `toasts`: Toast notification management
 //! - `io_context`: The main IoContext struct that composes these helpers
 

@@ -1841,10 +1841,6 @@ pub enum DispatchCommand {
     AddGuardian {
         contact_id: String,
     },
-    /// Guardian selection by index (shell maps to contact_id)
-    SelectGuardianByIndex {
-        index: usize,
-    },
     ApproveRecovery {
         request_id: String,
     },
@@ -2355,7 +2351,6 @@ fn handle_guardian_select_key_queue(
     key: KeyEvent,
     modal_state: ContactSelectModalState,
 ) {
-    let contact_count = modal_state.contacts.len();
     match key.code {
         KeyCode::Esc => {
             state.modal_queue.dismiss();
@@ -2377,14 +2372,12 @@ fn handle_guardian_select_key_queue(
             });
         }
         KeyCode::Enter => {
-            if contact_count > 0 {
-                commands.push(TuiCommand::Dispatch(
-                    DispatchCommand::SelectGuardianByIndex {
-                        index: modal_state.selected_index,
-                    },
-                ));
+            if let Some((contact_id, _)) = modal_state.contacts.get(modal_state.selected_index) {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::AddGuardian {
+                    contact_id: contact_id.clone(),
+                }));
+                state.modal_queue.dismiss();
             }
-            // Note: Don't dismiss here - let command handler do it
         }
         _ => {}
     }

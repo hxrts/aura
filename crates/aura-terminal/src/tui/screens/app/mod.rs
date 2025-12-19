@@ -2,7 +2,6 @@
 //!
 //! Main application shell with screen navigation and modal management.
 
-mod account_setup_modal;
 mod modal_overlays;
 mod shell;
 
