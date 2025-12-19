@@ -58,9 +58,13 @@ impl AccountFilesHelper {
         self.has_existing_account.store(true, Ordering::Relaxed);
     }
 
-    pub fn create_account(&self, _display_name: &str) -> Result<(), String> {
-        match crate::handlers::tui::create_account(&self.base_path, &self.device_id_str, self.mode)
-        {
+    pub fn create_account(&self, display_name: &str) -> Result<(), String> {
+        match crate::handlers::tui::create_account(
+            &self.base_path,
+            &self.device_id_str,
+            self.mode,
+            display_name,
+        ) {
             Ok((_authority_id, _context_id)) => {
                 self.set_account_created();
                 Ok(())
@@ -368,7 +372,7 @@ impl DispatchHelper {
 
         let contact = ViewContact {
             id: sender_id.to_string(),
-            petname: suggested_name.clone().unwrap_or_default(),
+            nickname: suggested_name.clone().unwrap_or_default(),
             suggested_name,
             is_guardian: false,
             is_resident: false,

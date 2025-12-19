@@ -67,7 +67,7 @@ pub static RECOVERY_SIGNAL: LazyLock<Signal<RecoveryState>> =
 pub static INVITATIONS_SIGNAL: LazyLock<Signal<InvitationsState>> =
     LazyLock::new(|| Signal::new("app:invitations"));
 
-/// Signal for contacts state (contacts, petnames, display names)
+/// Signal for contacts state (contacts, nicknames, display names)
 pub static CONTACTS_SIGNAL: LazyLock<Signal<ContactsState>> =
     LazyLock::new(|| Signal::new("app:contacts"));
 

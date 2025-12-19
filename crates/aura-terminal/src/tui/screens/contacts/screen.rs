@@ -1,6 +1,6 @@
 //! # Contacts Screen
 //!
-//! Petname management and invitations
+//! Nickname management and invitations
 //!
 //! ## Reactive Signal Subscription
 //!
@@ -28,7 +28,7 @@ use iocraft::prelude::*;
 use aura_app::signal_defs::{CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL};
 use aura_core::effects::reactive::ReactiveEffects;
 
-use crate::tui::callbacks::{ImportInvitationCallback, StartChatCallback, UpdatePetnameCallback};
+use crate::tui::callbacks::{ImportInvitationCallback, StartChatCallback, UpdateNicknameCallback};
 use crate::tui::components::{
     DetailPanel, DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState,
     InvitePeerCallback, KeyValue, ListPanel, StatusIndicator,
@@ -59,7 +59,7 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
         ContactStatus::Blocked => crate::tui::components::Status::Error,
     };
 
-    let name = c.petname.clone();
+    let name = c.nickname.clone();
     let guardian_badge = if c.is_guardian { " [guardian]" } else { "" }.to_string();
 
     element! {
@@ -143,7 +143,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             .unwrap_or_else(|| "No suggestion".to_string());
 
         vec![
-            element! { KeyValue(label: "Petname".to_string(), value: c.petname.clone()) }
+            element! { KeyValue(label: "Nickname".to_string(), value: c.nickname.clone()) }
                 .into_any(),
             element! { KeyValue(label: "Status".to_string(), value: status_label.to_string()) }
                 .into_any(),
@@ -174,7 +174,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
 /// The `view` field is a required struct that embeds all view state from TuiState.
 /// This makes it a **compile-time error** to forget any view state field, because
 /// the entire `ContactsViewProps` struct must be passed - you can't accidentally
-/// omit individual fields like `petname_modal_visible`.
+/// omit individual fields like `nickname_modal_visible`.
 #[derive(Default, Props)]
 pub struct ContactsScreenProps {
     // === Domain data (from reactive signals) ===
@@ -191,8 +191,8 @@ pub struct ContactsScreenProps {
     pub lan_peers_selection: usize,
 
     // === Callbacks ===
-    /// Callback when updating a contact's petname
-    pub on_update_petname: Option<UpdatePetnameCallback>,
+    /// Callback when updating a contact's nickname
+    pub on_update_nickname: Option<UpdateNicknameCallback>,
     /// Callback when starting a direct chat with a contact
     pub on_start_chat: Option<StartChatCallback>,
     /// Callback when inviting a discovered LAN peer
@@ -213,7 +213,7 @@ pub struct ContactsScreenProps {
 /// When `AppCoreContext` is available in the context tree, this component will
 /// subscribe to contacts state signals and automatically update when:
 /// - Contacts are added/removed
-/// - Petnames are changed
+/// - Nicknames are changed
 /// - Guardian status is toggled
 /// - Online status changes
 #[component]

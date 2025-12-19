@@ -168,17 +168,17 @@ pub fn render_help_modal(global: &GlobalModalProps) -> Option<AnyElement<'static
 // Contacts Screen Modal Render Functions
 // =============================================================================
 
-pub fn render_petname_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
-    if contacts.petname_modal_visible {
+pub fn render_nickname_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
+    if contacts.nickname_modal_visible {
         Some(
             element! {
                 ModalFrame {
                     TextInputModal(
                         visible: true,
                         focused: true,
-                        title: "Edit Petname".to_string(),
-                        value: contacts.petname_modal_value.clone(),
-                        placeholder: "Enter petname...".to_string(),
+                        title: "Edit Nickname".to_string(),
+                        value: contacts.nickname_modal_value.clone(),
+                        placeholder: "Enter nickname...".to_string(),
                         error: String::new(),
                         submitting: false,
                     )
@@ -353,8 +353,8 @@ pub fn render_channel_info_modal(chat: &ChatViewProps) -> Option<AnyElement<'sta
 // Settings Screen Modal Render Functions
 // =============================================================================
 
-pub fn render_nickname_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
-    if settings.nickname_modal_visible {
+pub fn render_display_name_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
+    if settings.display_name_modal_visible {
         Some(
             element! {
                 ModalFrame {
@@ -362,7 +362,7 @@ pub fn render_nickname_modal(settings: &SettingsViewProps) -> Option<AnyElement<
                         visible: true,
                         focused: true,
                         title: "Edit Display Name".to_string(),
-                        value: settings.nickname_modal_value.clone(),
+                        value: settings.display_name_modal_value.clone(),
                         placeholder: "Enter your display name...".to_string(),
                         error: String::new(),
                         submitting: false,

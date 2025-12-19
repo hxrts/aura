@@ -35,8 +35,8 @@ pub async fn handle_query(
             match get_user_info(app_core, target).await {
                 Ok(contact) => {
                     // Format contact info for terminal display
-                    let display_name = if !contact.petname.is_empty() {
-                        contact.petname.clone()
+                    let display_name = if !contact.nickname.is_empty() {
+                        contact.nickname.clone()
                     } else if let Some(ref suggested) = contact.suggested_name {
                         suggested.clone()
                     } else {

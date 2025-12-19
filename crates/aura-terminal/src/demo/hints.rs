@@ -108,7 +108,7 @@ fn generate_invite_code(name: &str, seed: u64) -> String {
         "sender_id": sender_id.uuid().to_string(),
         "invitation_type": {
             "Contact": {
-                "petname": name
+                "nickname": name
             }
         },
         "expires_at": null,
@@ -200,8 +200,8 @@ mod tests {
         assert!(!alice_parsed.invitation_id.is_empty());
         // Verify the invitation type is Contact (not Guardian)
         match alice_parsed.invitation_type {
-            aura_invitation::InvitationType::Contact { petname } => {
-                assert_eq!(petname, Some("alice".to_string()));
+            aura_invitation::InvitationType::Contact { nickname } => {
+                assert_eq!(nickname, Some("alice".to_string()));
             }
             _ => panic!(
                 "Expected Contact invitation type, got {:?}",
@@ -215,8 +215,8 @@ mod tests {
         assert_eq!(carol_parsed.version, 1);
         assert!(!carol_parsed.invitation_id.is_empty());
         match carol_parsed.invitation_type {
-            aura_invitation::InvitationType::Contact { petname } => {
-                assert_eq!(petname, Some("carol".to_string()));
+            aura_invitation::InvitationType::Contact { nickname } => {
+                assert_eq!(nickname, Some("carol".to_string()));
             }
             _ => panic!(
                 "Expected Contact invitation type, got {:?}",

@@ -56,7 +56,7 @@ fn invitation_send_and_accept_end_to_end() {
         &send_snapshot,
         receiver,
         InvitationType::Contact {
-            petname: Some("pal".into()),
+            nickname: Some("pal".into()),
         },
         Some("welcome".into()),
         Some(60_000),
@@ -71,7 +71,7 @@ fn invitation_send_and_accept_end_to_end() {
         receiver,
         invitation_id,
         InvitationType::Contact {
-            petname: Some("pal".into()),
+            nickname: Some("pal".into()),
         },
         send_snapshot.now_ms,
         Some(send_snapshot.now_ms + 60_000),

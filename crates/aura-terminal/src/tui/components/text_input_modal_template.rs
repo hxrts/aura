@@ -187,7 +187,7 @@ pub struct TextInputState {
     pub error: Option<String>,
     /// Whether submission is in progress
     pub submitting: bool,
-    /// Associated ID (e.g., contact_id for petname edit)
+    /// Associated ID (e.g., contact_id for nickname edit)
     pub context_id: Option<String>,
 }
 
@@ -277,14 +277,14 @@ mod tests {
         assert!(!state.can_submit());
 
         state.show(
-            "Edit Petname",
+            "Edit Nickname",
             "Alice",
             "Enter name...",
             Some("contact-123".to_string()),
         );
         assert!(state.visible);
         assert_eq!(state.value, "Alice");
-        assert_eq!(state.title, "Edit Petname");
+        assert_eq!(state.title, "Edit Nickname");
         assert_eq!(state.context_id, Some("contact-123".to_string()));
         assert!(state.can_submit());
 

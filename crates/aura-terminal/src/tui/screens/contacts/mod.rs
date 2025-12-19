@@ -1,6 +1,6 @@
 //! # Contacts Screen Module
 //!
-//! Petname management and invitation flows.
+//! Nickname management and invitation flows.
 
 mod guardian_select_modal;
 mod petname_modal;

@@ -99,7 +99,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
                         let bg = if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL };
                         let text_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL };
                         let pointer_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::PRIMARY };
-                        let name = contact.petname.clone();
+                        let name = contact.nickname.clone();
                         let id = contact.id.clone();
                         let pointer = if is_selected { "▸ " } else { "  " }.to_string();
                         element! {

@@ -23,7 +23,7 @@ pub enum GuardianStatus {
 pub struct Guardian {
     /// Guardian identifier
     pub id: String,
-    /// Guardian display name (petname)
+    /// Guardian display name (nickname)
     pub name: String,
     /// Guardian status
     pub status: GuardianStatus,

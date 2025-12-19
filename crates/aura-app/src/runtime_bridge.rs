@@ -119,8 +119,8 @@ pub struct LanPeerInfo {
 /// Workflows convert this to view types with display fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InvitationBridgeType {
-    /// Contact invitation with optional petname
-    Contact { petname: Option<String> },
+    /// Contact invitation with optional nickname
+    Contact { nickname: Option<String> },
     /// Guardian invitation for a subject authority
     Guardian { subject_authority: AuthorityId },
     /// Channel/block invitation
@@ -387,13 +387,13 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// # Arguments
     /// * `receiver` - Authority to invite as contact
-    /// * `petname` - Optional petname for the contact
+    /// * `nickname` - Optional nickname for the contact
     /// * `message` - Optional message to include
     /// * `ttl_ms` - Optional time-to-live in milliseconds
     async fn create_contact_invitation(
         &self,
         receiver: AuthorityId,
-        petname: Option<String>,
+        nickname: Option<String>,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError>;
@@ -688,7 +688,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn create_contact_invitation(
         &self,
         _receiver: AuthorityId,
-        _petname: Option<String>,
+        _nickname: Option<String>,
         _message: Option<String>,
         _ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {

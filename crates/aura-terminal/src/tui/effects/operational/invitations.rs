@@ -51,8 +51,8 @@ pub async fn handle_invitations(
                             format!("channel:{}", block_id)
                         }
                         InvitationBridgeType::Guardian { .. } => "guardian".to_string(),
-                        InvitationBridgeType::Contact { petname } => {
-                            if let Some(name) = petname {
+                        InvitationBridgeType::Contact { nickname } => {
+                            if let Some(name) = nickname {
                                 format!("contact:{}", name)
                             } else {
                                 "contact".to_string()

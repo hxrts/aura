@@ -244,12 +244,12 @@ pub enum EffectCommand {
     },
 
     // === Contact Commands ===
-    /// Update a contact's petname
-    UpdateContactPetname {
+    /// Update a contact's nickname
+    UpdateContactNickname {
         /// Contact ID
         contact_id: String,
-        /// New petname
-        petname: String,
+        /// New nickname
+        nickname: String,
     },
     /// Toggle guardian status for a contact
     ToggleContactGuardian {
@@ -435,7 +435,7 @@ impl EffectCommand {
             | Self::LeaveChannel { .. }
             | Self::RetryMessage { .. }
             | Self::UpdateNickname { .. }
-            | Self::UpdateContactPetname { .. }
+            | Self::UpdateContactNickname { .. }
             | Self::SetTopic { .. }
             | Self::PinMessage { .. }
             | Self::UnpinMessage { .. }
@@ -837,18 +837,18 @@ pub enum AuraEvent {
         block_id: String,
     },
 
-    // === Contacts & Petnames Events ===
+    // === Contacts & Nicknames Events ===
     /// User nickname updated
     NicknameUpdated {
         /// New nickname
         nickname: String,
     },
-    /// Contact petname updated
-    ContactPetnameUpdated {
+    /// Contact nickname updated
+    ContactNicknameUpdated {
         /// Contact ID
         contact_id: String,
-        /// New petname
-        petname: String,
+        /// New nickname
+        nickname: String,
     },
     /// Contact guardian status toggled
     ContactGuardianToggled {
@@ -1037,7 +1037,7 @@ impl EventFilter {
             | AuraEvent::DeviceRemoved { .. }
             | AuraEvent::NicknameUpdated { .. }
             | AuraEvent::PositionUpdated { .. }
-            | AuraEvent::ContactPetnameUpdated { .. }
+            | AuraEvent::ContactNicknameUpdated { .. }
             | AuraEvent::ContactGuardianToggled { .. }
             | AuraEvent::GuardianInvitationSent { .. } => self.account,
             AuraEvent::MessageReceived { .. }

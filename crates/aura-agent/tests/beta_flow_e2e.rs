@@ -49,7 +49,7 @@ async fn test_invitation_code_roundtrip() -> TestResult {
         invitation_id: "inv-test-123".to_string(),
         sender_id,
         invitation_type: InvitationType::Contact {
-            petname: Some("alice".to_string()),
+            nickname: Some("alice".to_string()),
         },
         expires_at: Some(9999999999999),
         message: Some("Hello from Alice!".to_string()),
@@ -66,8 +66,8 @@ async fn test_invitation_code_roundtrip() -> TestResult {
     assert_eq!(decoded.message, Some("Hello from Alice!".to_string()));
 
     match decoded.invitation_type {
-        InvitationType::Contact { petname } => {
-            assert_eq!(petname, Some("alice".to_string()));
+        InvitationType::Contact { nickname } => {
+            assert_eq!(nickname, Some("alice".to_string()));
         }
         _ => panic!("Expected Contact invitation type"),
     }

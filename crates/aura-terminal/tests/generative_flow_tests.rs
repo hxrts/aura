@@ -85,7 +85,7 @@ pub struct AgentState {
     pub pending_invitations: Vec<String>,
     pub channels: Vec<String>,
     pub emitted_signals: Vec<String>,
-    pub contact_petnames: HashMap<String, String>,
+    pub contact_nicknames: HashMap<String, String>,
     pub blocks: Vec<String>,
 }
 
@@ -298,7 +298,7 @@ impl FlowTraceReplayer {
             agent.pending_invitations = Self::extract_string_set(obj.get("pendingInvitations"));
             agent.channels = Self::extract_string_set(obj.get("channels"));
             agent.emitted_signals = Self::extract_string_set(obj.get("emittedSignals"));
-            agent.contact_petnames = Self::extract_string_map(obj.get("contactPetnames"));
+            agent.contact_nicknames = Self::extract_string_map(obj.get("contactNicknames"));
             agent.blocks = Self::extract_string_set(obj.get("blocks"));
         }
 
@@ -590,14 +590,14 @@ impl FlowTraceReplayer {
             }
         }
 
-        // Invariant 5: Petnames can only be set for contacts (Social Graph)
+        // Invariant 5: Nicknames can only be set for contacts (Social Graph)
         for (agent_id, agent) in &state.agents {
-            for (contact_id, _petname) in &agent.contact_petnames {
+            for (contact_id, _nickname) in &agent.contact_nicknames {
                 if agent.contacts.contains(contact_id) {
                     results.passed_count += 1;
                 } else {
                     results.failures.push(format!(
-                        "Agent {} has petname for {} who is not a contact",
+                        "Agent {} has nickname for {} who is not a contact",
                         agent_id, contact_id
                     ));
                 }
@@ -795,21 +795,21 @@ fn test_stewards_are_residents_invariant() {
         .any(|f| f.contains("stewards who are not residents")));
 }
 
-/// Test petnames-for-contacts invariant (Social Graph)
+/// Test nicknames-for-contacts invariant (Social Graph)
 #[test]
-fn test_petnames_for_contacts_invariant() {
+fn test_nicknames_for_contacts_invariant() {
     let mut state = FlowState::default();
 
-    // Valid: petname set for a contact
-    let mut valid_petnames = HashMap::new();
-    valid_petnames.insert("alice".to_string(), "My Friend Alice".to_string());
+    // Valid: nickname set for a contact
+    let mut valid_nicknames = HashMap::new();
+    valid_nicknames.insert("alice".to_string(), "My Friend Alice".to_string());
 
     state.agents.insert(
         "bob".to_string(),
         AgentState {
             has_account: true,
             contacts: vec!["alice".to_string()],
-            contact_petnames: valid_petnames,
+            contact_nicknames: valid_nicknames,
             ..Default::default()
         },
     );
@@ -817,18 +817,18 @@ fn test_petnames_for_contacts_invariant() {
     let results = FlowTraceReplayer::validate_flow_invariants(&state);
     assert!(
         results.all_passed,
-        "Petname for contact should be valid: {:?}",
+        "Nickname for contact should be valid: {:?}",
         results.failures
     );
 
-    // Invalid: petname set for non-contact
-    let mut invalid_petnames = HashMap::new();
-    invalid_petnames.insert("carol".to_string(), "Unknown Carol".to_string());
+    // Invalid: nickname set for non-contact
+    let mut invalid_nicknames = HashMap::new();
+    invalid_nicknames.insert("carol".to_string(), "Unknown Carol".to_string());
 
-    state.agents.get_mut("bob").unwrap().contact_petnames = invalid_petnames;
+    state.agents.get_mut("bob").unwrap().contact_nicknames = invalid_nicknames;
 
     let results = FlowTraceReplayer::validate_flow_invariants(&state);
-    assert!(!results.all_passed, "Petname for non-contact should fail");
+    assert!(!results.all_passed, "Nickname for non-contact should fail");
     assert!(results
         .failures
         .iter()
@@ -913,7 +913,7 @@ fn test_social_graph_flow_state_extraction() {
               "pendingInvitations": {"#set": []},
               "channels": {"#set": []},
               "emittedSignals": {"#set": ["CONTACTS_SIGNAL", "BLOCK_SIGNAL"]},
-              "contactPetnames": {"#map": [["alice", "My Friend"]]},
+              "contactNicknames": {"#map": [["alice", "My Friend"]]},
               "blocks": {"#set": ["block1"]}
             }],
             ["alice", {
@@ -923,7 +923,7 @@ fn test_social_graph_flow_state_extraction() {
               "pendingInvitations": {"#set": []},
               "channels": {"#set": []},
               "emittedSignals": {"#set": []},
-              "contactPetnames": {"#map": []},
+              "contactNicknames": {"#map": []},
               "blocks": {"#set": []}
             }]
           ]},
@@ -957,7 +957,7 @@ fn test_social_graph_flow_state_extraction() {
     );
 
     // Should have checked: agent validity, block capacity, stewards-are-residents,
-    // petnames-for-contacts, and block-residents-are-agents
+    // nicknames-for-contacts, and block-residents-are-agents
     assert!(
         result.invariants_verified >= 5,
         "Should verify multiple Social Graph invariants"

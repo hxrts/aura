@@ -33,8 +33,8 @@ pub enum ViewDelta {
     ChannelClosed { channel_id: String },
     /// Channel topic was updated
     TopicUpdated { channel_id: String, topic: String },
-    /// A petname was set for a contact
-    PetnameSet { target: String, petname: String },
+    /// A nickname was set for a contact
+    NicknameSet { target: String, nickname: String },
     /// A block name was set
     BlockNameSet { block_id: String, name: String },
     /// A recovery request was initiated
@@ -75,8 +75,8 @@ pub fn reduce_fact(fact: &JournalFact, own_authority: &AuthorityId) -> ViewDelta
         reduce_close_channel(content)
     } else if content.starts_with("SetTopic::") {
         reduce_set_topic(content)
-    } else if content.starts_with("SetPetname::") {
-        reduce_set_petname(content)
+    } else if content.starts_with("SetNickname::") {
+        reduce_set_nickname(content)
     } else if content.starts_with("SetBlockName::") {
         reduce_set_block_name(content)
     } else if content.starts_with("InitiateRecovery::") {
@@ -158,7 +158,7 @@ fn reduce_send_message(
             id: msg_id,
             channel_id: msg_channel_id,
             sender_id: sender_id.clone(),
-            sender_name: sender_id, // Petname resolved in ViewState::apply_delta
+            sender_name: sender_id, // Nickname resolved in ViewState::apply_delta
             content: msg_content,
             timestamp,
             reply_to,
@@ -242,14 +242,14 @@ fn reduce_set_topic(content: &str) -> ViewDelta {
     ViewDelta::TopicUpdated { channel_id, topic }
 }
 
-fn reduce_set_petname(content: &str) -> ViewDelta {
-    let params = content.strip_prefix("SetPetname::").unwrap_or(content);
+fn reduce_set_nickname(content: &str) -> ViewDelta {
+    let params = content.strip_prefix("SetNickname::").unwrap_or(content);
     let target = parse_param(params, "target")
         .unwrap_or("unknown")
         .to_string();
-    let petname = parse_param(params, "petname").unwrap_or("").to_string();
+    let nickname = parse_param(params, "nickname").unwrap_or("").to_string();
 
-    ViewDelta::PetnameSet { target, petname }
+    ViewDelta::NicknameSet { target, nickname }
 }
 
 fn reduce_set_block_name(content: &str) -> ViewDelta {

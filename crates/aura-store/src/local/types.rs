@@ -24,8 +24,8 @@ pub enum ThemePreference {
 pub struct ContactCache {
     /// Authority ID of the contact
     pub authority_id: AuthorityId,
-    /// Petname assigned by the user
-    pub petname: Option<String>,
+    /// Nickname assigned by the user
+    pub nickname: Option<String>,
     /// Display name from the contact
     pub display_name: Option<String>,
     /// Last seen timestamp (unix millis)
@@ -39,7 +39,7 @@ impl ContactCache {
     pub fn new(authority_id: AuthorityId) -> Self {
         Self {
             authority_id,
-            petname: None,
+            nickname: None,
             display_name: None,
             last_seen: None,
             avatar_hash: None,
@@ -48,7 +48,7 @@ impl ContactCache {
 
     /// Get the best display name for this contact
     pub fn display(&self) -> String {
-        self.petname
+        self.nickname
             .clone()
             .or_else(|| self.display_name.clone())
             .unwrap_or_else(|| {

@@ -42,7 +42,7 @@ pub type RetryMessageCallback = ThreeStringCallback;
 pub type SetTopicCallback = TwoStringCallback;
 
 // --- Contacts Screen ---
-pub type UpdatePetnameCallback = TwoStringCallback;
+pub type UpdateNicknameCallback = TwoStringCallback;
 pub type StartChatCallback = IdCallback;
 
 // --- Recovery Screen ---
@@ -50,7 +50,7 @@ pub type RecoveryCallback = NoArgCallback;
 pub type ApprovalCallback = IdCallback;
 
 // --- Settings Screen ---
-pub type UpdateNicknameCallback = IdCallback;
+pub type UpdateDisplayNameCallback = IdCallback;
 pub type AddDeviceCallback = IdCallback;
 pub type RemoveDeviceCallback = IdCallback;
 pub type UpdateThresholdCallback = ThresholdCallback;

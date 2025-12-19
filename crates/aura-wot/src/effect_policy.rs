@@ -87,7 +87,7 @@ pub enum OperationType {
     /// Unblock a contact
     UnblockContact,
     /// Set display name for contact
-    SetContactPetname,
+    SetContactNickname,
 
     // === Group Operations ===
     /// Create a multi-party group
@@ -150,7 +150,7 @@ impl OperationType {
             OperationType::AddContact => "add_contact",
             OperationType::BlockContact => "block_contact",
             OperationType::UnblockContact => "unblock_contact",
-            OperationType::SetContactPetname => "set_contact_petname",
+            OperationType::SetContactNickname => "set_contact_nickname",
             OperationType::CreateGroup => "create_group",
             OperationType::AddGroupMember => "add_group_member",
             OperationType::RemoveGroupMember => "remove_group_member",
@@ -181,7 +181,7 @@ impl OperationType {
             | OperationType::PinMessage
             | OperationType::BlockContact
             | OperationType::UnblockContact
-            | OperationType::SetContactPetname
+            | OperationType::SetContactNickname
             | OperationType::UpdateProfile
             | OperationType::UpdatePreferences => SecurityLevel::Low,
 
@@ -234,7 +234,7 @@ impl FromStr for OperationType {
             "add_contact" => Ok(OperationType::AddContact),
             "block_contact" => Ok(OperationType::BlockContact),
             "unblock_contact" => Ok(OperationType::UnblockContact),
-            "set_contact_petname" => Ok(OperationType::SetContactPetname),
+            "set_contact_nickname" => Ok(OperationType::SetContactNickname),
             "create_group" => Ok(OperationType::CreateGroup),
             "add_group_member" => Ok(OperationType::AddGroupMember),
             "remove_group_member" => Ok(OperationType::RemoveGroupMember),
@@ -590,7 +590,7 @@ impl Default for EffectPolicyRegistry {
         registry.set_default(OperationType::PinMessage, EffectTiming::Immediate);
         registry.set_default(OperationType::BlockContact, EffectTiming::Immediate);
         registry.set_default(OperationType::UnblockContact, EffectTiming::Immediate);
-        registry.set_default(OperationType::SetContactPetname, EffectTiming::Immediate);
+        registry.set_default(OperationType::SetContactNickname, EffectTiming::Immediate);
         registry.set_default(OperationType::UpdateProfile, EffectTiming::Immediate);
         registry.set_default(OperationType::UpdatePreferences, EffectTiming::Immediate);
 

@@ -105,7 +105,7 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
             "Chat",
         ),
         // Contacts screen
-        HelpCommand::new("e", "e", "Edit contact petname", "Contacts"),
+        HelpCommand::new("e", "e", "Edit contact nickname", "Contacts"),
         HelpCommand::new("g", "g", "Toggle guardian status", "Contacts"),
         HelpCommand::new("c", "c", "Start chat with contact", "Contacts"),
         HelpCommand::new("i", "i", "Invite selected peer", "Contacts"),

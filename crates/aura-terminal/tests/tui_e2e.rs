@@ -1571,13 +1571,13 @@ fn test_text_input_state_machine() {
 
     // Show with context
     state.show(
-        "Edit Petname",
+        "Edit Nickname",
         "Alice",
         "Enter name",
         Some("contact_alice".to_string()),
     );
     assert!(state.visible);
-    assert_eq!(state.title, "Edit Petname");
+    assert_eq!(state.title, "Edit Nickname");
     assert_eq!(state.value, "Alice");
     assert_eq!(state.placeholder, "Enter name");
     assert_eq!(state.context_id, Some("contact_alice".to_string()));
@@ -4634,8 +4634,8 @@ async fn test_snapshot_data_accuracy() {
         contacts: vec![
             Contact {
                 id: "contact-1".to_string(),
-                petname: "Alice".to_string(),
-                suggested_name: Some("Alice Smith".to_string()), // Different from petname
+                nickname: "Alice".to_string(),
+                suggested_name: Some("Alice Smith".to_string()), // Different from nickname
                 is_guardian: false,
                 is_resident: false,
                 last_interaction: Some(1702000000000),
@@ -4643,8 +4643,8 @@ async fn test_snapshot_data_accuracy() {
             },
             Contact {
                 id: "contact-2".to_string(),
-                petname: "Bob".to_string(),
-                suggested_name: Some("Bob".to_string()), // Same as petname
+                nickname: "Bob".to_string(),
+                suggested_name: Some("Bob".to_string()), // Same as nickname
                 is_guardian: false,
                 is_resident: false,
                 last_interaction: Some(1702000000000),
@@ -4652,7 +4652,7 @@ async fn test_snapshot_data_accuracy() {
             },
             Contact {
                 id: "contact-3".to_string(),
-                petname: "Carol".to_string(),
+                nickname: "Carol".to_string(),
                 suggested_name: None, // No suggestion
                 is_guardian: false,
                 is_resident: false,
@@ -4676,24 +4676,24 @@ async fn test_snapshot_data_accuracy() {
     // Get contacts snapshot
     let contacts_snapshot = ctx.snapshot_contacts();
 
-    // Verify has_pending_suggestion logic - computed by comparing suggested_name to petname
+    // Verify has_pending_suggestion logic - computed by comparing suggested_name to nickname
     for contact in &contacts_snapshot.contacts {
-        // has_pending_suggestion is true when suggested_name differs from petname
+        // has_pending_suggestion is true when suggested_name differs from nickname
         let has_pending_suggestion = contact
             .suggested_name
             .as_ref()
-            .is_some_and(|suggested| !suggested.is_empty() && *suggested != contact.petname);
+            .is_some_and(|suggested| !suggested.is_empty() && *suggested != contact.nickname);
 
         let expected = match contact.id.as_str() {
-            "contact-1" => true,  // suggested_name differs from petname
-            "contact-2" => false, // suggested_name equals petname
+            "contact-1" => true,  // suggested_name differs from nickname
+            "contact-2" => false, // suggested_name equals nickname
             "contact-3" => false, // no suggested_name
             _ => false,
         };
         assert_eq!(
             has_pending_suggestion, expected,
             "Contact {} has_pending_suggestion should be {}",
-            contact.petname, expected
+            contact.nickname, expected
         );
     }
     println!("  ✓ Contact has_pending_suggestion is correctly computed");

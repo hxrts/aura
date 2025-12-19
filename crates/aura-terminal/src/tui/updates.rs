@@ -212,12 +212,12 @@ pub enum UiUpdate {
     // =========================================================================
     // Contacts
     // =========================================================================
-    /// A contact's petname was updated
-    PetnameUpdated {
+    /// A contact's nickname was updated
+    NicknameUpdated {
         /// The contact ID
         contact_id: String,
-        /// The new petname
-        petname: String,
+        /// The new nickname
+        nickname: String,
     },
 
     /// A direct chat was started with a contact

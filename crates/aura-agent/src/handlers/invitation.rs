@@ -443,7 +443,7 @@ mod tests {
                 &effects_guard,
                 receiver_id,
                 InvitationType::Contact {
-                    petname: Some("alice".to_string()),
+                    nickname: Some("alice".to_string()),
                 },
                 Some("Let's connect!".to_string()),
                 Some(86400000), // 1 day
@@ -536,7 +536,7 @@ mod tests {
             .create_invitation(
                 &effects_guard,
                 receiver_id,
-                InvitationType::Contact { petname: None },
+                InvitationType::Contact { nickname: None },
                 None,
                 None,
             )
@@ -570,7 +570,7 @@ mod tests {
             .create_invitation(
                 &effects_guard,
                 AuthorityId::new_from_entropy([101u8; 32]),
-                InvitationType::Contact { petname: None },
+                InvitationType::Contact { nickname: None },
                 None,
                 None,
             )
@@ -581,7 +581,7 @@ mod tests {
             .create_invitation(
                 &effects_guard,
                 AuthorityId::new_from_entropy([102u8; 32]),
-                InvitationType::Contact { petname: None },
+                InvitationType::Contact { nickname: None },
                 None,
                 None,
             )
@@ -592,7 +592,7 @@ mod tests {
             .create_invitation(
                 &effects_guard,
                 AuthorityId::new_from_entropy([103u8; 32]),
-                InvitationType::Contact { petname: None },
+                InvitationType::Contact { nickname: None },
                 None,
                 None,
             )
@@ -626,7 +626,7 @@ mod tests {
             invitation_id: "inv-test-123".to_string(),
             sender_id,
             invitation_type: InvitationType::Contact {
-                petname: Some("alice".to_string()),
+                nickname: Some("alice".to_string()),
             },
             expires_at: Some(1700000000000),
             message: Some("Hello!".to_string()),
@@ -753,7 +753,7 @@ mod tests {
             sender_id: AuthorityId::new_from_entropy([51u8; 32]),
             receiver_id: AuthorityId::new_from_entropy([52u8; 32]),
             invitation_type: InvitationType::Contact {
-                petname: Some("bob".to_string()),
+                nickname: Some("bob".to_string()),
             },
             status: InvitationStatus::Pending,
             created_at: 1600000000000,

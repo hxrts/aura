@@ -353,8 +353,8 @@ cfg_if! {
                     ViewDelta::TopicUpdated { channel_id, topic } => {
                         self.chat.lock_mut().update_topic(&channel_id, topic);
                     }
-                    ViewDelta::PetnameSet { target, petname } => {
-                        self.contacts.lock_mut().set_petname(target, petname);
+                    ViewDelta::NicknameSet { target, nickname } => {
+                        self.contacts.lock_mut().set_nickname(target, nickname);
                     }
                     ViewDelta::BlockNameSet { name, .. } => {
                         self.block.lock_mut().set_name(name);
@@ -434,8 +434,8 @@ cfg_if! {
                     ViewDelta::TopicUpdated { channel_id, topic } => {
                         self.chat.update_topic(&channel_id, topic);
                     }
-                    ViewDelta::PetnameSet { target, petname } => {
-                        self.contacts.set_petname(target, petname);
+                    ViewDelta::NicknameSet { target, nickname } => {
+                        self.contacts.set_nickname(target, nickname);
                     }
                     ViewDelta::BlockNameSet { name, .. } => {
                         self.block.set_name(name);

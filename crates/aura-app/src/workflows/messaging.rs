@@ -120,7 +120,7 @@ pub async fn start_direct_chat(
             .contacts
             .iter()
             .find(|c| c.id == *contact_id)
-            .map(|c| c.petname.clone())
+            .map(|c| c.nickname.clone())
             .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]))
     };
 

@@ -10,7 +10,7 @@
 //! 1. **Block Operations** - CreateBlock, BLOCK_SIGNAL/BLOCKS_SIGNAL, resident management
 //! 2. **Recovery Flow** - Full recovery lifecycle (start → approve → complete/cancel)
 //! 3. **Channel Lifecycle** - Create → Join → Send → Leave → Close
-//! 4. **Contact Management** - Petname updates, guardian toggle, contact operations
+//! 4. **Contact Management** - Nickname updates, guardian toggle, contact operations
 //!
 //! ## Running
 //!
@@ -628,12 +628,12 @@ async fn test_retry_message() {
 // Contact Management Tests
 // ============================================================================
 
-/// Test UpdateContactPetname command
+/// Test UpdateContactNickname command
 #[tokio::test]
-async fn test_update_contact_petname() {
-    println!("\n=== Update Contact Petname Test ===\n");
+async fn test_update_contact_nickname() {
+    println!("\n=== Update Contact Nickname Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("contact-petname").await;
+    let (ctx, app_core) = setup_test_env("contact-nickname").await;
 
     // Phase 1: Add a contact first by importing an invitation
     println!("Phase 1: Setup - create invitation and import");
@@ -652,21 +652,21 @@ async fn test_update_contact_petname() {
         println!("  Created invitation: {:?}", response);
     }
 
-    // Phase 2: Update petname for a contact
-    println!("\nPhase 2: Update contact petname");
+    // Phase 2: Update nickname for a contact
+    println!("\nPhase 2: Update contact nickname");
     let result = ctx
-        .dispatch(EffectCommand::UpdateContactPetname {
+        .dispatch(EffectCommand::UpdateContactNickname {
             contact_id: contact_id.clone(),
-            petname: "My Friend".to_string(),
+            nickname: "My Friend".to_string(),
         })
         .await;
 
     match &result {
-        Ok(response) => println!("  UpdateContactPetname response: {:?}", response),
-        Err(e) => println!("  UpdateContactPetname error: {:?}", e),
+        Ok(response) => println!("  UpdateContactNickname response: {:?}", response),
+        Err(e) => println!("  UpdateContactNickname error: {:?}", e),
     }
 
-    // Phase 3: Verify petname in contacts signal
+    // Phase 3: Verify nickname in contacts signal
     println!("\nPhase 3: Verify contacts state");
     let core = app_core.read().await;
     if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
@@ -674,10 +674,10 @@ async fn test_update_contact_petname() {
 
         // Look for the updated contact
         for contact in &contacts_state.contacts {
-            if contact.id == contact_id || contact.petname == "My Friend" {
+            if contact.id == contact_id || contact.nickname == "My Friend" {
                 println!(
-                    "    Found contact: {} (petname: {})",
-                    contact.id, contact.petname
+                    "    Found contact: {} (nickname: {})",
+                    contact.id, contact.nickname
                 );
             }
         }
@@ -685,8 +685,8 @@ async fn test_update_contact_petname() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("contact-petname");
-    println!("\n=== Update Contact Petname Test PASSED ===\n");
+    cleanup_test_dir("contact-nickname");
+    println!("\n=== Update Contact Nickname Test PASSED ===\n");
 }
 
 /// Test ToggleContactGuardian command
@@ -1262,12 +1262,12 @@ async fn test_complete_contact_to_guardian_flow() {
         })
         .await;
 
-    // Phase 5: Update petname
-    println!("\nPhase 5: Update contact petname");
+    // Phase 5: Update nickname
+    println!("\nPhase 5: Update contact nickname");
     let _ = ctx
-        .dispatch(EffectCommand::UpdateContactPetname {
+        .dispatch(EffectCommand::UpdateContactNickname {
             contact_id: contact_id.to_string(),
-            petname: "Trusted Friend".to_string(),
+            nickname: "Trusted Friend".to_string(),
         })
         .await;
 

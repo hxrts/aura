@@ -278,17 +278,17 @@ mod contacts_screen {
     }
 
     #[test]
-    fn test_petname_modal_reaches_contacts_props() {
+    fn test_nickname_modal_reaches_contacts_props() {
         let mut harness = PropsTestHarness::new();
         harness.go_to_screen(Screen::Contacts);
 
-        // Open petname modal with 'e'
+        // Open nickname modal with 'e'
         harness.send_char('e');
 
         let props = extract_contacts_view_props(&harness.state);
         assert!(
-            props.petname_modal_visible,
-            "Petname modal state must reach props"
+            props.nickname_modal_visible,
+            "Nickname modal state must reach props"
         );
     }
 }
@@ -381,7 +381,7 @@ mod settings_screen {
 
         let props = extract_settings_view_props(&harness.state);
         assert!(
-            props.nickname_modal_visible,
+            props.display_name_modal_visible,
             "Nickname modal state must reach props"
         );
     }

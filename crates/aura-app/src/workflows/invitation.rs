@@ -22,7 +22,7 @@ use std::sync::Arc;
 pub async fn create_contact_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
-    petname: Option<String>,
+    nickname: Option<String>,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
@@ -34,7 +34,7 @@ pub async fn create_contact_invitation(
     };
 
     runtime
-        .create_contact_invitation(receiver, petname, message, ttl_ms)
+        .create_contact_invitation(receiver, nickname, message, ttl_ms)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to create contact invitation: {}", e)))
 }

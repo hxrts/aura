@@ -17,11 +17,12 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 // Import app types from aura-app (pure layer)
-use aura_app::{AppConfig, AppCore};
+use aura_app::{signal_defs::SETTINGS_SIGNAL, AppConfig, AppCore};
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
+use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::StorageEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -53,6 +54,12 @@ pub struct AccountConfig {
     authority_id: String,
     /// The primary context ID for this account
     context_id: String,
+    /// User display name for this device
+    ///
+    /// This is a UI-facing profile field and is not yet persisted as a journal fact.
+    /// It is stored here so terminal frontends can restore the entered name across sessions.
+    #[serde(default)]
+    display_name: Option<String>,
     /// Account creation timestamp (ms since epoch)
     created_at: u64,
 }
@@ -67,9 +74,6 @@ pub enum AccountLoadResult {
     /// No account exists - need to show setup modal
     NotFound,
 }
-
-/// Sentinel prefix for placeholder authority IDs (used before account setup)
-pub const PLACEHOLDER_AUTHORITY_PREFIX: &str = "placeholder:";
 
 /// Get the account filename based on TUI mode
 ///
@@ -192,22 +196,18 @@ async fn try_load_account(
 /// These use a deterministic sentinel value so the TUI can detect that
 /// the account hasn't been set up yet (via `has_account()` check).
 fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
-    // Use placeholder prefix so we can detect this is not a real account
-    let authority_entropy = aura_core::hash::hash(
-        format!(
-            "{}authority:{}",
-            PLACEHOLDER_AUTHORITY_PREFIX, device_id_str
-        )
-        .as_bytes(),
-    );
-    let context_entropy = aura_core::hash::hash(
-        format!("{}context:{}", PLACEHOLDER_AUTHORITY_PREFIX, device_id_str).as_bytes(),
-    );
+    // Use the same deterministic derivation as `create_account`.
+    //
+    // The "placeholder" status is tracked separately via `has_existing_account`.
+    // Keeping the identity stable avoids needing to rebuild the runtime after account creation.
+    let authority_entropy =
+        aura_core::hash::hash(format!("authority:{}", device_id_str).as_bytes());
+    let context_entropy = aura_core::hash::hash(format!("context:{}", device_id_str).as_bytes());
 
-    let authority_id = AuthorityId::new_from_entropy(authority_entropy);
-    let context_id = ContextId::new_from_entropy(context_entropy);
-
-    (authority_id, context_id)
+    (
+        AuthorityId::new_from_entropy(authority_entropy),
+        ContextId::new_from_entropy(context_entropy),
+    )
 }
 
 async fn persist_account_config(
@@ -216,6 +216,7 @@ async fn persist_account_config(
     mode: TuiMode,
     authority_id: AuthorityId,
     context_id: ContextId,
+    display_name: Option<String>,
 ) -> Result<(), AuraError> {
     let created_at = time
         .physical_time()
@@ -226,6 +227,7 @@ async fn persist_account_config(
     let config = AccountConfig {
         authority_id: hex::encode(authority_id.to_bytes()),
         context_id: hex::encode(context_id.to_bytes()),
+        display_name,
         created_at,
     };
 
@@ -247,6 +249,7 @@ pub fn create_account(
     base_path: &Path,
     device_id_str: &str,
     mode: TuiMode,
+    display_name: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
     let time = PhysicalTimeHandler::new();
@@ -260,9 +263,20 @@ pub fn create_account(
     let authority_id = AuthorityId::new_from_entropy(authority_entropy);
     let context_id = ContextId::new_from_entropy(context_entropy);
 
+    // Convert to owned String before async block to satisfy 'static requirement
+    let display_name_owned = display_name.to_string();
+
     // Persist to storage using effect-backed handlers.
     let result = block_on(async move {
-        persist_account_config(&storage, &time, mode, authority_id, context_id).await
+        persist_account_config(
+            &storage,
+            &time,
+            mode,
+            authority_id,
+            context_id,
+            Some(display_name_owned),
+        )
+        .await
     });
     result?;
 
@@ -305,7 +319,15 @@ pub fn restore_recovered_account(
     });
 
     let result = block_on(async move {
-        persist_account_config(&storage, &time, mode, recovered_authority_id, context_id).await
+        persist_account_config(
+            &storage,
+            &time,
+            mode,
+            recovered_authority_id,
+            context_id,
+            None,
+        )
+        .await
     });
     result?;
 
@@ -744,6 +766,20 @@ async fn handle_tui_launch(
                 "Warning: Failed to initialize signals: {} - reactive updates may not work",
                 e
             ));
+        }
+    }
+
+    {
+        let core = app_core.read().await;
+        if let Some(runtime) = core.runtime() {
+            let settings = runtime.get_settings().await;
+            let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
+            state.display_name = settings.display_name;
+            state.mfa_policy = settings.mfa_policy;
+            state.threshold_k = settings.threshold_k as u8;
+            state.threshold_n = settings.threshold_n as u8;
+            state.contact_count = settings.contact_count;
+            let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
         }
     }
 

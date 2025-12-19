@@ -181,7 +181,7 @@ impl ChatCallbacks {
 /// All callbacks for the contacts screen
 #[derive(Clone)]
 pub struct ContactsCallbacks {
-    pub on_update_petname: UpdatePetnameCallback,
+    pub on_update_nickname: UpdateNicknameCallback,
     pub on_start_chat: StartChatCallback,
     pub on_import_invitation: ImportInvitationCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
@@ -190,34 +190,34 @@ pub struct ContactsCallbacks {
 impl ContactsCallbacks {
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
-            on_update_petname: Self::make_update_petname(ctx.clone(), tx.clone()),
+            on_update_nickname: Self::make_update_nickname(ctx.clone(), tx.clone()),
             on_start_chat: Self::make_start_chat(ctx.clone(), tx.clone()),
             on_import_invitation: Self::make_import_invitation(ctx.clone(), tx.clone()),
             on_invite_lan_peer: Self::make_invite_lan_peer(ctx, tx),
         }
     }
 
-    fn make_update_petname(ctx: Arc<IoContext>, tx: UiUpdateSender) -> UpdatePetnameCallback {
-        Arc::new(move |contact_id: String, new_petname: String| {
+    fn make_update_nickname(ctx: Arc<IoContext>, tx: UiUpdateSender) -> UpdateNicknameCallback {
+        Arc::new(move |contact_id: String, new_nickname: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let contact_id_clone = contact_id.clone();
-            let petname_clone = new_petname.clone();
-            let cmd = EffectCommand::UpdateContactPetname {
+            let nickname_clone = new_nickname.clone();
+            let cmd = EffectCommand::UpdateContactNickname {
                 contact_id,
-                petname: new_petname,
+                nickname: new_nickname,
             };
             tokio::spawn(async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::PetnameUpdated {
+                        let _ = tx.send(UiUpdate::NicknameUpdated {
                             contact_id: contact_id_clone,
-                            petname: petname_clone,
+                            nickname: nickname_clone,
                         });
                     }
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "UpdatePetname".to_string(),
+                            operation: "UpdateNickname".to_string(),
                             error: e.to_string(),
                         });
                     }
@@ -582,7 +582,7 @@ impl RecoveryCallbacks {
 #[derive(Clone)]
 pub struct SettingsCallbacks {
     pub on_update_mfa: Arc<dyn Fn(MfaPolicy) + Send + Sync>,
-    pub on_update_nickname: UpdateNicknameCallback,
+    pub on_update_display_name: UpdateDisplayNameCallback,
     pub on_update_threshold: UpdateThresholdCallback,
     pub on_add_device: AddDeviceCallback,
     pub on_remove_device: RemoveDeviceCallback,
@@ -592,7 +592,7 @@ impl SettingsCallbacks {
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_update_mfa: Self::make_update_mfa(ctx.clone(), tx.clone()),
-            on_update_nickname: Self::make_update_nickname(ctx.clone(), tx.clone()),
+            on_update_display_name: Self::make_update_display_name(ctx.clone(), tx.clone()),
             on_update_threshold: Self::make_update_threshold(ctx.clone(), tx.clone()),
             on_add_device: Self::make_add_device(ctx.clone(), tx.clone()),
             on_remove_device: Self::make_remove_device(ctx, tx),
@@ -626,7 +626,10 @@ impl SettingsCallbacks {
         })
     }
 
-    fn make_update_nickname(ctx: Arc<IoContext>, tx: UiUpdateSender) -> UpdateNicknameCallback {
+    fn make_update_display_name(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> UpdateDisplayNameCallback {
         Arc::new(move |name: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
@@ -640,7 +643,7 @@ impl SettingsCallbacks {
                     }
                     Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "UpdateNickname".to_string(),
+                            operation: "UpdateDisplayName".to_string(),
                             error: e.to_string(),
                         });
                     }
@@ -1048,6 +1051,16 @@ impl AppCallbacks {
 
                 match file_result {
                     Ok(Ok(())) => {
+                        // Then persist the display name to settings storage and emit SETTINGS_SIGNAL.
+                        // This is best-effort and does not block account creation.
+                        let _ = ctx
+                            .dispatch(EffectCommand::UpdateNickname {
+                                name: display_name.clone(),
+                            })
+                            .await;
+
+                        let _ = tx.send(UiUpdate::DisplayNameChanged(display_name.clone()));
+
                         // Then dispatch the intent to create a journal fact.
                         let cmd = EffectCommand::CreateAccount {
                             display_name: display_name.clone(),

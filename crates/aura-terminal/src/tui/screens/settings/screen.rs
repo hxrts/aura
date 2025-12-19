@@ -22,7 +22,7 @@ use aura_app::signal_defs::SETTINGS_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::{
-    AddDeviceCallback, RemoveDeviceCallback, UpdateNicknameCallback, UpdateThresholdCallback,
+    AddDeviceCallback, RemoveDeviceCallback, UpdateDisplayNameCallback, UpdateThresholdCallback,
 };
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::layout::dim;
@@ -100,7 +100,7 @@ pub struct SettingsScreenProps {
 
     // === Callbacks ===
     pub on_update_mfa: Option<MfaCallback>,
-    pub on_update_nickname: Option<UpdateNicknameCallback>,
+    pub on_update_display_name: Option<UpdateDisplayNameCallback>,
     pub on_update_threshold: Option<UpdateThresholdCallback>,
     pub on_add_device: Option<AddDeviceCallback>,
     pub on_remove_device: Option<RemoveDeviceCallback>,

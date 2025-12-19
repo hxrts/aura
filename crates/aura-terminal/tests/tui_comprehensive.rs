@@ -535,15 +535,15 @@ mod contacts_screen {
     }
 
     #[test]
-    fn test_contacts_edit_petname() {
+    fn test_contacts_edit_nickname() {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Contacts);
 
         // Open edit modal with 'e'
         tui.send_char('e');
-        assert!(tui.has_modal()); // Screen-specific modal (petname_modal.visible)
+        assert!(tui.has_modal()); // Screen-specific modal (nickname_modal.visible)
 
-        // Type new petname
+        // Type new nickname
         tui.type_text("Alice");
 
         // Submit
@@ -551,7 +551,7 @@ mod contacts_screen {
         tui.send_enter();
 
         assert!(tui.has_dispatch(
-            |d| matches!(d, DispatchCommand::UpdatePetname { petname, .. } if petname == "Alice")
+            |d| matches!(d, DispatchCommand::UpdateNickname { nickname, .. } if nickname == "Alice")
         ));
         assert!(!tui.has_modal());
     }
@@ -564,10 +564,11 @@ mod contacts_screen {
         tui.clear_commands();
         tui.send_char('g');
 
-        // 'g' now opens the guardian setup modal via the queue system
+        // 'g' emits OpenGuardianSetup dispatch command which the shell processes
+        // to populate and open the modal with current contacts from reactive subscription
         assert!(
-            tui.state.is_guardian_setup_modal_active(),
-            "Guardian setup modal should be visible after pressing 'g'"
+            tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenGuardianSetup)),
+            "Pressing 'g' should emit OpenGuardianSetup dispatch command"
         );
     }
 
@@ -659,7 +660,8 @@ mod settings_screen {
         tui.clear_commands();
         tui.send_enter();
 
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::UpdateNickname { nickname } if nickname == "NewNickname")));
+        // Settings profile edit updates display name, not contact nickname
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::UpdateDisplayName { display_name } if display_name == "NewNickname")));
     }
 
     #[test]
@@ -1023,7 +1025,7 @@ mod modals {
             (Screen::Block, '?'),    // Help
             (Screen::Chat, 'n'),     // Create channel
             (Screen::Chat, 't'),     // Set topic
-            (Screen::Contacts, 'e'), // Edit petname
+            (Screen::Contacts, 'e'), // Edit nickname
         ];
 
         for (screen, key) in modal_openers {

@@ -10,8 +10,6 @@
 // - Chat/messaging flow
 // - Invitation lifecycle flow
 // - Social graph flow (contacts + blocks)
-//
-// See: work/tui_flows.md
 
 module harness_flows {
   // ============ IMPORTS ============
@@ -192,9 +190,9 @@ module harness_flows {
 
   // ============ SCENARIO: SOCIAL GRAPH FLOW ============
 
-  // Bob sets petname for alice
-  action bobSetsPetnameForAlice(petname: str): bool = all {
-    tui_flows::setPetname("bob", "alice", petname),
+  // Bob sets nickname for alice
+  action bobSetsNicknameForAlice(nickname: str): bool = all {
+    tui_flows::setNickname("bob", "alice", nickname),
     harnessUnchanged
   }
 
@@ -347,8 +345,8 @@ module harness_flows {
     .then(bobAcceptsInvitation("social-invite"))  // Now alice is bob's contact
     // Bob creates a block
     .then(bobCreatesBlock("social-block"))
-    // Bob sets petname for alice (alice is now a contact!)
-    .then(bobSetsPetnameForAlice("My Friend Alice"))
+    // Bob sets nickname for alice (alice is now a contact!)
+    .then(bobSetsNicknameForAlice("My Friend Alice"))
     // Bob invites alice to his block (alice becomes a resident)
     .then(bobInvitesAliceToBlock("social-block"))
     // Bob filters contacts by block to view only block members
@@ -361,8 +359,8 @@ module harness_flows {
       assert(scenarioOutcomes.get("social_graph_complete") == true),
       // Verify state: alice should be a resident of the block
       assert(tui_flows::blocks.get("social-block").residents.contains("alice")),
-      // Verify petname was set
-      assert(tui_flows::agents.get("bob").contactPetnames.get("alice") == "My Friend Alice"),
+      // Verify nickname was set
+      assert(tui_flows::agents.get("bob").contactNicknames.get("alice") == "My Friend Alice"),
       tui_flows::allAgents' = tui_flows::allAgents,
       tui_flows::agents' = tui_flows::agents,
       tui_flows::invitations' = tui_flows::invitations,

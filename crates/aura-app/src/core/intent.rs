@@ -222,12 +222,12 @@ pub enum Intent {
     // =========================================================================
     // Contact Intents
     // =========================================================================
-    /// Set a petname for a contact
-    SetPetname {
+    /// Set a nickname for a contact
+    SetNickname {
         /// Contact authority ID as string
         contact_id: String,
-        /// Petname to set
-        petname: String,
+        /// Nickname to set
+        nickname: String,
     },
 
     /// Remove a contact
@@ -623,7 +623,7 @@ impl Intent {
             Self::AcceptInvitation { .. } => "accept invitation",
             Self::RejectInvitation { .. } => "reject invitation",
             Self::RevokeInvitation { .. } => "revoke invitation",
-            Self::SetPetname { .. } => "set petname",
+            Self::SetNickname { .. } => "set nickname",
             Self::RemoveContact { .. } => "remove contact",
             Self::ToggleGuardian { .. } => "toggle guardian",
             Self::CreateBlock { .. } => "create block",
@@ -845,11 +845,11 @@ impl Intent {
             }
 
             // Contact intents
-            Self::SetPetname {
+            Self::SetNickname {
                 contact_id,
-                petname,
+                nickname,
             } => {
-                format!("SetPetname::target={}&petname={}", contact_id, petname)
+                format!("SetNickname::target={}&nickname={}", contact_id, nickname)
             }
             Self::RemoveContact { contact_id } => {
                 format!("RemoveContact::contact_id={}", contact_id)
@@ -1162,7 +1162,7 @@ impl Intent {
             | Self::AcceptInvitation { .. }
             | Self::RejectInvitation { .. }
             | Self::RevokeInvitation { .. }
-            | Self::SetPetname { .. }
+            | Self::SetNickname { .. }
             | Self::RemoveContact { .. }
             | Self::CreateBlock { .. }
             | Self::SetBlockName { .. }

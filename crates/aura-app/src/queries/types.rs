@@ -571,7 +571,7 @@ impl Query for ContactsQuery {
             "contact",
             vec![
                 DatalogValue::var("id"),
-                DatalogValue::var("petname"),
+                DatalogValue::var("nickname"),
                 DatalogValue::var("suggested_name"),
                 DatalogValue::var("is_guardian"),
                 DatalogValue::var("is_resident"),
@@ -607,7 +607,7 @@ impl Query for ContactsQuery {
                 "result",
                 vec![
                     DatalogValue::var("id"),
-                    DatalogValue::var("petname"),
+                    DatalogValue::var("nickname"),
                     DatalogValue::var("suggested_name"),
                     DatalogValue::var("is_guardian"),
                     DatalogValue::var("is_resident"),
@@ -645,7 +645,7 @@ impl Query for ContactsQuery {
 
                 Contact {
                     id: get_string(&row, "id"),
-                    petname: get_string(&row, "petname"),
+                    nickname: get_string(&row, "nickname"),
                     suggested_name: get_optional_string(&row, "suggested_name"),
                     is_guardian: get_bool(&row, "is_guardian"),
                     is_resident: get_bool(&row, "is_resident"),

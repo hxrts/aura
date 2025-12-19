@@ -76,8 +76,8 @@ pub enum InvitationType {
     },
     /// Invitation to become a contact
     Contact {
-        /// Optional petname for the contact
-        petname: Option<String>,
+        /// Optional nickname for the contact
+        nickname: Option<String>,
     },
 }
 
@@ -592,7 +592,7 @@ mod tests {
         let outcome = service.prepare_send_invitation(
             &snapshot,
             test_receiver(),
-            InvitationType::Contact { petname: None },
+            InvitationType::Contact { nickname: None },
             Some("Hello!".to_string()),
             Some(86400000),
             "inv-123".to_string(),
@@ -611,7 +611,7 @@ mod tests {
         let outcome = service.prepare_send_invitation(
             &snapshot,
             test_receiver(),
-            InvitationType::Contact { petname: None },
+            InvitationType::Contact { nickname: None },
             None,
             None,
             "inv-123".to_string(),
@@ -629,7 +629,7 @@ mod tests {
         let outcome = service.prepare_send_invitation(
             &snapshot,
             test_receiver(),
-            InvitationType::Contact { petname: None },
+            InvitationType::Contact { nickname: None },
             None,
             None,
             "inv-123".to_string(),
@@ -650,7 +650,7 @@ mod tests {
         let outcome = service.prepare_send_invitation(
             &snapshot,
             test_receiver(),
-            InvitationType::Contact { petname: None },
+            InvitationType::Contact { nickname: None },
             Some("This message is way too long for the limit".to_string()),
             None,
             "inv-123".to_string(),
@@ -701,7 +701,7 @@ mod tests {
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { petname: None },
+            invitation_type: InvitationType::Contact { nickname: None },
             status: InvitationStatus::Pending,
             created_at: 1000,
             expires_at: Some(2000),
@@ -725,7 +725,7 @@ mod tests {
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { petname: None },
+            invitation_type: InvitationType::Contact { nickname: None },
             status: InvitationStatus::Pending,
             created_at: 500,
             expires_at: Some(1000),
@@ -738,7 +738,7 @@ mod tests {
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { petname: None },
+            invitation_type: InvitationType::Contact { nickname: None },
             status: InvitationStatus::Pending,
             created_at: 500,
             expires_at: Some(3000),
@@ -764,7 +764,7 @@ mod tests {
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { petname: None },
+            invitation_type: InvitationType::Contact { nickname: None },
             status: InvitationStatus::Pending,
             created_at: 1000,
             expires_at: None,
@@ -776,7 +776,7 @@ mod tests {
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { petname: None },
+            invitation_type: InvitationType::Contact { nickname: None },
             status: InvitationStatus::Accepted,
             created_at: 1000,
             expires_at: None,
@@ -797,7 +797,7 @@ mod tests {
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { petname: None },
+            invitation_type: InvitationType::Contact { nickname: None },
             status: InvitationStatus::Pending,
             created_at: 1000,
             expires_at: None,
@@ -827,7 +827,7 @@ mod tests {
             "guardian"
         );
         assert_eq!(
-            InvitationType::Contact { petname: None }.as_type_string(),
+            InvitationType::Contact { nickname: None }.as_type_string(),
             "contact"
         );
     }
@@ -839,7 +839,7 @@ mod tests {
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { petname: None },
+            invitation_type: InvitationType::Contact { nickname: None },
             status: InvitationStatus::Pending,
             created_at: 1000,
             expires_at: Some(2000),
@@ -858,7 +858,7 @@ mod tests {
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { petname: None },
+            invitation_type: InvitationType::Contact { nickname: None },
             status: InvitationStatus::Pending,
             created_at: 1000,
             expires_at: None,

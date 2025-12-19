@@ -9,14 +9,17 @@ use super::modal_overlays::{
     render_account_setup_modal, render_add_device_modal, render_block_invite_modal,
     render_channel_info_modal, render_chat_create_modal, render_confirm_modal,
     render_contact_modal, render_contacts_create_modal, render_contacts_import_modal,
-    render_guardian_modal, render_guardian_setup_modal, render_help_modal,
-    render_invitation_code_modal, render_invitations_create_modal, render_invitations_import_modal,
-    render_nickname_modal, render_petname_modal, render_remove_device_modal,
+    render_display_name_modal, render_guardian_modal, render_guardian_setup_modal,
+    render_help_modal, render_invitation_code_modal, render_invitations_create_modal,
+    render_invitations_import_modal, render_nickname_modal, render_remove_device_modal,
     render_threshold_modal, render_topic_modal, GlobalModalProps,
 };
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+
+use aura_app::signal_defs::SETTINGS_SIGNAL;
+use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
@@ -25,7 +28,7 @@ use crate::tui::components::{
 use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
-use crate::tui::screens::app::subscriptions::use_nav_status_signals;
+use crate::tui::screens::app::subscriptions::{use_contacts_subscription, use_nav_status_signals};
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
     BlockScreen, ChatScreen, ContactsScreen, NeighborhoodScreen, RecoveryScreen, SettingsScreen,
@@ -178,6 +181,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         props.peer_count,
         props.last_sync_time,
     );
+
+    // =========================================================================
+    // Contacts subscription: SharedContacts for dispatch handlers to read
+    // =========================================================================
+    // Unlike props.contacts (which is empty), this Arc is kept up-to-date
+    // by a reactive subscription. Dispatch handler closures capture the Arc,
+    // not the data, so they always read current contacts.
+    let shared_contacts = use_contacts_subscription(&mut hooks, &app_ctx);
 
     // NOTE: Toast polling loop removed - toasts now flow through UiUpdate channel
     // All toast operations (ShowToast, DismissToast, ClearAllToasts) send UiUpdate variants
@@ -415,9 +426,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         .map(|cb| cb.chat.on_create_channel.clone());
     let on_set_topic = callbacks.as_ref().map(|cb| cb.chat.on_set_topic.clone());
 
-    let on_update_petname = callbacks
+    let on_update_nickname = callbacks
         .as_ref()
-        .map(|cb| cb.contacts.on_update_petname.clone());
+        .map(|cb| cb.contacts.on_update_nickname.clone());
     let on_start_chat = callbacks
         .as_ref()
         .map(|cb| cb.contacts.on_start_chat.clone());
@@ -441,9 +452,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let on_update_mfa = callbacks
         .as_ref()
         .map(|cb| cb.settings.on_update_mfa.clone());
-    let on_update_nickname = callbacks
+    let on_update_display_name = callbacks
         .as_ref()
-        .map(|cb| cb.settings.on_update_nickname.clone());
+        .map(|cb| cb.settings.on_update_display_name.clone());
     let on_update_threshold = callbacks
         .as_ref()
         .map(|cb| cb.settings.on_update_threshold.clone());
@@ -599,14 +610,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let app_core_for_ceremony = app_ctx.app_core.clone();
         // Clone callbacks registry for command dispatch
         let callbacks = callbacks.clone();
-        // Clone contacts for use inside the closure (for populating guardian modal)
-        let contacts_for_modal_populate = contacts.clone();
+        // Clone shared contacts Arc for guardian setup dispatch
+        // This Arc is updated by a reactive subscription, so reading from it
+        // always gets current contacts (not stale props)
+        let shared_contacts_for_dispatch = shared_contacts.clone();
         move |event| {
             // Convert iocraft event to aura-core event and run through state machine
             if let Some(core_event) = convert_iocraft_event(event.clone()) {
                 // Get current state, apply transition, update state
                 let current = tui_state.read().clone();
-                let (new_state, commands) = transition(&current, core_event);
+                let (mut new_state, commands) = transition(&current, core_event);
 
                 // Sync TuiState changes to iocraft hooks
                 if new_state.screen() != current.screen() {
@@ -677,11 +690,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
 
                                     // === Contacts Screen Commands ===
-                                    DispatchCommand::UpdatePetname {
+                                    DispatchCommand::UpdateNickname {
                                         contact_id,
-                                        petname,
+                                        nickname,
                                     } => {
-                                        (cb.contacts.on_update_petname)(contact_id, petname);
+                                        (cb.contacts.on_update_nickname)(contact_id, nickname);
                                     }
                                     DispatchCommand::StartChat { contact_id } => {
                                         (cb.contacts.on_start_chat)(contact_id);
@@ -730,6 +743,43 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::ApproveRecovery { request_id } => {
                                         (cb.recovery.on_submit_approval)(request_id);
+                                    }
+
+                                    // === Guardian Setup Modal ===
+                                    DispatchCommand::OpenGuardianSetup => {
+                                        // Read current contacts from reactive subscription
+                                        // This reads from SharedContacts Arc which is kept up-to-date
+                                        // by a separate reactive subscription (not stale props)
+                                        let current_contacts = shared_contacts_for_dispatch
+                                            .read()
+                                            .map(|guard| guard.clone())
+                                            .unwrap_or_default();
+
+                                        // Populate candidates from current contacts
+                                        let candidates: Vec<crate::tui::state_machine::GuardianCandidate> = current_contacts
+                                            .iter()
+                                            .map(|c| crate::tui::state_machine::GuardianCandidate {
+                                                id: c.id.clone(),
+                                                name: c.nickname.clone(),
+                                                is_current_guardian: c.is_guardian,
+                                            })
+                                            .collect();
+
+                                        // Pre-select existing guardians
+                                        let selected: Vec<usize> = candidates
+                                            .iter()
+                                            .enumerate()
+                                            .filter(|(_, c)| c.is_current_guardian)
+                                            .map(|(i, _)| i)
+                                            .collect();
+
+                                        // Create populated modal state
+                                        let mut modal_state = crate::tui::state_machine::GuardianSetupModalState::default();
+                                        modal_state.contacts = candidates;
+                                        modal_state.selected_indices = selected;
+
+                                        // Enqueue the modal to new_state (not tui_state, which gets overwritten)
+                                        new_state.modal_queue.enqueue(crate::tui::state_machine::QueuedModal::GuardianSetup(modal_state));
                                     }
 
                                     // === Guardian Ceremony Commands ===
@@ -837,8 +887,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
 
                                     // === Settings Screen Commands ===
-                                    DispatchCommand::UpdateNickname { nickname } => {
-                                        (cb.settings.on_update_nickname)(nickname);
+                                    DispatchCommand::UpdateDisplayName { display_name } => {
+                                        (cb.settings.on_update_display_name)(display_name);
                                     }
                                     DispatchCommand::UpdateThreshold { k, n } => {
                                         (cb.settings.on_update_threshold)(k, n);
@@ -905,50 +955,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                 // Update TuiState
                 *tui_state.write() = new_state;
-
-                // If the guardian setup modal just became visible, populate its contacts list
-                // from the reactive contacts data
-                {
-                    let mut state = tui_state.write();
-                    // Check queue for GuardianSetup modal and populate contacts if empty
-                    let needs_population = matches!(
-                        state.modal_queue.current(),
-                        Some(QueuedModal::GuardianSetup(s)) if s.contacts.is_empty()
-                    );
-
-                    if needs_population {
-                        // Populate from the contacts prop (which comes from reactive signals)
-                        // We need to convert Contact -> GuardianCandidate
-                        let candidates: Vec<_> = contacts_for_modal_populate
-                            .iter()
-                            .map(|c| crate::tui::state_machine::GuardianCandidate {
-                                id: c.id.clone(),
-                                name: c.petname.clone(),
-                                is_current_guardian: c.is_guardian,
-                            })
-                            .collect();
-
-                        // Pre-select existing guardians
-                        let selected: Vec<_> = candidates
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, c)| c.is_current_guardian)
-                            .map(|(i, _)| i)
-                            .collect();
-
-                        let count = candidates.len();
-
-                        // Update the modal in the queue
-                        state.modal_queue.update_active(|modal| {
-                            if let QueuedModal::GuardianSetup(ref mut s) = modal {
-                                s.contacts = candidates.clone();
-                                s.selected_indices = selected.clone();
-                            }
-                        });
-
-                        tracing::debug!("Populated guardian modal with {} contacts", count);
-                    }
-                }
 
                 tui_state_version.set(tui_state_version.get().wrapping_add(1));
             }
@@ -1029,7 +1035,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 contacts: contacts.clone(),
                                 discovered_peers: discovered_peers.clone(),
                                 view: contacts_props.clone(),
-                                on_update_petname: on_update_petname.clone(),
+                                on_update_nickname: on_update_nickname.clone(),
                                 on_start_chat: on_start_chat.clone(),
                                 on_invite_lan_peer: on_invite_lan_peer.clone(),
                                 on_import_invitation: on_import_invitation.clone(),
@@ -1060,7 +1066,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 mfa_policy: mfa_policy,
                                 view: settings_props.clone(),
                                 on_update_mfa: on_update_mfa.clone(),
-                                on_update_nickname: on_update_nickname.clone(),
+                                on_update_display_name: on_update_display_name.clone(),
                                 on_update_threshold: on_update_threshold.clone(),
                                 on_add_device: on_add_device.clone(),
                                 on_remove_device: on_remove_device.clone(),
@@ -1097,7 +1103,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // === SCREEN-SPECIFIC MODALS ===
             // Rendered via modal_overlays module for maintainability
-            #(render_petname_modal(&contacts_props))
+            #(render_nickname_modal(&contacts_props))
             #(render_contacts_import_modal(&contacts_props))
             #(render_contacts_create_modal(&contacts_props))
             #(render_guardian_setup_modal(&contacts_props))
@@ -1110,7 +1116,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // === SETTINGS SCREEN MODALS ===
             // Rendered via modal_overlays module for maintainability
-            #(render_nickname_modal(&settings_props))
+            #(render_display_name_modal(&settings_props))
             #(render_threshold_modal(&settings_props, threshold_k))
             #(render_add_device_modal(&settings_props))
             #(render_remove_device_modal(&settings_props))
@@ -1201,7 +1207,13 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
 
     // Settings data - reactively updated via SETTINGS_SIGNAL
     let devices = Vec::new();
-    let display_name = String::new();
+    let display_name = {
+        let core = ctx_arc.app_core().read().await;
+        core.read(&*SETTINGS_SIGNAL)
+            .await
+            .unwrap_or_default()
+            .display_name
+    };
     let threshold_k = 0;
     let threshold_n = 0;
 

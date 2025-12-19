@@ -220,12 +220,12 @@ pub fn command_to_intent(cmd: &EffectCommand, ctx: &CommandContext) -> Option<In
         // =========================================================================
         // Contact Commands → Contact Intents
         // =========================================================================
-        EffectCommand::UpdateContactPetname {
+        EffectCommand::UpdateContactNickname {
             contact_id,
-            petname,
-        } => Some(Intent::SetPetname {
+            nickname,
+        } => Some(Intent::SetNickname {
             contact_id: contact_id.clone(),
-            petname: petname.clone(),
+            nickname: nickname.clone(),
         }),
 
         EffectCommand::ToggleContactGuardian { contact_id } => Some(Intent::ToggleGuardian {

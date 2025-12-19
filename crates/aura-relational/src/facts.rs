@@ -22,7 +22,7 @@
 //!     context_id,
 //!     owner_id,
 //!     contact_id,
-//!     petname: "Alice".to_string(),
+//!     nickname: "Alice".to_string(),
 //!     added_at_ms: 1234567890,
 //! };
 //!
@@ -58,8 +58,8 @@ pub enum ContactFact {
         owner_id: AuthorityId,
         /// Authority being added as a contact
         contact_id: AuthorityId,
-        /// User-assigned petname for the contact
-        petname: String,
+        /// User-assigned nickname for the contact
+        nickname: String,
         /// Timestamp when contact was added (uses unified time system)
         added_at: PhysicalTime,
     },
@@ -74,7 +74,7 @@ pub enum ContactFact {
         /// Timestamp when contact was removed (uses unified time system)
         removed_at: PhysicalTime,
     },
-    /// Contact petname updated
+    /// Contact nickname updated
     Renamed {
         /// Relational context for the contact relationship
         context_id: ContextId,
@@ -82,8 +82,8 @@ pub enum ContactFact {
         owner_id: AuthorityId,
         /// Contact being renamed
         contact_id: AuthorityId,
-        /// New petname for the contact
-        new_petname: String,
+        /// New nickname for the contact
+        new_nickname: String,
         /// Timestamp when contact was renamed (uses unified time system)
         renamed_at: PhysicalTime,
     },
@@ -122,14 +122,14 @@ impl ContactFact {
         context_id: ContextId,
         owner_id: AuthorityId,
         contact_id: AuthorityId,
-        petname: String,
+        nickname: String,
         added_at_ms: u64,
     ) -> Self {
         Self::Added {
             context_id,
             owner_id,
             contact_id,
-            petname,
+            nickname,
             added_at: PhysicalTime {
                 ts_ms: added_at_ms,
                 uncertainty: None,
@@ -160,14 +160,14 @@ impl ContactFact {
         context_id: ContextId,
         owner_id: AuthorityId,
         contact_id: AuthorityId,
-        new_petname: String,
+        new_nickname: String,
         renamed_at_ms: u64,
     ) -> Self {
         Self::Renamed {
             context_id,
             owner_id,
             contact_id,
-            new_petname,
+            new_nickname,
             renamed_at: PhysicalTime {
                 ts_ms: renamed_at_ms,
                 uncertainty: None,

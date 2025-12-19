@@ -25,7 +25,7 @@ pub struct StateSnapshot {
     /// Invitations state (pending, sent, received)
     pub invitations: InvitationsState,
 
-    /// Contacts state (contacts, petnames)
+    /// Contacts state (contacts, nicknames)
     pub contacts: ContactsState,
 
     /// Block state (residents, storage, settings)

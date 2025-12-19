@@ -104,7 +104,7 @@ pub use callbacks::{
     GuardianSelectCallback, IdCallback, ImportInvitationCallback, InvitationCallback,
     NoArgCallback, RecoveryCallback, RemoveDeviceCallback, RetryMessageCallback,
     RevokeStewardCallback, SendCallback, SetTopicCallback, StartChatCallback, ThresholdCallback,
-    TwoStringCallback, UpdateNicknameCallback, UpdatePetnameCallback, UpdateThresholdCallback,
+    TwoStringCallback, UpdateDisplayNameCallback, UpdateNicknameCallback, UpdateThresholdCallback,
 };
 pub use theme::{Spacing, Theme};
 pub use types::*;

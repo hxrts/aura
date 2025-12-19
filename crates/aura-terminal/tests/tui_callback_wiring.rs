@@ -395,7 +395,7 @@ async fn test_contacts_signal_contact_tracking() {
 
         contacts.contacts.push(ViewContact {
             id: "contact-alice".to_string(),
-            petname: "Alice (Friend)".to_string(),
+            nickname: "Alice (Friend)".to_string(),
             suggested_name: Some("Alice".to_string()),
             is_guardian: false,
             is_resident: false,
@@ -430,11 +430,11 @@ async fn test_contacts_signal_contact_tracking() {
             Some("Alice".to_string()),
             "Suggested name should match"
         );
-        assert_eq!(alice.petname, "Alice (Friend)", "Petname should match");
+        assert_eq!(alice.nickname, "Alice (Friend)", "Nickname should match");
         assert!(!alice.is_guardian, "Should not be guardian initially");
 
         println!("  Contact found: {:?}", alice.suggested_name);
-        println!("  Petname: {}", alice.petname);
+        println!("  Nickname: {}", alice.nickname);
         println!("  Is guardian: {}", alice.is_guardian);
     }
 
@@ -450,7 +450,7 @@ async fn test_contacts_signal_contact_tracking() {
             .find(|c| c.id == "contact-alice")
         {
             alice.is_guardian = true;
-            alice.petname = "Alice (Guardian)".to_string();
+            alice.nickname = "Alice (Guardian)".to_string();
         }
 
         core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();
@@ -471,12 +471,12 @@ async fn test_contacts_signal_contact_tracking() {
 
         assert!(alice.is_guardian, "Alice should now be guardian");
         assert_eq!(
-            alice.petname, "Alice (Guardian)",
-            "Petname should be updated"
+            alice.nickname, "Alice (Guardian)",
+            "Nickname should be updated"
         );
 
         println!("  Guardian status: {}", alice.is_guardian);
-        println!("  Updated petname: {}", alice.petname);
+        println!("  Updated nickname: {}", alice.nickname);
     }
 
     cleanup_test_dir("contacts-track");

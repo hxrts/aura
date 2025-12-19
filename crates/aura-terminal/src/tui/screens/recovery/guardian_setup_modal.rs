@@ -152,6 +152,35 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
     let selected = props.selected_indices.clone();
     let focused = props.focused_index;
 
+    // Empty state when no contacts
+    if contacts.is_empty() {
+        return element! {
+            View(
+                padding: Spacing::MD,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+            ) {
+                Text(
+                    content: "No contacts available.",
+                    color: Theme::TEXT_MUTED,
+                )
+                Text(
+                    content: "Add contacts first to set up guardians.",
+                    color: Theme::TEXT_MUTED,
+                )
+                View(margin_top: Spacing::SM) {
+                    Text(
+                        content: "Press Esc to close",
+                        color: Theme::TEXT_MUTED,
+                    )
+                }
+            }
+        }
+        .into_any();
+    }
+
     element! {
         View(
             padding_left: Spacing::SM,
@@ -177,11 +206,13 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
                 #(contacts.iter().enumerate().map(|(i, contact)| {
                     let is_selected = selected.contains(&i);
                     let is_focused = i == focused;
+                    let pointer = if is_focused { "▸" } else { " " };
                     let checkbox = if is_selected { "[x]" } else { "[ ]" };
                     let guardian_badge = if contact.is_current_guardian { " (current)" } else { "" };
 
                     let bg = if is_focused { Theme::BG_SELECTED } else { Color::Reset };
                     let fg = if is_focused { Theme::TEXT } else { Theme::TEXT_MUTED };
+                    let pointer_color = if is_focused { Theme::PRIMARY } else { Color::Reset };
 
                     element! {
                         View(
@@ -190,6 +221,7 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
                             padding_left: Spacing::XS,
                             background_color: bg,
                         ) {
+                            Text(content: pointer.to_string(), color: pointer_color)
                             Text(content: checkbox.to_string(), color: if is_selected { Theme::SUCCESS } else { fg })
                             Text(content: contact.name.clone(), color: fg)
                             #(if contact.is_current_guardian {
@@ -209,6 +241,14 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
                 content: format!("{} selected (min 2)", selected.len()),
                 color: if selected.len() >= 2 { Theme::SUCCESS } else { Theme::WARNING },
             )
+
+            // Key hints footer
+            View(margin_top: Spacing::XS) {
+                Text(
+                    content: "↑↓/jk Navigate  Space Select  Enter Confirm  Esc Cancel",
+                    color: Theme::TEXT_MUTED,
+                )
+            }
         }
     }
     .into_any()

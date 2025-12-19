@@ -94,8 +94,8 @@ pub enum QueuedModal {
     // ========================================================================
     // Contacts Screen Modals
     // ========================================================================
-    /// Edit contact petname
-    ContactsPetname(PetnameModalState),
+    /// Edit contact nickname
+    ContactsNickname(NicknameModalState),
 
     /// Import invitation (contacts screen)
     ContactsImport(ImportInvitationModalState),
@@ -124,8 +124,8 @@ pub enum QueuedModal {
     // ========================================================================
     // Settings Screen Modals
     // ========================================================================
-    /// Edit nickname
-    SettingsNickname(NicknameModalState),
+    /// Edit display name
+    SettingsNickname(DisplayNameModalState),
 
     /// Configure threshold
     SettingsThreshold(ThresholdModalState),
@@ -457,7 +457,7 @@ impl ToastQueue {
 /// - `ExportInvitation` → use `state.invitations.code_modal`
 /// - `InvitationCode` → use `state.invitations.code_modal`
 /// - `ThresholdConfig` → use `state.settings.threshold_modal`
-/// - `TextInput` → use screen-specific modal (e.g., `petname_modal`, `nickname_modal`)
+/// - `TextInput` → use screen-specific modal (e.g., `nickname_modal`, `nickname_modal`)
 ///
 /// If you need to add a new modal, add it as a screen-specific modal struct
 /// in the appropriate screen state (e.g., `ChatState`, `SettingsState`), NOT here.
@@ -749,8 +749,8 @@ pub struct ContactsViewState {
     pub contact_count: usize,
     /// Filter text
     pub filter: String,
-    /// Petname edit modal state
-    pub petname_modal: PetnameModalState,
+    /// Nickname edit modal state
+    pub nickname_modal: NicknameModalState,
     /// Import invitation modal state (accept an invitation code)
     pub import_modal: ImportInvitationModalState,
     /// Create invitation modal state (send an invitation)
@@ -765,20 +765,20 @@ pub struct ContactsViewState {
     pub demo_carol_code: String,
 }
 
-/// State for petname edit modal
+/// State for nickname edit modal
 #[derive(Clone, Debug, Default)]
-pub struct PetnameModalState {
+pub struct NicknameModalState {
     /// Whether visible
     pub visible: bool,
     /// Contact ID being edited
     pub contact_id: String,
-    /// Current petname value
+    /// Current nickname value
     pub value: String,
     /// Error message if any
     pub error: Option<String>,
 }
 
-impl PetnameModalState {
+impl NicknameModalState {
     pub fn show(&mut self, contact_id: &str, current_name: &str) {
         self.visible = true;
         self.contact_id = contact_id.to_string();
@@ -1189,8 +1189,8 @@ pub struct SettingsViewState {
     pub selected_index: usize,
     /// Current MFA policy
     pub mfa_policy: MfaPolicy,
-    /// Nickname edit modal state
-    pub nickname_modal: NicknameModalState,
+    /// Display name edit modal state (user's own display name)
+    pub display_name_modal: DisplayNameModalState,
     /// Threshold config modal state
     pub threshold_modal: ThresholdModalState,
     /// Add device modal state
@@ -1199,18 +1199,18 @@ pub struct SettingsViewState {
     pub confirm_remove_modal: ConfirmRemoveModalState,
 }
 
-/// State for nickname edit modal
+/// State for display name edit modal (settings screen)
 #[derive(Clone, Debug, Default)]
-pub struct NicknameModalState {
+pub struct DisplayNameModalState {
     /// Whether visible
     pub visible: bool,
-    /// Nickname input buffer
+    /// Display name input buffer
     pub value: String,
     /// Error message if any
     pub error: Option<String>,
 }
 
-impl NicknameModalState {
+impl DisplayNameModalState {
     pub fn show(&mut self, current_name: &str) {
         self.visible = true;
         self.value = current_name.to_string();
@@ -1585,7 +1585,7 @@ impl TuiState {
             Some(QueuedModal::AccountSetup(_)) => true,
             Some(QueuedModal::ChatCreate(_)) => true,
             Some(QueuedModal::ChatTopic(_)) => true,
-            Some(QueuedModal::ContactsPetname(_)) => true,
+            Some(QueuedModal::ContactsNickname(_)) => true,
             Some(QueuedModal::ContactsImport(_)) => true,
             Some(QueuedModal::InvitationsImport(_)) => true,
             Some(QueuedModal::SettingsNickname(_)) => true,
@@ -1791,9 +1791,9 @@ pub enum DispatchCommand {
     },
 
     // Contacts screen
-    UpdatePetname {
+    UpdateNickname {
         contact_id: String,
-        petname: String,
+        nickname: String,
     },
     StartChat {
         contact_id: String,
@@ -1807,6 +1807,8 @@ pub enum DispatchCommand {
     },
 
     // Guardian ceremony
+    /// Open guardian setup modal (shell will populate contacts)
+    OpenGuardianSetup,
     /// Start a guardian ceremony with selected contacts and threshold
     StartGuardianCeremony {
         contact_ids: Vec<String>,
@@ -1846,8 +1848,8 @@ pub enum DispatchCommand {
     },
 
     // Settings screen
-    UpdateNickname {
-        nickname: String,
+    UpdateDisplayName {
+        display_name: String,
     },
     UpdateThreshold {
         k: u8,
@@ -2237,8 +2239,8 @@ fn handle_queued_modal_key(
             }
         }
         // Contacts screen modals
-        QueuedModal::ContactsPetname(modal_state) => {
-            handle_petname_key_queue(state, commands, key, modal_state);
+        QueuedModal::ContactsNickname(modal_state) => {
+            handle_nickname_key_queue(state, commands, key, modal_state);
         }
         QueuedModal::ContactsImport(modal_state) => {
             handle_import_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
@@ -2270,7 +2272,7 @@ fn handle_queued_modal_key(
         }
         // Settings screen modals
         QueuedModal::SettingsNickname(modal_state) => {
-            handle_settings_nickname_key_queue(state, commands, key, modal_state);
+            handle_settings_display_name_key_queue(state, commands, key, modal_state);
         }
         QueuedModal::SettingsThreshold(modal_state) => {
             handle_settings_threshold_key_queue(state, commands, key, modal_state);
@@ -2561,12 +2563,12 @@ fn handle_chat_topic_key_queue(
     }
 }
 
-/// Handle petname edit modal keys (queue-based)
-fn handle_petname_key_queue(
+/// Handle nickname edit modal keys (queue-based)
+fn handle_nickname_key_queue(
     state: &mut TuiState,
     commands: &mut Vec<TuiCommand>,
     key: KeyEvent,
-    modal_state: PetnameModalState,
+    modal_state: NicknameModalState,
 ) {
     match key.code {
         KeyCode::Esc => {
@@ -2574,23 +2576,23 @@ fn handle_petname_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdatePetname {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateNickname {
                     contact_id: modal_state.contact_id.clone(),
-                    petname: modal_state.value.clone(),
+                    nickname: modal_state.value.clone(),
                 }));
                 state.modal_queue.dismiss();
             }
         }
         KeyCode::Char(c) => {
             state.modal_queue.update_active(|modal| {
-                if let QueuedModal::ContactsPetname(ref mut s) = modal {
+                if let QueuedModal::ContactsNickname(ref mut s) = modal {
                     s.value.push(c);
                 }
             });
         }
         KeyCode::Backspace => {
             state.modal_queue.update_active(|modal| {
-                if let QueuedModal::ContactsPetname(ref mut s) = modal {
+                if let QueuedModal::ContactsNickname(ref mut s) = modal {
                     s.value.pop();
                 }
             });
@@ -2917,12 +2919,12 @@ fn handle_guardian_setup_key_queue(
     }
 }
 
-/// Handle settings nickname modal keys (queue-based)
-fn handle_settings_nickname_key_queue(
+/// Handle settings display name modal keys (queue-based)
+fn handle_settings_display_name_key_queue(
     state: &mut TuiState,
     commands: &mut Vec<TuiCommand>,
     key: KeyEvent,
-    modal_state: NicknameModalState,
+    modal_state: DisplayNameModalState,
 ) {
     match key.code {
         KeyCode::Esc => {
@@ -2930,8 +2932,8 @@ fn handle_settings_nickname_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateNickname {
-                    nickname: modal_state.value.clone(),
+                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateDisplayName {
+                    display_name: modal_state.value.clone(),
                 }));
                 state.modal_queue.dismiss();
             }
@@ -3287,17 +3289,15 @@ fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
             );
         }
         KeyCode::Char('e') => {
-            // Open petname edit modal via queue
+            // Open nickname edit modal via queue
             state
                 .modal_queue
-                .enqueue(QueuedModal::ContactsPetname(PetnameModalState::default()));
+                .enqueue(QueuedModal::ContactsNickname(NicknameModalState::default()));
         }
         KeyCode::Char('g') => {
-            // Open guardian setup modal via queue (if no pending ceremony)
+            // Open guardian setup modal via dispatch (shell will populate contacts)
             if !state.contacts.guardian_setup_modal.has_pending_ceremony {
-                state.modal_queue.enqueue(QueuedModal::GuardianSetup(
-                    GuardianSetupModalState::default(),
-                ));
+                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenGuardianSetup));
             } else {
                 commands.push(TuiCommand::ShowToast {
                     message: "A guardian ceremony is already in progress".to_string(),
@@ -3441,19 +3441,19 @@ fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
         }
         KeyCode::Char('e') => {
             if state.settings.section == SettingsSection::Profile {
-                // Open nickname edit modal via queue
-                state
-                    .modal_queue
-                    .enqueue(QueuedModal::SettingsNickname(NicknameModalState::default()));
+                // Open display name edit modal via queue
+                state.modal_queue.enqueue(QueuedModal::SettingsNickname(
+                    DisplayNameModalState::default(),
+                ));
             }
         }
         KeyCode::Enter => {
             match state.settings.section {
                 SettingsSection::Profile => {
-                    // Open nickname edit modal via queue
-                    state
-                        .modal_queue
-                        .enqueue(QueuedModal::SettingsNickname(NicknameModalState::default()));
+                    // Open display name edit modal via queue
+                    state.modal_queue.enqueue(QueuedModal::SettingsNickname(
+                        DisplayNameModalState::default(),
+                    ));
                 }
                 SettingsSection::Threshold => {
                     // Open threshold edit modal via queue

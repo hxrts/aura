@@ -101,8 +101,8 @@ pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, Au
 
 // Builder system exports
 pub use builder::{
-    AndroidPresetBuilder, BuildError, CliPresetBuilder, CustomPresetBuilder,
-    DataProtectionClass, IosPresetBuilder, WebPresetBuilder,
+    AndroidPresetBuilder, BuildError, CliPresetBuilder, CustomPresetBuilder, DataProtectionClass,
+    IosPresetBuilder, WebPresetBuilder,
 };
 
 // Session management types

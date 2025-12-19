@@ -99,7 +99,7 @@ module tui_flows {
     | SocialBlockExists              // User has created/owns a block
     | SocialContactInvitedToBlock    // Contact invited to join block
     | SocialContactJoinedBlock       // Contact joined as resident (is_resident = true)
-    | SocialPetnameUpdated           // Contact petname changed
+    | SocialNicknameUpdated           // Contact nickname changed
     | SocialBlockContactsFiltered    // Contacts filtered by block membership
 
   // ============ INVITATION TYPE ============
@@ -121,7 +121,7 @@ module tui_flows {
     contacts: Set[AgentId],
     guardians: Set[AgentId],
     guardianFor: Set[AgentId],       // Who this agent is a guardian for
-    contactPetnames: AgentId -> str, // Petnames for contacts (contact_id -> petname)
+    contactNicknames: AgentId -> str, // Nicknames for contacts (contact_id -> nickname)
 
     // Invitations
     pendingInvitations: Set[InvitationId],
@@ -236,7 +236,7 @@ module tui_flows {
     contacts: Set(),
     guardians: Set(),
     guardianFor: Set(),
-    contactPetnames: Map(),
+    contactNicknames: Map(),
     pendingInvitations: Set(),
     sentInvitations: Set(),
     channels: Set(),
@@ -1053,19 +1053,19 @@ module tui_flows {
 
   // ============ FLOW 6: SOCIAL GRAPH (Contacts + Blocks) ============
 
-  // Set petname for a contact
-  action setPetname(agent: AgentId, contactId: AgentId, petname: str): bool = {
+  // Set nickname for a contact
+  action setNickname(agent: AgentId, contactId: AgentId, nickname: str): bool = {
     val agentState = getAgent(agents, agent)
     all {
       agentState.hasAccount,
       agentState.contacts.contains(contactId),
-      // Update petname
+      // Update nickname
       agents' = agents.set(agent, {
         ...agentState,
-        contactPetnames: agentState.contactPetnames.put(contactId, petname),
+        contactNicknames: agentState.contactNicknames.put(contactId, nickname),
         lastEmittedSignals: Set(ContactsSignal)
       }),
-      socialGraphFlowPhase' = socialGraphFlowPhase.set(agent, SocialPetnameUpdated),
+      socialGraphFlowPhase' = socialGraphFlowPhase.set(agent, SocialNicknameUpdated),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -1287,9 +1287,9 @@ module tui_flows {
     linkBlockToNeighborhood(linker, "block-1", "neighborhood-1"),
 
     // Social Graph flow
-    nondet petnameAgent = allAgents.oneOf()
-    nondet petnameContact = allAgents.oneOf()
-    setPetname(petnameAgent, petnameContact, "Friend"),
+    nondet nicknameAgent = allAgents.oneOf()
+    nondet nicknameContact = allAgents.oneOf()
+    setNickname(nicknameAgent, nicknameContact, "Friend"),
 
     nondet blockInviter = allAgents.oneOf()
     nondet contactToInvite = allAgents.oneOf()
@@ -1373,12 +1373,12 @@ module tui_flows {
       })
     })
 
-  // Social Graph: Petnames only for contacts
-  // An agent can only have petnames for their contacts
-  val petnamesOnlyForContacts: bool =
+  // Social Graph: Nicknames only for contacts
+  // An agent can only have nicknames for their contacts
+  val nicknamesOnlyForContacts: bool =
     allAgents.forall(agent => {
       val state = getAgent(agents, agent)
-      state.contactPetnames.keys().forall(contactId =>
+      state.contactNicknames.keys().forall(contactId =>
         state.contacts.contains(contactId)
       )
     })
@@ -1392,7 +1392,7 @@ module tui_flows {
     invitationConsistency and
     contactBlockMappingConsistency and
     blockResidentsHaveAccounts and
-    petnamesOnlyForContacts
+    nicknamesOnlyForContacts
 
   // ============ TEST SCENARIOS ============
 
@@ -1548,7 +1548,7 @@ module tui_flows {
     })
   }
 
-  // Test: Social Graph flow - contacts, blocks, petnames, assignment
+  // Test: Social Graph flow - contacts, blocks, nicknames, assignment
   run socialGraphFlowTest = {
     init
     // Create accounts for bob, alice, carol
@@ -1560,11 +1560,11 @@ module tui_flows {
     .then(exportInvitation("social-inv"))
     .then(importInvitation("bob", "social-inv"))
     .then(acceptInvitation("bob", "social-inv"))
-    // Bob sets petname for alice
-    .then(setPetname("bob", "alice", "My Guardian Alice"))
-    // Verify petname was set
+    // Bob sets nickname for alice
+    .then(setNickname("bob", "alice", "My Guardian Alice"))
+    // Verify nickname was set
     .then(all {
-      assert(getAgent(agents, "bob").contactPetnames.get("alice") == "My Guardian Alice"),
+      assert(getAgent(agents, "bob").contactNicknames.get("alice") == "My Guardian Alice"),
       assert(getAgent(agents, "bob").lastEmittedSignals.contains(ContactsSignal)),
       // Continue to block creation
       allAgents' = allAgents,
@@ -1613,8 +1613,8 @@ module tui_flows {
       // Alice is contact and resident
       assert(getAgent(agents, "bob").contacts.contains("alice")),
       assert(isContactResident(getAgent(agents, "bob"), "alice", blocks.get("social-block"))),
-      // Petname persists
-      assert(getAgent(agents, "bob").contactPetnames.get("alice") == "My Guardian Alice"),
+      // Nickname persists
+      assert(getAgent(agents, "bob").contactNicknames.get("alice") == "My Guardian Alice"),
       // Social graph flow phase updated
       assert(match socialGraphFlowPhase.get("bob") { | SocialBlockContactsFiltered => true | _ => false }),
       // All invariants hold

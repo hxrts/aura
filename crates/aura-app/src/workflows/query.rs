@@ -113,10 +113,10 @@ pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
 
 /// Helper function to get display name from contact
 ///
-/// Priority: petname > suggested_name > truncated ID
+/// Priority: nickname > suggested_name > truncated ID
 fn get_display_name(contact: &Contact) -> String {
-    if !contact.petname.is_empty() {
-        contact.petname.clone()
+    if !contact.nickname.is_empty() {
+        contact.nickname.clone()
     } else if let Some(ref suggested) = contact.suggested_name {
         suggested.clone()
     } else {

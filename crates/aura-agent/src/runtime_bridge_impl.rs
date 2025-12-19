@@ -13,13 +13,14 @@ use aura_app::runtime_bridge::{
 };
 use aura_app::IntentError;
 use aura_core::domain::FactValue;
-use aura_core::effects::{JournalEffects, ThresholdSigningEffects};
+use aura_core::effects::{JournalEffects, StorageEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::time::TimeStamp;
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::DeviceId;
 use aura_journal::JournalFact;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Wrapper to implement RuntimeBridge for AuraAgent
@@ -35,6 +36,76 @@ impl AgentRuntimeBridge {
     /// Create a new runtime bridge from an AuraAgent
     pub fn new(agent: Arc<AuraAgent>) -> Self {
         Self { agent }
+    }
+}
+
+const ACCOUNT_CONFIG_KEYS: [&str; 2] = ["account.json", "demo-account.json"];
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct StoredAccountConfig {
+    #[serde(default)]
+    authority_id: Option<String>,
+    #[serde(default)]
+    context_id: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    mfa_policy: Option<String>,
+    #[serde(default)]
+    created_at: Option<u64>,
+}
+
+impl AgentRuntimeBridge {
+    async fn try_load_account_config(
+        &self,
+    ) -> Result<Option<(String, StoredAccountConfig)>, IntentError> {
+        let effects = self.agent.runtime().effects();
+        let effects_guard = effects.read().await;
+
+        for key in ACCOUNT_CONFIG_KEYS {
+            let bytes = effects_guard
+                .retrieve(key)
+                .await
+                .map_err(|e| IntentError::storage_error(format!("Failed to read {key}: {e}")))?;
+
+            let Some(bytes) = bytes else {
+                continue;
+            };
+
+            let content = String::from_utf8(bytes)
+                .map_err(|e| IntentError::internal_error(format!("Invalid {key} UTF-8: {e}")))?;
+
+            let config: StoredAccountConfig = serde_json::from_str(&content)
+                .map_err(|e| IntentError::internal_error(format!("Failed to parse {key}: {e}")))?;
+
+            return Ok(Some((key.to_string(), config)));
+        }
+
+        Ok(None)
+    }
+
+    async fn load_account_config(&self) -> Result<(String, StoredAccountConfig), IntentError> {
+        self.try_load_account_config().await?.ok_or_else(|| {
+            IntentError::validation_failed("No account config found. Create an account first.")
+        })
+    }
+
+    async fn store_account_config(
+        &self,
+        key: &str,
+        config: &StoredAccountConfig,
+    ) -> Result<(), IntentError> {
+        let content = serde_json::to_string_pretty(config)
+            .map_err(|e| IntentError::internal_error(format!("Failed to serialize {key}: {e}")))?;
+
+        let effects = self.agent.runtime().effects();
+        let effects_guard = effects.read().await;
+        effects_guard
+            .store(key, content.into_bytes())
+            .await
+            .map_err(|e| IntentError::storage_error(format!("Failed to write {key}: {e}")))?;
+
+        Ok(())
     }
 }
 
@@ -434,7 +505,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn create_contact_invitation(
         &self,
         receiver: AuthorityId,
-        petname: Option<String>,
+        nickname: Option<String>,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
@@ -443,7 +514,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })?;
 
         let invitation = invitation_service
-            .invite_as_contact(receiver, petname, message, ttl_ms)
+            .invite_as_contact(receiver, nickname, message, ttl_ms)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to create contact invitation: {}", e))
@@ -636,9 +707,21 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Settings service not yet implemented - return available data
         // When implemented, would provide: display_name, mfa_policy from profile facts
+        let (display_name, mfa_policy) = match self.try_load_account_config().await {
+            Ok(Some((_key, config))) => (
+                config.display_name.unwrap_or_default(),
+                config.mfa_policy.unwrap_or_else(|| "disabled".to_string()),
+            ),
+            Ok(None) => (String::new(), "disabled".to_string()),
+            Err(e) => {
+                tracing::warn!("Failed to load account config for settings: {}", e);
+                (String::new(), "disabled".to_string())
+            }
+        };
+
         SettingsBridgeState {
-            display_name: String::new(),        // Requires profile/settings service
-            mfa_policy: "disabled".to_string(), // Requires auth policy service
+            display_name,
+            mfa_policy,
             threshold_k,
             threshold_n,
             device_count: 1, // Requires device registry service
@@ -646,20 +729,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
     }
 
-    async fn set_display_name(&self, _name: &str) -> Result<(), IntentError> {
-        // Requires profile/settings service to persist display name as a fact
-        // Implementation would: create DisplayNameFact, persist via journal
-        Err(IntentError::internal_error(
-            "Profile service not yet implemented - display name cannot be persisted",
-        ))
+    async fn set_display_name(&self, name: &str) -> Result<(), IntentError> {
+        let (key, mut config) = self.load_account_config().await?;
+        config.display_name = Some(name.to_string());
+        self.store_account_config(&key, &config).await
     }
 
-    async fn set_mfa_policy(&self, _policy: &str) -> Result<(), IntentError> {
-        // Requires auth policy service to persist MFA settings
-        // Implementation would: create MfaPolicyFact, persist via journal
-        Err(IntentError::internal_error(
-            "Auth policy service not yet implemented - MFA policy cannot be persisted",
-        ))
+    async fn set_mfa_policy(&self, policy: &str) -> Result<(), IntentError> {
+        let (key, mut config) = self.load_account_config().await?;
+        config.mfa_policy = Some(policy.to_string());
+        self.store_account_config(&key, &config).await
     }
 
     // =========================================================================
@@ -801,9 +880,9 @@ fn convert_invitation_type_to_bridge(
     inv_type: &crate::handlers::invitation::InvitationType,
 ) -> InvitationBridgeType {
     match inv_type {
-        crate::handlers::invitation::InvitationType::Contact { petname } => {
+        crate::handlers::invitation::InvitationType::Contact { nickname } => {
             InvitationBridgeType::Contact {
-                petname: petname.clone(),
+                nickname: nickname.clone(),
             }
         }
         crate::handlers::invitation::InvitationType::Guardian { subject_authority } => {

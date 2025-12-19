@@ -93,7 +93,7 @@ impl InvitationService {
     ///
     /// # Arguments
     /// * `receiver_id` - Authority to invite as contact
-    /// * `petname` - Optional petname for the contact
+    /// * `nickname` - Optional nickname for the contact
     /// * `message` - Optional message
     /// * `expires_in_ms` - Optional expiration time in milliseconds
     ///
@@ -102,7 +102,7 @@ impl InvitationService {
     pub async fn invite_as_contact(
         &self,
         receiver_id: AuthorityId,
-        petname: Option<String>,
+        nickname: Option<String>,
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
@@ -111,7 +111,7 @@ impl InvitationService {
             .create_invitation(
                 &effects,
                 receiver_id,
-                InvitationType::Contact { petname },
+                InvitationType::Contact { nickname },
                 message,
                 expires_in_ms,
             )

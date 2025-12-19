@@ -311,7 +311,14 @@ impl
         // Note: The typestate pattern ensures all required effects were provided,
         // but currently EffectSystemBuilder creates handlers based on execution mode.
         // The provided handlers validate the API contract at compile time.
-        let _ = (self.crypto, self.storage, self.time, self.random, self.console, self.transports);
+        let _ = (
+            self.crypto,
+            self.storage,
+            self.time,
+            self.random,
+            self.console,
+            self.transports,
+        );
 
         let runtime = match self.execution_mode {
             ExecutionMode::Testing => EffectSystemBuilder::testing()

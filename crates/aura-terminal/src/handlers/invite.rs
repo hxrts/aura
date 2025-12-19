@@ -160,9 +160,9 @@ pub async fn handle_invitation(
 /// Format invitation type for display
 fn format_invitation_type(shareable: &ShareableInvitation) -> String {
     match &shareable.invitation_type {
-        aura_agent::handlers::InvitationType::Contact { petname } => {
-            if let Some(name) = petname {
-                format!("Contact (petname: {})", name)
+        aura_agent::handlers::InvitationType::Contact { nickname } => {
+            if let Some(name) = nickname {
+                format!("Contact (nickname: {})", name)
             } else {
                 "Contact".to_string()
             }
@@ -229,19 +229,19 @@ mod tests {
     }
 
     #[test]
-    fn test_format_invitation_type_contact_without_petname() {
-        let shareable = test_shareable(InvitationType::Contact { petname: None });
+    fn test_format_invitation_type_contact_without_nickname() {
+        let shareable = test_shareable(InvitationType::Contact { nickname: None });
         let result = format_invitation_type(&shareable);
         assert_eq!(result, "Contact");
     }
 
     #[test]
-    fn test_format_invitation_type_contact_with_petname() {
+    fn test_format_invitation_type_contact_with_nickname() {
         let shareable = test_shareable(InvitationType::Contact {
-            petname: Some("Alice".to_string()),
+            nickname: Some("Alice".to_string()),
         });
         let result = format_invitation_type(&shareable);
-        assert_eq!(result, "Contact (petname: Alice)");
+        assert_eq!(result, "Contact (nickname: Alice)");
     }
 
     #[test]

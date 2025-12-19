@@ -39,8 +39,8 @@ pub struct MySuggestion {
 pub struct Contact {
     /// Contact identifier (authority ID)
     pub id: String,
-    /// Petname (user-assigned name)
-    pub petname: String,
+    /// Nickname (user-assigned name)
+    pub nickname: String,
     /// Suggested name (from contact or system)
     pub suggested_name: Option<String>,
     /// Whether this contact is a guardian
@@ -79,7 +79,7 @@ impl ContactsState {
                 self.contacts
                     .iter()
                     .filter(|c| {
-                        c.petname.to_lowercase().contains(&filter_lower)
+                        c.nickname.to_lowercase().contains(&filter_lower)
                             || c.suggested_name
                                 .as_ref()
                                 .map(|n| n.to_lowercase().contains(&filter_lower))
@@ -103,11 +103,11 @@ impl ContactsState {
 
     /// Get display name for a contact
     ///
-    /// Returns petname if set, otherwise suggested_name, otherwise the ID as fallback.
+    /// Returns nickname if set, otherwise suggested_name, otherwise the ID as fallback.
     pub fn get_display_name(&self, id: &str) -> String {
         if let Some(contact) = self.contact(id) {
-            if !contact.petname.is_empty() {
-                return contact.petname.clone();
+            if !contact.nickname.is_empty() {
+                return contact.nickname.clone();
             }
             if let Some(name) = &contact.suggested_name {
                 return name.clone();
@@ -116,17 +116,17 @@ impl ContactsState {
         id.to_string()
     }
 
-    /// Set petname for a contact
+    /// Set nickname for a contact
     ///
     /// If the contact doesn't exist, creates a new contact entry.
-    pub fn set_petname(&mut self, target: String, petname: String) {
+    pub fn set_nickname(&mut self, target: String, nickname: String) {
         if let Some(contact) = self.contacts.iter_mut().find(|c| c.id == target) {
-            contact.petname = petname;
+            contact.nickname = nickname;
         } else {
-            // Create new contact with the petname
+            // Create new contact with the nickname
             self.contacts.push(Contact {
                 id: target,
-                petname,
+                nickname,
                 suggested_name: None,
                 is_guardian: false,
                 is_resident: false,

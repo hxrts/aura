@@ -49,7 +49,7 @@
 //! | SendMessage         | CHAT_SIGNAL      | ✓      | Ignored |
 //! | AcceptInvitation    | INVITATIONS      | ✓      | Ignored |
 //! | StartDirectChat     | CHAT_SIGNAL      | ✓      | Ignored |
-//! | UpdatePetname       | CONTACTS_SIGNAL  | ✓      | Ignored |
+//! | UpdateNickname       | CONTACTS_SIGNAL  | ✓      | Ignored |
 
 use async_lock::RwLock;
 use std::sync::Arc;
@@ -171,7 +171,7 @@ async fn test_import_invitation_propagates_to_contacts_signal() {
         let state = core.read(&*CONTACTS_SIGNAL).await.unwrap();
         println!("Final contacts: {}", state.contacts.len());
         for c in &state.contacts {
-            println!("  - {} ({})", c.petname, c.id);
+            println!("  - {} ({})", c.nickname, c.id);
         }
         state.contacts.len()
     };
@@ -216,7 +216,7 @@ async fn test_multiple_imports_all_propagate() {
 
     assert_eq!(contacts.len(), 3, "Should have 3 contacts after 3 imports");
 
-    let names: Vec<_> = contacts.iter().map(|c| c.petname.to_lowercase()).collect();
+    let names: Vec<_> = contacts.iter().map(|c| c.nickname.to_lowercase()).collect();
     assert!(
         names.contains(&"alice".to_string()),
         "Alice should be in contacts"
@@ -445,13 +445,13 @@ async fn test_duplicate_import_idempotent() {
 // Full Authority Flow Tests - Critical Path Testing
 // ============================================================================
 
-/// Property: UpdateContactPetname updates CONTACTS_SIGNAL with new petname
+/// Property: UpdateContactNickname updates CONTACTS_SIGNAL with new nickname
 #[tokio::test]
 #[ignore = "Requires RuntimeBridge"]
-async fn test_update_petname_propagates_to_contacts_signal() {
-    println!("\n=== UpdateContactPetname → CONTACTS_SIGNAL Propagation Test ===\n");
+async fn test_update_nickname_propagates_to_contacts_signal() {
+    println!("\n=== UpdateContactNickname → CONTACTS_SIGNAL Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("petname").await;
+    let (ctx, app_core) = setup_test_env("nickname").await;
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // Import Alice as a contact first
@@ -459,45 +459,45 @@ async fn test_update_petname_propagates_to_contacts_signal() {
         .await
         .expect("Import should succeed");
 
-    // Get Alice's contact ID and original petname
-    let (alice_id, original_petname) = {
+    // Get Alice's contact ID and original nickname
+    let (alice_id, original_nickname) = {
         let core = app_core.read().await;
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
         let alice = contacts.contacts.first().expect("Alice should exist");
-        (alice.id.clone(), alice.petname.clone())
+        (alice.id.clone(), alice.nickname.clone())
     };
-    println!("  Original petname: {}", original_petname);
+    println!("  Original nickname: {}", original_nickname);
 
-    // Update Alice's petname
-    let new_petname = "My Friend Alice".to_string();
+    // Update Alice's nickname
+    let new_nickname = "My Friend Alice".to_string();
     let result = ctx
-        .dispatch(EffectCommand::UpdateContactPetname {
+        .dispatch(EffectCommand::UpdateContactNickname {
             contact_id: alice_id.clone(),
-            petname: new_petname.clone(),
+            nickname: new_nickname.clone(),
         })
         .await;
 
-    println!("  UpdateContactPetname result: {:?}", result);
+    println!("  UpdateContactNickname result: {:?}", result);
 
-    // Verify CONTACTS_SIGNAL was updated with new petname
-    let final_petname = {
+    // Verify CONTACTS_SIGNAL was updated with new nickname
+    let final_nickname = {
         let core = app_core.read().await;
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
         contacts
             .contacts
             .iter()
             .find(|c| c.id == alice_id)
-            .map(|c| c.petname.clone())
+            .map(|c| c.nickname.clone())
             .unwrap_or_default()
     };
-    println!("  Final petname: {}", final_petname);
+    println!("  Final nickname: {}", final_nickname);
 
     // The command may or may not succeed depending on authority state,
     // but if it succeeds, the signal MUST be updated
     if result.is_ok() {
         assert_eq!(
-            final_petname, new_petname,
-            "CONTACTS_SIGNAL should reflect the new petname after successful UpdateContactPetname"
+            final_nickname, new_nickname,
+            "CONTACTS_SIGNAL should reflect the new nickname after successful UpdateContactNickname"
         );
     } else {
         println!(
@@ -506,7 +506,7 @@ async fn test_update_petname_propagates_to_contacts_signal() {
         );
     }
 
-    cleanup_test_dir("petname");
+    cleanup_test_dir("nickname");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -789,7 +789,7 @@ async fn test_decline_invitation_propagates_to_signal() {
             contacts
                 .contacts
                 .iter()
-                .any(|c| c.petname.to_lowercase() == "bob")
+                .any(|c| c.nickname.to_lowercase() == "bob")
         };
         println!("  Bob still in contacts: {}", bob_exists);
     } else {
@@ -1014,7 +1014,7 @@ async fn test_send_block_invitation_propagates_to_signals() {
     println!("\n=== Test PASSED ===\n");
 }
 
-/// Property: Full Social Graph flow - Import contact, create block, update petname
+/// Property: Full Social Graph flow - Import contact, create block, update nickname
 #[tokio::test]
 #[ignore = "Requires RuntimeBridge"]
 async fn test_social_graph_full_flow() {
@@ -1042,33 +1042,33 @@ async fn test_social_graph_full_flow() {
     assert_eq!(contacts.len(), 2, "Should have 2 contacts after imports");
     println!("  Contacts after import: {}", contacts.len());
 
-    // Step 2: Update petnames
-    println!("Step 2: Updating petnames...");
+    // Step 2: Update nicknames
+    println!("Step 2: Updating nicknames...");
     let alice_id = contacts
         .iter()
-        .find(|c| c.petname.to_lowercase() == "alice")
+        .find(|c| c.nickname.to_lowercase() == "alice")
         .expect("Alice exists")
         .id
         .clone();
 
-    let petname_result = ctx
-        .dispatch(EffectCommand::UpdateContactPetname {
+    let nickname_result = ctx
+        .dispatch(EffectCommand::UpdateContactNickname {
             contact_id: alice_id.clone(),
-            petname: "Ally".to_string(),
+            nickname: "Ally".to_string(),
         })
         .await;
-    println!("  UpdateContactPetname result: {:?}", petname_result);
+    println!("  UpdateContactNickname result: {:?}", nickname_result);
 
-    // Verify petname update propagated
-    if petname_result.is_ok() {
+    // Verify nickname update propagated
+    if nickname_result.is_ok() {
         let updated_contacts = {
             let core = app_core.read().await;
             core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts
         };
         let alice = updated_contacts.iter().find(|c| c.id == alice_id);
         if let Some(a) = alice {
-            println!("  Alice petname after update: {}", a.petname);
-            assert_eq!(a.petname, "Ally", "Petname should be updated");
+            println!("  Alice nickname after update: {}", a.nickname);
+            assert_eq!(a.nickname, "Ally", "Nickname should be updated");
         }
     }
 
@@ -1100,7 +1100,7 @@ async fn test_social_graph_full_flow() {
 
     println!("  Final contacts count: {}", final_contacts.contacts.len());
     for c in &final_contacts.contacts {
-        println!("    - {} (id: {})", c.petname, c.id);
+        println!("    - {} (id: {})", c.nickname, c.id);
     }
 
     cleanup_test_dir("social-graph-flow");
@@ -1125,7 +1125,7 @@ async fn test_command_coverage_documentation() {
         ("SendDirectMessage", "CHAT_SIGNAL", false), // TODO: Similar to SendMessage
         ("AcceptInvitation", "INVITATIONS_SIGNAL", true),
         ("DeclineInvitation", "INVITATIONS_SIGNAL", true),
-        ("UpdateContactPetname", "CONTACTS_SIGNAL", true),
+        ("UpdateContactNickname", "CONTACTS_SIGNAL", true),
         ("ToggleContactGuardian", "CONTACTS_SIGNAL+RECOVERY", true),
         ("CreateBlock", "BLOCK_SIGNAL", true),
         ("SendBlockInvitation", "BLOCK+CONTACTS", true),

@@ -1039,17 +1039,17 @@ impl ContactStatus {
 #[derive(Clone, Debug, Default)]
 pub struct Contact {
     pub id: String,
-    pub petname: String,
+    pub nickname: String,
     pub suggested_name: Option<String>,
     pub status: ContactStatus,
     pub is_guardian: bool,
 }
 
 impl Contact {
-    pub fn new(id: impl Into<String>, petname: impl Into<String>) -> Self {
+    pub fn new(id: impl Into<String>, nickname: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            petname: petname.into(),
+            nickname: nickname.into(),
             ..Default::default()
         }
     }
@@ -1225,7 +1225,7 @@ impl From<&AppContact> for Contact {
     fn from(c: &AppContact) -> Self {
         Self {
             id: c.id.clone(),
-            petname: c.petname.clone(),
+            nickname: c.nickname.clone(),
             suggested_name: c.suggested_name.clone(),
             status: if c.is_online {
                 ContactStatus::Active

@@ -18,7 +18,7 @@ Neighborhoods are collections of blocks connected via adjacency and traversal po
 
 ### 1.3 Terminology
 
-An authority (`AuthorityId`) is the cryptographic identity that holds capabilities and participates in consensus. A petname is a local mapping from an authority to a human-understandable name. Each device maintains its own petname mappings. There is no global username registry.
+An authority (`AuthorityId`) is the cryptographic identity that holds capabilities and participates in consensus. A nickname is a local mapping from an authority to a human-understandable name. Each device maintains its own nickname mappings. There is no global username registry.
 
 A contact suggestion is metadata an authority optionally shares when connecting with someone. Users configure a default suggestion sent to all new connections. Users can share different suggestions with different people or opt out entirely.
 

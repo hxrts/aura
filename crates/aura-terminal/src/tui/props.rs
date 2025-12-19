@@ -151,10 +151,10 @@ pub struct ContactsViewProps {
     pub focus: TwoPanelFocus,
     pub selected_index: usize,
     pub filter: String,
-    // Petname modal
-    pub petname_modal_visible: bool,
-    pub petname_modal_contact_id: String,
-    pub petname_modal_value: String,
+    // Nickname modal
+    pub nickname_modal_visible: bool,
+    pub nickname_modal_contact_id: String,
+    pub nickname_modal_value: String,
     // Import invitation modal (accept invitation code)
     pub import_modal_visible: bool,
     pub import_modal_code: String,
@@ -205,8 +205,9 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
     };
 
     // Extract modal state from queue (all modals now use queue system)
-    let (petname_visible, petname_contact_id, petname_value) = match state.modal_queue.current() {
-        Some(QueuedModal::ContactsPetname(s)) => (true, s.contact_id.clone(), s.value.clone()),
+    let (nickname_visible, nickname_contact_id, nickname_value) = match state.modal_queue.current()
+    {
+        Some(QueuedModal::ContactsNickname(s)) => (true, s.contact_id.clone(), s.value.clone()),
         _ => (false, String::new(), String::new()),
     };
 
@@ -280,10 +281,10 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
                 focus,
                 selected_index: state.contacts.selected_index,
                 filter: state.contacts.filter.clone(),
-                // Petname modal (from queue)
-                petname_modal_visible: petname_visible,
-                petname_modal_contact_id: petname_contact_id,
-                petname_modal_value: petname_value,
+                // Nickname modal (from queue)
+                nickname_modal_visible: nickname_visible,
+                nickname_modal_contact_id: nickname_contact_id,
+                nickname_modal_value: nickname_value,
                 // Import modal (from queue)
                 import_modal_visible: import_visible,
                 import_modal_code: import_code,
@@ -319,10 +320,10 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
                 focus,
                 selected_index: state.contacts.selected_index,
                 filter: state.contacts.filter.clone(),
-                // Petname modal (from queue)
-                petname_modal_visible: petname_visible,
-                petname_modal_contact_id: petname_contact_id,
-                petname_modal_value: petname_value,
+                // Nickname modal (from queue)
+                nickname_modal_visible: nickname_visible,
+                nickname_modal_contact_id: nickname_contact_id,
+                nickname_modal_value: nickname_value,
                 // Import modal (from queue)
                 import_modal_visible: import_visible,
                 import_modal_code: import_code,
@@ -466,9 +467,9 @@ pub struct SettingsViewProps {
     pub section: SettingsSection,
     pub selected_index: usize,
     pub mfa_policy: MfaPolicy,
-    // Nickname modal
-    pub nickname_modal_visible: bool,
-    pub nickname_modal_value: String,
+    // Display name modal (user's own display name)
+    pub display_name_modal_visible: bool,
+    pub display_name_modal_value: String,
     // Threshold modal
     pub threshold_modal_visible: bool,
     pub threshold_modal_k: u8,
@@ -487,7 +488,7 @@ pub struct SettingsViewProps {
 /// Extract SettingsScreen view props from TuiState
 pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     // Extract modal state from queue (all modals now use queue system)
-    let (nickname_visible, nickname_value) = match state.modal_queue.current() {
+    let (display_name_visible, display_name_value) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsNickname(s)) => (true, s.value.clone()),
         _ => (false, String::new()),
     };
@@ -522,9 +523,9 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         section: state.settings.section,
         selected_index: state.settings.selected_index,
         mfa_policy: state.settings.mfa_policy,
-        // Nickname modal (from queue)
-        nickname_modal_visible: nickname_visible,
-        nickname_modal_value: nickname_value,
+        // Display name modal (from queue)
+        display_name_modal_visible: display_name_visible,
+        display_name_modal_value: display_name_value,
         // Threshold modal (from queue)
         threshold_modal_visible: threshold_visible,
         threshold_modal_k: threshold_k,
@@ -664,27 +665,27 @@ mod tests {
 
     #[test]
     fn test_contacts_view_props_extraction() {
-        use crate::tui::state_machine::PetnameModalState;
+        use crate::tui::state_machine::NicknameModalState;
 
         let mut state = TuiState::new();
         state.contacts.selected_index = 7;
         state.contacts.filter = "search".to_string();
         // Use queue for modal visibility
-        let mut petname_modal = PetnameModalState::default();
-        petname_modal.visible = true;
-        petname_modal.contact_id = "contact-123".to_string();
-        petname_modal.value = "new-name".to_string();
+        let mut nickname_modal = NicknameModalState::default();
+        nickname_modal.visible = true;
+        nickname_modal.contact_id = "contact-123".to_string();
+        nickname_modal.value = "new-name".to_string();
         state
             .modal_queue
-            .enqueue(QueuedModal::ContactsPetname(petname_modal));
+            .enqueue(QueuedModal::ContactsNickname(nickname_modal));
 
         let props = extract_contacts_view_props(&state);
 
         assert_eq!(props.selected_index, 7);
         assert_eq!(props.filter, "search");
-        assert!(props.petname_modal_visible);
-        assert_eq!(props.petname_modal_contact_id, "contact-123");
-        assert_eq!(props.petname_modal_value, "new-name");
+        assert!(props.nickname_modal_visible);
+        assert_eq!(props.nickname_modal_contact_id, "contact-123");
+        assert_eq!(props.nickname_modal_value, "new-name");
     }
 
     #[test]
@@ -726,27 +727,27 @@ mod tests {
 
     #[test]
     fn test_settings_view_props_extraction() {
-        use crate::tui::state_machine::NicknameModalState;
+        use crate::tui::state_machine::DisplayNameModalState;
 
         let mut state = TuiState::new();
         state.settings.section = SettingsSection::Devices;
         state.settings.selected_index = 1;
         state.settings.mfa_policy = MfaPolicy::AlwaysRequired;
         // Use queue for modal visibility (only one modal at a time)
-        let mut nickname_modal = NicknameModalState::default();
-        nickname_modal.visible = true;
-        nickname_modal.value = "new-nick".to_string();
+        let mut display_name_modal = DisplayNameModalState::default();
+        display_name_modal.visible = true;
+        display_name_modal.value = "new-nick".to_string();
         state
             .modal_queue
-            .enqueue(QueuedModal::SettingsNickname(nickname_modal));
+            .enqueue(QueuedModal::SettingsNickname(display_name_modal));
 
         let props = extract_settings_view_props(&state);
 
         assert_eq!(props.section, SettingsSection::Devices);
         assert_eq!(props.selected_index, 1);
         assert_eq!(props.mfa_policy, MfaPolicy::AlwaysRequired);
-        assert!(props.nickname_modal_visible);
-        assert_eq!(props.nickname_modal_value, "new-nick");
+        assert!(props.display_name_modal_visible);
+        assert_eq!(props.display_name_modal_value, "new-nick");
         // add_device_modal is not active because nickname_modal is (only one modal at a time)
         assert!(!props.add_device_modal_visible);
     }

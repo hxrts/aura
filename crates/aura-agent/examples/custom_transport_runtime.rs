@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use aura_agent::AgentBuilder;
 use aura_core::effects::{TransportEffects, TransportEnvelope, TransportError, TransportStats};
 use aura_core::{AuthorityId, ContextId};
@@ -20,7 +21,6 @@ use aura_effects::{
     FilesystemStorageHandler, PhysicalTimeHandler, RealConsoleHandler, RealCryptoHandler,
     RealRandomHandler, RealTransportHandler,
 };
-use async_trait::async_trait;
 
 /// Example custom transport handler.
 ///

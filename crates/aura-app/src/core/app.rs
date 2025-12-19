@@ -490,12 +490,12 @@ impl AppCore {
                     return Err(IntentError::validation_failed("Message too long"));
                 }
             }
-            Intent::SetPetname { petname, .. } => {
-                if petname.is_empty() {
-                    return Err(IntentError::validation_failed("Petname is empty"));
+            Intent::SetNickname { nickname, .. } => {
+                if nickname.is_empty() {
+                    return Err(IntentError::validation_failed("Nickname is empty"));
                 }
-                if petname.len() > 100 {
-                    return Err(IntentError::validation_failed("Petname too long"));
+                if nickname.len() > 100 {
+                    return Err(IntentError::validation_failed("Nickname too long"));
                 }
             }
             Intent::SetBlockName { name, .. } => {
@@ -1531,9 +1531,9 @@ mod tests {
         assert!(channel_names.contains(&&"channel-2".to_string()));
     }
 
-    /// E2E test: SetPetname intent creates fact and updates contacts
+    /// E2E test: SetNickname intent creates fact and updates contacts
     #[test]
-    fn test_e2e_set_petname_updates_contacts() {
+    fn test_e2e_set_nickname_updates_contacts() {
         let config = AppConfig::default();
         let mut app = AppCore::new(config).unwrap();
 
@@ -1541,12 +1541,12 @@ mod tests {
         let authority = AuthorityId::new_from_entropy([42u8; 32]);
         app.set_authority(authority);
 
-        // Dispatch SetPetname intent
-        let result = app.dispatch(Intent::SetPetname {
+        // Dispatch SetNickname intent
+        let result = app.dispatch(Intent::SetNickname {
             contact_id: "contact123".to_string(),
-            petname: "Alice".to_string(),
+            nickname: "Alice".to_string(),
         });
-        assert!(result.is_ok(), "SetPetname dispatch failed: {:?}", result);
+        assert!(result.is_ok(), "SetNickname dispatch failed: {:?}", result);
 
         // Verify fact was created
         assert_eq!(app.pending_facts().len(), 1);

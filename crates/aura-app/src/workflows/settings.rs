@@ -38,6 +38,20 @@ pub async fn update_mfa_policy(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to update MFA policy: {}", e)))?;
 
+    {
+        let core = app_core.read().await;
+        if let Some(runtime) = core.runtime() {
+            let settings = runtime.get_settings().await;
+            let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
+            state.display_name = settings.display_name;
+            state.mfa_policy = settings.mfa_policy;
+            state.threshold_k = settings.threshold_k as u8;
+            state.threshold_n = settings.threshold_n as u8;
+            state.contact_count = settings.contact_count;
+            let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
+        }
+    }
+
     Ok(())
 }
 
@@ -61,6 +75,20 @@ pub async fn update_nickname(
         .set_display_name(&name)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to update display name: {}", e)))?;
+
+    {
+        let core = app_core.read().await;
+        if let Some(runtime) = core.runtime() {
+            let settings = runtime.get_settings().await;
+            let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
+            state.display_name = settings.display_name;
+            state.mfa_policy = settings.mfa_policy;
+            state.threshold_k = settings.threshold_k as u8;
+            state.threshold_n = settings.threshold_n as u8;
+            state.contact_count = settings.contact_count;
+            let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
+        }
+    }
 
     Ok(())
 }

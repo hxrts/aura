@@ -23,7 +23,7 @@ fn prepare_send_invitation_allows_with_capabilities() {
     let outcome = svc.prepare_send_invitation(
         &snap,
         test_authority_id(2),
-        InvitationType::Contact { petname: None },
+        InvitationType::Contact { nickname: None },
         Some("hi".to_string()),
         Some(1000),
         "inv-1".to_string(),

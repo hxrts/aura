@@ -36,7 +36,7 @@ module tui_signal_propagation {
     | SendDirectMessage({ target: str, content: str })
     | AcceptInvitation({ invitation_id: str })
     | DeclineInvitation({ invitation_id: str })
-    | UpdatePetname({ contact_id: str, petname: str })
+    | UpdateNickname({ contact_id: str, nickname: str })
     | ToggleGuardian({ contact_id: str })
     | StartRecovery
     | ApproveRecovery({ recovery_id: str })
@@ -73,7 +73,7 @@ module tui_signal_propagation {
       | SendDirectMessage(_) => Set(ChatSignal)
       | AcceptInvitation(_) => Set(InvitationsSignal, ContactsSignal)
       | DeclineInvitation(_) => Set(InvitationsSignal)
-      | UpdatePetname(_) => Set(ContactsSignal)
+      | UpdateNickname(_) => Set(ContactsSignal)
       | ToggleGuardian(_) => Set(ContactsSignal, RecoverySignal)
       | StartRecovery => Set(RecoverySignal)
       | ApproveRecovery(_) => Set(RecoverySignal)

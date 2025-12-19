@@ -24,7 +24,7 @@ pub use crate::tui::callbacks::{
     ExportInvitationCallback, GoHomeCallback, GrantStewardCallback, GuardianSelectCallback,
     ImportInvitationCallback, InvitationCallback, RecoveryCallback, RemoveDeviceCallback,
     RetryMessageCallback, RevokeStewardCallback, SendCallback, SetTopicCallback, StartChatCallback,
-    UpdateNicknameCallback, UpdatePetnameCallback, UpdateThresholdCallback,
+    UpdateDisplayNameCallback, UpdateNicknameCallback, UpdateThresholdCallback,
 };
 
 // Screen-specific callback types (use specialized types not in callbacks module)

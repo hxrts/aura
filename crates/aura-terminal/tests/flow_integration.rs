@@ -619,7 +619,7 @@ async fn test_neighborhood_formation_flow() {
 // Flow Test: Social Graph (Contacts + Blocks)
 // ============================================================================
 
-/// Test complete Social Graph flow: contacts → blocks → petnames → contact-block relationships
+/// Test complete Social Graph flow: contacts → blocks → nicknames → contact-block relationships
 /// This covers Flow 6: Social Graph (Contacts + Blocks) from the verification plan
 #[tokio::test]
 async fn test_social_graph_flow() {
@@ -668,39 +668,39 @@ async fn test_social_graph_flow() {
     let bob_contacts = env.get_agent("bob").read_contacts().await;
     println!("  Bob's contacts: {}", bob_contacts.contacts.len());
     for c in &bob_contacts.contacts {
-        println!("    - {} (guardian: {})", c.petname, c.is_guardian);
+        println!("    - {} (guardian: {})", c.nickname, c.is_guardian);
     }
     env.track_signal("CONTACTS_SIGNAL", "contact_import");
 
-    // Phase 3: Update petnames for contacts
-    println!("\nPhase 3: Updating petnames...");
+    // Phase 3: Update nicknames for contacts
+    println!("\nPhase 3: Updating nicknames...");
     if let Some(alice_contact) = bob_contacts
         .contacts
         .iter()
-        .find(|c| c.petname.to_lowercase() == "alice")
+        .find(|c| c.nickname.to_lowercase() == "alice")
     {
-        let petname_result = env
+        let nickname_result = env
             .get_agent("bob")
-            .dispatch(EffectCommand::UpdateContactPetname {
+            .dispatch(EffectCommand::UpdateContactNickname {
                 contact_id: alice_contact.id.clone(),
-                petname: "My Friend Alice".to_string(),
+                nickname: "My Friend Alice".to_string(),
             })
             .await;
-        match &petname_result {
+        match &nickname_result {
             Ok(()) => {
-                println!("  ✓ Petname updated successfully");
-                env.track_signal("CONTACTS_SIGNAL", "petname_update");
+                println!("  ✓ Nickname updated successfully");
+                env.track_signal("CONTACTS_SIGNAL", "nickname_update");
             }
             Err(e) => {
-                println!("  Petname update: {}", e);
+                println!("  Nickname update: {}", e);
             }
         }
     }
 
-    // Read contacts again to verify petname update
-    let bob_contacts_after_petname = env.get_agent("bob").read_contacts().await;
-    for c in &bob_contacts_after_petname.contacts {
-        println!("    - {} (id: {})", c.petname, c.id);
+    // Read contacts again to verify nickname update
+    let bob_contacts_after_nickname = env.get_agent("bob").read_contacts().await;
+    for c in &bob_contacts_after_nickname.contacts {
+        println!("    - {} (id: {})", c.nickname, c.id);
     }
 
     // Phase 4: Create a block for social organization
@@ -733,7 +733,7 @@ async fn test_social_graph_flow() {
     if let Some(alice_contact) = bob_contacts
         .contacts
         .iter()
-        .find(|c| c.petname.to_lowercase() == "alice")
+        .find(|c| c.nickname.to_lowercase() == "alice")
     {
         let invite_result = env
             .get_agent("bob")
@@ -823,7 +823,7 @@ async fn test_social_graph_contact_block_view() {
     let bob_contacts = env.get_agent("bob").read_contacts().await;
     println!("Bob's contacts:");
     for c in &bob_contacts.contacts {
-        println!("  - {} (id: {})", c.petname, c.id);
+        println!("  - {} (id: {})", c.nickname, c.id);
     }
 
     // Read block state
@@ -870,7 +870,7 @@ async fn test_signal_emission_coverage() {
             vec!["INVITATIONS_SIGNAL", "CONTACTS_SIGNAL"],
         ),
         ("DeclineInvitation", vec!["INVITATIONS_SIGNAL"]),
-        ("UpdateContactPetname", vec!["CONTACTS_SIGNAL"]),
+        ("UpdateContactNickname", vec!["CONTACTS_SIGNAL"]),
         (
             "ToggleContactGuardian",
             vec!["CONTACTS_SIGNAL", "RECOVERY_SIGNAL"],

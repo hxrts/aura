@@ -366,7 +366,7 @@ async fn test_complete_demo_invitation_flow() {
     if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
         println!("  Contacts: {}", contacts_state.contacts.len());
         for contact in &contacts_state.contacts {
-            println!("    - {} ({})", contact.petname, contact.id);
+            println!("    - {} ({})", contact.nickname, contact.id);
         }
     }
 

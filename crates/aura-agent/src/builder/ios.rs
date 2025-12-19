@@ -209,7 +209,15 @@ impl IosPresetBuilder {
             // - URLSessionTransportHandler
 
             // For now, fall back to testing mode until iOS handlers are implemented
-            let _ = (app_group, authority_id, context_id, self.keychain_access_group, self.data_protection_class, self.execution_mode, self.config);
+            let _ = (
+                app_group,
+                authority_id,
+                context_id,
+                self.keychain_access_group,
+                self.data_protection_class,
+                self.execution_mode,
+                self.config,
+            );
 
             Err(BuildError::EffectInit {
                 effect: "ios",

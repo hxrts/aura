@@ -12,7 +12,7 @@ pub enum Screen {
     Block,
     /// Chat conversations
     Chat,
-    /// Contacts, petnames, and invitations
+    /// Contacts, nicknames, and invitations
     Contacts,
     /// Neighborhood navigation
     Neighborhood,
