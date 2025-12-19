@@ -9,8 +9,19 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::{effects::reactive::ReactiveEffects, AuraError};
+use aura_core::{
+    crypto::hash::hash,
+    effects::reactive::ReactiveEffects,
+    identifiers::{AuthorityId, ChannelId},
+    AuraError,
+};
 use std::sync::Arc;
+
+/// Create a deterministic ChannelId from a DM channel descriptor string
+fn dm_channel_id(target: &str) -> ChannelId {
+    let descriptor = format!("dm:{}", target);
+    ChannelId::from_bytes(hash(descriptor.as_bytes()))
+}
 
 /// Send a direct message to a contact
 ///
@@ -37,7 +48,7 @@ pub async fn send_direct_message(
     content: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    let dm_channel_id = format!("dm:{}", target);
+    let channel_id = dm_channel_id(target);
 
     let core = app_core.read().await;
     let mut chat_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
@@ -45,9 +56,9 @@ pub async fn send_direct_message(
     let now = timestamp_ms;
 
     // Ensure the DM channel exists (create if needed)
-    if !chat_state.channels.iter().any(|c| c.id == dm_channel_id) {
+    if !chat_state.channels.iter().any(|c| c.id == channel_id) {
         let dm_channel = Channel {
-            id: dm_channel_id.clone(),
+            id: channel_id.clone(),
             name: format!("DM with {}", &target[..8.min(target.len())]),
             topic: Some(format!("Direct messages with {}", target)),
             channel_type: ChannelType::DirectMessage,
@@ -62,13 +73,14 @@ pub async fn send_direct_message(
     }
 
     // Select this channel so messages are visible
-    chat_state.selected_channel_id = Some(dm_channel_id.clone());
+    chat_state.selected_channel_id = Some(channel_id.clone());
 
     // Create the message with deterministic ID
+    // Use AuthorityId::default() for self - in production this would be the actual user's ID
     let message = Message {
-        id: format!("msg-{}-{}", dm_channel_id, now),
-        channel_id: dm_channel_id.clone(),
-        sender_id: "self".to_string(),
+        id: format!("msg-{}-{}", channel_id, now),
+        channel_id: channel_id.clone(),
+        sender_id: AuthorityId::default(),
         sender_name: "You".to_string(),
         content: content.to_string(),
         timestamp: now,
@@ -78,14 +90,14 @@ pub async fn send_direct_message(
     };
 
     // Apply message to state
-    chat_state.apply_message(dm_channel_id.clone(), message);
+    chat_state.apply_message(channel_id.clone(), message);
 
     // Emit updated state
     core.emit(&*CHAT_SIGNAL, chat_state)
         .await
         .map_err(|e| AuraError::internal(format!("Failed to emit chat signal: {}", e)))?;
 
-    Ok(dm_channel_id)
+    Ok(channel_id.to_string())
 }
 
 /// Start a direct chat with a contact
@@ -109,7 +121,12 @@ pub async fn start_direct_chat(
     contact_id: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    let dm_channel_id = format!("dm:{}", contact_id);
+    let channel_id = dm_channel_id(contact_id);
+
+    // Parse contact_id as AuthorityId for lookup
+    let authority_id = contact_id
+        .parse::<AuthorityId>()
+        .unwrap_or_else(|_| AuthorityId::default());
 
     // Get contact name from ViewState for the channel name
     let contact_name = {
@@ -119,7 +136,7 @@ pub async fn start_direct_chat(
             .contacts
             .contacts
             .iter()
-            .find(|c| c.id == *contact_id)
+            .find(|c| c.id == authority_id)
             .map(|c| c.nickname.clone())
             .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]))
     };
@@ -128,7 +145,7 @@ pub async fn start_direct_chat(
 
     // Create the DM channel
     let dm_channel = Channel {
-        id: dm_channel_id.clone(),
+        id: channel_id.clone(),
         name: contact_name,
         topic: Some(format!("Direct messages with {}", contact_id)),
         channel_type: ChannelType::DirectMessage,
@@ -148,14 +165,14 @@ pub async fn start_direct_chat(
     chat_state.add_channel(dm_channel);
 
     // Select this channel (don't clear messages - retain history)
-    chat_state.selected_channel_id = Some(dm_channel_id.clone());
+    chat_state.selected_channel_id = Some(channel_id.clone());
 
     // Emit updated state
     core.emit(&*CHAT_SIGNAL, chat_state)
         .await
         .map_err(|e| AuraError::internal(format!("Failed to emit chat signal: {}", e)))?;
 
-    Ok(dm_channel_id)
+    Ok(channel_id.to_string())
 }
 
 /// Get current chat state
@@ -185,15 +202,20 @@ pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> ChatState {
 /// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
 pub async fn send_action(
     app_core: &Arc<RwLock<AppCore>>,
-    channel_id: &str,
+    channel_id_str: &str,
     action: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
+    // Parse channel_id as ChannelId
+    let channel_id = channel_id_str
+        .parse::<ChannelId>()
+        .map_err(|_| AuraError::agent(format!("Invalid channel ID: {}", channel_id_str)))?;
+
     let core = app_core.read().await;
     let mut chat_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
 
     // Verify channel exists
-    if chat_state.channel(channel_id).is_none() {
+    if chat_state.channel(&channel_id).is_none() {
         return Err(AuraError::agent(format!(
             "Channel not found: {}",
             channel_id
@@ -207,8 +229,8 @@ pub async fn send_action(
     let message_id = format!("msg-{}-{}", channel_id, now);
     let message = Message {
         id: message_id.clone(),
-        channel_id: channel_id.to_string(),
-        sender_id: "self".to_string(),
+        channel_id: channel_id.clone(),
+        sender_id: AuthorityId::default(),
         sender_name: "You".to_string(),
         // Format as emote: "* You action text"
         content: format!("* You {}", action),
@@ -219,7 +241,7 @@ pub async fn send_action(
     };
 
     // Apply message to state
-    chat_state.apply_message(channel_id.to_string(), message);
+    chat_state.apply_message(channel_id, message);
 
     // Emit updated state
     core.emit(&*CHAT_SIGNAL, chat_state)
@@ -251,16 +273,17 @@ pub async fn invite_user_to_channel(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<String, AuraError> {
-    use aura_core::identifiers::AuthorityId;
-
     // Determine channel ID - use provided or get current selected
     let channel = match channel_id {
         Some(id) => id.to_string(),
         None => {
             let chat_state = get_chat_state(app_core).await;
-            chat_state.selected_channel_id.ok_or_else(|| {
-                AuraError::agent("No channel selected. Please select a channel first.")
-            })?
+            chat_state
+                .selected_channel_id
+                .map(|id| id.to_string())
+                .ok_or_else(|| {
+                    AuraError::agent("No channel selected. Please select a channel first.")
+                })?
         }
     };
 

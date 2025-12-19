@@ -10,7 +10,7 @@ use crate::{
     AppCore, RECOVERY_SIGNAL,
 };
 use async_lock::RwLock;
-use aura_core::{effects::reactive::ReactiveEffects, AuraError};
+use aura_core::{effects::reactive::ReactiveEffects, identifiers::AuthorityId, AuraError};
 use std::sync::Arc;
 
 /// Start a guardian recovery ceremony
@@ -48,7 +48,7 @@ pub async fn start_recovery(
     // Emit recovery signal with initial state
     let recovery_process = RecoveryProcess {
         id: ceremony_id.clone(),
-        account_id: String::new(), // Would be set from context
+        account_id: AuthorityId::default(), // Would be set from context
         status: RecoveryProcessStatus::WaitingForApprovals,
         approvals_received: 0,
         approvals_required: threshold_k as u32,
@@ -172,6 +172,7 @@ mod tests {
         Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus,
     };
     use crate::AppConfig;
+    use aura_core::identifiers::AuthorityId;
 
     #[tokio::test]
     async fn test_get_recovery_status_default() {
@@ -199,7 +200,7 @@ mod tests {
         // Emit recovery state with active recovery process
         let state = RecoveryState {
             guardians: vec![Guardian {
-                id: "guardian-1".to_string(),
+                id: AuthorityId::default(),
                 name: "Alice".to_string(),
                 status: GuardianStatus::Active,
                 added_at: 1000,
@@ -209,7 +210,7 @@ mod tests {
             guardian_count: 3,
             active_recovery: Some(RecoveryProcess {
                 id: "ceremony-123".to_string(),
-                account_id: "account-abc".to_string(),
+                account_id: AuthorityId::default(),
                 status: RecoveryProcessStatus::WaitingForApprovals,
                 approvals_received: 0,
                 approvals_required: 2,

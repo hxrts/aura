@@ -1,5 +1,6 @@
 //! # Invitations View State
 
+use aura_core::identifiers::{AuthorityId, ChannelId};
 use serde::{Deserialize, Serialize};
 
 /// Invitation type
@@ -44,7 +45,7 @@ pub enum InvitationDirection {
 }
 
 /// An invitation
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Invitation {
     /// Invitation identifier (fact ID)
@@ -56,11 +57,11 @@ pub struct Invitation {
     /// Direction (sent or received)
     pub direction: InvitationDirection,
     /// Sender ID
-    pub from_id: String,
+    pub from_id: AuthorityId,
     /// Sender name
     pub from_name: String,
     /// Recipient ID (for sent invitations)
-    pub to_id: Option<String>,
+    pub to_id: Option<AuthorityId>,
     /// Recipient name (for sent invitations)
     pub to_name: Option<String>,
     /// When invitation was created (ms since epoch)
@@ -70,7 +71,7 @@ pub struct Invitation {
     /// Optional message from sender
     pub message: Option<String>,
     /// Block ID (for block invitations)
-    pub block_id: Option<String>,
+    pub block_id: Option<ChannelId>,
     /// Block name (for block invitations)
     pub block_name: Option<String>,
 }

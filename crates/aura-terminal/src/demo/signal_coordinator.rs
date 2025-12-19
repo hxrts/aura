@@ -264,7 +264,9 @@ impl DemoSignalCoordinator {
                 account,
                 context_id,
             } => {
-                let guardian_id = authority_id.to_string();
+                // Use uuid().to_string() to match the format used in invitation codes
+                // (hints.rs uses sender_id.uuid().to_string(), not sender_id.to_string())
+                let guardian_id = authority_id.uuid().to_string();
                 let guardian_name = self.get_agent_name(&authority_id);
                 tracing::info!(
                     "Demo: Guardian {} ({}) accepted binding for {} in {}",

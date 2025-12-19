@@ -2912,6 +2912,7 @@ async fn test_steward_role_flow() {
     use async_lock::RwLock;
     use aura_app::views::block::{BlockState, Resident, ResidentRole};
     use aura_app::AppCore;
+    use aura_core::identifiers::{AuthorityId, ChannelId};
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
@@ -2945,21 +2946,26 @@ async fn test_steward_role_flow() {
     // Phase 2: Set up a block with residents
     println!("\nPhase 2: Setting up block with residents");
 
+    let block_id = "test-block-1".parse::<ChannelId>().unwrap_or_default();
+    let owner_id = "owner-id".parse::<AuthorityId>().unwrap_or_default();
+    let resident1_id = "resident-1".parse::<AuthorityId>().unwrap_or_default();
+    let resident2_id = "resident-2".parse::<AuthorityId>().unwrap_or_default();
+
     {
         let core = app_core.write().await;
 
         // Create a block with the current user as owner
         let mut block = BlockState::new(
-            "test-block-1".to_string(),
+            block_id.clone(),
             Some("Test Block".to_string()),
-            "owner-id".to_string(),
+            owner_id.clone(),
             0,
             "context-1".to_string(),
         );
 
         // Add some residents
         let resident1 = Resident {
-            id: "resident-1".to_string(),
+            id: resident1_id.clone(),
             name: "Alice".to_string(),
             role: ResidentRole::Resident,
             is_online: true,
@@ -2969,7 +2975,7 @@ async fn test_steward_role_flow() {
         };
 
         let resident2 = Resident {
-            id: "resident-2".to_string(),
+            id: resident2_id.clone(),
             name: "Bob".to_string(),
             role: ResidentRole::Resident,
             is_online: true,
@@ -2986,7 +2992,7 @@ async fn test_steward_role_flow() {
 
         // Add block and select it
         core.views().add_block(block);
-        core.views().select_block(Some("test-block-1".to_string()));
+        core.views().select_block(Some(block_id.clone()));
     }
 
     println!("  ✓ Block created with 3 residents (1 owner, 2 residents)");
@@ -3008,7 +3014,7 @@ async fn test_steward_role_flow() {
         let core = app_core.read().await;
         let blocks = core.views().get_blocks();
         let block = blocks.current_block().expect("Block should exist");
-        let resident = block.resident("resident-1").expect("Resident should exist");
+        let resident = block.resident(&resident1_id).expect("Resident should exist");
         assert!(
             matches!(resident.role, ResidentRole::Admin),
             "Resident should now be Admin"
@@ -3033,7 +3039,7 @@ async fn test_steward_role_flow() {
         let core = app_core.read().await;
         let blocks = core.views().get_blocks();
         let block = blocks.current_block().expect("Block should exist");
-        let resident = block.resident("resident-1").expect("Resident should exist");
+        let resident = block.resident(&resident1_id).expect("Resident should exist");
         assert!(
             matches!(resident.role, ResidentRole::Resident),
             "Resident should now be back to Resident role"
@@ -3117,6 +3123,7 @@ async fn test_neighborhood_navigation_flow() {
         AdjacencyType, NeighborBlock, NeighborhoodState, TraversalPosition,
     };
     use aura_app::AppCore;
+    use aura_core::identifiers::ChannelId;
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use aura_terminal::tui::effects::EffectCommand;
@@ -3151,22 +3158,27 @@ async fn test_neighborhood_navigation_flow() {
     // Phase 2: Set up neighborhood with blocks
     println!("\nPhase 2: Setting up neighborhood with blocks");
 
+    let home_block_id = "home-block".parse::<ChannelId>().unwrap_or_default();
+    let alice_block_id = "alice-block".parse::<ChannelId>().unwrap_or_default();
+    let bob_block_id = "bob-block".parse::<ChannelId>().unwrap_or_default();
+    let locked_block_id = "locked-block".parse::<ChannelId>().unwrap_or_default();
+
     {
         let core = app_core.write().await;
 
         // Create neighborhood state with home and neighbors
         let neighborhood = NeighborhoodState {
-            home_block_id: "home-block".to_string(),
+            home_block_id: home_block_id.clone(),
             home_block_name: "My Home".to_string(),
             position: Some(TraversalPosition {
-                current_block_id: "home-block".to_string(),
+                current_block_id: home_block_id.clone(),
                 current_block_name: "My Home".to_string(),
                 depth: 2, // Interior depth
-                path: vec!["home-block".to_string()],
+                path: vec![home_block_id.clone()],
             }),
             neighbors: vec![
                 NeighborBlock {
-                    id: "alice-block".to_string(),
+                    id: alice_block_id.clone(),
                     name: "Alice's Block".to_string(),
                     adjacency: AdjacencyType::Direct,
                     shared_contacts: 3,
@@ -3174,7 +3186,7 @@ async fn test_neighborhood_navigation_flow() {
                     can_traverse: true,
                 },
                 NeighborBlock {
-                    id: "bob-block".to_string(),
+                    id: bob_block_id.clone(),
                     name: "Bob's Block".to_string(),
                     adjacency: AdjacencyType::Direct,
                     shared_contacts: 2,
@@ -3182,7 +3194,7 @@ async fn test_neighborhood_navigation_flow() {
                     can_traverse: true,
                 },
                 NeighborBlock {
-                    id: "locked-block".to_string(),
+                    id: locked_block_id.clone(),
                     name: "Private Block".to_string(),
                     adjacency: AdjacencyType::TwoHop,
                     shared_contacts: 0,
@@ -3222,7 +3234,7 @@ async fn test_neighborhood_navigation_flow() {
             .position
             .expect("Should have position after navigation");
         assert_eq!(
-            position.current_block_id, "alice-block",
+            position.current_block_id, alice_block_id,
             "Should be at Alice's block"
         );
         assert_eq!(
@@ -3258,7 +3270,7 @@ async fn test_neighborhood_navigation_flow() {
             .clone()
             .expect("Should have position after going home");
         assert_eq!(
-            position.current_block_id, "home-block",
+            position.current_block_id, home_block_id,
             "Should be at home block"
         );
         println!("  ✓ Returned to home block");
@@ -3295,7 +3307,7 @@ async fn test_neighborhood_navigation_flow() {
 
         let position = neighborhood.position.expect("Should have position");
         assert_eq!(
-            position.current_block_id, "bob-block",
+            position.current_block_id, bob_block_id,
             "Should still be at Bob's block"
         );
         assert_eq!(position.depth, 0, "Street depth should be 0");
@@ -3579,6 +3591,7 @@ async fn test_channel_mode_operations() {
     use async_lock::RwLock;
     use aura_app::views::block::{BlockState, ResidentRole};
     use aura_app::AppCore;
+    use aura_core::identifiers::{AuthorityId, ChannelId};
     use std::sync::Arc;
 
     let test_dir =
@@ -3601,20 +3614,22 @@ async fn test_channel_mode_operations() {
     ctx.create_account("ChannelModeTester")
         .expect("Failed to create account");
 
+    let block_id = "test-block-mode".parse::<ChannelId>().unwrap_or_default();
+    let owner_id = "owner-id".parse::<AuthorityId>().unwrap_or_default();
+
     // Set up a block with the user as owner (required for SetChannelMode)
     {
         let core = app_core.write().await;
         let mut block = BlockState::new(
-            "test-block-mode".to_string(),
+            block_id.clone(),
             Some("Test Block".to_string()),
-            "owner-id".to_string(),
+            owner_id.clone(),
             0,
             "context-1".to_string(),
         );
         block.my_role = ResidentRole::Owner;
         core.views().add_block(block);
-        core.views()
-            .select_block(Some("test-block-mode".to_string()));
+        core.views().select_block(Some(block_id.clone()));
     }
 
     // Initially no mode set
@@ -4537,7 +4552,7 @@ async fn test_snapshot_data_accuracy() {
     use aura_app::views::contacts::{Contact, ContactsState};
     use aura_app::AppCore;
     use aura_core::effects::reactive::ReactiveEffects;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::identifiers::{AuthorityId, ChannelId};
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::IoContext;
     use std::sync::Arc;
@@ -4577,10 +4592,11 @@ async fn test_snapshot_data_accuracy() {
 
     // Create a block with a specific created_at timestamp
     let test_created_at = 1702000000000u64; // A specific timestamp
+    let block_id = "test-block-1".parse::<ChannelId>().unwrap_or_default();
     let block_state = BlockState::new(
-        "test-block-1".to_string(),
+        block_id,
         Some("Test Block".to_string()),
-        authority_str.clone(),
+        authority_id.clone(),
         test_created_at,
         "ctx-1".to_string(),
     );
@@ -4612,7 +4628,7 @@ async fn test_snapshot_data_accuracy() {
 
     // The block's residents should include the creator
     let residents = block_snapshot.residents();
-    let self_resident = residents.iter().find(|r| r.id == authority_str);
+    let self_resident = residents.iter().find(|r| r.id == authority_id);
     if let Some(resident) = self_resident {
         println!(
             "  ✓ Found current user in residents: {} ({})",
@@ -4630,10 +4646,13 @@ async fn test_snapshot_data_accuracy() {
     println!("\nPhase 3: Testing Contact.has_pending_suggestion");
 
     // Create contacts with various suggestion states
+    let contact1_id = "contact-1".parse::<AuthorityId>().unwrap_or_default();
+    let contact2_id = "contact-2".parse::<AuthorityId>().unwrap_or_default();
+    let contact3_id = "contact-3".parse::<AuthorityId>().unwrap_or_default();
     let contacts_state = ContactsState {
         contacts: vec![
             Contact {
-                id: "contact-1".to_string(),
+                id: contact1_id.clone(),
                 nickname: "Alice".to_string(),
                 suggested_name: Some("Alice Smith".to_string()), // Different from nickname
                 is_guardian: false,
@@ -4642,7 +4661,7 @@ async fn test_snapshot_data_accuracy() {
                 is_online: true,
             },
             Contact {
-                id: "contact-2".to_string(),
+                id: contact2_id.clone(),
                 nickname: "Bob".to_string(),
                 suggested_name: Some("Bob".to_string()), // Same as nickname
                 is_guardian: false,
@@ -4651,7 +4670,7 @@ async fn test_snapshot_data_accuracy() {
                 is_online: false,
             },
             Contact {
-                id: "contact-3".to_string(),
+                id: contact3_id.clone(),
                 nickname: "Carol".to_string(),
                 suggested_name: None, // No suggestion
                 is_guardian: false,
@@ -4684,11 +4703,14 @@ async fn test_snapshot_data_accuracy() {
             .as_ref()
             .is_some_and(|suggested| !suggested.is_empty() && *suggested != contact.nickname);
 
-        let expected = match contact.id.as_str() {
-            "contact-1" => true,  // suggested_name differs from nickname
-            "contact-2" => false, // suggested_name equals nickname
-            "contact-3" => false, // no suggested_name
-            _ => false,
+        let expected = if contact.id == contact1_id {
+            true  // suggested_name differs from nickname
+        } else if contact.id == contact2_id {
+            false // suggested_name equals nickname
+        } else if contact.id == contact3_id {
+            false // no suggested_name
+        } else {
+            false
         };
         assert_eq!(
             has_pending_suggestion, expected,

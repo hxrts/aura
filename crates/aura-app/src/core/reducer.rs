@@ -11,39 +11,51 @@
 //! to the appropriate view state.
 
 use crate::views::{Channel, ChannelType, Message};
-use aura_core::identifiers::AuthorityId;
+use aura_core::crypto::hash::hash;
+use aura_core::identifiers::{AuthorityId, ChannelId};
 use aura_core::time::TimeStamp;
 use aura_journal::JournalFact;
+
+/// Parse a string channel ID, falling back to hashing the string if not valid hex format
+fn parse_channel_id(s: &str) -> ChannelId {
+    s.parse::<ChannelId>()
+        .unwrap_or_else(|_| ChannelId::from_bytes(hash(s.as_bytes())))
+}
+
+/// Parse a string authority ID, falling back to default if not valid format
+fn parse_authority_id(s: &str) -> AuthorityId {
+    s.parse::<AuthorityId>().unwrap_or_default()
+}
 
 /// Result of reducing a fact
 #[derive(Debug, Clone)]
 pub enum ViewDelta {
     /// A new message was sent
     MessageSent {
-        channel_id: String,
+        channel_id: ChannelId,
         message: Message,
     },
     /// A channel was created
     ChannelCreated { channel: Channel },
     /// A channel was joined
-    ChannelJoined { channel_id: String },
+    ChannelJoined { channel_id: ChannelId },
     /// A channel was left
-    ChannelLeft { channel_id: String },
+    ChannelLeft { channel_id: ChannelId },
     /// A channel was closed/archived
-    ChannelClosed { channel_id: String },
+    ChannelClosed { channel_id: ChannelId },
     /// Channel topic was updated
-    TopicUpdated { channel_id: String, topic: String },
+    TopicUpdated { channel_id: ChannelId, topic: String },
     /// A nickname was set for a contact
-    NicknameSet { target: String, nickname: String },
+    NicknameSet { target: AuthorityId, nickname: String },
     /// A block name was set
-    BlockNameSet { block_id: String, name: String },
+    BlockNameSet { block_id: ChannelId, name: String },
     /// A recovery request was initiated
     RecoveryRequested { session_id: String },
     /// A guardian approval was granted
-    GuardianApproved { guardian_id: String },
+    GuardianApproved { guardian_id: AuthorityId },
     /// Guardian status was toggled for a contact
     GuardianToggled {
-        contact_id: String,
+        contact_id: AuthorityId,
         is_guardian: bool,
     },
     /// Guardian threshold was configured
@@ -141,7 +153,7 @@ fn reduce_send_message(
         .map(|s| s.to_string());
 
     let timestamp = timestamp_to_ms(&fact.timestamp);
-    let sender_id = fact.source_authority.to_string();
+    let sender_name = fact.source_authority.to_string();
     let is_own = fact.source_authority == *own_authority;
 
     // Generate a message ID from the fact content hash
@@ -151,14 +163,14 @@ fn reduce_send_message(
         u64::from_le_bytes(msg_hash[..8].try_into().unwrap_or([0u8; 8]))
     );
 
-    let msg_channel_id = channel_id.clone();
+    let msg_channel_id = parse_channel_id(&channel_id);
     ViewDelta::MessageSent {
-        channel_id,
+        channel_id: msg_channel_id.clone(),
         message: Message {
             id: msg_id,
             channel_id: msg_channel_id,
-            sender_id: sender_id.clone(),
-            sender_name: sender_id, // Nickname resolved in ViewState::apply_delta
+            sender_id: fact.source_authority,
+            sender_name, // Nickname resolved in ViewState::apply_delta
             content: msg_content,
             timestamp,
             reply_to,
@@ -182,12 +194,9 @@ fn reduce_create_channel(content: &str, fact: &JournalFact) -> ViewDelta {
         _ => ChannelType::Block,
     };
 
-    // Generate channel ID from content hash
-    let channel_hash = aura_core::hash::hash(content.as_bytes());
-    let channel_id = format!(
-        "ch_{:x}",
-        u64::from_le_bytes(channel_hash[..8].try_into().unwrap_or([0u8; 8]))
-    );
+    // Generate channel ID from content hash (as ChannelId)
+    let channel_hash = hash(content.as_bytes());
+    let channel_id = ChannelId::from_bytes(channel_hash);
 
     ViewDelta::ChannelCreated {
         channel: Channel {
@@ -207,36 +216,32 @@ fn reduce_create_channel(content: &str, fact: &JournalFact) -> ViewDelta {
 
 fn reduce_join_channel(content: &str) -> ViewDelta {
     let params = content.strip_prefix("JoinChannel::").unwrap_or(content);
-    let channel_id = parse_param(params, "channel_id")
-        .unwrap_or("unknown")
-        .to_string();
+    let channel_id_str = parse_param(params, "channel_id").unwrap_or("unknown");
+    let channel_id = parse_channel_id(channel_id_str);
 
     ViewDelta::ChannelJoined { channel_id }
 }
 
 fn reduce_leave_channel(content: &str) -> ViewDelta {
     let params = content.strip_prefix("LeaveChannel::").unwrap_or(content);
-    let channel_id = parse_param(params, "channel_id")
-        .unwrap_or("unknown")
-        .to_string();
+    let channel_id_str = parse_param(params, "channel_id").unwrap_or("unknown");
+    let channel_id = parse_channel_id(channel_id_str);
 
     ViewDelta::ChannelLeft { channel_id }
 }
 
 fn reduce_close_channel(content: &str) -> ViewDelta {
     let params = content.strip_prefix("CloseChannel::").unwrap_or(content);
-    let channel_id = parse_param(params, "channel_id")
-        .unwrap_or("unknown")
-        .to_string();
+    let channel_id_str = parse_param(params, "channel_id").unwrap_or("unknown");
+    let channel_id = parse_channel_id(channel_id_str);
 
     ViewDelta::ChannelClosed { channel_id }
 }
 
 fn reduce_set_topic(content: &str) -> ViewDelta {
     let params = content.strip_prefix("SetTopic::").unwrap_or(content);
-    let channel_id = parse_param(params, "channel_id")
-        .unwrap_or("unknown")
-        .to_string();
+    let channel_id_str = parse_param(params, "channel_id").unwrap_or("unknown");
+    let channel_id = parse_channel_id(channel_id_str);
     let topic = parse_param(params, "topic").unwrap_or("").to_string();
 
     ViewDelta::TopicUpdated { channel_id, topic }
@@ -244,9 +249,8 @@ fn reduce_set_topic(content: &str) -> ViewDelta {
 
 fn reduce_set_nickname(content: &str) -> ViewDelta {
     let params = content.strip_prefix("SetNickname::").unwrap_or(content);
-    let target = parse_param(params, "target")
-        .unwrap_or("unknown")
-        .to_string();
+    let target_str = parse_param(params, "target").unwrap_or("unknown");
+    let target = parse_authority_id(target_str);
     let nickname = parse_param(params, "nickname").unwrap_or("").to_string();
 
     ViewDelta::NicknameSet { target, nickname }
@@ -254,9 +258,8 @@ fn reduce_set_nickname(content: &str) -> ViewDelta {
 
 fn reduce_set_block_name(content: &str) -> ViewDelta {
     let params = content.strip_prefix("SetBlockName::").unwrap_or(content);
-    let block_id = parse_param(params, "block_id")
-        .unwrap_or("unknown")
-        .to_string();
+    let block_id_str = parse_param(params, "block_id").unwrap_or("unknown");
+    let block_id = parse_channel_id(block_id_str);
     let name = parse_param(params, "name").unwrap_or("").to_string();
 
     ViewDelta::BlockNameSet { block_id, name }
@@ -275,18 +278,16 @@ fn reduce_initiate_recovery(content: &str) -> ViewDelta {
 
 fn reduce_approve_recovery(content: &str) -> ViewDelta {
     let params = content.strip_prefix("ApproveRecovery::").unwrap_or(content);
-    let guardian_id = parse_param(params, "guardian_id")
-        .unwrap_or("unknown")
-        .to_string();
+    let guardian_id_str = parse_param(params, "guardian_id").unwrap_or("unknown");
+    let guardian_id = parse_authority_id(guardian_id_str);
 
     ViewDelta::GuardianApproved { guardian_id }
 }
 
 fn reduce_toggle_guardian(content: &str) -> ViewDelta {
     let params = content.strip_prefix("ToggleGuardian::").unwrap_or(content);
-    let contact_id = parse_param(params, "contact_id")
-        .unwrap_or("unknown")
-        .to_string();
+    let contact_id_str = parse_param(params, "contact_id").unwrap_or("unknown");
+    let contact_id = parse_authority_id(contact_id_str);
     let is_guardian = parse_param(params, "is_guardian")
         .map(|s| s == "true")
         .unwrap_or(false);
@@ -361,12 +362,15 @@ mod tests {
         let own_authority = AuthorityId::new_from_entropy([1u8; 32]);
         let delta = reduce_fact(&fact, &own_authority);
 
+        // "ch123" is not a valid ChannelId hex, so it gets hashed
+        let expected_channel_id = parse_channel_id("ch123");
+
         match delta {
             ViewDelta::MessageSent {
                 channel_id,
                 message,
             } => {
-                assert_eq!(channel_id, "ch123");
+                assert_eq!(channel_id, expected_channel_id);
                 assert_eq!(message.content, "Hello");
                 assert!(message.is_own);
             }

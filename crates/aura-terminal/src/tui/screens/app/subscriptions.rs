@@ -98,7 +98,7 @@ pub fn use_contacts_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) ->
             // Helper to convert app Contact to tui Contact
             fn convert_contact(c: &aura_app::views::Contact) -> Contact {
                 Contact {
-                    id: c.id.clone(),
+                    id: c.id.to_string(),
                     nickname: c.nickname.clone(),
                     suggested_name: c.suggested_name.clone(),
                     // Map to Active status - the TUI ContactStatus doesn't have Online/Offline

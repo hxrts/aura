@@ -272,7 +272,7 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
     // Start direct chat with Alice
     let result = ctx
         .dispatch(EffectCommand::StartDirectChat {
-            contact_id: alice_id,
+            contact_id: alice_id.to_string(),
         })
         .await;
 
@@ -302,7 +302,7 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
     let dm_channel = final_state
         .channels
         .iter()
-        .find(|c| c.id.starts_with("dm:"));
+        .find(|c| c.id.to_string().starts_with("dm:"));
     assert!(dm_channel.is_some(), "Should have a DM channel");
 
     cleanup_test_dir("direct-chat");
@@ -472,7 +472,7 @@ async fn test_update_nickname_propagates_to_contacts_signal() {
     let new_nickname = "My Friend Alice".to_string();
     let result = ctx
         .dispatch(EffectCommand::UpdateContactNickname {
-            contact_id: alice_id.clone(),
+            contact_id: alice_id.to_string(),
             nickname: new_nickname.clone(),
         })
         .await;
@@ -543,7 +543,7 @@ async fn test_toggle_guardian_propagates_to_signals() {
     // Toggle Alice's guardian status
     let result = ctx
         .dispatch(EffectCommand::ToggleContactGuardian {
-            contact_id: alice_id.clone(),
+            contact_id: alice_id.to_string(),
         })
         .await;
 
@@ -630,7 +630,7 @@ async fn test_create_channel_propagates_to_chat_signal() {
         .dispatch(EffectCommand::CreateChannel {
             name: "Test Channel".to_string(),
             topic: Some("A test channel for verification".to_string()),
-            members: vec![alice_id],
+            members: vec![alice_id.to_string()],
         })
         .await;
 
@@ -828,7 +828,7 @@ async fn test_send_message_propagates_to_chat_signal() {
 
     // Start a direct chat to create a channel
     ctx.dispatch(EffectCommand::StartDirectChat {
-        contact_id: alice_id.clone(),
+        contact_id: alice_id.to_string(),
     })
     .await
     .expect("StartDirectChat should succeed");
@@ -839,8 +839,8 @@ async fn test_send_message_propagates_to_chat_signal() {
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
         chat.channels
             .iter()
-            .find(|c| c.id.starts_with("dm:"))
-            .map(|c| c.id.clone())
+            .find(|c| c.id.to_string().starts_with("dm:"))
+            .map(|c| c.id.to_string())
             .unwrap_or_else(|| "dm:test".to_string())
     };
 
@@ -986,7 +986,7 @@ async fn test_send_block_invitation_propagates_to_signals() {
     // Now try to send block invitation to Alice
     let result = ctx
         .dispatch(EffectCommand::SendBlockInvitation {
-            contact_id: alice_id.clone(),
+            contact_id: alice_id.to_string(),
         })
         .await;
 
@@ -1053,7 +1053,7 @@ async fn test_social_graph_full_flow() {
 
     let nickname_result = ctx
         .dispatch(EffectCommand::UpdateContactNickname {
-            contact_id: alice_id.clone(),
+            contact_id: alice_id.to_string(),
             nickname: "Ally".to_string(),
         })
         .await;

@@ -256,12 +256,14 @@ fn is_steward_role(role: aura_app::views::block::ResidentRole) -> bool {
 }
 
 /// Convert aura-app resident to TUI resident
-fn convert_resident(r: &aura_app::views::block::Resident, my_id: &str) -> Resident {
+fn convert_resident(r: &aura_app::views::block::Resident) -> Resident {
     Resident {
-        id: r.id.clone(),
+        id: r.id.to_string(),
         name: r.name.clone(),
         is_steward: is_steward_role(r.role),
-        is_self: r.id == my_id,
+        // Note: is_self should be determined by comparing with current user's AuthorityId
+        // which isn't available in BlockState. The original code incorrectly compared with block ID.
+        is_self: false,
     }
 }
 
@@ -319,12 +321,10 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
             async move {
                 // Helper closure to convert BlockState to TUI types
                 let convert_block_state = |block_state: &aura_app::views::BlockState| {
-                    let my_id = &block_state.id;
-
                     let residents: Vec<Resident> = block_state
                         .residents
                         .iter()
-                        .map(|r| convert_resident(r, my_id))
+                        .map(convert_resident)
                         .collect();
 
                     let budget = convert_budget(&block_state.storage, block_state.resident_count);

@@ -57,17 +57,13 @@ impl CommandContext {
     /// Create context from an AppCore StateSnapshot
     pub fn from_snapshot(snapshot: &aura_app::StateSnapshot) -> Self {
         // Extract current block ID from neighborhood position
+        // ChannelId is Hash32 (32 bytes), ContextId is UUID (16 bytes)
+        // Use first 16 bytes of the channel hash to create a deterministic ContextId
         let current_block_id = snapshot.neighborhood.position.as_ref().map(|p| {
-            // Try to parse as UUID first, then hash the string
-            if let Ok(uuid) = uuid::Uuid::parse_str(&p.current_block_id) {
-                ContextId::from(uuid)
-            } else {
-                // Hash the string for deterministic ID
-                let hash = aura_core::hash::hash(p.current_block_id.as_bytes());
-                let mut bytes = [0u8; 16];
-                bytes.copy_from_slice(&hash[..16]);
-                ContextId::from(uuid::Uuid::from_bytes(bytes))
-            }
+            let hash_bytes = p.current_block_id.as_bytes();
+            let mut uuid_bytes = [0u8; 16];
+            uuid_bytes.copy_from_slice(&hash_bytes[..16]);
+            ContextId::from(uuid::Uuid::from_bytes(uuid_bytes))
         });
 
         // Extract recovery context ID from active recovery

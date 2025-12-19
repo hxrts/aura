@@ -189,7 +189,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         .channels
                         .iter()
                         .map(|c| {
-                            Channel::new(&c.id, &c.name)
+                            Channel::new(c.id.to_string(), &c.name)
                                 .with_unread(c.unread_count as usize)
                                 .selected(Some(c.id.clone()) == chat_state.selected_channel_id)
                         })

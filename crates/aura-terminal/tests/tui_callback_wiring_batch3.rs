@@ -28,6 +28,7 @@ use aura_app::signal_defs::{
 use aura_app::views::RecoveryProcessStatus;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::{AuthorityId, ChannelId};
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::IoContext;
 use aura_terminal::tui::effects::EffectCommand;
@@ -102,7 +103,7 @@ async fn test_block_signals_initialization() {
             println!("  Resident count: {}", state.resident_count);
             // Default state should have empty/default values
             assert!(
-                state.residents.is_empty() || state.id.is_empty(),
+                state.residents.is_empty() || state.id == ChannelId::default(),
                 "Initial block state should be empty or default"
             );
         }
@@ -674,7 +675,7 @@ async fn test_update_contact_nickname() {
 
         // Look for the updated contact
         for contact in &contacts_state.contacts {
-            if contact.id == contact_id || contact.nickname == "My Friend" {
+            if contact.id.to_string() == contact_id || contact.nickname == "My Friend" {
                 println!(
                     "    Found contact: {} (nickname: {})",
                     contact.id, contact.nickname
@@ -697,6 +698,7 @@ async fn test_toggle_contact_guardian() {
     let (ctx, app_core) = setup_test_env("toggle-guardian").await;
 
     let contact_id = "guardian-candidate-123";
+    let contact_authority_id = contact_id.parse::<AuthorityId>().unwrap_or_default();
 
     // Phase 1: Get initial guardian status
     println!("Phase 1: Check initial guardian status");
@@ -704,7 +706,7 @@ async fn test_toggle_contact_guardian() {
     let mut _was_guardian = false;
 
     if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-        if let Some(contact) = contacts_state.contact(contact_id) {
+        if let Some(contact) = contacts_state.contact(&contact_authority_id) {
             _was_guardian = contact.is_guardian;
             println!(
                 "  Contact {} guardian status: {}",
@@ -1288,7 +1290,7 @@ async fn test_complete_contact_to_guardian_flow() {
         let dm_channel = chat_state
             .channels
             .iter()
-            .find(|c| c.id.contains(contact_id) || c.is_dm);
+            .find(|c| c.id.to_string().contains(contact_id) || c.is_dm);
         if let Some(channel) = dm_channel {
             println!("  DM channel exists: {} ({})", channel.name, channel.id);
         }

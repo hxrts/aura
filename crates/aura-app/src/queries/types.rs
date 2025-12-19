@@ -12,9 +12,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use aura_core::query::{
-    DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryCapability, QueryParseError,
+use aura_core::{
+    crypto::hash::hash,
+    identifiers::{AuthorityId, ChannelId},
+    query::{
+        DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate,
+        Query, QueryCapability, QueryParseError,
+    },
 };
 
 // =============================================================================
@@ -39,6 +43,42 @@ fn get_optional_string(row: &aura_core::query::DatalogRow, key: &str) -> Option<
         None
     } else {
         Some(s)
+    }
+}
+
+/// Helper to extract an AuthorityId from a DatalogRow, parsing or hashing the string
+fn get_authority_id(row: &aura_core::query::DatalogRow, key: &str) -> AuthorityId {
+    let s = get_string(row, key);
+    s.parse::<AuthorityId>().unwrap_or_default()
+}
+
+/// Helper to extract an optional AuthorityId from a DatalogRow
+fn get_optional_authority_id(row: &aura_core::query::DatalogRow, key: &str) -> Option<AuthorityId> {
+    let s = get_string(row, key);
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.parse::<AuthorityId>().unwrap_or_default())
+    }
+}
+
+/// Helper to extract a ChannelId from a DatalogRow, parsing or hashing the string
+fn get_channel_id(row: &aura_core::query::DatalogRow, key: &str) -> ChannelId {
+    let s = get_string(row, key);
+    s.parse::<ChannelId>()
+        .unwrap_or_else(|_| ChannelId::from_bytes(hash(s.as_bytes())))
+}
+
+/// Helper to extract an optional ChannelId from a DatalogRow
+fn get_optional_channel_id(row: &aura_core::query::DatalogRow, key: &str) -> Option<ChannelId> {
+    let s = get_string(row, key);
+    if s.is_empty() {
+        None
+    } else {
+        Some(
+            s.parse::<ChannelId>()
+                .unwrap_or_else(|_| ChannelId::from_bytes(hash(s.as_bytes()))),
+        )
     }
 }
 
@@ -149,7 +189,7 @@ impl Query for ChannelsQuery {
                 };
 
                 Channel {
-                    id: get_string(&row, "id"),
+                    id: get_channel_id(&row, "id"),
                     name: get_string(&row, "name"),
                     topic: get_optional_string(&row, "topic"),
                     channel_type,
@@ -257,8 +297,8 @@ impl Query for MessagesQuery {
             .into_iter()
             .map(|row| Message {
                 id: get_string(&row, "id"),
-                channel_id: get_string(&row, "channel"),
-                sender_id: get_string(&row, "sender"),
+                channel_id: get_channel_id(&row, "channel"),
+                sender_id: get_authority_id(&row, "sender"),
                 sender_name: get_string(&row, "sender_name"),
                 content: get_string(&row, "content"),
                 timestamp: get_int(&row, "timestamp") as u64,
@@ -363,7 +403,7 @@ impl Query for GuardiansQuery {
                 };
 
                 Guardian {
-                    id: get_string(&row, "id"),
+                    id: get_authority_id(&row, "id"),
                     name: get_string(&row, "name"),
                     status,
                     added_at: get_int(&row, "added_at") as u64,
@@ -505,14 +545,14 @@ impl Query for InvitationsQuery {
                     invitation_type: inv_type,
                     status,
                     direction,
-                    from_id: get_string(&row, "from_id"),
+                    from_id: get_authority_id(&row, "from_id"),
                     from_name: get_string(&row, "from"),
-                    to_id: get_optional_string(&row, "to_id"),
+                    to_id: get_optional_authority_id(&row, "to_id"),
                     to_name: get_optional_string(&row, "to"),
                     created_at: get_int(&row, "created_at") as u64,
                     expires_at,
                     message: get_optional_string(&row, "message"),
-                    block_id: get_optional_string(&row, "block_id"),
+                    block_id: get_optional_channel_id(&row, "block_id"),
                     block_name: get_optional_string(&row, "block_name"),
                 }
             })
@@ -644,7 +684,7 @@ impl Query for ContactsQuery {
                 };
 
                 Contact {
-                    id: get_string(&row, "id"),
+                    id: get_authority_id(&row, "id"),
                     nickname: get_string(&row, "nickname"),
                     suggested_name: get_optional_string(&row, "suggested_name"),
                     is_guardian: get_bool(&row, "is_guardian"),
@@ -870,7 +910,7 @@ impl Query for BlocksQuery {
                 };
 
                 BlockState {
-                    id: get_string(&row, "id"),
+                    id: get_channel_id(&row, "id"),
                     name: get_string(&row, "name"),
                     residents: Vec::new(), // Populated by separate query
                     my_role,
@@ -891,8 +931,8 @@ impl Query for BlocksQuery {
             .collect();
 
         // Convert to HashMap and find current block
-        let mut blocks: HashMap<String, BlockState> = HashMap::new();
-        let mut current_block_id = None;
+        let mut blocks: HashMap<ChannelId, BlockState> = HashMap::new();
+        let mut current_block_id: Option<ChannelId> = None;
 
         for block in blocks_list {
             if block.is_primary && current_block_id.is_none() {
@@ -978,7 +1018,7 @@ impl Query for NeighborhoodQuery {
                 };
 
                 NeighborBlock {
-                    id: get_string(&row, "id"),
+                    id: get_channel_id(&row, "id"),
                     name: get_string(&row, "name"),
                     adjacency,
                     shared_contacts: get_int(&row, "shared_contacts") as u32,
@@ -996,8 +1036,8 @@ impl Query for NeighborhoodQuery {
             .collect();
 
         Ok(NeighborhoodState {
-            home_block_id: String::new(),   // Set by caller
-            home_block_name: String::new(), // Set by caller
+            home_block_id: ChannelId::default(), // Set by caller
+            home_block_name: String::new(),      // Set by caller
             position: None,
             neighbors,
             max_depth: 3,
@@ -1071,7 +1111,7 @@ impl Query for ChatQuery {
                 };
 
                 Channel {
-                    id: get_string(&row, "id"),
+                    id: get_channel_id(&row, "id"),
                     name: get_string(&row, "name"),
                     topic: get_optional_string(&row, "topic"),
                     channel_type,

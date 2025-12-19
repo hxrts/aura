@@ -7,6 +7,7 @@ use super::{
     RecoveryState,
 };
 use crate::core::{StateSnapshot, ViewDelta};
+use aura_core::identifiers::ChannelId;
 use cfg_if::cfg_if;
 
 cfg_if! {
@@ -164,7 +165,7 @@ cfg_if! {
             ///
             /// This updates the selected channel in ChatState and triggers
             /// the chat signal for UI updates.
-            pub fn select_channel(&self, channel_id: Option<String>) {
+            pub fn select_channel(&self, channel_id: Option<ChannelId>) {
                 self.chat.lock_mut().select_channel(channel_id);
             }
 
@@ -202,7 +203,7 @@ cfg_if! {
             ///
             /// This updates the selected block in BlocksState and triggers
             /// the blocks signal for UI updates.
-            pub fn select_block(&self, block_id: Option<String>) {
+            pub fn select_block(&self, block_id: Option<ChannelId>) {
                 self.blocks.lock_mut().select_block(block_id);
             }
 
@@ -212,7 +213,7 @@ cfg_if! {
             }
 
             /// Remove a block from the blocks state
-            pub fn remove_block(&self, block_id: &str) -> Option<BlockState> {
+            pub fn remove_block(&self, block_id: &ChannelId) -> Option<BlockState> {
                 self.blocks.lock_mut().remove_block(block_id)
             }
         }
@@ -360,8 +361,9 @@ cfg_if! {
                         self.block.lock_mut().set_name(name);
                     }
                     ViewDelta::RecoveryRequested { session_id } => {
-                        // Use empty account_id and 0 as initiated_at since we don't have them in delta
-                        self.recovery.lock_mut().initiate_recovery(session_id, String::new(), 0);
+                        // Use default account_id and 0 as initiated_at since we don't have them in delta
+                        use aura_core::identifiers::AuthorityId;
+                        self.recovery.lock_mut().initiate_recovery(session_id, AuthorityId::default(), 0);
                     }
                     ViewDelta::GuardianApproved { guardian_id } => {
                         self.recovery.lock_mut().add_guardian_approval(guardian_id);
@@ -369,12 +371,13 @@ cfg_if! {
                     ViewDelta::InvitationCreated { invitation_id } => {
                         // Create a minimal invitation record - full details would come from reducer
                         use super::invitations::{Invitation, InvitationDirection, InvitationStatus, InvitationType};
+                        use aura_core::identifiers::AuthorityId;
                         let invitation = Invitation {
                             id: invitation_id,
                             invitation_type: InvitationType::Block,
                             status: InvitationStatus::Pending,
                             direction: InvitationDirection::Sent,
-                            from_id: String::new(),
+                            from_id: AuthorityId::default(),
                             from_name: String::new(),
                             to_id: None,
                             to_name: None,
@@ -441,8 +444,9 @@ cfg_if! {
                         self.block.set_name(name);
                     }
                     ViewDelta::RecoveryRequested { session_id } => {
-                        // Use empty account_id and 0 as initiated_at since we don't have them in delta
-                        self.recovery.initiate_recovery(session_id, String::new(), 0);
+                        // Use default account_id and 0 as initiated_at since we don't have them in delta
+                        use aura_core::identifiers::AuthorityId;
+                        self.recovery.initiate_recovery(session_id, AuthorityId::default(), 0);
                     }
                     ViewDelta::GuardianApproved { guardian_id } => {
                         self.recovery.add_guardian_approval(guardian_id);
@@ -450,12 +454,13 @@ cfg_if! {
                     ViewDelta::InvitationCreated { invitation_id } => {
                         // Create a minimal invitation record - full details would come from reducer
                         use super::invitations::{Invitation, InvitationDirection, InvitationStatus, InvitationType};
+                        use aura_core::identifiers::AuthorityId;
                         let invitation = Invitation {
                             id: invitation_id,
                             invitation_type: InvitationType::Block,
                             status: InvitationStatus::Pending,
                             direction: InvitationDirection::Sent,
-                            from_id: String::new(),
+                            from_id: AuthorityId::default(),
                             from_name: String::new(),
                             to_id: None,
                             to_name: None,

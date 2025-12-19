@@ -364,7 +364,7 @@ fn convert_guardian_status(status: aura_app::views::GuardianStatus) -> GuardianS
 /// Convert aura-app guardian to TUI guardian
 fn convert_guardian(g: &aura_app::views::Guardian) -> Guardian {
     Guardian {
-        id: g.id.clone(),
+        id: g.id.to_string(),
         name: g.name.clone(),
         status: convert_guardian_status(g.status),
         has_share: g.status == aura_app::views::GuardianStatus::Active,

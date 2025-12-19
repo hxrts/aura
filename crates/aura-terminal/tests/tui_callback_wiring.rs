@@ -39,6 +39,7 @@ use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL, R
 use aura_app::views::{Contact as ViewContact, Message, RecoveryProcess, RecoveryProcessStatus};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::{AuthorityId, ChannelId};
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::IoContext;
 use aura_terminal::tui::effects::EffectCommand;
@@ -265,8 +266,8 @@ async fn test_chat_signal_message_accumulation() {
         // Add first message
         chat.messages.push(Message {
             id: "msg-1".to_string(),
-            channel_id: "general".to_string(),
-            sender_id: "alice".to_string(),
+            channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
+            sender_id: "alice".parse::<AuthorityId>().unwrap_or_default(),
             sender_name: "Alice".to_string(),
             content: "Hello world!".to_string(),
             timestamp: 1000,
@@ -278,8 +279,8 @@ async fn test_chat_signal_message_accumulation() {
         // Add second message
         chat.messages.push(Message {
             id: "msg-2".to_string(),
-            channel_id: "general".to_string(),
-            sender_id: "bob".to_string(),
+            channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
+            sender_id: "bob".parse::<AuthorityId>().unwrap_or_default(),
             sender_name: "Bob".to_string(),
             content: "Hi Alice!".to_string(),
             timestamp: 2000,
@@ -333,8 +334,8 @@ async fn test_chat_signal_message_accumulation() {
         for i in 3..6 {
             chat.messages.push(Message {
                 id: format!("msg-{}", i),
-                channel_id: "general".to_string(),
-                sender_id: format!("user-{}", i),
+                channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
+                sender_id: format!("user-{}", i).parse::<AuthorityId>().unwrap_or_default(),
                 sender_name: format!("User{}", i),
                 content: format!("Message number {}", i),
                 timestamp: i as u64 * 1000,
@@ -389,12 +390,13 @@ async fn test_contacts_signal_contact_tracking() {
 
     // Phase 2: Add a contact via signal
     println!("\nPhase 2: Add contact via signal");
+    let contact_alice_id = "contact-alice".parse::<AuthorityId>().unwrap_or_default();
     {
         let core = app_core.read().await;
         let mut contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
 
         contacts.contacts.push(ViewContact {
-            id: "contact-alice".to_string(),
+            id: contact_alice_id.clone(),
             nickname: "Alice (Friend)".to_string(),
             suggested_name: Some("Alice".to_string()),
             is_guardian: false,
@@ -422,7 +424,7 @@ async fn test_contacts_signal_contact_tracking() {
         let alice = contacts
             .contacts
             .iter()
-            .find(|c| c.id == "contact-alice")
+            .find(|c| c.id == contact_alice_id)
             .expect("Alice should exist in contacts");
 
         assert_eq!(
@@ -447,7 +449,7 @@ async fn test_contacts_signal_contact_tracking() {
         if let Some(alice) = contacts
             .contacts
             .iter_mut()
-            .find(|c| c.id == "contact-alice")
+            .find(|c| c.id == contact_alice_id)
         {
             alice.is_guardian = true;
             alice.nickname = "Alice (Guardian)".to_string();
@@ -466,7 +468,7 @@ async fn test_contacts_signal_contact_tracking() {
         let alice = contacts
             .contacts
             .iter()
-            .find(|c| c.id == "contact-alice")
+            .find(|c| c.id == contact_alice_id)
             .expect("Alice should still exist");
 
         assert!(alice.is_guardian, "Alice should now be guardian");
@@ -520,7 +522,7 @@ async fn test_recovery_signal_state_tracking() {
 
         recovery.active_recovery = Some(RecoveryProcess {
             id: "recovery-session-123".to_string(),
-            account_id: "my-account".to_string(),
+            account_id: "my-account".parse::<AuthorityId>().unwrap_or_default(),
             status: RecoveryProcessStatus::WaitingForApprovals,
             approvals_received: 0,
             approvals_required: 2,
@@ -564,13 +566,15 @@ async fn test_recovery_signal_state_tracking() {
 
     // Phase 4: Simulate guardian approval
     println!("\nPhase 4: Simulate guardian approval");
+    let guardian_alice_id = "guardian-alice".parse::<AuthorityId>().unwrap_or_default();
+    let guardian_bob_id = "guardian-bob".parse::<AuthorityId>().unwrap_or_default();
     {
         let core = app_core.read().await;
         let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
 
         if let Some(ref mut active) = recovery.active_recovery {
             active.approvals_received = 1;
-            active.approved_by.push("guardian-alice".to_string());
+            active.approved_by.push(guardian_alice_id.clone());
             active.progress = 50;
         }
 
@@ -587,7 +591,7 @@ async fn test_recovery_signal_state_tracking() {
 
         assert_eq!(active.approvals_received, 1, "Should have 1 approval");
         assert!(
-            active.approved_by.contains(&"guardian-alice".to_string()),
+            active.approved_by.contains(&guardian_alice_id),
             "Alice should be in approved_by"
         );
         assert_eq!(active.progress, 50, "Progress should be 50%");
@@ -608,7 +612,7 @@ async fn test_recovery_signal_state_tracking() {
 
         if let Some(ref mut active) = recovery.active_recovery {
             active.approvals_received = 2;
-            active.approved_by.push("guardian-bob".to_string());
+            active.approved_by.push(guardian_bob_id.clone());
             active.status = RecoveryProcessStatus::Approved;
             active.progress = 100;
         }

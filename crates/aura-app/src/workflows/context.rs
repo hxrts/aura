@@ -8,7 +8,7 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::AuraError;
+use aura_core::{identifiers::ChannelId, AuraError};
 use std::sync::Arc;
 
 /// Set active context for navigation and command targeting
@@ -73,7 +73,10 @@ pub async fn move_position(
             .map(|p| p.current_block_id.clone())
             .unwrap_or_else(|| neighborhood.home_block_id.clone())
     } else {
-        block_id.to_string()
+        // Parse block_id as ChannelId, fall back to home if invalid
+        block_id
+            .parse::<ChannelId>()
+            .unwrap_or_else(|_| neighborhood.home_block_id.clone())
     };
 
     // Get block name from neighbors or use the ID
@@ -85,7 +88,7 @@ pub async fn move_position(
             if target_block_id == neighborhood.home_block_id {
                 neighborhood.home_block_name.clone()
             } else {
-                target_block_id.clone()
+                target_block_id.to_string()
             }
         });
 

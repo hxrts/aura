@@ -18,6 +18,7 @@ use aura_app::signal_defs::{
 use aura_app::views::{Message, RecoveryProcess, RecoveryProcessStatus};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::{AuthorityId, ChannelId};
 
 /// Helper to create a test AppCore with signals initialized
 async fn test_app_core() -> Arc<RwLock<AppCore>> {
@@ -86,8 +87,8 @@ async fn test_chat_signal_state_updates() {
     let mut updated_state = initial.clone();
     updated_state.messages.push(Message {
         id: "msg-1".to_string(),
-        channel_id: "general".to_string(),
-        sender_id: "alice".to_string(),
+        channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
+        sender_id: "alice".parse::<AuthorityId>().unwrap_or_default(),
         sender_name: "Alice".to_string(),
         content: "Hello, world!".to_string(),
         timestamp: 1234567890,
@@ -118,7 +119,7 @@ async fn test_recovery_signal_state_updates() {
     let mut updated_state = initial.clone();
     updated_state.active_recovery = Some(RecoveryProcess {
         id: "recovery-123".to_string(),
-        account_id: "account-456".to_string(),
+        account_id: "account-456".parse::<AuthorityId>().unwrap_or_default(),
         status: RecoveryProcessStatus::WaitingForApprovals,
         approvals_received: 0,
         approvals_required: 2,
@@ -212,8 +213,8 @@ async fn test_chat_message_accumulation() {
         let mut state = core.read(&*CHAT_SIGNAL).await.unwrap();
         state.messages.push(Message {
             id: format!("msg-{}", i),
-            channel_id: "general".to_string(),
-            sender_id: format!("user-{}", i % 3),
+            channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
+            sender_id: format!("user-{}", i % 3).parse::<AuthorityId>().unwrap_or_default(),
             sender_name: format!("User{}", i % 3),
             content: format!("Message number {}", i),
             timestamp: 1234567890 + i as u64,

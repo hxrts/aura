@@ -1,5 +1,6 @@
 //! # Neighborhood View State
 
+use aura_core::identifiers::ChannelId;
 use serde::{Deserialize, Serialize};
 
 /// Adjacency type between blocks
@@ -16,11 +17,11 @@ pub enum AdjacencyType {
 }
 
 /// A neighboring block
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct NeighborBlock {
     /// Block identifier
-    pub id: String,
+    pub id: ChannelId,
     /// Block name
     pub name: String,
     /// Type of adjacency
@@ -34,17 +35,17 @@ pub struct NeighborBlock {
 }
 
 /// Traversal position in the neighborhood
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct TraversalPosition {
     /// Current block ID
-    pub current_block_id: String,
+    pub current_block_id: ChannelId,
     /// Current block name
     pub current_block_name: String,
     /// Depth from home block
     pub depth: u32,
     /// Path from home (block IDs)
-    pub path: Vec<String>,
+    pub path: Vec<ChannelId>,
 }
 
 /// Neighborhood state
@@ -52,7 +53,7 @@ pub struct TraversalPosition {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct NeighborhoodState {
     /// Home block ID
-    pub home_block_id: String,
+    pub home_block_id: ChannelId,
     /// Home block name
     pub home_block_name: String,
     /// Current traversal position (if traversing)
@@ -75,8 +76,8 @@ impl NeighborhoodState {
     }
 
     /// Get neighbor by ID
-    pub fn neighbor(&self, id: &str) -> Option<&NeighborBlock> {
-        self.neighbors.iter().find(|n| n.id == id)
+    pub fn neighbor(&self, id: &ChannelId) -> Option<&NeighborBlock> {
+        self.neighbors.iter().find(|n| n.id == *id)
     }
 
     /// Get direct neighbors

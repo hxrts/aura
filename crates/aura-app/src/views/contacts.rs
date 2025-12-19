@@ -1,5 +1,6 @@
 //! # Contacts View State
 
+use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -34,11 +35,11 @@ pub struct MySuggestion {
 // =============================================================================
 
 /// A contact
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Contact {
     /// Contact identifier (authority ID)
-    pub id: String,
+    pub id: AuthorityId,
     /// Nickname (user-assigned name)
     pub nickname: String,
     /// Suggested name (from contact or system)
@@ -60,15 +61,15 @@ pub struct ContactsState {
     /// All contacts
     pub contacts: Vec<Contact>,
     /// Currently selected contact ID
-    pub selected_contact_id: Option<String>,
+    pub selected_contact_id: Option<AuthorityId>,
     /// Search filter
     pub search_filter: Option<String>,
 }
 
 impl ContactsState {
     /// Get contact by ID
-    pub fn contact(&self, id: &str) -> Option<&Contact> {
-        self.contacts.iter().find(|c| c.id == id)
+    pub fn contact(&self, id: &AuthorityId) -> Option<&Contact> {
+        self.contacts.iter().find(|c| c.id == *id)
     }
 
     /// Get contacts matching search filter
@@ -104,7 +105,7 @@ impl ContactsState {
     /// Get display name for a contact
     ///
     /// Returns nickname if set, otherwise suggested_name, otherwise the ID as fallback.
-    pub fn get_display_name(&self, id: &str) -> String {
+    pub fn get_display_name(&self, id: &AuthorityId) -> String {
         if let Some(contact) = self.contact(id) {
             if !contact.nickname.is_empty() {
                 return contact.nickname.clone();
@@ -119,7 +120,7 @@ impl ContactsState {
     /// Set nickname for a contact
     ///
     /// If the contact doesn't exist, creates a new contact entry.
-    pub fn set_nickname(&mut self, target: String, nickname: String) {
+    pub fn set_nickname(&mut self, target: AuthorityId, nickname: String) {
         if let Some(contact) = self.contacts.iter_mut().find(|c| c.id == target) {
             contact.nickname = nickname;
         } else {

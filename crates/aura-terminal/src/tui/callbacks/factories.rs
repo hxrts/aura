@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use aura_core::identifiers::ChannelId;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::types::{Device, MfaPolicy, TraversalDepth};
@@ -111,8 +112,10 @@ impl ChatCallbacks {
             let tx = tx.clone();
             let channel_id_clone = channel_id.clone();
             tokio::spawn(async move {
+                // Parse channel_id string to ChannelId
+                let channel_id_typed = channel_id.parse::<ChannelId>().ok();
                 let core = app_core.read().await;
-                core.views().select_channel(Some(channel_id));
+                core.views().select_channel(channel_id_typed);
                 let _ = tx.send(UiUpdate::ChannelSelected(channel_id_clone));
             });
         })
@@ -773,10 +776,11 @@ impl BlockCallbacks {
                     if let Ok(blocks) = core.read(&*BLOCKS_SIGNAL).await {
                         blocks
                             .current_block_id
-                            .clone()
+                            .as_ref()
+                            .map(|id| id.to_string())
                             .unwrap_or_else(|| "home".to_string())
                     } else if let Ok(block) = core.read(&*BLOCK_SIGNAL).await {
-                        block.id.clone()
+                        block.id.to_string()
                     } else {
                         "home".to_string()
                     }

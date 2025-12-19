@@ -63,7 +63,7 @@ impl SnapshotHelper {
         if let Some(snapshot) = self.try_state_snapshot() {
             ChatSnapshot {
                 channels: snapshot.chat.channels,
-                selected_channel: snapshot.chat.selected_channel_id,
+                selected_channel: snapshot.chat.selected_channel_id.map(|id| id.to_string()),
                 messages: snapshot.chat.messages,
             }
         } else {
@@ -135,10 +135,12 @@ impl SnapshotHelper {
 
     pub fn snapshot_block(&self) -> BlockSnapshot {
         use aura_app::views::block::ResidentRole;
+        use aura_core::identifiers::ChannelId;
 
         if let Some(snapshot) = self.try_state_snapshot() {
             let block = snapshot.blocks.current_block().cloned().or_else(|| {
-                if snapshot.block.id.is_empty() {
+                // Check if block has default (empty) ID
+                if snapshot.block.id == ChannelId::default() {
                     None
                 } else {
                     Some(snapshot.block)
@@ -179,7 +181,7 @@ impl SnapshotHelper {
                 }
             });
             NeighborhoodSnapshot {
-                neighborhood_id: Some(home_id),
+                neighborhood_id: Some(home_id.to_string()),
                 neighborhood_name: Some(home_name),
                 blocks: snapshot.neighborhood.neighbors,
                 position,

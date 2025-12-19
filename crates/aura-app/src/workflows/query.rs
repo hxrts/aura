@@ -5,7 +5,7 @@
 
 use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
-use aura_core::AuraError;
+use aura_core::{identifiers::AuthorityId, AuraError};
 use std::sync::Arc;
 
 /// List participants in a channel
@@ -31,11 +31,15 @@ pub async fn list_participants(
 
     // For DM channels (format: "dm:<contact_id>"), include just that contact
     if channel.starts_with("dm:") {
-        let contact_id = channel.strip_prefix("dm:").unwrap_or("");
-        if let Some(contact) = contacts.contact(contact_id) {
-            participants.push(get_display_name(contact));
+        let contact_id_str = channel.strip_prefix("dm:").unwrap_or("");
+        if let Ok(contact_id) = contact_id_str.parse::<AuthorityId>() {
+            if let Some(contact) = contacts.contact(&contact_id) {
+                participants.push(get_display_name(contact));
+            } else {
+                participants.push(contact_id_str.to_string());
+            }
         } else {
-            participants.push(contact_id.to_string());
+            participants.push(contact_id_str.to_string());
         }
     } else {
         // For group channels, include all contacts as potential participants
@@ -65,9 +69,11 @@ pub async fn get_user_info(
     let snapshot = app_core_guard.snapshot();
     let contacts = &snapshot.contacts;
 
-    // Look up contact by ID
-    if let Some(contact) = contacts.contact(target) {
-        return Ok(contact.clone());
+    // Look up contact by ID (if parseable as AuthorityId)
+    if let Ok(authority_id) = target.parse::<AuthorityId>() {
+        if let Some(contact) = contacts.contact(&authority_id) {
+            return Ok(contact.clone());
+        }
     }
 
     // Try partial match by name
@@ -120,7 +126,8 @@ fn get_display_name(contact: &Contact) -> String {
     } else if let Some(ref suggested) = contact.suggested_name {
         suggested.clone()
     } else {
-        contact.id.chars().take(8).collect::<String>() + "..."
+        let id_str = contact.id.to_string();
+        id_str.chars().take(8).collect::<String>() + "..."
     }
 }
 

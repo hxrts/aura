@@ -15,6 +15,7 @@ use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_app::views::contacts::Contact as ViewContact;
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::AuthorityId;
 
 use super::{SnapshotHelper, ToastHelper};
 use crate::error::TerminalError;
@@ -359,6 +360,15 @@ impl DispatchHelper {
     }
 
     async fn add_contact_from_invitation(&self, sender_id: &str, message: Option<&str>) {
+        // Parse sender_id to AuthorityId
+        let authority_id = match sender_id.parse::<AuthorityId>() {
+            Ok(id) => id,
+            Err(_) => {
+                tracing::warn!("Failed to parse sender_id as AuthorityId: {}", sender_id);
+                return;
+            }
+        };
+
         let suggested_name = message.and_then(|msg| {
             if msg.contains("from ") {
                 msg.split("from ")
@@ -371,7 +381,7 @@ impl DispatchHelper {
         });
 
         let contact = ViewContact {
-            id: sender_id.to_string(),
+            id: authority_id.clone(),
             nickname: suggested_name.clone().unwrap_or_default(),
             suggested_name,
             is_guardian: false,
@@ -387,7 +397,7 @@ impl DispatchHelper {
 
         let core = self.app_core.read().await;
         if let Ok(mut contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-            if !contacts_state.contacts.iter().any(|c| c.id == sender_id) {
+            if !contacts_state.contacts.iter().any(|c| c.id == authority_id) {
                 contacts_state.contacts.push(contact);
                 if let Err(e) = core.emit(&*CONTACTS_SIGNAL, contacts_state).await {
                     tracing::warn!("Failed to update contacts signal: {}", e);

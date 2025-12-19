@@ -32,10 +32,18 @@ use std::sync::Arc;
 use aura_app::signal_defs::{CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, SYNC_STATUS_SIGNAL};
 use aura_app::views::chat::ChannelType;
 use aura_app::{AppConfig, AppCore};
+use aura_core::crypto::hash::hash;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::ChannelId;
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::IoContext;
 use aura_terminal::tui::effects::EffectCommand;
+
+/// Helper to create a DM channel ID the same way the messaging workflow does
+fn dm_channel_id(target: &str) -> ChannelId {
+    let descriptor = format!("dm:{}", target);
+    ChannelId::from_bytes(hash(descriptor.as_bytes()))
+}
 
 // ============================================================================
 // Test Helpers
@@ -225,6 +233,7 @@ async fn test_start_direct_chat_creates_dm_channel() {
 
     // Phase 3: Verify DM channel was created
     println!("\nPhase 3: Verify DM channel was created");
+    let expected_channel_id = dm_channel_id(contact_id);
     {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
@@ -235,8 +244,7 @@ async fn test_start_direct_chat_creates_dm_channel() {
         );
 
         // Find the DM channel
-        let dm_channel_id = format!("dm:{}", contact_id);
-        let dm_channel = chat.channels.iter().find(|c| c.id == dm_channel_id);
+        let dm_channel = chat.channels.iter().find(|c| c.id == expected_channel_id);
         assert!(dm_channel.is_some(), "DM channel should exist");
 
         let dm = dm_channel.unwrap();
@@ -256,10 +264,9 @@ async fn test_start_direct_chat_creates_dm_channel() {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
 
-        let dm_channel_id = format!("dm:{}", contact_id);
         assert_eq!(
-            chat.selected_channel_id,
-            Some(dm_channel_id.clone()),
+            chat.selected_channel_id.as_ref(),
+            Some(&expected_channel_id),
             "DM channel should be selected"
         );
         println!("  Selected channel: {:?}", chat.selected_channel_id);
@@ -310,16 +317,16 @@ async fn test_send_direct_message_adds_message() {
 
     // Phase 3: Verify channel was created
     println!("\nPhase 3: Verify DM channel was created");
+    let expected_channel_id = dm_channel_id(target);
     {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
 
-        let dm_channel_id = format!("dm:{}", target);
-        let dm_channel = chat.channels.iter().find(|c| c.id == dm_channel_id);
+        let dm_channel = chat.channels.iter().find(|c| c.id == expected_channel_id);
         assert!(
             dm_channel.is_some(),
             "DM channel should be created: {}",
-            dm_channel_id
+            expected_channel_id
         );
 
         let channel = dm_channel.unwrap();
@@ -344,8 +351,7 @@ async fn test_send_direct_message_adds_message() {
             "Should have more messages after send"
         );
 
-        let dm_channel_id = format!("dm:{}", target);
-        let message = chat.messages.iter().find(|m| m.channel_id == dm_channel_id);
+        let message = chat.messages.iter().find(|m| m.channel_id == expected_channel_id);
         assert!(message.is_some(), "Message should exist in DM channel");
 
         let msg = message.unwrap();
@@ -901,14 +907,14 @@ async fn test_complete_dm_flow() {
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
 
         // Find DM channel
-        let dm_channel = chat.channels.iter().find(|c| c.id == dm_channel_id);
+        let dm_channel = chat.channels.iter().find(|c| c.id.to_string() == dm_channel_id);
         assert!(dm_channel.is_some(), "DM channel should exist");
 
         // Count messages in DM channel
         let dm_messages: Vec<_> = chat
             .messages
             .iter()
-            .filter(|m| m.channel_id == dm_channel_id)
+            .filter(|m| m.channel_id.to_string() == dm_channel_id)
             .collect();
         assert_eq!(dm_messages.len(), 2, "Should have 2 messages in DM");
 

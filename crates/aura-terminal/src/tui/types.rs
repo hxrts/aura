@@ -34,7 +34,7 @@ pub struct Channel {
 impl From<&AppChannel> for Channel {
     fn from(ch: &AppChannel) -> Self {
         Self {
-            id: ch.id.clone(),
+            id: ch.id.to_string(),
             name: ch.name.clone(),
             topic: ch.topic.clone(),
             unread_count: ch.unread_count as usize,
@@ -47,7 +47,7 @@ impl Channel {
     /// Create from aura_app Channel with selection state
     pub fn from_app(ch: &AppChannel, is_selected: bool) -> Self {
         Self {
-            id: ch.id.clone(),
+            id: ch.id.to_string(),
             name: ch.name.clone(),
             topic: ch.topic.clone(),
             unread_count: ch.unread_count as usize,
@@ -516,10 +516,10 @@ impl From<&AppInvitation> for Invitation {
         // For direction-aware display names
         let (other_party_id, other_party_name) = match inv.direction {
             AppInvitationDirection::Sent => (
-                inv.to_id.clone().unwrap_or_default(),
+                inv.to_id.as_ref().map(|id| id.to_string()).unwrap_or_default(),
                 inv.to_name.clone().unwrap_or_default(),
             ),
-            AppInvitationDirection::Received => (inv.from_id.clone(), inv.from_name.clone()),
+            AppInvitationDirection::Received => (inv.from_id.to_string(), inv.from_name.clone()),
         };
 
         Self {
@@ -846,7 +846,7 @@ impl From<AppGuardianStatus> for GuardianStatus {
 impl From<&AppGuardian> for Guardian {
     fn from(g: &AppGuardian) -> Self {
         Self {
-            id: g.id.clone(),
+            id: g.id.to_string(),
             name: g.name.clone(),
             status: g.status.into(),
             has_share: true, // In the unified model, guardians always have shares
@@ -934,8 +934,8 @@ impl From<AppRecoveryProcessStatus> for RecoveryState {
 impl From<&AppRecoveryApproval> for GuardianApproval {
     fn from(a: &AppRecoveryApproval) -> Self {
         Self {
-            guardian_name: a.guardian_id.clone(), // Will be resolved to name by UI
-            approved: true,                       // If there's an approval record, it's approved
+            guardian_name: a.guardian_id.to_string(), // Will be resolved to name by UI
+            approved: true,                           // If there's an approval record, it's approved
         }
     }
 }
@@ -994,7 +994,7 @@ impl From<&AppRecoveryProcess> for PendingRequest {
     fn from(p: &AppRecoveryProcess) -> Self {
         Self {
             id: p.id.clone(),
-            account_name: p.account_id.clone(), // Will be resolved to name by UI if possible
+            account_name: p.account_id.to_string(), // Will be resolved to name by UI if possible
             approvals_received: p.approvals_received,
             approvals_required: p.approvals_required,
             we_approved: false, // Caller should set this based on our guardian ID
@@ -1106,7 +1106,7 @@ impl Resident {
 impl From<&aura_app::views::block::Resident> for Resident {
     fn from(r: &aura_app::views::block::Resident) -> Self {
         Self {
-            id: r.id.clone(),
+            id: r.id.to_string(),
             name: r.name.clone(),
             is_steward: r.is_steward(),
             is_self: false, // Cannot determine from aura-app Resident alone
@@ -1224,7 +1224,7 @@ impl BlockSummary {
 impl From<&AppContact> for Contact {
     fn from(c: &AppContact) -> Self {
         Self {
-            id: c.id.clone(),
+            id: c.id.to_string(),
             nickname: c.nickname.clone(),
             suggested_name: c.suggested_name.clone(),
             status: if c.is_online {

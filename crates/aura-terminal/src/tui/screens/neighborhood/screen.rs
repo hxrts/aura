@@ -240,13 +240,16 @@ pub struct NeighborhoodScreenProps {
 }
 
 /// Convert aura-app neighbor block to TUI block summary
-fn convert_neighbor_block(n: &aura_app::views::NeighborBlock, home_block_id: &str) -> BlockSummary {
+fn convert_neighbor_block(
+    n: &aura_app::views::NeighborBlock,
+    home_block_id: &aura_core::identifiers::ChannelId,
+) -> BlockSummary {
     BlockSummary {
-        id: n.id.clone(),
+        id: n.id.to_string(),
         name: Some(n.name.clone()),
         resident_count: n.resident_count.unwrap_or(0) as u8,
         max_residents: 8, // Default max
-        is_home: n.id == home_block_id,
+        is_home: n.id == *home_block_id,
         can_enter: n.can_traverse,
     }
 }

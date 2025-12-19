@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use aura_core::effects::reactive::{
     ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
 };
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, ChannelId};
 use aura_core::query::{FactPredicate, Query};
 use aura_core::time::TimeStamp;
 use aura_core::tree::{AttestedOp, TreeOp};
@@ -910,7 +910,7 @@ impl AppCore {
     /// This updates the selected channel in ChatState and triggers
     /// the chat signal for UI updates. Channel selection is a UI
     /// concern and doesn't need to be persisted to the journal.
-    pub fn select_channel(&self, channel_id: Option<String>) {
+    pub fn select_channel(&self, channel_id: Option<ChannelId>) {
         self.views.select_channel(channel_id);
     }
 

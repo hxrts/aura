@@ -5,7 +5,7 @@
 
 use crate::{views::block::ResidentRole, AppCore};
 use async_lock::RwLock;
-use aura_core::AuraError;
+use aura_core::{identifiers::AuthorityId, AuraError};
 use std::sync::Arc;
 
 /// Grant steward (Admin) role to a resident
@@ -31,9 +31,14 @@ pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Res
         ));
     }
 
+    // Parse target as AuthorityId
+    let target_id = target
+        .parse::<AuthorityId>()
+        .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {}", target)))?;
+
     // Find and update the target resident
     let resident = block
-        .resident_mut(target)
+        .resident_mut(&target_id)
         .ok_or_else(|| AuraError::not_found(format!("Resident not found: {}", target)))?;
 
     // Can't promote an Owner
@@ -74,9 +79,14 @@ pub async fn revoke_steward(
         ));
     }
 
+    // Parse target as AuthorityId
+    let target_id = target
+        .parse::<AuthorityId>()
+        .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {}", target)))?;
+
     // Find and update the target resident
     let resident = block
-        .resident_mut(target)
+        .resident_mut(&target_id)
         .ok_or_else(|| AuraError::not_found(format!("Resident not found: {}", target)))?;
 
     // Can only demote Admin, not Owner

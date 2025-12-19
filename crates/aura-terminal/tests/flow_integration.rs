@@ -680,7 +680,7 @@ async fn test_social_graph_flow() {
         let nickname_result = env
             .get_agent("bob")
             .dispatch(EffectCommand::UpdateContactNickname {
-                contact_id: alice_contact.id.clone(),
+                contact_id: alice_contact.id.to_string(),
                 nickname: "My Friend Alice".to_string(),
             })
             .await;
@@ -736,7 +736,7 @@ async fn test_social_graph_flow() {
         let invite_result = env
             .get_agent("bob")
             .dispatch(EffectCommand::SendBlockInvitation {
-                contact_id: alice_contact.id.clone(),
+                contact_id: alice_contact.id.to_string(),
             })
             .await;
 

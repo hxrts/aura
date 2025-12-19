@@ -1,5 +1,6 @@
 //! # Chat View State
 
+use aura_core::identifiers::{AuthorityId, ChannelId};
 use serde::{Deserialize, Serialize};
 
 /// Type of channel
@@ -23,11 +24,11 @@ impl ChannelType {
 }
 
 /// A chat channel
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Channel {
     /// Channel identifier
-    pub id: String,
+    pub id: ChannelId,
     /// Channel name
     pub name: String,
     /// Channel topic/description
@@ -49,15 +50,15 @@ pub struct Channel {
 }
 
 /// A chat message
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Message {
     /// Message identifier (fact ID)
     pub id: String,
     /// Channel this message belongs to
-    pub channel_id: String,
+    pub channel_id: ChannelId,
     /// Sender identifier
-    pub sender_id: String,
+    pub sender_id: AuthorityId,
     /// Sender display name
     pub sender_name: String,
     /// Message content
@@ -79,7 +80,7 @@ pub struct ChatState {
     /// All available channels
     pub channels: Vec<Channel>,
     /// Currently selected channel ID
-    pub selected_channel_id: Option<String>,
+    pub selected_channel_id: Option<ChannelId>,
     /// Messages in the selected channel
     pub messages: Vec<Message>,
     /// Total unread count across all channels
@@ -92,17 +93,17 @@ pub struct ChatState {
 
 impl ChatState {
     /// Get channel by ID
-    pub fn channel(&self, id: &str) -> Option<&Channel> {
-        self.channels.iter().find(|c| c.id == id)
+    pub fn channel(&self, id: &ChannelId) -> Option<&Channel> {
+        self.channels.iter().find(|c| c.id == *id)
     }
 
     /// Get mutable channel by ID
-    pub fn channel_mut(&mut self, id: &str) -> Option<&mut Channel> {
-        self.channels.iter_mut().find(|c| c.id == id)
+    pub fn channel_mut(&mut self, id: &ChannelId) -> Option<&mut Channel> {
+        self.channels.iter_mut().find(|c| c.id == *id)
     }
 
     /// Get unread count for a channel
-    pub fn unread_count(&self, channel_id: &str) -> u32 {
+    pub fn unread_count(&self, channel_id: &ChannelId) -> u32 {
         self.channel(channel_id)
             .map(|c| c.unread_count)
             .unwrap_or(0)
@@ -117,33 +118,33 @@ impl ChatState {
     }
 
     /// Remove a channel by ID
-    pub fn remove_channel(&mut self, channel_id: &str) {
-        self.channels.retain(|c| c.id != channel_id);
+    pub fn remove_channel(&mut self, channel_id: &ChannelId) {
+        self.channels.retain(|c| c.id != *channel_id);
         // Clear messages if this was the selected channel
-        if self.selected_channel_id.as_deref() == Some(channel_id) {
+        if self.selected_channel_id.as_ref() == Some(channel_id) {
             self.selected_channel_id = None;
             self.messages.clear();
         }
     }
 
     /// Mark a channel as joined (increment member count)
-    pub fn mark_channel_joined(&mut self, channel_id: &str) {
+    pub fn mark_channel_joined(&mut self, channel_id: &ChannelId) {
         if let Some(channel) = self.channel_mut(channel_id) {
             channel.member_count = channel.member_count.saturating_add(1);
         }
     }
 
     /// Update channel topic
-    pub fn update_topic(&mut self, channel_id: &str, topic: String) {
+    pub fn update_topic(&mut self, channel_id: &ChannelId, topic: String) {
         if let Some(channel) = self.channel_mut(channel_id) {
             channel.topic = Some(topic);
         }
     }
 
     /// Apply a new message to the state
-    pub fn apply_message(&mut self, channel_id: String, message: Message) {
+    pub fn apply_message(&mut self, channel_id: ChannelId, message: Message) {
         // Check if this is the selected channel before mutable borrow
-        let is_selected = self.selected_channel_id.as_deref() == Some(&channel_id);
+        let is_selected = self.selected_channel_id.as_ref() == Some(&channel_id);
         let should_increment_unread = !message.is_own && !is_selected;
 
         // Update channel metadata
@@ -173,7 +174,7 @@ impl ChatState {
     }
 
     /// Select a channel and load its messages
-    pub fn select_channel(&mut self, channel_id: Option<String>) {
+    pub fn select_channel(&mut self, channel_id: Option<ChannelId>) {
         if self.selected_channel_id != channel_id {
             // Clear old messages
             self.messages.clear();

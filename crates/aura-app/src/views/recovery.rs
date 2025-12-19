@@ -1,5 +1,6 @@
 //! # Recovery View State
 
+use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 /// Guardian status
@@ -18,11 +19,11 @@ pub enum GuardianStatus {
 }
 
 /// A guardian
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Guardian {
     /// Guardian identifier
-    pub id: String,
+    pub id: AuthorityId,
     /// Guardian display name (nickname)
     pub name: String,
     /// Guardian status
@@ -53,11 +54,11 @@ pub enum RecoveryProcessStatus {
 }
 
 /// Guardian approval for recovery (with detailed info)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct RecoveryApproval {
     /// Guardian ID who approved
-    pub guardian_id: String,
+    pub guardian_id: AuthorityId,
     /// Timestamp when approved (ms since epoch)
     pub approved_at: u64,
 }
@@ -68,8 +69,8 @@ pub struct RecoveryApproval {
 pub struct RecoveryProcess {
     /// Recovery context ID
     pub id: String,
-    /// Account being recovered (authority ID as string)
-    pub account_id: String,
+    /// Account being recovered
+    pub account_id: AuthorityId,
     /// Current status
     pub status: RecoveryProcessStatus,
     /// Number of approvals received
@@ -77,7 +78,7 @@ pub struct RecoveryProcess {
     /// Number of approvals required
     pub approvals_required: u32,
     /// Guardian IDs that have approved
-    pub approved_by: Vec<String>,
+    pub approved_by: Vec<AuthorityId>,
     /// Detailed approval records
     pub approvals: Vec<RecoveryApproval>,
     /// When recovery was initiated (ms since epoch)
@@ -116,12 +117,12 @@ impl RecoveryState {
     }
 
     /// Get guardian by ID
-    pub fn guardian(&self, id: &str) -> Option<&Guardian> {
-        self.guardians.iter().find(|g| g.id == id)
+    pub fn guardian(&self, id: &AuthorityId) -> Option<&Guardian> {
+        self.guardians.iter().find(|g| g.id == *id)
     }
 
     /// Initiate a recovery process
-    pub fn initiate_recovery(&mut self, session_id: String, account_id: String, initiated_at: u64) {
+    pub fn initiate_recovery(&mut self, session_id: String, account_id: AuthorityId, initiated_at: u64) {
         self.active_recovery = Some(RecoveryProcess {
             id: session_id,
             account_id,
@@ -137,15 +138,15 @@ impl RecoveryState {
     }
 
     /// Add a guardian approval to the active recovery
-    pub fn add_guardian_approval(&mut self, guardian_id: String) {
+    pub fn add_guardian_approval(&mut self, guardian_id: AuthorityId) {
         self.add_guardian_approval_with_timestamp(guardian_id, 0);
     }
 
     /// Add a guardian approval with timestamp to the active recovery
-    pub fn add_guardian_approval_with_timestamp(&mut self, guardian_id: String, timestamp: u64) {
+    pub fn add_guardian_approval_with_timestamp(&mut self, guardian_id: AuthorityId, timestamp: u64) {
         if let Some(ref mut recovery) = self.active_recovery {
             if !recovery.approved_by.contains(&guardian_id) {
-                recovery.approved_by.push(guardian_id.clone());
+                recovery.approved_by.push(guardian_id);
                 recovery.approvals.push(RecoveryApproval {
                     guardian_id,
                     approved_at: timestamp,
@@ -193,7 +194,7 @@ impl RecoveryState {
     ///
     /// If is_guardian is true, adds/activates the guardian.
     /// If is_guardian is false, removes/revokes the guardian.
-    pub fn toggle_guardian(&mut self, contact_id: String, is_guardian: bool) {
+    pub fn toggle_guardian(&mut self, contact_id: AuthorityId, is_guardian: bool) {
         if is_guardian {
             // Check if guardian already exists
             if let Some(guardian) = self.guardians.iter_mut().find(|g| g.id == contact_id) {
