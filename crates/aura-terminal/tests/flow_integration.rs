@@ -73,14 +73,12 @@ struct TestAgent {
 impl TestAgent {
     /// Create a new test agent with initialized context
     async fn new(name: &str) -> Self {
+        // Use UUID v4 to ensure unique directories even when tests run concurrently
+        let unique_id = uuid::Uuid::new_v4();
         let test_dir = std::env::temp_dir().join(format!(
-            "aura-flow-test-{}-{}-{}",
+            "aura-flow-test-{}-{}",
             name,
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            unique_id
         ));
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");

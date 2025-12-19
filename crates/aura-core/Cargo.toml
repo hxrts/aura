@@ -82,3 +82,7 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 [[bench]]
 name = "time_system"
 harness = false
+
+[[bench]]
+name = "vectorclock_regression"
+harness = false
