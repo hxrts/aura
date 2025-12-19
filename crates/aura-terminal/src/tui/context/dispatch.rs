@@ -429,3 +429,57 @@ fn command_name(command: &EffectCommand) -> &'static str {
         _ => "This operation",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use async_lock::RwLock;
+    use aura_app::{signal_defs::ERROR_SIGNAL, AppConfig, AppCore};
+    use aura_core::effects::reactive::ReactiveEffects;
+
+    use crate::handlers::tui::TuiMode;
+    use crate::tui::context::IoContext;
+    use crate::tui::effects::EffectCommand;
+
+    async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::signal_defs::AppError {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+        loop {
+            {
+                let core = app_core.read().await;
+                if let Ok(Some(err)) = core.read(&*ERROR_SIGNAL).await {
+                    return err;
+                }
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                panic!("Timed out waiting for ERROR_SIGNAL to become Some");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_command_emits_error_signal() {
+        let app_core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
+        app_core
+            .init_signals()
+            .await
+            .expect("Failed to init signals");
+        let app_core = Arc::new(RwLock::new(app_core));
+
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let ctx = IoContext::with_account_status(
+            app_core.clone(),
+            false,
+            dir.path().to_path_buf(),
+            "test-device".to_string(),
+            TuiMode::Production,
+        );
+
+        let _ = ctx.dispatch(EffectCommand::UnknownCommandForTest).await;
+        let err = wait_for_error(&app_core).await;
+        assert_eq!(err.code, "OPERATION_FAILED");
+        assert!(err.message.contains("Unknown command"));
+    }
+}

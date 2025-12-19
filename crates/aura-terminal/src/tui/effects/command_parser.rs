@@ -390,10 +390,11 @@ pub enum EffectCommand {
     },
 
     // === Test-only Commands (not user-parsed) ===
-    /// Intentionally unmapped command used to exercise error paths in tests.
+    /// Intentionally unmapped command used to exercise "unknown command" error paths in unit tests.
     ///
     /// This is not produced by the command parser and is not handled by the
     /// intent mapper or operational handlers.
+    #[cfg(test)]
     UnknownCommandForTest,
 }
 
@@ -418,8 +419,10 @@ impl EffectCommand {
             | Self::ListLanPeers
             | Self::Ping
             | Self::ListParticipants { .. }
-            | Self::GetUserInfo { .. }
-            | Self::UnknownCommandForTest => CommandAuthorizationLevel::Public,
+            | Self::GetUserInfo { .. } => CommandAuthorizationLevel::Public,
+
+            #[cfg(test)]
+            Self::UnknownCommandForTest => CommandAuthorizationLevel::Public,
 
             // Basic - user token required
             Self::SendMessage { .. }
