@@ -48,7 +48,6 @@ pub mod reliability;
 pub mod choreography_adapter;
 
 // Re-export main types for convenience
-use aura_core::effects::ExecutionMode;
 pub use builder::EffectSystemBuilder;
 pub use choreography_adapter::{AuraHandlerAdapter, ChoreographyAdapter};
 pub use context::EffectContext;
@@ -59,76 +58,6 @@ pub type RuntimeSystem = AuraEffectSystem;
 pub type RuntimeBuilder = EffectSystemBuilder;
 pub use registry::{EffectRegistry, EffectRegistryError, EffectRegistryExt};
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct EffectSystemConfig {
-    pub device_id: aura_core::identifiers::DeviceId,
-    pub execution_mode: ExecutionMode,
-    pub storage_config: Option<StorageConfig>,
-    pub initial_epoch: u64,
-    pub default_flow_limit: u64,
-}
-
-#[allow(dead_code)]
-impl EffectSystemConfig {
-    /// Create config for production
-    pub fn for_production(
-        device_id: aura_core::identifiers::DeviceId,
-    ) -> Result<Self, aura_core::AuraError> {
-        Ok(Self {
-            device_id,
-            execution_mode: ExecutionMode::Production,
-            storage_config: None,
-            initial_epoch: 1,
-            default_flow_limit: 10000,
-        })
-    }
-
-    /// Create config for simulation
-    pub fn for_simulation(device_id: aura_core::identifiers::DeviceId, seed: u64) -> Self {
-        Self {
-            device_id,
-            execution_mode: ExecutionMode::Simulation { seed },
-            storage_config: None,
-            initial_epoch: 1,
-            default_flow_limit: 10000,
-        }
-    }
-
-    /// Create config for testing
-    pub fn for_testing(device_id: aura_core::identifiers::DeviceId) -> Self {
-        Self {
-            device_id,
-            execution_mode: ExecutionMode::Testing,
-            storage_config: None,
-            initial_epoch: 1,
-            default_flow_limit: 10000,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct StorageConfig {
-    pub storage_path: String,
-}
-
-#[allow(dead_code)]
-impl StorageConfig {
-    /// Create config for testing
-    pub fn for_testing() -> Self {
-        Self {
-            storage_path: "/tmp/aura-test".to_string(),
-        }
-    }
-
-    /// Create config for simulation
-    pub fn for_simulation() -> Self {
-        Self {
-            storage_path: "/tmp/aura-sim".to_string(),
-        }
-    }
-}
 pub use executor::EffectExecutor;
 pub use lifecycle::LifecycleManager;
 #[allow(unused_imports)] // Re-exported for public API

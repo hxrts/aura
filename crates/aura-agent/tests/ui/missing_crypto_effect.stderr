@@ -1,0 +1,16 @@
+error[E0599]: no method named `build` found for struct `CustomPresetBuilder<Missing, Provided<Arc<dyn StorageEffects>>, Provided<Arc<dyn PhysicalTimeEffects>>, Provided<Arc<dyn RandomEffects>>, Provided<Arc<(dyn ConsoleEffects + 'static)>>>` in the current scope
+  --> tests/ui/missing_crypto_effect.rs:23:10
+   |
+18 |       let _builder = AgentBuilder::custom()
+   |  ____________________-
+19 | |         .with_storage(Arc::new(FilesystemStorageHandler::new(temp_dir)))
+20 | |         .with_time(Arc::new(PhysicalTimeHandler::new()))
+21 | |         .with_random(Arc::new(RealRandomHandler::new()))
+22 | |         .with_console(Arc::new(RealConsoleHandler::new()))
+23 | |         .build();
+   | |         -^^^^^ method not found in `CustomPresetBuilder<Missing, Provided<Arc<dyn StorageEffects>>, Provided<Arc<dyn PhysicalTimeEffects>>, Provided<Arc<dyn RandomEffects>>, Provided<Arc<(dyn ConsoleEffects + 'static)>>>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `CustomPresetBuilder<Provided<Arc<(dyn CryptoEffects + 'static)>>, Provided<Arc<(dyn StorageEffects + 'static)>>, Provided<Arc<(dyn PhysicalTimeEffects + 'static)>>, Provided<Arc<(dyn RandomEffects + 'static)>>, Provided<Arc<(dyn ConsoleEffects + 'static)>>>`

@@ -22,6 +22,72 @@ just build
 
 The build compiles all Aura components and generates the CLI binary. This takes a few minutes on the first run.
 
+## Creating an Agent
+
+Aura provides platform-specific builder presets for creating agents. The CLI preset is the simplest path for terminal applications.
+
+```rust
+use aura_agent::AgentBuilder;
+
+// CLI preset - simplest path for terminal applications
+let agent = AgentBuilder::cli()
+    .data_dir("~/.aura")
+    .testing_mode()
+    .build()
+    .await?;
+```
+
+The CLI preset provides sensible defaults for command-line tools. It uses file-based storage, real cryptographic operations, and TCP transport.
+
+For custom environments that need explicit control over effect handlers, use the custom preset with typestate enforcement.
+
+```rust
+use std::sync::Arc;
+use aura_agent::AgentBuilder;
+use aura_effects::{
+    RealCryptoHandler, FilesystemStorageHandler,
+    PhysicalTimeHandler, RealRandomHandler, RealConsoleHandler,
+};
+
+// Custom preset - all effects must be provided
+let agent = AgentBuilder::custom()
+    .with_crypto(Arc::new(RealCryptoHandler::new()))
+    .with_storage(Arc::new(FilesystemStorageHandler::new("~/.aura".into())))
+    .with_time(Arc::new(PhysicalTimeHandler::new()))
+    .with_random(Arc::new(RealRandomHandler::new()))
+    .with_console(Arc::new(RealConsoleHandler::new()))
+    .testing_mode()
+    .build()
+    .await?;
+```
+
+The custom preset uses Rust's type system to enforce that all required effects are provided before building. Attempting to call `build()` without providing all five required effects results in a compile error.
+
+Platform-specific presets are available for iOS, Android, and Web/WASM. These require feature flags to enable.
+
+```rust
+// iOS preset (requires --features ios)
+let agent = AgentBuilder::ios()
+    .app_group("group.com.example.aura")
+    .build()
+    .await?;
+
+// Android preset (requires --features android)
+let agent = AgentBuilder::android()
+    .application_id("com.example.aura")
+    .use_strongbox(true)
+    .build()
+    .await?;
+
+// Web preset (requires --features web)
+let agent = AgentBuilder::web()
+    .storage_prefix("aura_")
+    .build()
+    .await?;
+```
+
+See [Project Structure](999_project_structure.md) for details on the 8-layer architecture and effect handler organization.
+
 ## Hello World Protocol
 
 Create a simple ping-pong choreography. This protocol demonstrates basic message exchange between two devices.

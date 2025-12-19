@@ -62,6 +62,7 @@ parking_lot = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
 cfg-if = "1"
+dirs = { workspace = true }
 
 # Optional dependencies for features
 tokio-tungstenite = { workspace = true, optional = true }
@@ -97,8 +98,16 @@ dev-console = [
 ]
 real-android-keystore = []  # Enable real Android Keystore implementation
 
+# Platform-specific presets
+# These enable the build() method for platform-specific builders.
+# The builder types are always available for API discoverability.
+ios = []      # iOS preset: Keychain crypto, app container storage
+android = []  # Android preset: Keystore crypto, encrypted storage
+web = []      # Web/WASM preset: Web Crypto API, IndexedDB storage
+
 [dev-dependencies]
 # tokio-test = { workspace = true } # removed - unused
 aura-testkit = { path = "../aura-testkit" }
 tracing-subscriber = { workspace = true }
 futures = { workspace = true }
+trybuild = { workspace = true }

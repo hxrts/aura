@@ -78,6 +78,9 @@
 // Core modules (public API)
 pub mod core;
 
+// Builder system for ergonomic runtime construction
+pub mod builder;
+
 // Runtime modules (internal)
 mod runtime;
 
@@ -95,6 +98,12 @@ pub mod fact_registry;
 
 // Public API - authority-first design
 pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, AuthorityContext};
+
+// Builder system exports
+pub use builder::{
+    AndroidPresetBuilder, BuildError, CliPresetBuilder, CustomPresetBuilder,
+    DataProtectionClass, IosPresetBuilder, WebPresetBuilder,
+};
 
 // Session management types
 pub use handlers::{SessionHandle, SessionService, SessionStats};

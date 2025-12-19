@@ -1,0 +1,8 @@
+error[E0599]: no method named `build` found for struct `CustomPresetBuilder<Missing, Missing, Missing, Missing, Missing>` in the current scope
+  --> tests/ui/missing_all_effects.rs:10:43
+   |
+10 |     let _builder = AgentBuilder::custom().build();
+   |                                           ^^^^^ method not found in `CustomPresetBuilder<Missing, Missing, Missing, Missing, Missing>`
+   |
+   = note: the method was found for
+           - `CustomPresetBuilder<Provided<Arc<(dyn aura_core::effects::crypto::CryptoEffects + 'static)>>, Provided<Arc<(dyn aura_core::effects::storage::StorageEffects + 'static)>>, Provided<Arc<(dyn aura_core::effects::time::PhysicalTimeEffects + 'static)>>, Provided<Arc<(dyn aura_core::effects::random::RandomEffects + 'static)>>, Provided<Arc<(dyn aura_core::effects::console::ConsoleEffects + 'static)>>>`

@@ -78,10 +78,12 @@ async fn main() -> Result<(), AuraError> {
     let context_id = ids::context_id("cli:main-context");
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
 
-    // Initialize agent and create AppCore (unified backend)
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&effect_context)
+    // Initialize agent using CLI preset (unified backend)
+    let agent = AgentBuilder::cli()
+        .authority(authority_id)
+        .context(context_id)
+        .testing_mode()
+        .build()
         .await
         .map_err(|e| AuraError::agent(format!("{}", e)))?;
     let agent = Arc::new(agent);

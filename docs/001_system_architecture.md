@@ -525,7 +525,7 @@ View types aggregate reactive state for screens. Views subscribe to journal fact
 
 The effect bridge connects the TUI to the real effect system. Commands dispatch asynchronously. Results return via channel. Events stream from the effect system to the TUI.
 
-Demo mode compiles only with the development feature flag. The simulator automates Alice and Carol while Bob is human-controlled. Production builds exclude simulator dependencies. See [Terminal User Interface](115_tui.md) for component details.
+Demo mode compiles only with the development feature flag. The simulator automates Alice and Carol while Bob is human-controlled. Production builds exclude simulator dependencies. See [CLI and Terminal User Interface](115_cli_tui.md) for component details.
 
 ## 11. Operation Categories
 
@@ -607,4 +607,4 @@ Core documentation covers foundational concepts and formal models. [Theoretical 
 
 System documentation covers major components. [Authority and Identity](100_authority_and_identity.md) describes the authority model. [Journal System](102_journal.md) documents fact storage and reduction. [Relational Contexts](103_relational_contexts.md) covers cross-authority relationships. [Consensus](104_consensus.md) describes the agreement protocol. [Database Architecture](113_database.md) covers query and indexing systems. [Social Architecture](114_social_architecture.md) defines blocks and neighborhoods.
 
-Implementation documentation covers practical patterns. [Effect System and Runtime](106_effect_system_and_runtime.md) details effect implementation. [MPST and Choreography](107_mpst_and_choreography.md) covers protocol design. [Authorization](109_authorization.md) describes capability evaluation. [Terminal User Interface](115_tui.md) specifies the TUI architecture. [Project Structure](999_project_structure.md) provides comprehensive crate organization.
+Implementation documentation covers practical patterns. [Effect System and Runtime](106_effect_system_and_runtime.md) details effect implementation. [MPST and Choreography](107_mpst_and_choreography.md) covers protocol design. [Authorization](109_authorization.md) describes capability evaluation. [CLI and Terminal User Interface](115_cli_tui.md) specifies the CLI and TUI architecture. [Project Structure](999_project_structure.md) provides comprehensive crate organization.

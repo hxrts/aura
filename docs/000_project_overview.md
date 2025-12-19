@@ -88,7 +88,7 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Social Architecture](114_social_architecture.md) defines the social organization model using messages, blocks, and neighborhoods.
 
-[Terminal UI Architecture](115_tui.md) specifies the ratatui-based TUI for the Aura CLI.
+[CLI and Terminal User Interface](115_cli_tui.md) specifies the CLI and iocraft-based TUI for Aura.
 
 **Developer Guides**
 

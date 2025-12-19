@@ -98,7 +98,7 @@ pub use aura_core::{AuraError, AuraResult};
 // Handler composition available from aura_composition::
 // - EffectBuilder, EffectRegistry, HandlerContainer
 // Runtime assembly available from aura_agent::runtime:
-// - AuraEffectSystem, EffectSystemConfig, LifecycleManager
+// - AuraEffectSystem, LifecycleManager
 // - Context management, services, optimizations
 //
 /// Composite trait that combines all effect traits
@@ -137,7 +137,6 @@ pub trait AuraEffects:
 // - EffectBuilder: Compile-time type-safe effect building
 // Runtime assembly available from aura_agent::runtime:
 // - AuraEffectSystem: Concrete effect system type
-// - EffectSystemConfig: System configuration
 
 /// Protocol requirement specification marker
 ///

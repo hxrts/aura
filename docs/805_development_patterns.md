@@ -334,3 +334,228 @@ impl AuraAgent {
 - **Safe**: RwLock managed automatically at agent layer
 
 See `docs/106_effect_system_and_runtime.md` section 13 for more details.
+
+## Implementing Aura in a New Environment
+
+When building an Aura application for a new platform (mobile, web, embedded, or custom infrastructure), use the `AgentBuilder` API to assemble the runtime with appropriate effect handlers.
+
+### Choosing a Builder Strategy
+
+Aura provides three paths for creating agents:
+
+| Strategy | Use Case | Compile-Time Safety |
+|----------|----------|---------------------|
+| Platform preset | Standard platforms (CLI, iOS, Android, Web) | Configuration validation |
+| Custom preset | Full control over all effects | Typestate enforcement |
+| Effect overrides | Preset with specific customizations | Mixed |
+
+### Using Platform Presets
+
+Platform presets provide sensible defaults for common environments.
+
+#### CLI Preset
+
+The CLI preset is the simplest path for terminal applications:
+
+```rust
+use aura_agent::AgentBuilder;
+
+let agent = AgentBuilder::cli()
+    .data_dir("~/.aura")
+    .testing_mode()
+    .build()
+    .await?;
+```
+
+The CLI preset wires:
+- `RealCryptoHandler` for cryptographic operations
+- `FilesystemStorageHandler` for persistent storage
+- `PhysicalTimeHandler` for wall-clock time
+- `RealRandomHandler` for secure randomness
+- `RealConsoleHandler` for terminal output
+- `TcpTransportHandler` for network transport
+
+#### Mobile Presets
+
+Mobile presets require platform-specific feature flags:
+
+```rust
+// iOS (requires --features ios)
+let agent = AgentBuilder::ios()
+    .app_group("group.com.example.aura")
+    .keychain_access_group("com.example.aura")
+    .data_protection(DataProtectionClass::CompleteProtection)
+    .build()
+    .await?;
+
+// Android (requires --features android)
+let agent = AgentBuilder::android()
+    .application_id("com.example.aura")
+    .use_strongbox(true)
+    .require_user_authentication(Some(300)) // 5 minutes
+    .build()
+    .await?;
+```
+
+#### Web Preset
+
+The web preset targets browser environments:
+
+```rust
+// Web/WASM (requires --features web)
+let agent = AgentBuilder::web()
+    .storage_prefix("aura_")
+    .use_session_storage(false)
+    .build()
+    .await?;
+```
+
+### Custom Preset with Typestate
+
+When you need explicit control over all effects, use the custom preset. The Rust type system enforces that all required effects are provided before `build()` is available.
+
+```rust
+use std::sync::Arc;
+use aura_agent::AgentBuilder;
+use aura_effects::{
+    RealCryptoHandler, FilesystemStorageHandler,
+    PhysicalTimeHandler, RealRandomHandler, RealConsoleHandler,
+};
+
+// All five required effects must be provided
+let agent = AgentBuilder::custom()
+    .with_crypto(Arc::new(RealCryptoHandler::new()))
+    .with_storage(Arc::new(FilesystemStorageHandler::new("~/.aura".into())))
+    .with_time(Arc::new(PhysicalTimeHandler::new()))
+    .with_random(Arc::new(RealRandomHandler::new()))
+    .with_console(Arc::new(RealConsoleHandler::new()))
+    .testing_mode()
+    .build()
+    .await?;
+```
+
+Attempting to call `build()` without providing all required effects results in a compile error:
+
+```rust
+// This will not compile - missing effects
+let agent = AgentBuilder::custom()
+    .with_crypto(Arc::new(RealCryptoHandler::new()))
+    .build()  // Error: method not found for this type
+    .await?;
+```
+
+### Required vs Optional Effects
+
+#### Core Required Effects
+
+Every agent requires these five effects:
+
+| Effect | Purpose | Trait |
+|--------|---------|-------|
+| Crypto | Signing, verification, encryption | `CryptoEffects` |
+| Storage | Persistent data storage | `StorageEffects` |
+| Time | Wall-clock timestamps | `PhysicalTimeEffects` |
+| Random | Cryptographically secure randomness | `RandomEffects` |
+| Console | Logging and output | `ConsoleEffects` |
+
+#### Optional Effects
+
+These effects have defaults or are derived from required effects:
+
+| Effect | Default Behavior |
+|--------|-----------------|
+| `TransportEffects` | TCP transport (can be customized) |
+| `LogicalClockEffects` | Derived from storage |
+| `OrderClockEffects` | Derived from random |
+| `ReactiveEffects` | Default reactive handler |
+| `JournalEffects` | Derived from storage + crypto |
+| `BiometricEffects` | Fallback no-op handler |
+
+### Implementing Custom Effect Handlers
+
+To support a new platform, implement the core effect traits:
+
+```rust
+use aura_core::effects::{CryptoEffects, Signature, SecretKey, PublicKey};
+
+pub struct MyPlatformCrypto {
+    // Platform-specific state
+}
+
+#[async_trait]
+impl CryptoEffects for MyPlatformCrypto {
+    async fn sign(&self, key: &SecretKey, msg: &[u8]) -> Result<Signature> {
+        // Platform-specific signing implementation
+    }
+
+    async fn verify(&self, key: &PublicKey, msg: &[u8], sig: &Signature) -> Result<bool> {
+        // Platform-specific verification
+    }
+
+    // ... other required methods
+}
+```
+
+Then use it with the custom builder:
+
+```rust
+let agent = AgentBuilder::custom()
+    .with_crypto(Arc::new(MyPlatformCrypto::new()))
+    .with_storage(Arc::new(MyPlatformStorage::new()))
+    .with_time(Arc::new(MyPlatformTime::new()))
+    .with_random(Arc::new(MyPlatformRandom::new()))
+    .with_console(Arc::new(MyPlatformConsole::new()))
+    .build()
+    .await?;
+```
+
+### Testing Custom Implementations
+
+Use mock handlers from `aura-testkit` for testing:
+
+```rust
+use aura_testkit::{MockCryptoHandler, MockStorageHandler};
+
+#[tokio::test]
+async fn test_custom_agent() {
+    let agent = AgentBuilder::custom()
+        .with_crypto(Arc::new(MockCryptoHandler::new()))
+        .with_storage(Arc::new(MockStorageHandler::new()))
+        .with_time(Arc::new(MockTimeHandler::new()))
+        .with_random(Arc::new(MockRandomHandler::seeded(42)))
+        .with_console(Arc::new(MockConsoleHandler::new()))
+        .testing_mode()
+        .build()
+        .await
+        .expect("Agent should build");
+
+    // Test agent operations
+}
+```
+
+### Feature Flags
+
+Platform-specific presets require feature flags:
+
+```toml
+[dependencies]
+aura-agent = { version = "0.1", features = ["ios"] }
+# or
+aura-agent = { version = "0.1", features = ["android"] }
+# or
+aura-agent = { version = "0.1", features = ["web"] }
+```
+
+The default feature set includes CLI support. Multiple platform features can be enabled simultaneously for cross-platform codebases.
+
+### Platform Implementation Checklist
+
+When implementing Aura for a new platform:
+
+- [ ] Identify platform-specific APIs for crypto, storage, time, random, and console
+- [ ] Implement the five core effect traits using platform APIs
+- [ ] Create a preset builder (optional but recommended)
+- [ ] Add feature flags for platform-specific dependencies
+- [ ] Write integration tests using mock handlers
+- [ ] Document platform-specific security considerations
+- [ ] Consider transport layer requirements (WebSocket, BLE, etc.)
