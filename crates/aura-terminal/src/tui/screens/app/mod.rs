@@ -4,6 +4,7 @@
 
 mod modal_overlays;
 mod shell;
+mod subscriptions;
 
 // Shell exports
 pub use shell::{run_app_with_context, IoApp};

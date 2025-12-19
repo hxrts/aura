@@ -18,11 +18,6 @@ use super::modal_overlays::{
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use aura_app::signal_defs::{
-    ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, SYNC_STATUS_SIGNAL,
-};
-use aura_core::effects::reactive::ReactiveEffects;
-
 use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
     DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastLevel, ToastMessage,
@@ -30,6 +25,7 @@ use crate::tui::components::{
 use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
+use crate::tui::screens::app::subscriptions::use_nav_status_signals;
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
     BlockScreen, ChatScreen, ContactsScreen, NeighborhoodScreen, RecoveryScreen, SettingsScreen,
@@ -175,41 +171,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // NavBar status: derive from reactive signals (no blocking awaits at startup).
     // =========================================================================
-    let nav_syncing = hooks.use_state(|| props.sync_in_progress);
-    let nav_peer_count = hooks.use_state(|| props.peer_count);
-    let nav_last_sync_time = hooks.use_state(|| props.last_sync_time);
-
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let mut nav_syncing = nav_syncing.clone();
-        async move {
-            let mut stream = {
-                let core = app_core.read().await;
-                core.subscribe(&*SYNC_STATUS_SIGNAL)
-            };
-            while let Ok(status) = stream.recv().await {
-                nav_syncing.set(matches!(status, SyncStatus::Syncing { .. }));
-            }
-        }
-    });
-
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let mut nav_peer_count = nav_peer_count.clone();
-        async move {
-            let mut stream = {
-                let core = app_core.read().await;
-                core.subscribe(&*CONNECTION_STATUS_SIGNAL)
-            };
-            while let Ok(status) = stream.recv().await {
-                let peers = match status {
-                    ConnectionStatus::Online { peer_count } => peer_count,
-                    _ => 0,
-                };
-                nav_peer_count.set(peers);
-            }
-        }
-    });
+    let nav_signals = use_nav_status_signals(
+        &mut hooks,
+        &app_ctx,
+        props.sync_in_progress,
+        props.peer_count,
+        props.last_sync_time,
+    );
 
     // NOTE: Toast polling loop removed - toasts now flow through UiUpdate channel
     // All toast operations (ShowToast, DismissToast, ClearAllToasts) send UiUpdate variants
@@ -625,8 +593,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut should_exit = should_exit.clone();
         let mut tui_state = tui_state.clone();
         let mut tui_state_version = tui_state_version.clone();
-        // Clone IoContext for ceremony operations
-        let io_ctx_for_ceremony = app_ctx.io_context.clone();
+        // Clone AppCoreContext for ceremony operations
+        let app_ctx_for_ceremony = app_ctx.clone();
         // Clone AppCore for key rotation operations
         let app_core_for_ceremony = app_ctx.app_core.clone();
         // Clone callbacks registry for command dispatch
@@ -772,7 +740,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             threshold_k
                                         );
 
-                                        let io_ctx = io_ctx_for_ceremony.clone();
+                                        let app_ctx = app_ctx_for_ceremony.clone();
                                         let ids = contact_ids.clone();
                                         let n = contact_ids.len() as u8;
                                         let k = threshold_k;
@@ -808,14 +776,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     // No mock acceptance here - full protocol fidelity!
 
                                                     // Show ceremony started toast
-                                                    io_ctx.add_info_toast(
+                                                    app_ctx.add_info_toast(
                                                         "guardian-ceremony-started",
                                                         format!("Guardian ceremony started! Waiting for {}-of-{} guardians to respond", k, n)
                                                     ).await;
 
                                                     // Spawn a task to monitor ceremony progress and show completion
                                                     let app_core_monitor = app_core.clone();
-                                                    let io_ctx_monitor = io_ctx.clone();
+                                                    let app_ctx_monitor = app_ctx.clone();
                                                     tokio::spawn(async move {
                                                         // Poll for ceremony completion (max 30 seconds)
                                                         for _ in 0..60 {
@@ -825,7 +793,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                             if let Ok(status) = core.get_ceremony_status(&ceremony_id).await {
                                                                 if status.is_complete {
                                                                     tracing::info!("Guardian ceremony completed successfully");
-                                                                    io_ctx_monitor.add_success_toast(
+                                                                    app_ctx_monitor.add_success_toast(
                                                                         "guardian-ceremony-complete",
                                                                         format!("Guardian ceremony complete! {}-of-{} threshold achieved", k, n)
                                                                     ).await;
@@ -838,7 +806,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 Err(e) => {
                                                     tracing::error!("Failed to initiate guardian ceremony: {}", e);
 
-                                                    io_ctx.add_error_toast(
+                                                    app_ctx.add_error_toast(
                                                         "guardian-ceremony-error",
                                                         format!("Failed to initiate guardian ceremony: {}", e)
                                                     ).await;
@@ -991,9 +959,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     });
 
     // Nav bar status is updated reactively from signals.
-    let syncing = nav_syncing.get();
-    let last_sync = nav_last_sync_time.get();
-    let peers = nav_peer_count.get();
+    let syncing = nav_signals.syncing.get();
+    let last_sync = nav_signals.last_sync_time.get();
+    let peers = nav_signals.peer_count.get();
 
     // Layout: NavBar (3 rows) + Content (25 rows) + Footer (3 rows) = 31 = TOTAL_HEIGHT
     //
@@ -1252,14 +1220,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // - `hooks.use_context::<AppCoreContext>()` for reactive signal subscription
     // - `hooks.use_context::<CallbackContext>()` for accessing domain callbacks
     {
-        // Prevent any stray stdout/stderr writes while iocraft is in fullscreen.
-        // This avoids terminal scroll artifacts (e.g., "duplicated" nav bar).
-        let _stdio_guard = if std::env::var_os("AURA_TUI_ALLOW_STDIO").is_some() {
-            None
-        } else {
-            Some(crate::tui::fullscreen_stdio::FullscreenStdioGuard::redirect_stderr_to_null()?)
-        };
-
         let app_context = app_core_context;
         let cb_context = callback_context;
         #[cfg(feature = "development")]

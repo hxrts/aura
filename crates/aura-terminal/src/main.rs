@@ -9,16 +9,14 @@ use async_lock::RwLock;
 use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::effects::ExecutionMode;
 use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ThresholdArgs};
+use aura_terminal::handlers::CliOutput;
 use aura_terminal::ids;
 use aura_terminal::{CliHandler, SyncAction};
 use bpaf::{Args, Parser};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Print a friendly usage message when no command is provided
-fn print_usage() {
-    eprintln!(
-        "usage: aura [-v] [-c CONFIG] COMMAND [OPTIONS]
+const USAGE: &str = r#"usage: aura [-v] [-c CONFIG] COMMAND [OPTIONS]
 
 commands:
     init        Initialize a new threshold account
@@ -34,8 +32,18 @@ commands:
     amp         AMP channel operations
     version     Show version information
 
-run 'aura COMMAND --help' for command-specific options"
-    );
+run 'aura COMMAND --help' for command-specific options"#;
+
+fn usage_output(to_stderr: bool) -> CliOutput {
+    let mut out = CliOutput::new();
+    for line in USAGE.lines() {
+        if to_stderr {
+            out.eprintln(line.to_string());
+        } else {
+            out.println(line.to_string());
+        }
+    }
+    out
 }
 
 #[tokio::main]
@@ -43,7 +51,7 @@ async fn main() -> Result<(), AuraError> {
     // Check if no arguments were provided (just "aura" with no command)
     let raw_args: Vec<String> = std::env::args().collect();
     if raw_args.len() == 1 {
-        print_usage();
+        usage_output(false).render();
         std::process::exit(0);
     }
 
@@ -54,11 +62,11 @@ async fn main() -> Result<(), AuraError> {
             // Check if this is a help request (exit code 0)
             let exit_code = e.clone().exit_code();
             if exit_code == 0 {
-                print!("{:?}", e);
+                CliOutput::new().println(format!("{:?}", e)).render();
                 std::process::exit(0);
             }
             // For other errors, show our friendly usage
-            print_usage();
+            usage_output(true).render();
             std::process::exit(1);
         }
     };
@@ -86,7 +94,12 @@ async fn main() -> Result<(), AuraError> {
 
     // Initialize logging through effects
     let log_level = if args.verbose { "debug" } else { "info" };
-    println!("Initializing Aura CLI with log level: {}", log_level);
+    CliOutput::new()
+        .println(format!(
+            "Initializing Aura CLI with log level: {}",
+            log_level
+        ))
+        .render();
 
     // Create CLI handler with agent and AppCore
     let cli_handler = CliHandler::with_agent(app_core, agent, device_id, effect_context);
@@ -207,8 +220,9 @@ async fn resolve_config_path(
         return Ok(config.clone());
     }
 
-    eprintln!("No config file specified. Use -c or --config to specify a config file.");
-    Err(AuraError::invalid("No config file specified"))
+    Err(AuraError::invalid(
+        "No config file specified. Use -c or --config to specify a config file.",
+    ))
 }
 
 #[cfg(test)]

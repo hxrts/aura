@@ -12,6 +12,8 @@ use std::fmt;
 use std::future::Future;
 use std::rc::Rc;
 
+use crate::tui::fullscreen_stdio::FullscreenStdioGuard;
+
 pub struct PreFullscreenStdio {
     _no_send: Rc<()>,
 }
@@ -68,6 +70,16 @@ pub async fn during_fullscreen<R, Fut>(_: PreFullscreenStdio, fut: Fut) -> (Post
 where
     Fut: Future<Output = R>,
 {
+    // While fullscreen is active, keep stderr redirected away from the terminal
+    // to avoid scroll artifacts (e.g., a "duplicated" nav bar).
+    //
+    // `AURA_TUI_ALLOW_STDIO=1` disables redirection for debugging.
+    let _stdio_guard = if std::env::var("AURA_TUI_ALLOW_STDIO").ok().as_deref() == Some("1") {
+        None
+    } else {
+        FullscreenStdioGuard::redirect_stderr_to_null().ok()
+    };
+
     let result = fut.await;
     (
         PostFullscreenStdio {

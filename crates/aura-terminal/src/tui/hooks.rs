@@ -112,7 +112,7 @@ pub struct AppCoreContext {
     pub app_core: Arc<RwLock<AppCore>>,
 
     /// The IoContext for effect dispatch
-    pub io_context: Arc<IoContext>,
+    io_context: Arc<IoContext>,
 }
 
 impl AppCoreContext {
@@ -139,6 +139,29 @@ impl AppCoreContext {
     /// Dispatch an effect command through IoContext
     pub async fn dispatch(&self, cmd: crate::tui::effects::EffectCommand) -> Result<(), String> {
         self.io_context.dispatch(cmd).await
+    }
+
+    pub async fn dispatch_and_wait(
+        &self,
+        cmd: crate::tui::effects::EffectCommand,
+    ) -> Result<(), String> {
+        self.io_context.dispatch_and_wait(cmd).await
+    }
+
+    pub async fn export_invitation_code(&self, invitation_id: &str) -> Result<String, String> {
+        self.io_context.export_invitation_code(invitation_id).await
+    }
+
+    pub async fn add_error_toast(&self, id: impl Into<String>, message: impl Into<String>) {
+        self.io_context.add_error_toast(id, message).await;
+    }
+
+    pub async fn add_success_toast(&self, id: impl Into<String>, message: impl Into<String>) {
+        self.io_context.add_success_toast(id, message).await;
+    }
+
+    pub async fn add_info_toast(&self, id: impl Into<String>, message: impl Into<String>) {
+        self.io_context.add_info_toast(id, message).await;
     }
 }
 
