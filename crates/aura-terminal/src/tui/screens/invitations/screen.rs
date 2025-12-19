@@ -259,12 +259,6 @@ pub struct InvitationsScreenProps {
     pub on_import: Option<ImportInvitationCallback>,
     /// Code to display (set after export)
     pub exported_code: Option<String>,
-    /// Whether running in demo mode (enables quick-fill shortcuts)
-    pub demo_mode: bool,
-    /// Alice's invite code for demo mode (press 'a' in import modal to fill)
-    pub demo_alice_code: String,
-    /// Carol's invite code for demo mode (press 'c' in import modal to fill)
-    pub demo_carol_code: String,
 }
 
 /// Convert aura-app invitation type to TUI invitation type
@@ -419,8 +413,6 @@ pub fn InvitationsScreen(
     let current_focus = props.view.focus;
     let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let selected_invitation = filtered.get(current_selected).cloned();
-
-    // NOTE: demo_mode is now passed to modals in app.rs
 
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.
