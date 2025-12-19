@@ -16,13 +16,11 @@ use aura_app::views::contacts::Contact as ViewContact;
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
 
+use super::{SnapshotHelper, ToastHelper};
 use crate::error::TerminalError;
 use crate::handlers::tui::TuiMode;
-use crate::tui::effects::{
-    command_to_intent, EffectCommand, OpResponse, OperationalHandler,
-};
+use crate::tui::effects::{command_to_intent, EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
-use super::{SnapshotHelper, ToastHelper};
 
 /// File-based account operations used by the TUI.
 ///
@@ -106,7 +104,7 @@ impl AccountFilesHelper {
             Some(&self.device_id_str),
             self.mode,
         )
-            .map_err(|e| format!("Failed to export backup: {}", e))
+        .map_err(|e| format!("Failed to export backup: {}", e))
     }
 
     pub fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
@@ -340,12 +338,7 @@ impl DispatchHelper {
             | CommandAuthorizationLevel::Sensitive => Ok(()),
             CommandAuthorizationLevel::Admin => {
                 let snapshot = self.snapshots.try_state_snapshot();
-                let role = snapshot.map(|s| {
-                    s.blocks
-                        .current_block()
-                        .unwrap_or(&s.block)
-                        .my_role
-                });
+                let role = snapshot.map(|s| s.blocks.current_block().unwrap_or(&s.block).my_role);
                 match role {
                     Some(ResidentRole::Admin | ResidentRole::Owner) => Ok(()),
                     Some(ResidentRole::Resident) => Err(format!(

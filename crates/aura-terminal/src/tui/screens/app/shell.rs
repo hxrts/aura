@@ -7,9 +7,9 @@
 
 use super::modal_overlays::{
     render_account_setup_modal, render_add_device_modal, render_block_invite_modal,
-    render_channel_info_modal, render_chat_create_modal, render_confirm_modal, render_contact_modal,
-    render_contacts_create_modal, render_contacts_import_modal, render_guardian_modal,
-    render_guardian_setup_modal, render_help_modal,
+    render_channel_info_modal, render_chat_create_modal, render_confirm_modal,
+    render_contact_modal, render_contacts_create_modal, render_contacts_import_modal,
+    render_guardian_modal, render_guardian_setup_modal, render_help_modal,
     render_invitation_code_modal, render_invitations_create_modal, render_invitations_import_modal,
     render_nickname_modal, render_petname_modal, render_remove_device_modal,
     render_threshold_modal, render_topic_modal, GlobalModalProps,
@@ -17,6 +17,11 @@ use super::modal_overlays::{
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+
+use aura_app::signal_defs::{
+    ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, SYNC_STATUS_SIGNAL,
+};
+use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
@@ -86,10 +91,13 @@ pub struct IoAppProps {
     pub peer_count: usize,
     // Demo mode
     /// Whether running in demo mode
+    #[cfg(feature = "development")]
     pub demo_mode: bool,
     /// Alice's invite code (for demo mode)
+    #[cfg(feature = "development")]
     pub demo_alice_code: String,
     /// Carol's invite code (for demo mode)
+    #[cfg(feature = "development")]
     pub demo_carol_code: String,
     // Reactive update channel - receiver wrapped in Arc<Mutex<Option>> for take-once semantics
     /// UI update receiver for reactive updates from callbacks
@@ -110,21 +118,35 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Pure TUI state machine - holds all UI state for deterministic transitions
     // This is the source of truth; iocraft hooks sync FROM this state
     let show_setup = props.show_account_setup;
+    #[cfg(feature = "development")]
     let demo_alice = props.demo_alice_code.clone();
+    #[cfg(feature = "development")]
     let demo_carol = props.demo_carol_code.clone();
     let tui_state = hooks.use_ref(move || {
-        let mut state = if show_setup {
-            TuiState::with_account_setup()
-        } else {
-            TuiState::new()
-        };
-        // Set demo mode codes for import modal shortcuts (on contacts screen)
-        state.contacts.demo_alice_code = demo_alice.clone();
-        state.contacts.demo_carol_code = demo_carol.clone();
-        // Also keep them on invitations for backwards compatibility
-        state.invitations.demo_alice_code = demo_alice.clone();
-        state.invitations.demo_carol_code = demo_carol.clone();
-        state
+        #[cfg(feature = "development")]
+        {
+            let mut state = if show_setup {
+                TuiState::with_account_setup()
+            } else {
+                TuiState::new()
+            };
+            // Set demo mode codes for import modal shortcuts (on contacts screen)
+            state.contacts.demo_alice_code = demo_alice.clone();
+            state.contacts.demo_carol_code = demo_carol.clone();
+            // Also keep them on invitations for backwards compatibility
+            state.invitations.demo_alice_code = demo_alice.clone();
+            state.invitations.demo_carol_code = demo_carol.clone();
+            state
+        }
+
+        #[cfg(not(feature = "development"))]
+        {
+            if show_setup {
+                TuiState::with_account_setup()
+            } else {
+                TuiState::new()
+            }
+        }
     });
     let tui_state_version = hooks.use_state(|| 0usize);
 
@@ -149,6 +171,45 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Get AppCoreContext for IoContext access
     let app_ctx = hooks.use_context::<AppCoreContext>();
+
+    // =========================================================================
+    // NavBar status: derive from reactive signals (no blocking awaits at startup).
+    // =========================================================================
+    let nav_syncing = hooks.use_state(|| props.sync_in_progress);
+    let nav_peer_count = hooks.use_state(|| props.peer_count);
+    let nav_last_sync_time = hooks.use_state(|| props.last_sync_time);
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut nav_syncing = nav_syncing.clone();
+        async move {
+            let mut stream = {
+                let core = app_core.read().await;
+                core.subscribe(&*SYNC_STATUS_SIGNAL)
+            };
+            while let Ok(status) = stream.recv().await {
+                nav_syncing.set(matches!(status, SyncStatus::Syncing { .. }));
+            }
+        }
+    });
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut nav_peer_count = nav_peer_count.clone();
+        async move {
+            let mut stream = {
+                let core = app_core.read().await;
+                core.subscribe(&*CONNECTION_STATUS_SIGNAL)
+            };
+            while let Ok(status) = stream.recv().await {
+                let peers = match status {
+                    ConnectionStatus::Online { peer_count } => peer_count,
+                    _ => 0,
+                };
+                nav_peer_count.set(peers);
+            }
+        }
+    });
 
     // NOTE: Toast polling loop removed - toasts now flow through UiUpdate channel
     // All toast operations (ShowToast, DismissToast, ClearAllToasts) send UiUpdate variants
@@ -448,6 +509,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let settings_props = extract_settings_view_props(&tui_state.read());
     let recovery_props = extract_recovery_view_props(&tui_state.read());
     let neighborhood_props = extract_neighborhood_view_props(&tui_state.read());
+
+    #[cfg(feature = "development")]
+    let demo_mode = props.demo_mode;
+    #[cfg(not(feature = "development"))]
+    let demo_mode = false;
 
     // =========================================================================
     // Global modal overlays
@@ -924,10 +990,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         }
     });
 
-    // Extract sync status from props
-    let syncing = props.sync_in_progress;
-    let last_sync = props.last_sync_time;
-    let peers = props.peer_count;
+    // Nav bar status is updated reactively from signals.
+    let syncing = nav_syncing.get();
+    let last_sync = nav_last_sync_time.get();
+    let peers = nav_peer_count.get();
 
     // Layout: NavBar (3 rows) + Content (25 rows) + Footer (3 rows) = 31 = TOTAL_HEIGHT
     //
@@ -1089,7 +1155,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Rendered via modal_overlays module for maintainability
             #(render_invitations_create_modal(&invitations_props))
             #(render_invitation_code_modal(&invitations_props))
-            #(render_invitations_import_modal(&invitations_props, props.demo_mode))
+            #(render_invitations_import_modal(&invitations_props, demo_mode))
 
             // === TOAST OVERLAY ===
             // Toast notifications overlay the footer when active
@@ -1171,10 +1237,11 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let threshold_k = 0;
     let threshold_n = 0;
 
-    // Get sync status for status bar display
-    let sync_in_progress = ctx_arc.is_syncing().await;
-    let last_sync_time = ctx_arc.last_sync_time().await;
-    let peer_count = ctx_arc.known_peers_count().await;
+    // Status bar values are updated reactively after mount.
+    // Avoid blocking before entering fullscreen (important for demo mode).
+    let sync_in_progress = false;
+    let last_sync_time: Option<u64> = None;
+    let peer_count: usize = 0;
 
     // Create AppCoreContext for components to access AppCore and signals
     // AppCore is always available (demo mode uses agent-less AppCore)
@@ -1195,56 +1262,104 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
 
         let app_context = app_core_context;
         let cb_context = callback_context;
-        element! {
+        #[cfg(feature = "development")]
+        let mut app = element! {
             ContextProvider(value: Context::owned(app_context)) {
                 ContextProvider(value: Context::owned(cb_context)) {
                     IoApp(
-                    // Chat screen data
-                    channels: channels,
-                    messages: messages,
-                    // Recovery screen data
-                    invitations: invitations,
-                    guardians: guardians,
-                    pending_requests: Vec::new(), // Populated reactively in RecoveryScreen
-                    recovery_status: recovery_status,
-                    // Settings screen data
-                    devices: devices,
-                    display_name: display_name,
-                    threshold_k: threshold_k,
-                    threshold_n: threshold_n,
-                    mfa_policy: MfaPolicy::SensitiveOnly,
-                    // Block screen data
-                    block_name: block_name,
-                    residents: residents,
-                    block_budget: block_budget,
-                    channel_name: channel_name,
-                    // Contacts screen data
-                    contacts: contacts,
-                    discovered_peers: discovered_peers,
-                    // Neighborhood screen data
-                    neighborhood_name: neighborhood_name,
-                    blocks: blocks,
-                    traversal_depth: TraversalDepth::Street,
-                    // Account setup
-                    show_account_setup: show_account_setup,
-                    // Sync status
-                    sync_in_progress: sync_in_progress,
-                    last_sync_time: last_sync_time,
-                    peer_count: peer_count,
-                    // Demo mode (get from context)
-                    demo_mode: ctx_arc.is_demo_mode(),
-                    demo_alice_code: ctx_arc.demo_alice_code(),
-                    demo_carol_code: ctx_arc.demo_carol_code(),
-                    // Reactive update channel
-                    update_rx: Some(update_rx_holder),
-                    update_tx: Some(update_tx.clone()),
-                    // Callbacks registry
-                    callbacks: Some(callbacks),
-                )
+                        // Chat screen data
+                        channels: channels,
+                        messages: messages,
+                        // Recovery screen data
+                        invitations: invitations,
+                        guardians: guardians,
+                        pending_requests: Vec::new(), // Populated reactively in RecoveryScreen
+                        recovery_status: recovery_status,
+                        // Settings screen data
+                        devices: devices,
+                        display_name: display_name,
+                        threshold_k: threshold_k,
+                        threshold_n: threshold_n,
+                        mfa_policy: MfaPolicy::SensitiveOnly,
+                        // Block screen data
+                        block_name: block_name,
+                        residents: residents,
+                        block_budget: block_budget,
+                        channel_name: channel_name,
+                        // Contacts screen data
+                        contacts: contacts,
+                        discovered_peers: discovered_peers,
+                        // Neighborhood screen data
+                        neighborhood_name: neighborhood_name,
+                        blocks: blocks,
+                        traversal_depth: TraversalDepth::Street,
+                        // Account setup
+                        show_account_setup: show_account_setup,
+                        // Sync status
+                        sync_in_progress: sync_in_progress,
+                        last_sync_time: last_sync_time,
+                        peer_count: peer_count,
+                        // Demo mode (get from context)
+                        demo_mode: ctx_arc.is_demo_mode(),
+                        demo_alice_code: ctx_arc.demo_alice_code(),
+                        demo_carol_code: ctx_arc.demo_carol_code(),
+                        // Reactive update channel
+                        update_rx: Some(update_rx_holder),
+                        update_tx: Some(update_tx.clone()),
+                        // Callbacks registry
+                        callbacks: Some(callbacks),
+                    )
                 }
             }
-        }
-        .fullscreen()
-        .await
+        };
+
+        #[cfg(not(feature = "development"))]
+        let mut app = element! {
+            ContextProvider(value: Context::owned(app_context)) {
+                ContextProvider(value: Context::owned(cb_context)) {
+                    IoApp(
+                        // Chat screen data
+                        channels: channels,
+                        messages: messages,
+                        // Recovery screen data
+                        invitations: invitations,
+                        guardians: guardians,
+                        pending_requests: Vec::new(), // Populated reactively in RecoveryScreen
+                        recovery_status: recovery_status,
+                        // Settings screen data
+                        devices: devices,
+                        display_name: display_name,
+                        threshold_k: threshold_k,
+                        threshold_n: threshold_n,
+                        mfa_policy: MfaPolicy::SensitiveOnly,
+                        // Block screen data
+                        block_name: block_name,
+                        residents: residents,
+                        block_budget: block_budget,
+                        channel_name: channel_name,
+                        // Contacts screen data
+                        contacts: contacts,
+                        discovered_peers: discovered_peers,
+                        // Neighborhood screen data
+                        neighborhood_name: neighborhood_name,
+                        blocks: blocks,
+                        traversal_depth: TraversalDepth::Street,
+                        // Account setup
+                        show_account_setup: show_account_setup,
+                        // Sync status
+                        sync_in_progress: sync_in_progress,
+                        last_sync_time: last_sync_time,
+                        peer_count: peer_count,
+                        // Reactive update channel
+                        update_rx: Some(update_rx_holder),
+                        update_tx: Some(update_tx.clone()),
+                        // Callbacks registry
+                        callbacks: Some(callbacks),
+                    )
+                }
+            }
+        };
+
+        app.fullscreen().await
     }
 }

@@ -45,7 +45,12 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     // Show success/error result view
     if success || has_error {
         let (status_icon, status_text, status_color, title) = if success {
-            ("✓", "Account created successfully!", Theme::SUCCESS, "Account Created")
+            (
+                "✓",
+                "Account created successfully!",
+                Theme::SUCCESS,
+                "Account Created",
+            )
         } else {
             ("✗", error.as_str(), Theme::ERROR, "Account Creation Failed")
         };

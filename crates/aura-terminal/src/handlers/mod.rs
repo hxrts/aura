@@ -99,6 +99,7 @@ pub mod sync;
 pub mod threshold;
 #[cfg(feature = "terminal")]
 pub mod tui;
+pub mod tui_stdio;
 pub mod version;
 
 // Re-export CLI output types

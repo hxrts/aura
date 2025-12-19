@@ -178,6 +178,203 @@ impl StorageEffects for FilesystemStorageHandler {
     }
 }
 
+// =============================================================================
+// Path-based filesystem storage (preserves filenames)
+// =============================================================================
+
+/// Filesystem storage handler that treats keys as relative paths under `base_path`.
+///
+/// This is useful for UI layers that already have stable filenames (e.g. `account.json`,
+/// `journal.json`) and want to move I/O behind `StorageEffects` without changing on-disk layouts.
+///
+/// Security: keys are validated to be relative paths with no `..` components.
+#[derive(Debug, Clone)]
+pub struct PathFilesystemStorageHandler {
+    base_path: PathBuf,
+}
+
+impl PathFilesystemStorageHandler {
+    /// Create a new handler rooted at `base_path`.
+    pub fn new(base_path: PathBuf) -> Self {
+        Self { base_path }
+    }
+
+    fn resolve(&self, key: &str) -> Result<PathBuf, StorageError> {
+        use std::path::{Component, Path};
+
+        if key.is_empty() {
+            return Err(StorageError::InvalidKey {
+                reason: "Key cannot be empty".to_string(),
+            });
+        }
+
+        let rel = Path::new(key);
+        if rel.is_absolute() {
+            return Err(StorageError::InvalidKey {
+                reason: "Key must be a relative path".to_string(),
+            });
+        }
+
+        for comp in rel.components() {
+            match comp {
+                Component::Prefix(_) | Component::RootDir | Component::ParentDir => {
+                    return Err(StorageError::InvalidKey {
+                        reason: "Key must not contain absolute or parent components".to_string(),
+                    });
+                }
+                Component::CurDir | Component::Normal(_) => {}
+            }
+        }
+
+        Ok(self.base_path.join(rel))
+    }
+}
+
+#[async_trait]
+impl StorageEffects for PathFilesystemStorageHandler {
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        let file_path = self.resolve(key)?;
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).await.map_err(|e| {
+                StorageError::WriteFailed(format!("Failed to create directory: {}", e))
+            })?;
+        }
+
+        fs::write(&file_path, value)
+            .await
+            .map_err(|e| StorageError::WriteFailed(format!("Failed to write file: {}", e)))?;
+        Ok(())
+    }
+
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        let file_path = self.resolve(key)?;
+
+        match fs::read(&file_path).await {
+            Ok(data) => Ok(Some(data)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(StorageError::ReadFailed(format!(
+                "Failed to read file: {}",
+                e
+            ))),
+        }
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, StorageError> {
+        let file_path = self.resolve(key)?;
+        match fs::remove_file(&file_path).await {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(StorageError::DeleteFailed(format!(
+                "Failed to remove file: {}",
+                e
+            ))),
+        }
+    }
+
+    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        let mut keys = Vec::new();
+        let mut stack: Vec<PathBuf> = vec![self.base_path.clone()];
+
+        while let Some(dir) = stack.pop() {
+            let mut entries = match fs::read_dir(&dir).await {
+                Ok(e) => e,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    return Err(StorageError::ReadFailed(format!(
+                        "Failed to read directory: {}",
+                        e
+                    )))
+                }
+            };
+
+            while let Some(entry) = entries.next_entry().await.map_err(|e| {
+                StorageError::ReadFailed(format!("Failed to read directory entry: {}", e))
+            })? {
+                let path = entry.path();
+                let file_type = entry.file_type().await.map_err(|e| {
+                    StorageError::ReadFailed(format!("Failed to stat entry: {}", e))
+                })?;
+
+                if file_type.is_dir() {
+                    stack.push(path);
+                } else if file_type.is_file() {
+                    if let Ok(rel) = path.strip_prefix(&self.base_path) {
+                        keys.push(rel.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+
+        if let Some(prefix) = prefix {
+            keys.retain(|k| k.starts_with(prefix));
+        }
+        keys.sort();
+        Ok(keys)
+    }
+
+    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        let file_path = self.resolve(key)?;
+        match fs::metadata(&file_path).await {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(StorageError::ReadFailed(format!(
+                "Failed to stat file: {}",
+                e
+            ))),
+        }
+    }
+
+    async fn store_batch(
+        &self,
+        pairs: std::collections::HashMap<String, Vec<u8>>,
+    ) -> Result<(), StorageError> {
+        for (k, v) in pairs {
+            self.store(&k, v).await?;
+        }
+        Ok(())
+    }
+
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, StorageError> {
+        let mut out = std::collections::HashMap::new();
+        for key in keys {
+            if let Some(val) = self.retrieve(key).await? {
+                out.insert(key.clone(), val);
+            }
+        }
+        Ok(out)
+    }
+
+    async fn clear_all(&self) -> Result<(), StorageError> {
+        // Best-effort recursive clear.
+        let keys = self.list_keys(None).await?;
+        for k in keys {
+            let _ = self.remove(&k).await;
+        }
+        Ok(())
+    }
+
+    async fn stats(&self) -> Result<StorageStats, StorageError> {
+        let keys = self.list_keys(None).await?;
+        let mut total_size: u64 = 0;
+        for k in &keys {
+            let p = self.resolve(k)?;
+            if let Ok(m) = fs::metadata(&p).await {
+                total_size = total_size.saturating_add(m.len());
+            }
+        }
+
+        Ok(StorageStats {
+            key_count: keys.len() as u64,
+            total_size,
+            available_space: None,
+            backend_type: "path-filesystem".to_string(),
+        })
+    }
+}
+
 fn nonce_for(key: &[u8], key_str: &str) -> Result<chacha20poly1305::Nonce, StorageError> {
     use chacha20poly1305::Nonce;
     // Use aura_core's hash function (SHA-256) for nonce derivation

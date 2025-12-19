@@ -103,7 +103,9 @@ pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
 pub use secure::RealSecureStorageHandler;
 #[cfg(feature = "simulation")]
 pub use simulation::FallbackSimulationHandler;
-pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler};
+pub use storage::{
+    EncryptedStorageHandler, FilesystemStorageHandler, PathFilesystemStorageHandler,
+};
 // ProductionSyncExecutor removed - replaced by ProductionEffectInterpreter (ADR-014)
 pub use time::{
     LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler, TimeComparisonHandler,

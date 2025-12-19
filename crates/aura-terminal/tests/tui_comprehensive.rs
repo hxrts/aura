@@ -1095,7 +1095,8 @@ mod modals {
 
         let expected_contact_id =
             if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
-                state.contacts
+                state
+                    .contacts
                     .get(state.selected_index)
                     .map(|(id, _)| id.clone())
                     .unwrap()
@@ -1566,7 +1567,8 @@ mod integration {
         tui.send_char('j'); // Select second contact
         let expected_contact_id =
             if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
-                state.contacts
+                state
+                    .contacts
                     .get(state.selected_index)
                     .map(|(id, _)| id.clone())
                     .unwrap()

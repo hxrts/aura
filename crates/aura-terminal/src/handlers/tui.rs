@@ -7,7 +7,11 @@
 //! - Production: Uses `build_production()` for real network/storage
 //! - Demo: Uses `build_simulation_async()` for simulated effects
 
+#![deny(clippy::print_stdout)]
+#![deny(clippy::print_stderr)]
+
 use std::env;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -18,13 +22,19 @@ use aura_app::{AppConfig, AppCore};
 use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
+use aura_core::effects::time::PhysicalTimeEffects;
+use aura_core::effects::StorageEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
+use aura_effects::time::PhysicalTimeHandler;
+use aura_effects::PathFilesystemStorageHandler;
+use tokio::runtime::Handle;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
 use crate::demo::{DemoSignalCoordinator, DemoSimulator};
+use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
 use crate::tui::{context::IoContext, screens::run_app_with_context};
 
 /// Whether the TUI is running in demo or production mode
@@ -87,37 +97,50 @@ fn journal_filename(mode: TuiMode) -> &'static str {
     }
 }
 
+fn block_on<F>(fut: F) -> F::Output
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    // Avoid `tokio::runtime::Runtime::block_on` on the caller thread entirely.
+    // In `#[tokio::test]` contexts this can panic ("Cannot start a runtime from within a runtime").
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+
+    match Handle::try_current() {
+        Ok(handle) => {
+            std::thread::spawn(move || {
+                let out = handle.block_on(fut);
+                let _ = tx.send(out);
+            });
+        }
+        Err(_) => {
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to build tokio runtime for blocking storage ops");
+                let out = rt.block_on(fut);
+                let _ = tx.send(out);
+            });
+        }
+    }
+
+    rx.recv()
+        .expect("Failed to receive result from blocking storage thread")
+}
+
 /// Clean up demo files before starting demo mode
 ///
 /// In demo mode, we want users to go through the account creation flow each time.
 /// This function deletes demo-account.json and demo-journal.json if they exist.
 ///
 /// This is ONLY called in demo mode - production files are NEVER deleted.
-fn cleanup_demo_files(base_path: &Path) {
-    let demo_account = base_path.join("demo-account.json");
-    let demo_journal = base_path.join("demo-journal.json");
-
-    if demo_account.exists() {
-        if let Err(e) = std::fs::remove_file(&demo_account) {
-            eprintln!(
-                "Warning: Failed to remove demo account file: {} - {}",
-                demo_account.display(),
-                e
-            );
-        } else {
-            println!("Removed existing demo account file");
-        }
-    }
-
-    if demo_journal.exists() {
-        if let Err(e) = std::fs::remove_file(&demo_journal) {
-            eprintln!(
-                "Warning: Failed to remove demo journal file: {} - {}",
-                demo_journal.display(),
-                e
-            );
-        } else {
-            println!("Removed existing demo journal file");
+async fn cleanup_demo_files(storage: &impl StorageEffects) {
+    for key in ["demo-account.json", "demo-journal.json"] {
+        match storage.remove(key).await {
+            Ok(true) => tracing::debug!(key = key, "Removed demo file"),
+            Ok(false) => {}
+            Err(e) => tracing::warn!(key = key, err = %e, "Failed to remove demo file"),
         }
     }
 }
@@ -126,16 +149,20 @@ fn cleanup_demo_files(base_path: &Path) {
 ///
 /// Returns `Loaded` if account exists, `NotFound` otherwise.
 /// Does NOT auto-create accounts - this allows the TUI to show an account setup modal.
-fn try_load_account(base_path: &Path, mode: TuiMode) -> Result<AccountLoadResult, AuraError> {
-    let account_path = base_path.join(account_filename(mode));
-
-    if !account_path.exists() {
+async fn try_load_account(
+    storage: &impl StorageEffects,
+    mode: TuiMode,
+) -> Result<AccountLoadResult, AuraError> {
+    let Some(bytes) = storage
+        .retrieve(account_filename(mode))
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?
+    else {
         return Ok(AccountLoadResult::NotFound);
-    }
+    };
 
-    // Load existing account
-    let content = std::fs::read_to_string(&account_path)
-        .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?;
+    let content = String::from_utf8(bytes)
+        .map_err(|e| AuraError::internal(format!("Invalid account config UTF-8: {}", e)))?;
 
     let config: AccountConfig = serde_json::from_str(&content)
         .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
@@ -183,6 +210,36 @@ fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
     (authority_id, context_id)
 }
 
+async fn persist_account_config(
+    storage: &impl StorageEffects,
+    time: &impl PhysicalTimeEffects,
+    mode: TuiMode,
+    authority_id: AuthorityId,
+    context_id: ContextId,
+) -> Result<(), AuraError> {
+    let created_at = time
+        .physical_time()
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to fetch physical time: {}", e)))?
+        .ts_ms;
+
+    let config = AccountConfig {
+        authority_id: hex::encode(authority_id.to_bytes()),
+        context_id: hex::encode(context_id.to_bytes()),
+        created_at,
+    };
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
+
+    storage
+        .store(account_filename(mode), content.into_bytes())
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
+
+    Ok(())
+}
+
 /// Create a new account and save to disk
 ///
 /// Called when user completes the account setup modal.
@@ -191,7 +248,8 @@ pub fn create_account(
     device_id_str: &str,
     mode: TuiMode,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let account_path = base_path.join(account_filename(mode));
+    let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
+    let time = PhysicalTimeHandler::new();
 
     // Create new account with deterministic IDs based on device_id
     // This ensures the same device_id always creates the same account
@@ -202,29 +260,11 @@ pub fn create_account(
     let authority_id = AuthorityId::new_from_entropy(authority_entropy);
     let context_id = ContextId::new_from_entropy(context_entropy);
 
-    // Save the new account configuration
-    // Note: We store only the UUID bytes (16 bytes), not the full entropy (32 bytes)
-    // since AuthorityId/ContextId only use the first 16 bytes of entropy anyway
-    let config = AccountConfig {
-        authority_id: hex::encode(authority_id.to_bytes()),
-        context_id: hex::encode(context_id.to_bytes()),
-        created_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0),
-    };
-
-    // Ensure directory exists
-    if let Some(parent) = account_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AuraError::internal(format!("Failed to create data directory: {}", e)))?;
-    }
-
-    let content = serde_json::to_string_pretty(&config)
-        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
-
-    std::fs::write(&account_path, content)
-        .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
+    // Persist to storage using effect-backed handlers.
+    let result = block_on(async move {
+        persist_account_config(&storage, &time, mode, authority_id, context_id).await
+    });
+    result?;
 
     Ok((authority_id, context_id))
 }
@@ -249,7 +289,8 @@ pub fn restore_recovered_account(
     recovered_context_id: Option<ContextId>,
     mode: TuiMode,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let account_path = base_path.join(account_filename(mode));
+    let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
+    let time = PhysicalTimeHandler::new();
 
     // Use the recovered authority directly (NOT derived from device_id)
     // This is the key difference from create_account()
@@ -262,29 +303,11 @@ pub fn restore_recovered_account(
         );
         ContextId::new_from_entropy(context_entropy)
     });
-    let context_bytes = context_id.to_bytes();
 
-    // Save the recovered account configuration
-    let config = AccountConfig {
-        authority_id: hex::encode(authority_bytes),
-        context_id: hex::encode(context_bytes),
-        created_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0),
-    };
-
-    // Ensure directory exists
-    if let Some(parent) = account_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AuraError::internal(format!("Failed to create data directory: {}", e)))?;
-    }
-
-    let content = serde_json::to_string_pretty(&config)
-        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
-
-    std::fs::write(&account_path, content)
-        .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
+    let result = block_on(async move {
+        persist_account_config(&storage, &time, mode, recovered_authority_id, context_id).await
+    });
+    result?;
 
     Ok((recovered_authority_id, context_id))
 }
@@ -335,36 +358,45 @@ pub fn export_account_backup(
     device_id: Option<&str>,
     mode: TuiMode,
 ) -> Result<String, AuraError> {
-    let account_path = base_path.join(account_filename(mode));
-    let journal_path = base_path.join(journal_filename(mode));
+    let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
+    let time = PhysicalTimeHandler::new();
 
-    // Load account configuration
-    if !account_path.exists() {
-        return Err(AuraError::internal("No account exists to backup"));
-    }
+    let (account, journal, backup_at) = block_on(async move {
+        let Some(account_bytes) = storage
+            .retrieve(account_filename(mode))
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?
+        else {
+            return Err(AuraError::internal("No account exists to backup"));
+        };
 
-    let account_content = std::fs::read_to_string(&account_path)
-        .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?;
+        let account_content = String::from_utf8(account_bytes)
+            .map_err(|e| AuraError::internal(format!("Invalid account config UTF-8: {}", e)))?;
 
-    let account: AccountConfig = serde_json::from_str(&account_content)
-        .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
+        let account: AccountConfig = serde_json::from_str(&account_content)
+            .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
 
-    // Load journal if it exists
-    let journal = if journal_path.exists() {
-        std::fs::read_to_string(&journal_path).ok()
-    } else {
-        None
-    };
+        let journal = storage
+            .retrieve(journal_filename(mode))
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to read journal: {}", e)))?
+            .and_then(|b| String::from_utf8(b).ok());
+
+        let backup_at = time
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to fetch physical time: {}", e)))?
+            .ts_ms;
+
+        Ok::<_, AuraError>((account, journal, backup_at))
+    })?;
 
     // Create backup structure
     let backup = AccountBackup {
         version: BACKUP_VERSION,
         account,
         journal,
-        backup_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0),
+        backup_at,
         source_device: device_id.map(String::from),
     };
 
@@ -395,15 +427,7 @@ pub fn import_account_backup(
     overwrite: bool,
     mode: TuiMode,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let account_path = base_path.join(account_filename(mode));
-    let journal_path = base_path.join(journal_filename(mode));
-
-    // Check for existing account
-    if account_path.exists() && !overwrite {
-        return Err(AuraError::internal(
-            "Account already exists. Use overwrite=true to replace.",
-        ));
-    }
+    let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
 
     // Parse backup code
     if !backup_code.starts_with(BACKUP_PREFIX) {
@@ -450,24 +474,39 @@ pub fn import_account_backup(
         .map_err(|_| AuraError::internal("Invalid context_id length in backup"))?;
     let context_id = ContextId::from_uuid(uuid::Uuid::from_bytes(context_bytes));
 
-    // Ensure directory exists
-    if let Some(parent) = account_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AuraError::internal(format!("Failed to create data directory: {}", e)))?;
-    }
+    block_on(async move {
+        // Check for existing account
+        if storage
+            .exists(account_filename(mode))
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to check account existence: {}", e)))?
+            && !overwrite
+        {
+            return Err(AuraError::internal(
+                "Account already exists. Use overwrite=true to replace.",
+            ));
+        }
 
-    // Write account configuration
-    let account_content = serde_json::to_string_pretty(&backup.account)
-        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
+        // Write account configuration (pretty JSON for readability).
+        let account_content = serde_json::to_string_pretty(&backup.account).map_err(|e| {
+            AuraError::internal(format!("Failed to serialize account config: {}", e))
+        })?;
 
-    std::fs::write(&account_path, account_content)
-        .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
+        storage
+            .store(account_filename(mode), account_content.into_bytes())
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
 
-    // Write journal if present in backup
-    if let Some(ref journal_content) = backup.journal {
-        std::fs::write(&journal_path, journal_content)
-            .map_err(|e| AuraError::internal(format!("Failed to write journal: {}", e)))?;
-    }
+        // Write journal if present in backup
+        if let Some(ref journal_content) = backup.journal {
+            storage
+                .store(journal_filename(mode), journal_content.as_bytes().to_vec())
+                .await
+                .map_err(|e| AuraError::internal(format!("Failed to write journal: {}", e)))?;
+        }
+
+        Ok::<_, AuraError>(())
+    })?;
 
     Ok((authority_id, context_id))
 }
@@ -477,14 +516,18 @@ const DEMO_SEED: u64 = 2024;
 
 /// Handle TUI launch
 pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
+    let stdio = PreFullscreenStdio::new();
+
     // Demo mode: use simulation backend with deterministic seed
     // The TUI code is IDENTICAL for demo and production - only the backend differs
     if args.demo {
-        println!("Starting Aura TUI (Demo Mode)");
-        println!("=============================");
-        println!("Demo mode runs a real agent with simulated effects.");
-        println!("Seed: {} (deterministic)", DEMO_SEED);
-        println!();
+        stdio.println(format_args!("Starting Aura TUI (Demo Mode)"));
+        stdio.println(format_args!("============================="));
+        stdio.println(format_args!(
+            "Demo mode runs a real agent with simulated effects."
+        ));
+        stdio.println(format_args!("Seed: {} (deterministic)", DEMO_SEED));
+        stdio.newline();
 
         // Use demo-specific data directory and device ID
         let demo_data_dir = args
@@ -497,6 +540,7 @@ pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
             .unwrap_or_else(|| "demo:bob".to_string());
 
         return handle_tui_launch(
+            stdio,
             Some(&demo_data_dir),
             Some(&demo_device_id),
             TuiMode::Demo { seed: DEMO_SEED },
@@ -506,6 +550,7 @@ pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
 
     let data_dir = args.data_dir.clone().or_else(|| env::var("AURA_PATH").ok());
     handle_tui_launch(
+        stdio,
         data_dir.as_deref(),
         args.device_id.as_deref(),
         TuiMode::Production,
@@ -515,6 +560,7 @@ pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
 
 /// Launch the TUI with the specified mode
 async fn handle_tui_launch(
+    stdio: PreFullscreenStdio,
     data_dir: Option<&str>,
     device_id_str: Option<&str>,
     mode: TuiMode,
@@ -523,8 +569,8 @@ async fn handle_tui_launch(
         TuiMode::Production => "Production",
         TuiMode::Demo { .. } => "Demo (Simulation)",
     };
-    println!("Starting Aura TUI ({})", mode_str);
-    println!("================");
+    stdio.println(format_args!("Starting Aura TUI ({})", mode_str));
+    stdio.println(format_args!("================"));
 
     // Determine data directory
     let base_path = data_dir
@@ -535,14 +581,12 @@ async fn handle_tui_launch(
     // Safe to call multiple times; only the first init wins.
     init_tui_tracing(&base_path, mode);
 
+    let storage = PathFilesystemStorageHandler::new(base_path.clone());
+
     // In demo mode, clean up existing demo files so users go through account creation
     // This is ONLY done in demo mode - production files are NEVER deleted
     if matches!(mode, TuiMode::Demo { .. }) {
-        // Ensure the data directory exists before cleanup
-        if let Err(e) = std::fs::create_dir_all(&base_path) {
-            eprintln!("Warning: Failed to create data directory: {}", e);
-        }
-        cleanup_demo_files(&base_path);
+        cleanup_demo_files(&storage).await;
     }
 
     // Determine device ID
@@ -550,29 +594,29 @@ async fn handle_tui_launch(
         .map(|id| crate::ids::device_id(id))
         .unwrap_or_else(|| crate::ids::device_id("tui:production-device"));
 
-    println!("Data directory: {}", base_path.display());
-    println!("Device ID: {}", device_id);
+    stdio.println(format_args!("Data directory: {}", base_path.display()));
+    stdio.println(format_args!("Device ID: {}", device_id));
 
     // Determine device ID string for account derivation
     let device_id_for_account = device_id_str.unwrap_or("tui:production-device");
 
     // Try to load existing account, or use placeholders if no account exists
-    let (authority_id, context_id, has_existing_account) = match try_load_account(&base_path, mode)?
-    {
-        AccountLoadResult::Loaded { authority, context } => {
-            println!("Authority: {}", authority);
-            println!("Context: {}", context);
-            (authority, context, true)
-        }
-        AccountLoadResult::NotFound => {
-            // Use placeholder IDs - the TUI will show account setup modal
-            let (authority, context) = create_placeholder_ids(device_id_for_account);
-            println!("No existing account - will show setup modal");
-            println!("Placeholder Authority: {}", authority);
-            println!("Placeholder Context: {}", context);
-            (authority, context, false)
-        }
-    };
+    let (authority_id, context_id, has_existing_account) =
+        match try_load_account(&storage, mode).await? {
+            AccountLoadResult::Loaded { authority, context } => {
+                stdio.println(format_args!("Authority: {}", authority));
+                stdio.println(format_args!("Context: {}", context));
+                (authority, context, true)
+            }
+            AccountLoadResult::NotFound => {
+                // Use placeholder IDs - the TUI will show account setup modal
+                let (authority, context) = create_placeholder_ids(device_id_for_account);
+                stdio.println(format_args!("No existing account - will show setup modal"));
+                stdio.println(format_args!("Placeholder Authority: {}", authority));
+                stdio.println(format_args!("Placeholder Context: {}", context));
+                (authority, context, false)
+            }
+        };
 
     // Create agent configuration
     let agent_config = AgentConfig {
@@ -595,7 +639,9 @@ async fn handle_tui_launch(
     #[cfg(feature = "development")]
     let demo_simulator_for_bob = match mode {
         TuiMode::Demo { seed } => {
-            println!("Creating demo simulator for shared transport...");
+            stdio.println(format_args!(
+                "Creating demo simulator for shared transport..."
+            ));
             let sim = DemoSimulator::new(seed)
                 .await
                 .map_err(|e| AuraError::internal(format!("Failed to create simulator: {}", e)))?;
@@ -616,7 +662,7 @@ async fn handle_tui_launch(
             .await
             .map_err(|e| AuraError::internal(format!("Failed to create agent: {}", e)))?,
         TuiMode::Demo { seed } => {
-            println!("Using simulation agent with seed: {}", seed);
+            stdio.println(format_args!("Using simulation agent with seed: {}", seed));
 
             #[cfg(feature = "development")]
             {
@@ -626,7 +672,9 @@ async fn handle_tui_launch(
                     .map(|sim| sim.shared_transport_inbox.clone())
                     .expect("Simulator should be created in demo mode");
 
-                println!("Creating Bob's agent with shared transport...");
+                stdio.println(format_args!(
+                    "Creating Bob's agent with shared transport..."
+                ));
                 AgentBuilder::new()
                     .with_config(agent_config)
                     .with_authority(authority_id)
@@ -671,13 +719,16 @@ async fn handle_tui_launch(
     // Load existing journal facts from storage to rebuild ViewState
     match app_core.load_from_storage(&journal_path) {
         Ok(count) if count > 0 => {
-            println!("Loaded {} facts from journal", count);
+            stdio.println(format_args!("Loaded {} facts from journal", count));
         }
         Ok(_) => {
-            println!("No existing journal found, starting fresh");
+            stdio.println(format_args!("No existing journal found, starting fresh"));
         }
         Err(e) => {
-            eprintln!("Warning: Failed to load journal: {} - starting fresh", e);
+            stdio.eprintln(format_args!(
+                "Warning: Failed to load journal: {} - starting fresh",
+                e
+            ));
         }
     }
 
@@ -689,14 +740,16 @@ async fn handle_tui_launch(
     {
         let core = app_core.write().await;
         if let Err(e) = core.init_signals().await {
-            eprintln!(
+            stdio.eprintln(format_args!(
                 "Warning: Failed to initialize signals: {} - reactive updates may not work",
                 e
-            );
+            ));
         }
     }
 
-    println!("AppCore initialized (with runtime bridge and reactive signals)");
+    stdio.println(format_args!(
+        "AppCore initialized (with runtime bridge and reactive signals)"
+    ));
 
     // In demo mode, start the simulator with Alice and Carol peer agents
     // DemoSignalCoordinator handles bidirectional event routing via signals
@@ -707,7 +760,7 @@ async fn handle_tui_launch(
     ) = match mode {
         TuiMode::Demo { seed: _ } => {
             // Use the simulator we already created for shared transport
-            println!("Starting demo simulator...");
+            stdio.println(format_args!("Starting demo simulator..."));
             let mut sim = demo_simulator_for_bob.expect("Simulator should exist in demo mode");
 
             sim.start()
@@ -716,9 +769,9 @@ async fn handle_tui_launch(
 
             let alice_id = sim.alice_authority().await;
             let carol_id = sim.carol_authority().await;
-            println!("Alice online: {}", alice_id);
-            println!("Carol online: {}", carol_id);
-            println!("Peers connected: {}", sim.peer_count());
+            stdio.println(format_args!("Alice online: {}", alice_id));
+            stdio.println(format_args!("Carol online: {}", carol_id));
+            stdio.println(format_args!("Peers connected: {}", sim.peer_count()));
 
             // Get the simulator's bridge and response receiver for signal coordinator
             let sim_bridge = sim.bridge();
@@ -738,7 +791,7 @@ async fn handle_tui_launch(
 
             // Start coordinator tasks
             let handles = coordinator.start();
-            println!("Demo signal coordinator started");
+            stdio.println(format_args!("Demo signal coordinator started"));
 
             // Start background task to process ceremony acceptances
             let ceremony_agent = agent.clone();
@@ -762,7 +815,7 @@ async fn handle_tui_launch(
                     }
                 }
             });
-            println!("Ceremony acceptance processor started");
+            stdio.println(format_args!("Ceremony acceptance processor started"));
 
             (Some(sim), Some(handles))
         }
@@ -777,9 +830,15 @@ async fn handle_tui_launch(
     let ctx = match mode {
         TuiMode::Demo { seed } => {
             let hints = crate::demo::DemoHints::new(seed);
-            println!("Demo hints available:");
-            println!("  Alice invite code: {}", hints.alice_invite_code);
-            println!("  Carol invite code: {}", hints.carol_invite_code);
+            stdio.println(format_args!("Demo hints available:"));
+            stdio.println(format_args!(
+                "  Alice invite code: {}",
+                hints.alice_invite_code
+            ));
+            stdio.println(format_args!(
+                "  Carol invite code: {}",
+                hints.carol_invite_code
+            ));
             IoContext::with_demo_hints(
                 app_core,
                 hints,
@@ -810,24 +869,30 @@ async fn handle_tui_launch(
     // Without development feature, demo mode just shows a warning
     #[cfg(not(feature = "development"))]
     if matches!(mode, TuiMode::Demo { .. }) {
-        println!("Note: Demo mode simulation requires the 'development' feature.");
-        println!("Running with simulation agent but without peer agents (Alice/Carol).");
+        stdio.println(format_args!(
+            "Note: Demo mode simulation requires the 'development' feature."
+        ));
+        stdio.println(format_args!(
+            "Running with simulation agent but without peer agents (Alice/Carol)."
+        ));
     }
 
-    println!("Launching TUI...");
-    println!();
+    stdio.println(format_args!("Launching TUI..."));
+    stdio.newline();
 
     // Run the iocraft TUI app with context
-    let result = run_app_with_context(ctx)
-        .await
-        .map_err(|e| AuraError::internal(format!("TUI failed: {}", e)));
+    let (_stdio, result) = during_fullscreen(stdio, run_app_with_context(ctx)).await;
+    let result = result.map_err(|e| AuraError::internal(format!("TUI failed: {}", e)));
 
     // In demo mode, stop the simulator cleanly
     #[cfg(feature = "development")]
     if let Some(ref mut sim) = simulator {
-        println!("Stopping demo simulator...");
+        _stdio.println(format_args!("Stopping demo simulator..."));
         if let Err(e) = sim.stop().await {
-            eprintln!("Warning: Failed to stop simulator cleanly: {}", e);
+            _stdio.eprintln(format_args!(
+                "Warning: Failed to stop simulator cleanly: {}",
+                e
+            ));
         }
     }
 
@@ -837,11 +902,7 @@ async fn handle_tui_launch(
 
 fn init_tui_tracing(base_path: &Path, mode: TuiMode) {
     // Allow forcing stdio tracing for debugging.
-    if std::env::var("AURA_TUI_ALLOW_STDIO")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
+    if std::env::var("AURA_TUI_ALLOW_STDIO").ok().as_deref() == Some("1") {
         return;
     }
 
@@ -859,32 +920,52 @@ fn init_tui_tracing(base_path: &Path, mode: TuiMode) {
     }
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .unwrap_or_else(|_| {
+            #[cfg(unix)]
+            {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open("/dev/null")
+                    .expect("Failed to open /dev/null")
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_path)
+                    .expect("Failed to open TUI log file")
+            }
+        });
+    let file = std::sync::Arc::new(file);
+    #[cfg(not(unix))]
     let log_path = std::sync::Arc::new(log_path);
     let make_writer = {
+        let file = file.clone();
+        #[cfg(not(unix))]
         let log_path = log_path.clone();
         move || {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(log_path.as_ref())
-                .unwrap_or_else(|_| {
-                    #[cfg(unix)]
-                    {
-                        std::fs::OpenOptions::new()
-                            .write(true)
-                            .open("/dev/null")
-                            .expect("Failed to open /dev/null")
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        // Best-effort fallback: try again in the same location.
-                        std::fs::OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(log_path.as_ref())
-                            .expect("Failed to open TUI log file")
-                    }
-                })
+            file.try_clone().unwrap_or_else(|_| {
+                #[cfg(unix)]
+                {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open("/dev/null")
+                        .expect("Failed to open /dev/null")
+                }
+                #[cfg(not(unix))]
+                {
+                    std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(log_path.as_ref())
+                        .expect("Failed to open TUI log file")
+                }
+            })
         }
     };
 

@@ -69,7 +69,8 @@ impl IoContext {
         let snapshots = SnapshotHelper::new(app_core.clone(), device_id_str.clone());
         let toasts = ToastHelper::new();
 
-        let has_existing_account = Arc::new(std::sync::atomic::AtomicBool::new(has_existing_account));
+        let has_existing_account =
+            Arc::new(std::sync::atomic::AtomicBool::new(has_existing_account));
         let account_files =
             AccountFilesHelper::new(base_path, device_id_str, mode, has_existing_account.clone());
 
@@ -118,8 +119,13 @@ impl IoContext {
         device_id_str: String,
         mode: crate::handlers::tui::TuiMode,
     ) -> Self {
-        let mut ctx =
-            Self::with_account_status(app_core, has_existing_account, base_path, device_id_str, mode);
+        let mut ctx = Self::with_account_status(
+            app_core,
+            has_existing_account,
+            base_path,
+            device_id_str,
+            mode,
+        );
         ctx.demo_hints = Some(hints);
         ctx
     }
@@ -334,75 +340,98 @@ impl IoContext {
     // =========================================================================
 
     pub async fn is_connected(&self) -> bool {
-        if let Some(core) = self.app_core.try_read() {
-            if let Ok(status) = core.read(&*CONNECTION_STATUS_SIGNAL).await {
-                return matches!(status, ConnectionStatus::Online { .. });
-            }
+        let reactive = match self.app_core.try_read() {
+            Some(core) => core.reactive().clone(),
+            None => return false,
+        };
+
+        if let Ok(status) = reactive.read(&*CONNECTION_STATUS_SIGNAL).await {
+            return matches!(status, ConnectionStatus::Online { .. });
         }
         false
     }
 
     pub async fn last_error(&self) -> Option<String> {
-        if let Some(core) = self.app_core.try_read() {
-            if let Ok(error) = core.read(&*ERROR_SIGNAL).await {
-                return error.map(|e| e.message);
-            }
+        let reactive = match self.app_core.try_read() {
+            Some(core) => core.reactive().clone(),
+            None => return None,
+        };
+
+        if let Ok(error) = reactive.read(&*ERROR_SIGNAL).await {
+            return error.map(|e| e.message);
         }
         None
     }
 
     pub async fn is_syncing(&self) -> bool {
-        if let Some(core) = self.app_core.try_read() {
-            if let Ok(status) = core.read(&*SYNC_STATUS_SIGNAL).await {
-                return matches!(status, SyncStatus::Syncing { .. });
-            }
+        let reactive = match self.app_core.try_read() {
+            Some(core) => core.reactive().clone(),
+            None => return false,
+        };
+
+        if let Ok(status) = reactive.read(&*SYNC_STATUS_SIGNAL).await {
+            return matches!(status, SyncStatus::Syncing { .. });
         }
         false
     }
 
     pub async fn last_sync_time(&self) -> Option<u64> {
-        if let Some(core) = self.app_core.try_read() {
-            if let Some(status) = core.sync_status().await {
-                return status.last_sync_ms;
-            }
+        let runtime = self
+            .app_core
+            .try_read()
+            .and_then(|core| core.runtime().cloned());
+
+        if let Some(runtime) = runtime {
+            return runtime.get_sync_status().await.last_sync_ms;
         }
         None
     }
 
     pub async fn known_peers_count(&self) -> usize {
-        if let Some(core) = self.app_core.try_read() {
-            if let Some(status) = core.sync_status().await {
-                if status.connected_peers > 0 {
-                    return status.connected_peers;
-                }
+        let (runtime, reactive) = match self.app_core.try_read() {
+            Some(core) => (core.runtime().cloned(), core.reactive().clone()),
+            None => return 0,
+        };
+
+        if let Some(runtime) = runtime {
+            let status = runtime.get_sync_status().await;
+            if status.connected_peers > 0 {
+                return status.connected_peers;
             }
-            if let Ok(ConnectionStatus::Online { peer_count }) =
-                core.read(&*CONNECTION_STATUS_SIGNAL).await
-            {
-                return peer_count;
-            }
+        }
+
+        if let Ok(ConnectionStatus::Online { peer_count }) =
+            reactive.read(&*CONNECTION_STATUS_SIGNAL).await
+        {
+            return peer_count;
         }
         0
     }
 
     pub async fn get_discovered_peers(&self) -> Vec<(String, String)> {
-        if let Some(core) = self.app_core.try_read() {
-            if let Ok(state) = core.read(&*DISCOVERED_PEERS_SIGNAL).await {
-                return state
-                    .peers
-                    .iter()
-                    .map(|p| (p.authority_id.clone(), p.address.clone()))
-                    .collect();
-            }
+        let reactive = match self.app_core.try_read() {
+            Some(core) => core.reactive().clone(),
+            None => return vec![],
+        };
+
+        if let Ok(state) = reactive.read(&*DISCOVERED_PEERS_SIGNAL).await {
+            return state
+                .peers
+                .iter()
+                .map(|p| (p.authority_id.clone(), p.address.clone()))
+                .collect();
         }
         vec![]
     }
 
     pub async fn get_lan_peers(&self) -> Vec<(String, String)> {
-        let core = self.app_core.read().await;
-        let runtime = match core.runtime() {
-            Some(r) => r,
-            None => return vec![],
+        let runtime = self
+            .app_core
+            .try_read()
+            .and_then(|core| core.runtime().cloned());
+
+        let Some(runtime) = runtime else {
+            return vec![];
         };
 
         let lan_peers = runtime.get_lan_peers().await;

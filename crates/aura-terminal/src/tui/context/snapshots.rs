@@ -56,8 +56,8 @@ impl SnapshotHelper {
 // These methods are best-effort and intentionally non-reactive.
 //
 // Production TUI screens should subscribe to signals (reactive) rather than
-// relying on snapshots for rendering; snapshots exist for command context,
-// dispatch gating, and some test/dev flows.
+// relying on snapshots for rendering; snapshot accessors exist primarily for
+// deterministic tests and a few legacy utilities.
 impl SnapshotHelper {
     pub fn snapshot_chat(&self) -> ChatSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
@@ -92,7 +92,15 @@ impl SnapshotHelper {
                 .recovery
                 .active_recovery
                 .as_ref()
-                .map(|r| (r.progress, !matches!(r.status, aura_app::views::recovery::RecoveryProcessStatus::Idle)))
+                .map(|r| {
+                    (
+                        r.progress,
+                        !matches!(
+                            r.status,
+                            aura_app::views::recovery::RecoveryProcessStatus::Idle
+                        ),
+                    )
+                })
                 .unwrap_or((0, false));
 
             RecoverySnapshot {
@@ -152,8 +160,6 @@ impl SnapshotHelper {
         if let Some(snapshot) = self.try_state_snapshot() {
             ContactsSnapshot {
                 contacts: snapshot.contacts.contacts,
-                // Suggestion policy lives outside ContactsState today; use default here.
-                policy: aura_app::views::contacts::SuggestionPolicy::default(),
             }
         } else {
             ContactsSnapshot::default()

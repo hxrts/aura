@@ -316,15 +316,12 @@ impl BlockSnapshot {
 pub struct ContactsSnapshot {
     /// Contacts list
     pub contacts: Vec<aura_app::views::contacts::Contact>,
-    /// Suggestion policy
-    pub policy: aura_app::views::contacts::SuggestionPolicy,
 }
 
 impl Default for ContactsSnapshot {
     fn default() -> Self {
         Self {
             contacts: Vec::new(),
-            policy: aura_app::views::contacts::SuggestionPolicy::default(),
         }
     }
 }

@@ -23,6 +23,7 @@ use crate::tui::state_machine::{
     BlockFocus, ChatFocus, GuardianCeremonyResponse, GuardianSetupStep, PanelFocus, QueuedModal,
     TuiState,
 };
+use cfg_if::cfg_if;
 
 // ============================================================================
 // Block Screen Props Extraction
@@ -180,8 +181,11 @@ pub struct ContactsViewProps {
     pub guardian_setup_modal_ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
     pub guardian_setup_modal_error: String,
     // Demo mode shortcuts
+    #[cfg(feature = "development")]
     pub demo_mode: bool,
+    #[cfg(feature = "development")]
     pub demo_alice_code: String,
+    #[cfg(feature = "development")]
     pub demo_carol_code: String,
 }
 
@@ -270,43 +274,82 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         ),
     };
 
-    ContactsViewProps {
-        focus,
-        selected_index: state.contacts.selected_index,
-        filter: state.contacts.filter.clone(),
-        // Petname modal (from queue)
-        petname_modal_visible: petname_visible,
-        petname_modal_contact_id: petname_contact_id,
-        petname_modal_value: petname_value,
-        // Import modal (from queue)
-        import_modal_visible: import_visible,
-        import_modal_code: import_code,
-        import_modal_importing: import_importing,
-        // Create modal (from queue)
-        create_modal_visible: create_visible,
-        create_modal_type_index: create_type_index,
-        create_modal_message: create_message,
-        create_modal_ttl_hours: create_ttl,
-        create_modal_step: create_step,
-        // Code display modal (from queue)
-        code_modal_visible: code_visible,
-        code_modal_invitation_id: code_invitation_id,
-        code_modal_code: code_code,
-        code_modal_loading: code_loading,
-        // Guardian setup modal (from queue)
-        guardian_setup_modal_visible: guardian_visible,
-        guardian_setup_modal_step: guardian_step,
-        guardian_setup_modal_contacts: guardian_contacts,
-        guardian_setup_modal_selected_indices: guardian_selected,
-        guardian_setup_modal_focused_index: guardian_focused,
-        guardian_setup_modal_threshold_k: guardian_k,
-        guardian_setup_modal_threshold_n: guardian_n,
-        guardian_setup_modal_ceremony_responses: guardian_responses,
-        guardian_setup_modal_error: guardian_error,
-        // Demo mode
-        demo_mode: !state.contacts.demo_alice_code.is_empty(),
-        demo_alice_code: state.contacts.demo_alice_code.clone(),
-        demo_carol_code: state.contacts.demo_carol_code.clone(),
+    cfg_if! {
+        if #[cfg(feature = "development")] {
+            ContactsViewProps {
+                focus,
+                selected_index: state.contacts.selected_index,
+                filter: state.contacts.filter.clone(),
+                // Petname modal (from queue)
+                petname_modal_visible: petname_visible,
+                petname_modal_contact_id: petname_contact_id,
+                petname_modal_value: petname_value,
+                // Import modal (from queue)
+                import_modal_visible: import_visible,
+                import_modal_code: import_code,
+                import_modal_importing: import_importing,
+                // Create modal (from queue)
+                create_modal_visible: create_visible,
+                create_modal_type_index: create_type_index,
+                create_modal_message: create_message,
+                create_modal_ttl_hours: create_ttl,
+                create_modal_step: create_step,
+                // Code display modal (from queue)
+                code_modal_visible: code_visible,
+                code_modal_invitation_id: code_invitation_id,
+                code_modal_code: code_code,
+                code_modal_loading: code_loading,
+                // Guardian setup modal (from queue)
+                guardian_setup_modal_visible: guardian_visible,
+                guardian_setup_modal_step: guardian_step,
+                guardian_setup_modal_contacts: guardian_contacts,
+                guardian_setup_modal_selected_indices: guardian_selected,
+                guardian_setup_modal_focused_index: guardian_focused,
+                guardian_setup_modal_threshold_k: guardian_k,
+                guardian_setup_modal_threshold_n: guardian_n,
+                guardian_setup_modal_ceremony_responses: guardian_responses,
+                guardian_setup_modal_error: guardian_error,
+                // Demo mode
+                demo_mode: !state.contacts.demo_alice_code.is_empty(),
+                demo_alice_code: state.contacts.demo_alice_code.clone(),
+                demo_carol_code: state.contacts.demo_carol_code.clone(),
+            }
+        } else {
+            ContactsViewProps {
+                focus,
+                selected_index: state.contacts.selected_index,
+                filter: state.contacts.filter.clone(),
+                // Petname modal (from queue)
+                petname_modal_visible: petname_visible,
+                petname_modal_contact_id: petname_contact_id,
+                petname_modal_value: petname_value,
+                // Import modal (from queue)
+                import_modal_visible: import_visible,
+                import_modal_code: import_code,
+                import_modal_importing: import_importing,
+                // Create modal (from queue)
+                create_modal_visible: create_visible,
+                create_modal_type_index: create_type_index,
+                create_modal_message: create_message,
+                create_modal_ttl_hours: create_ttl,
+                create_modal_step: create_step,
+                // Code display modal (from queue)
+                code_modal_visible: code_visible,
+                code_modal_invitation_id: code_invitation_id,
+                code_modal_code: code_code,
+                code_modal_loading: code_loading,
+                // Guardian setup modal (from queue)
+                guardian_setup_modal_visible: guardian_visible,
+                guardian_setup_modal_step: guardian_step,
+                guardian_setup_modal_contacts: guardian_contacts,
+                guardian_setup_modal_selected_indices: guardian_selected,
+                guardian_setup_modal_focused_index: guardian_focused,
+                guardian_setup_modal_threshold_k: guardian_k,
+                guardian_setup_modal_threshold_n: guardian_n,
+                guardian_setup_modal_ceremony_responses: guardian_responses,
+                guardian_setup_modal_error: guardian_error,
+            }
+        }
     }
 }
 

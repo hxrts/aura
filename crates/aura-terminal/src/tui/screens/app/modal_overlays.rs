@@ -193,6 +193,11 @@ pub fn render_petname_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'
 
 pub fn render_contacts_import_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
     if contacts.import_modal_visible {
+        #[cfg(feature = "development")]
+        let demo_mode = contacts.demo_mode;
+        #[cfg(not(feature = "development"))]
+        let demo_mode = false;
+
         Some(
             element! {
                 ModalFrame {
@@ -202,7 +207,7 @@ pub fn render_contacts_import_modal(contacts: &ContactsViewProps) -> Option<AnyE
                         code: contacts.import_modal_code.clone(),
                         error: String::new(),
                         importing: contacts.import_modal_importing,
-                        demo_mode: contacts.demo_mode,
+                        demo_mode: demo_mode,
                     )
                 }
             }

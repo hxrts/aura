@@ -2608,41 +2608,44 @@ fn handle_import_invitation_key_queue(
     _source_screen: Screen,
 ) {
     // Demo shortcuts: Ctrl+A / Ctrl+L fill Alice/Carol invite codes.
+    //
     // These are handled at the state machine layer so they work consistently
-    // across ContactsImport and InvitationsImport modals.
-    if key.modifiers.ctrl() {
-        match key.code {
-            KeyCode::Char('a') => {
-                let code = if !state.contacts.demo_alice_code.is_empty() {
-                    state.contacts.demo_alice_code.clone()
-                } else {
-                    state.invitations.demo_alice_code.clone()
-                };
-                if !code.is_empty() {
-                    state.modal_queue.update_active(|modal| match modal {
-                        QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
-                        QueuedModal::InvitationsImport(ref mut s) => s.code = code.clone(),
-                        _ => {}
-                    });
-                    return;
-                }
-            }
-            KeyCode::Char('l') => {
-                let code = if !state.contacts.demo_carol_code.is_empty() {
-                    state.contacts.demo_carol_code.clone()
-                } else {
-                    state.invitations.demo_carol_code.clone()
-                };
-                if !code.is_empty() {
-                    state.modal_queue.update_active(|modal| match modal {
-                        QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
-                        QueuedModal::InvitationsImport(ref mut s) => s.code = code.clone(),
-                        _ => {}
-                    });
-                    return;
-                }
-            }
-            _ => {}
+    // across ContactsImport and InvitationsImport modals. In production builds
+    // the codes are typically empty unless explicitly provided.
+    let is_ctrl_a = (key.modifiers.ctrl() && matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A')))
+        // Some terminals report Ctrl+a as the control character (SOH, 0x01) with no modifiers.
+        || matches!(key.code, KeyCode::Char('\u{1}'));
+    let is_ctrl_l = (key.modifiers.ctrl() && matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L')))
+        // Some terminals report Ctrl+l as the control character (FF, 0x0c) with no modifiers.
+        || matches!(key.code, KeyCode::Char('\u{c}'));
+
+    if is_ctrl_a {
+        let code = if !state.contacts.demo_alice_code.is_empty() {
+            state.contacts.demo_alice_code.clone()
+        } else {
+            state.invitations.demo_alice_code.clone()
+        };
+        if !code.is_empty() {
+            state.modal_queue.update_active(|modal| match modal {
+                QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
+                QueuedModal::InvitationsImport(ref mut s) => s.code = code.clone(),
+                _ => {}
+            });
+            return;
+        }
+    } else if is_ctrl_l {
+        let code = if !state.contacts.demo_carol_code.is_empty() {
+            state.contacts.demo_carol_code.clone()
+        } else {
+            state.invitations.demo_carol_code.clone()
+        };
+        if !code.is_empty() {
+            state.modal_queue.update_active(|modal| match modal {
+                QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
+                QueuedModal::InvitationsImport(ref mut s) => s.code = code.clone(),
+                _ => {}
+            });
+            return;
         }
     }
 
