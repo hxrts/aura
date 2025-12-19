@@ -20,6 +20,7 @@ use aura_agent::core::config::StorageConfig;
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
+use tracing_subscriber::EnvFilter;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
@@ -530,6 +531,10 @@ async fn handle_tui_launch(
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("./aura-data"));
 
+    // Initialize tracing for TUI into a file (avoid stderr corruption in fullscreen).
+    // Safe to call multiple times; only the first init wins.
+    init_tui_tracing(&base_path, mode);
+
     // In demo mode, clean up existing demo files so users go through account creation
     // This is ONLY done in demo mode - production files are NEVER deleted
     if matches!(mode, TuiMode::Demo { .. }) {
@@ -828,4 +833,65 @@ async fn handle_tui_launch(
 
     result?;
     Ok(())
+}
+
+fn init_tui_tracing(base_path: &Path, mode: TuiMode) {
+    // Allow forcing stdio tracing for debugging.
+    if std::env::var("AURA_TUI_ALLOW_STDIO")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        return;
+    }
+
+    let default_name = match mode {
+        TuiMode::Production => "aura-tui.log",
+        TuiMode::Demo { .. } => "aura-tui-demo.log",
+    };
+
+    let log_path = std::env::var_os("AURA_TUI_LOG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| base_path.join(default_name));
+
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let log_path = std::sync::Arc::new(log_path);
+    let make_writer = {
+        let log_path = log_path.clone();
+        move || {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path.as_ref())
+                .unwrap_or_else(|_| {
+                    #[cfg(unix)]
+                    {
+                        std::fs::OpenOptions::new()
+                            .write(true)
+                            .open("/dev/null")
+                            .expect("Failed to open /dev/null")
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        // Best-effort fallback: try again in the same location.
+                        std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(log_path.as_ref())
+                            .expect("Failed to open TUI log file")
+                    }
+                })
+        }
+    };
+
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(false)
+        .with_target(false)
+        .with_writer(make_writer)
+        .try_init();
 }
