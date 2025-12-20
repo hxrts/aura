@@ -14,9 +14,9 @@
 //! The hints guide users through the demo flow by showing relevant information
 //! for each screen (e.g., Alice's invite code on the Invitations screen).
 
-use aura_core::identifiers::AuthorityId;
 use base64::Engine;
-use uuid::Uuid;
+
+use crate::ids;
 
 /// Demo hints that can be displayed in the TUI
 #[derive(Debug, Clone, Default)]
@@ -39,8 +39,10 @@ impl DemoHints {
     /// Both the authority IDs and invitation IDs are derived deterministically
     /// from the seed, ensuring reproducible demo behavior.
     pub fn new(seed: u64) -> Self {
-        let alice_code = generate_invite_code("alice", seed);
-        let carol_code = generate_invite_code("carol", seed);
+        // IMPORTANT: Name case must match SimulatedAgent creation in demo/mod.rs
+        // SimulatedAgent uses "Alice" and "Carol" (Title case)
+        let alice_code = generate_invite_code("Alice", seed);
+        let carol_code = generate_invite_code("Carol", seed);
 
         Self {
             alice_invite_code: alice_code,
@@ -88,14 +90,11 @@ impl DemoHints {
 /// Guardian requests are sent in-band after someone is a contact.
 fn generate_invite_code(name: &str, seed: u64) -> String {
     // Create deterministic authority ID matching the simulator's derivation
-    let authority_entropy =
-        aura_core::hash::hash(format!("demo:{}:{}:authority", seed, name).as_bytes());
-    let sender_id = AuthorityId::new_from_entropy(authority_entropy);
+    // IMPORTANT: Must use ids::authority_id() to match SimulatedAgent derivation in demo/mod.rs
+    let sender_id = ids::authority_id(&format!("demo:{}:{}:authority", seed, name));
 
     // Create deterministic invitation ID from seed and name
-    let invitation_id_entropy =
-        aura_core::hash::hash(format!("demo:{}:{}:invitation", seed, name).as_bytes());
-    let invitation_id = Uuid::from_bytes(invitation_id_entropy[..16].try_into().unwrap());
+    let invitation_id = ids::uuid(&format!("demo:{}:{}:invitation", seed, name));
 
     // Create ShareableInvitation-compatible structure
     // Note: invitation_type uses the aura-invitation InvitationType::Contact format
@@ -201,7 +200,7 @@ mod tests {
         // Verify the invitation type is Contact (not Guardian)
         match alice_parsed.invitation_type {
             aura_invitation::InvitationType::Contact { nickname } => {
-                assert_eq!(nickname, Some("alice".to_string()));
+                assert_eq!(nickname, Some("Alice".to_string()));
             }
             _ => panic!(
                 "Expected Contact invitation type, got {:?}",
@@ -216,7 +215,7 @@ mod tests {
         assert!(!carol_parsed.invitation_id.is_empty());
         match carol_parsed.invitation_type {
             aura_invitation::InvitationType::Contact { nickname } => {
-                assert_eq!(nickname, Some("carol".to_string()));
+                assert_eq!(nickname, Some("Carol".to_string()));
             }
             _ => panic!(
                 "Expected Contact invitation type, got {:?}",
@@ -228,6 +227,48 @@ mod tests {
         assert_ne!(
             alice_parsed.sender_id, carol_parsed.sender_id,
             "Alice and Carol should have different sender IDs"
+        );
+    }
+
+    /// Verify that hints derive the SAME authority IDs as the simulator.
+    ///
+    /// This test ensures that when a user imports an invitation code from hints,
+    /// the contact's AuthorityId matches what the SimulatedAgent uses internally.
+    /// Without this, guardian bindings won't match because the signal_coordinator
+    /// looks up contacts by authority_id.
+    #[test]
+    fn test_hints_authority_matches_simulator_derivation() {
+        use aura_agent::handlers::ShareableInvitation;
+
+        let seed = 2024u64;
+        let hints = DemoHints::new(seed);
+
+        // Parse Alice's invitation to get the sender_id used in hints
+        let alice_parsed = ShareableInvitation::from_code(&hints.alice_invite_code)
+            .expect("Alice's invitation code should be parseable");
+        // sender_id is already AuthorityId (typed ID refactor)
+        let hints_alice_authority = alice_parsed.sender_id;
+
+        // Derive Alice's authority the SAME way SimulatedAgent does (demo/mod.rs line 269)
+        let simulator_alice_authority =
+            ids::authority_id(&format!("demo:{}:{}:authority", seed, "Alice"));
+
+        assert_eq!(
+            hints_alice_authority, simulator_alice_authority,
+            "Hints and simulator must derive the same AuthorityId for Alice"
+        );
+
+        // Same check for Carol
+        let carol_parsed = ShareableInvitation::from_code(&hints.carol_invite_code)
+            .expect("Carol's invitation code should be parseable");
+        let hints_carol_authority = carol_parsed.sender_id;
+
+        let simulator_carol_authority =
+            ids::authority_id(&format!("demo:{}:{}:authority", seed, "Carol"));
+
+        assert_eq!(
+            hints_carol_authority, simulator_carol_authority,
+            "Hints and simulator must derive the same AuthorityId for Carol"
         );
     }
 }
