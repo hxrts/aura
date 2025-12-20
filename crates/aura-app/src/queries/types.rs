@@ -936,9 +936,9 @@ impl Query for BlocksQuery {
 
         for block in blocks_list {
             if block.is_primary && current_block_id.is_none() {
-                current_block_id = Some(block.id.clone());
+                current_block_id = Some(block.id);
             }
-            blocks.insert(block.id.clone(), block);
+            blocks.insert(block.id, block);
         }
 
         // If no primary block, select first block

@@ -2,7 +2,8 @@
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::disallowed_methods,
-    clippy::needless_borrows_for_generic_args
+    clippy::needless_borrows_for_generic_args,
+    clippy::clone_on_copy
 )]
 //! # TUI Callback Wiring E2E Tests
 //!
@@ -90,7 +91,6 @@ fn cleanup_test_dir(name: &str) {
     ));
     let _ = std::fs::remove_dir_all(&test_dir);
 }
-
 
 async fn wait_for_chat(
     app_core: &Arc<RwLock<AppCore>>,
@@ -480,7 +480,10 @@ async fn test_contacts_signal_contact_tracking() {
     // Phase 3: Verify contact is preserved
     println!("\nPhase 3: Verify contact is preserved");
     {
-        let contacts = wait_for_contacts(&app_core, |contacts| contacts.contacts.len() == initial_count + 1).await;
+        let contacts = wait_for_contacts(&app_core, |contacts| {
+            contacts.contacts.len() == initial_count + 1
+        })
+        .await;
 
         assert_eq!(
             contacts.contacts.len(),
@@ -661,10 +664,7 @@ async fn test_recovery_signal_state_tracking() {
     println!("\nPhase 5: Verify approval was recorded");
     {
         let recovery = wait_for_recovery(&app_core, |r| {
-            r.active_recovery
-                .as_ref()
-                .map(|a| a.approvals_received)
-                == Some(1)
+            r.active_recovery.as_ref().map(|a| a.approvals_received) == Some(1)
         })
         .await;
         let active = recovery.active_recovery.as_ref().unwrap();

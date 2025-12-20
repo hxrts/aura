@@ -338,7 +338,10 @@ async fn test_send_direct_message_adds_message() {
     let expected_channel_id = dm_channel_id(target);
     let chat = wait_for_chat(&app_core, |chat| {
         chat.channels.iter().any(|c| c.id == expected_channel_id)
-            && chat.messages.iter().any(|m| m.channel_id == expected_channel_id)
+            && chat
+                .messages
+                .iter()
+                .any(|m| m.channel_id == expected_channel_id)
     })
     .await;
 

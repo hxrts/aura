@@ -1018,7 +1018,7 @@ impl SimulatedBridge {
                         topic: topic.clone(),
                     };
                     if let Ok(channel_id) = amp.create_channel(params).await {
-                        let channel = aura_app::views::chat::Channel { 
+                        let channel = aura_app::views::chat::Channel {
                             id: channel_id,
                             name: name.clone(),
                             topic: topic.clone(),

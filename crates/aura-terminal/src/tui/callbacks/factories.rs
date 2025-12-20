@@ -66,7 +66,7 @@ impl ChatCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -90,7 +90,7 @@ impl ChatCallbacks {
                         }
                         Err(_e) => {
                             // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                        }
                     }
                 });
             },
@@ -132,7 +132,7 @@ impl ChatCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -158,7 +158,7 @@ impl ChatCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -208,7 +208,7 @@ impl ContactsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -229,7 +229,7 @@ impl ContactsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -250,7 +250,7 @@ impl ContactsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -278,7 +278,7 @@ impl ContactsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -325,7 +325,7 @@ impl InvitationsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -346,7 +346,7 @@ impl InvitationsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -372,7 +372,7 @@ impl InvitationsCallbacks {
                         }
                         Err(_e) => {
                             // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                        }
                     }
                 });
             },
@@ -390,7 +390,7 @@ impl InvitationsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -411,7 +411,7 @@ impl InvitationsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -453,7 +453,7 @@ impl RecoveryCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -473,7 +473,7 @@ impl RecoveryCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -496,7 +496,7 @@ impl RecoveryCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -519,7 +519,7 @@ impl RecoveryCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -568,7 +568,7 @@ impl SettingsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -590,7 +590,7 @@ impl SettingsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -614,7 +614,7 @@ impl SettingsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -639,7 +639,7 @@ impl SettingsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -660,7 +660,7 @@ impl SettingsCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -732,7 +732,7 @@ impl BlockCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -755,7 +755,7 @@ impl BlockCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -777,7 +777,7 @@ impl BlockCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -800,7 +800,7 @@ impl BlockCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -823,7 +823,7 @@ impl BlockCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -879,7 +879,7 @@ impl NeighborhoodCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -901,7 +901,7 @@ impl NeighborhoodCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })
@@ -923,7 +923,7 @@ impl NeighborhoodCallbacks {
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                }
+                    }
                 }
             });
         })

@@ -26,7 +26,8 @@ pub async fn handle_network(
                 peers.len()
             };
 
-            if let Err(e) = aura_app::workflows::network::update_connection_status(app_core, count).await
+            if let Err(e) =
+                aura_app::workflows::network::update_connection_status(app_core, count).await
             {
                 tracing::debug!("Failed to update connection status: {}", e);
             }
@@ -42,7 +43,8 @@ pub async fn handle_network(
                 peers.len()
             };
 
-            if let Err(e) = aura_app::workflows::network::update_connection_status(app_core, count).await
+            if let Err(e) =
+                aura_app::workflows::network::update_connection_status(app_core, count).await
             {
                 tracing::debug!("Failed to update connection status: {}", e);
             }
@@ -87,7 +89,10 @@ pub async fn handle_network(
             }
         }
 
-        EffectCommand::InviteLanPeer { authority_id, address } => {
+        EffectCommand::InviteLanPeer {
+            authority_id,
+            address,
+        } => {
             // LAN peer invitation flow:
             // 1. Create a contact invitation for this peer
             // 2. Export the invitation code
@@ -107,10 +112,8 @@ pub async fn handle_network(
             // Try to export an invitation (requires runtime)
             // The invitation_id would normally come from a created invitation
             // For LAN invites, we generate a placeholder ID based on the target
-            let invitation_id = format!(
-                "lan-invite-{}",
-                &authority_id[..8.min(authority_id.len())]
-            );
+            let invitation_id =
+                format!("lan-invite-{}", &authority_id[..8.min(authority_id.len())]);
 
             match app_core.export_invitation(&invitation_id).await {
                 Ok(code) => {

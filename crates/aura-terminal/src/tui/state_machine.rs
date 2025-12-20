@@ -1,3 +1,7 @@
+// Allow patterns that are clearer than their clippy-suggested alternatives
+#![allow(clippy::match_like_matches_macro)]
+#![allow(clippy::field_reassign_with_default)]
+
 //! # TUI State Machine
 //!
 //! Pure state machine model for the TUI, enabling deterministic testing.
@@ -33,8 +37,8 @@
 //! ```
 
 use crate::tui::navigation::{navigate_list, GridNav, NavKey};
-use crate::tui::types::{InvitationFilter, MfaPolicy, RecoveryTab, SettingsSection};
 use crate::tui::screens::{Router, Screen};
+use crate::tui::types::{InvitationFilter, MfaPolicy, RecoveryTab, SettingsSection};
 use aura_core::effects::terminal::{KeyCode, KeyEvent, TerminalEvent};
 use std::collections::VecDeque;
 

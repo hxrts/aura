@@ -33,7 +33,9 @@ async fn refresh_settings_signal_from_runtime(core: &AppCore) -> Result<(), Aura
 /// Refresh SETTINGS_SIGNAL from the current RuntimeBridge settings.
 ///
 /// This is used at startup (to seed UI state) and after settings writes.
-pub async fn refresh_settings_from_runtime(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
+pub async fn refresh_settings_from_runtime(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
     let core = app_core.read().await;
     refresh_settings_signal_from_runtime(&core).await
 }
@@ -74,7 +76,10 @@ pub async fn update_mfa_policy(
 /// **What it does**: Updates display name and emits SETTINGS_SIGNAL
 /// **Returns**: Unit result
 /// **Signal pattern**: RuntimeBridge handles signal emission
-pub async fn update_nickname(app_core: &Arc<RwLock<AppCore>>, name: String) -> Result<(), AuraError> {
+pub async fn update_nickname(
+    app_core: &Arc<RwLock<AppCore>>,
+    name: String,
+) -> Result<(), AuraError> {
     let runtime = {
         let core = app_core.read().await;
         core.runtime()

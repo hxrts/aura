@@ -100,6 +100,7 @@ fn journal_filename(mode: TuiMode) -> &'static str {
     }
 }
 
+#[allow(clippy::expect_used)] // Panicking is appropriate when runtime/channel fails
 fn block_on<F>(fut: F) -> F::Output
 where
     F: Future + Send + 'static,
@@ -769,10 +770,7 @@ async fn handle_tui_launch(
     }
 
     if let Err(e) = aura_app::workflows::settings::refresh_settings_from_runtime(&app_core).await {
-        stdio.eprintln(format_args!(
-            "Warning: Failed to refresh settings: {}",
-            e
-        ));
+        stdio.eprintln(format_args!("Warning: Failed to refresh settings: {}", e));
     }
 
     stdio.println(format_args!(
@@ -928,6 +926,7 @@ async fn handle_tui_launch(
     Ok(())
 }
 
+#[allow(clippy::expect_used)] // Panicking is appropriate when /dev/null can't be opened
 fn init_tui_tracing(base_path: &Path, mode: TuiMode) {
     // Allow forcing stdio tracing for debugging.
     if std::env::var("AURA_TUI_ALLOW_STDIO").ok().as_deref() == Some("1") {

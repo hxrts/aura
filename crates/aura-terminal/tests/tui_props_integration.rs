@@ -20,10 +20,10 @@ use aura_terminal::tui::props::{
     extract_block_view_props, extract_chat_view_props, extract_contacts_view_props,
     extract_recovery_view_props, extract_settings_view_props,
 };
+use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::screens::{BlockFocus, ChatFocus};
 use aura_terminal::tui::state_machine::{transition, ChatFocus as StateChatFocus, TuiState};
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
-use aura_terminal::tui::screens::Screen;
 
 // ============================================================================
 // Test Harness

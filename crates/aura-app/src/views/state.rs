@@ -7,6 +7,7 @@ use super::{
     RecoveryState,
 };
 use crate::core::{StateSnapshot, ViewDelta};
+#[cfg(feature = "signals")]
 use aura_core::identifiers::ChannelId;
 use cfg_if::cfg_if;
 

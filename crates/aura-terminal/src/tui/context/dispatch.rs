@@ -62,7 +62,7 @@ impl AccountFilesHelper {
             &self.base_path,
             &self.device_id_str,
             self.mode,
-                    display_name,
+            display_name,
         ) {
             Ok((_authority_id, _context_id)) => {
                 self.set_account_created();
@@ -415,6 +415,7 @@ fn command_name(command: &EffectCommand) -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)] // Tests use expect() for cleaner error handling
 mod tests {
     use std::sync::Arc;
 

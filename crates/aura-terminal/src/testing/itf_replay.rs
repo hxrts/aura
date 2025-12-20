@@ -18,8 +18,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::tui::screens::Router;
-use crate::tui::state_machine::{ModalType, TuiState};
 use crate::tui::screens::Screen;
+use crate::tui::state_machine::{ModalType, TuiState};
 
 /// ITF trace structure matching Quint output
 #[derive(Debug, Clone, Deserialize)]

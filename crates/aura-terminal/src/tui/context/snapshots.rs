@@ -204,6 +204,7 @@ impl SnapshotHelper {
     }
 }
 
+#[allow(clippy::expect_used)] // Default is only used in tests
 impl Default for SnapshotHelper {
     fn default() -> Self {
         // Default is only used in tests that construct helpers directly; it is

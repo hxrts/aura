@@ -587,6 +587,7 @@ pub fn extract_help_view_props(state: &TuiState) -> HelpViewProps {
 // ============================================================================
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)] // Tests construct state incrementally
 mod tests {
     use super::*;
 

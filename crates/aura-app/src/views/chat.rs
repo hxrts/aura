@@ -178,7 +178,7 @@ impl ChatState {
         if self.selected_channel_id != channel_id {
             // Clear old messages
             self.messages.clear();
-            self.selected_channel_id = channel_id.clone();
+            self.selected_channel_id = channel_id;
 
             // Mark as read - first get the unread count, then update both fields
             if let Some(id) = &channel_id {

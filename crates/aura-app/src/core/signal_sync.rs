@@ -248,6 +248,7 @@ impl Drop for SignalForwarder {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)] // Tests use expect() for cleaner error handling
 mod tests {
     use super::*;
     use crate::views::ContactsState;

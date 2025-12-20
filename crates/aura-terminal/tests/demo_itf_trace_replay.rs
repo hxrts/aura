@@ -1,3 +1,9 @@
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::clone_on_copy,
+    dead_code
+)]
 //! CLI Recovery Demo ITF Trace Replay Tests
 //!
 //! These tests validate the guardian relationship invariants from the Quint spec:

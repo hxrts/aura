@@ -64,19 +64,19 @@ pub async fn move_position(
 
     // Determine target block ID
     let target_block_id = if block_id == "home" {
-        neighborhood.home_block_id.clone()
+        neighborhood.home_block_id
     } else if block_id == "current" {
         // Stay on current block, just change depth
         neighborhood
             .position
             .as_ref()
-            .map(|p| p.current_block_id.clone())
-            .unwrap_or_else(|| neighborhood.home_block_id.clone())
+            .map(|p| p.current_block_id)
+            .unwrap_or(neighborhood.home_block_id)
     } else {
         // Parse block_id as ChannelId, fall back to home if invalid
         block_id
             .parse::<ChannelId>()
-            .unwrap_or_else(|_| neighborhood.home_block_id.clone())
+            .unwrap_or(neighborhood.home_block_id)
     };
 
     // Get block name from neighbors or use the ID
@@ -94,7 +94,7 @@ pub async fn move_position(
 
     // Create or update position
     let position = TraversalPosition {
-        current_block_id: target_block_id.clone(),
+        current_block_id: target_block_id,
         current_block_name: block_name,
         depth: depth_value,
         path: vec![target_block_id],

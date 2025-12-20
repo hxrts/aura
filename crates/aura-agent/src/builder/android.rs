@@ -170,13 +170,13 @@ impl AndroidPresetBuilder {
     pub async fn build(self) -> AgentResult<AuraAgent> {
         #[cfg(not(feature = "android"))]
         {
-            return Err(BuildError::EffectInit {
+            Err(BuildError::EffectInit {
                 effect: "android",
                 message: "Android preset requires the 'android' feature flag. \
                          Compile with --features android or use a different preset."
                     .to_string(),
             }
-            .into());
+            .into())
         }
 
         #[cfg(feature = "android")]

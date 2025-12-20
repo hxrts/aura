@@ -6,7 +6,7 @@
     clippy::unwrap_used,
     clippy::disallowed_methods,
     clippy::needless_borrows_for_generic_args,
-    missing_docs,
+    missing_docs
 )]
 //! # Guardian Display E2E Test
 //!

@@ -56,7 +56,7 @@ pub async fn send_direct_message(
     // Ensure the DM channel exists (create if needed)
     if !chat_state.channels.iter().any(|c| c.id == channel_id) {
         let dm_channel = Channel {
-            id: channel_id.clone(),
+            id: channel_id,
             name: format!("DM with {}", &target[..8.min(target.len())]),
             topic: Some(format!("Direct messages with {}", target)),
             channel_type: ChannelType::DirectMessage,
@@ -71,13 +71,13 @@ pub async fn send_direct_message(
     }
 
     // Select this channel so messages are visible
-    chat_state.selected_channel_id = Some(channel_id.clone());
+    chat_state.selected_channel_id = Some(channel_id);
 
     // Create the message with deterministic ID
     // Use AuthorityId::default() for self - in production this would be the actual user's ID
     let message = Message {
         id: format!("msg-{}-{}", channel_id, now),
-        channel_id: channel_id.clone(),
+        channel_id,
         sender_id: AuthorityId::default(),
         sender_name: "You".to_string(),
         content: content.to_string(),
@@ -88,7 +88,7 @@ pub async fn send_direct_message(
     };
 
     // Apply message to state
-    chat_state.apply_message(channel_id.clone(), message);
+    chat_state.apply_message(channel_id, message);
 
     // Update ViewState - signal forwarding auto-propagates to CHAT_SIGNAL
     core.views().set_chat(chat_state);
@@ -140,7 +140,7 @@ pub async fn start_direct_chat(
 
     // Create the DM channel
     let dm_channel = Channel {
-        id: channel_id.clone(),
+        id: channel_id,
         name: contact_name,
         topic: Some(format!("Direct messages with {}", contact_id)),
         channel_type: ChannelType::DirectMessage,
@@ -159,7 +159,7 @@ pub async fn start_direct_chat(
     chat_state.add_channel(dm_channel);
 
     // Select this channel (don't clear messages - retain history)
-    chat_state.selected_channel_id = Some(channel_id.clone());
+    chat_state.selected_channel_id = Some(channel_id);
 
     // Update ViewState - signal forwarding auto-propagates to CHAT_SIGNAL
     core.views().set_chat(chat_state);
@@ -221,7 +221,7 @@ pub async fn send_action(
     let message_id = format!("msg-{}-{}", channel_id, now);
     let message = Message {
         id: message_id.clone(),
-        channel_id: channel_id.clone(),
+        channel_id,
         sender_id: AuthorityId::default(),
         sender_name: "You".to_string(),
         // Format as emote: "* You action text"

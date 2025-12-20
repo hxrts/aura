@@ -22,11 +22,17 @@ pub struct PostFullscreenStdio {
     _no_send: Rc<()>,
 }
 
-impl PreFullscreenStdio {
-    pub fn new() -> Self {
+impl Default for PreFullscreenStdio {
+    fn default() -> Self {
         Self {
             _no_send: Rc::new(()),
         }
+    }
+}
+
+impl PreFullscreenStdio {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     #[allow(clippy::print_stdout)]

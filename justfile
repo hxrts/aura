@@ -582,7 +582,7 @@ ci-dry-run:
 
     # Layer architecture:
     # - Layer 3 (aura-effects): Production handlers - MUST use SystemTime::now(), thread_rng()
-    # - Layer 6 (aura-simulator): Runtime composition - allowed for instrumentation
+    # - Layer 6 (aura-agent, aura-simulator): Runtime composition - allowed for instrumentation
     # - Layer 7 (aura-terminal): User interface - allowed for TUI/CLI interaction
     # - Layer 8 (aura-testkit, tests/): Testing infrastructure - allowed
     # - All other layers: MUST use effect traits
@@ -591,6 +591,7 @@ ci-dry-run:
     # Note: May include false positives from code in comments or test modules
     time_violations=$(rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number \
         --glob '!**/aura-effects/**' \
+        --glob '!**/aura-agent/**' \
         --glob '!**/aura-simulator/**' \
         --glob '!**/aura-terminal/**' \
         --glob '!**/aura-testkit/**' \
@@ -629,6 +630,7 @@ ci-dry-run:
     # Check for direct randomness usage (exclude Layer 3, 6, 7, 8, integration tests, and demo code)
     if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number \
         --glob '!**/aura-effects/**' \
+        --glob '!**/aura-agent/**' \
         --glob '!**/aura-simulator/**' \
         --glob '!**/aura-terminal/**' \
         --glob '!**/aura-testkit/**' \

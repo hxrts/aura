@@ -50,8 +50,8 @@ pub mod cli;
 pub mod itf_replay;
 
 use crate::tui::runtime::TuiRuntime;
-use crate::tui::state_machine::{TuiCommand, TuiState};
 use crate::tui::screens::Screen;
+use crate::tui::state_machine::{TuiCommand, TuiState};
 use aura_core::effects::terminal::{
     events, CursorShape, TerminalError, TerminalEvent, TerminalFrame,
 };

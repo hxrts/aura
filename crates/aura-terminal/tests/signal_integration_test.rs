@@ -1,4 +1,5 @@
 #![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
 //! # Signal Integration Tests
 //!
 //! Tests for the unified signal-based reactive architecture.
@@ -26,7 +27,6 @@ async fn test_app_core() -> Arc<RwLock<AppCore>> {
     core.init_signals().await.expect("Failed to init signals");
     Arc::new(RwLock::new(core))
 }
-
 
 async fn wait_for_chat_signal(
     app_core: &Arc<RwLock<AppCore>>,

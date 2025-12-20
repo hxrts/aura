@@ -161,13 +161,13 @@ impl WebPresetBuilder {
     pub async fn build(self) -> AgentResult<AuraAgent> {
         #[cfg(not(feature = "web"))]
         {
-            return Err(BuildError::EffectInit {
+            Err(BuildError::EffectInit {
                 effect: "web",
                 message: "Web preset requires the 'web' feature flag. \
                          Compile with --features web or use a different preset."
                     .to_string(),
             }
-            .into());
+            .into())
         }
 
         #[cfg(feature = "web")]

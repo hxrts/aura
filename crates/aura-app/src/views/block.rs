@@ -179,7 +179,7 @@ impl BlockState {
         };
 
         // Initialize budget with one resident (the creator)
-        let mut budget = BlockFlowBudget::new(&id.to_string());
+        let mut budget = BlockFlowBudget::new(id.to_string());
         let _ = budget.add_resident(); // Creator is first resident
 
         Self {
@@ -369,8 +369,8 @@ impl BlocksState {
     /// Add a block
     pub fn add_block(&mut self, block: BlockState) {
         let is_first = self.blocks.is_empty();
-        let id = block.id.clone();
-        self.blocks.insert(id.clone(), block);
+        let id = block.id;
+        self.blocks.insert(id, block);
         // Auto-select first block
         if is_first {
             self.current_block_id = Some(id);

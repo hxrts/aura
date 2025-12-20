@@ -171,7 +171,7 @@ fn reduce_send_message(
 
     let msg_channel_id = parse_channel_id(&channel_id);
     ViewDelta::MessageSent {
-        channel_id: msg_channel_id.clone(),
+        channel_id: msg_channel_id,
         message: Message {
             id: msg_id,
             channel_id: msg_channel_id,

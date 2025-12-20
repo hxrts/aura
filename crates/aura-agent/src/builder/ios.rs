@@ -172,13 +172,13 @@ impl IosPresetBuilder {
     pub async fn build(self) -> AgentResult<AuraAgent> {
         #[cfg(not(feature = "ios"))]
         {
-            return Err(BuildError::EffectInit {
+            Err(BuildError::EffectInit {
                 effect: "ios",
                 message: "iOS preset requires the 'ios' feature flag. \
                          Compile with --features ios or use a different preset."
                     .to_string(),
             }
-            .into());
+            .into())
         }
 
         #[cfg(feature = "ios")]

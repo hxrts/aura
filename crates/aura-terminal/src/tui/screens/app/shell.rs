@@ -5,6 +5,11 @@
 //! This is the root TUI component that coordinates all screens, handles
 //! events, manages the state machine, and renders modals.
 
+// Allow field reassignment for large structs with many conditional fields
+#![allow(clippy::field_reassign_with_default)]
+// Allow manual map patterns in element! macro contexts for clarity
+#![allow(clippy::manual_map)]
+
 use super::modal_overlays::{
     render_account_setup_modal, render_add_device_modal, render_block_invite_modal,
     render_channel_info_modal, render_chat_create_modal, render_confirm_modal,
@@ -108,6 +113,7 @@ pub struct IoAppProps {
 }
 
 /// Main application with screen navigation
+#[allow(clippy::field_reassign_with_default)] // Large struct with many conditional fields
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let screen = hooks.use_state(|| Screen::Block);
@@ -189,7 +195,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // by a reactive subscription. Dispatch handler closures capture the Arc,
     // not the data, so they always read current contacts.
     let shared_contacts = use_contacts_subscription(&mut hooks, &app_ctx);
-
 
     // =========================================================================
     // ERROR_SIGNAL subscription: central domain error surfacing

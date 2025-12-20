@@ -20,7 +20,9 @@ use async_trait::async_trait;
 use aura_core::effects::reactive::{
     ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
 };
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::identifiers::AuthorityId;
+#[cfg(feature = "signals")]
+use aura_core::identifiers::ChannelId;
 use aura_core::query::{FactPredicate, Query};
 use aura_core::time::TimeStamp;
 use aura_core::tree::{AttestedOp, TreeOp};
@@ -1557,7 +1559,7 @@ mod tests {
         assert_eq!(snapshot.chat.channels[0].name, "test-channel");
 
         // Step 4: Get the channel ID (generated from the fact content hash)
-        let _channel_id = snapshot.chat.channels[0].id.clone();
+        let _channel_id = snapshot.chat.channels[0].id;
 
         // Step 5: Send a message to the channel
         // Note: Messages only appear in the messages vec when channel is selected,

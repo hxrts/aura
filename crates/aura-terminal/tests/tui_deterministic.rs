@@ -26,11 +26,11 @@
 //! | CI/CD | Requires PTY | Works anywhere |
 
 use aura_core::effects::terminal::{events, TerminalEvent};
+use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state_machine::{
     transition, ChatFocus, DispatchCommand, QueuedModal, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
-use aura_terminal::tui::screens::Screen;
 use proptest::prelude::*;
 
 // ============================================================================
