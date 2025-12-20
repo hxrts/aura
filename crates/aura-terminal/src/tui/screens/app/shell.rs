@@ -18,7 +18,7 @@ use super::modal_overlays::{
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use aura_app::signal_defs::SETTINGS_SIGNAL;
+use aura_app::signal_defs::{AppError, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::CallbackRegistry;
@@ -39,7 +39,7 @@ use crate::tui::types::{
 };
 
 // State machine integration
-use crate::tui::convert_iocraft_event;
+use crate::tui::iocraft_adapter::convert_iocraft_event;
 use crate::tui::props::{
     extract_block_view_props, extract_chat_view_props, extract_contacts_view_props,
     extract_invitations_view_props, extract_neighborhood_view_props, extract_recovery_view_props,
@@ -189,6 +189,102 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // by a reactive subscription. Dispatch handler closures capture the Arc,
     // not the data, so they always read current contacts.
     let shared_contacts = use_contacts_subscription(&mut hooks, &app_ctx);
+
+
+    // =========================================================================
+    // ERROR_SIGNAL subscription: central domain error surfacing
+    // =========================================================================
+    // Rule: AppCore/dispatch failures emit ERROR_SIGNAL (Option<AppError>) and are
+    // rendered here (toast queue), so screens/callbacks do not need their own
+    // per-operation error toasts.
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut tui_state = tui_state.clone();
+        let mut tui_state_version = tui_state_version.clone();
+        async move {
+            let format_error = |err: &AppError| {
+                if err.code.is_empty() {
+                    err.message.clone()
+                } else {
+                    format!("{}: {}", err.code, err.message)
+                }
+            };
+
+            // Initial read.
+            {
+                let core = app_core.read().await;
+                if let Ok(Some(err)) = core.read(&*ERROR_SIGNAL).await {
+                    let msg = format_error(&err);
+                    let mut state = tui_state.write();
+
+                    // Prefer routing errors into the account setup modal when it is active.
+                    let routed = matches!(
+                        state.modal_queue.current(),
+                        Some(QueuedModal::AccountSetup(_))
+                    );
+                    if routed {
+                        state.modal_queue.update_active(|modal| {
+                            if let QueuedModal::AccountSetup(ref mut s) = modal {
+                                s.set_error(msg.clone());
+                            }
+                        });
+                    }
+
+                    if !routed {
+                        let toast_id = state.next_toast_id;
+                        state.next_toast_id += 1;
+                        let toast = crate::tui::state_machine::QueuedToast::new(
+                            toast_id,
+                            msg,
+                            crate::tui::state_machine::ToastLevel::Error,
+                        );
+                        state.toast_queue.enqueue(toast);
+                    }
+
+                    drop(state);
+                    tui_state_version.set(tui_state_version.get().wrapping_add(1));
+                }
+            }
+
+            // Subscribe for updates.
+            let mut stream = {
+                let core = app_core.read().await;
+                core.subscribe(&*ERROR_SIGNAL)
+            };
+
+            while let Ok(err_opt) = stream.recv().await {
+                let Some(err) = err_opt else { continue };
+                let msg = format_error(&err);
+
+                let mut state = tui_state.write();
+                let routed = matches!(
+                    state.modal_queue.current(),
+                    Some(QueuedModal::AccountSetup(_))
+                );
+                if routed {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::AccountSetup(ref mut s) = modal {
+                            s.set_error(msg.clone());
+                        }
+                    });
+                }
+
+                if !routed {
+                    let toast_id = state.next_toast_id;
+                    state.next_toast_id += 1;
+                    let toast = crate::tui::state_machine::QueuedToast::new(
+                        toast_id,
+                        msg,
+                        crate::tui::state_machine::ToastLevel::Error,
+                    );
+                    state.toast_queue.enqueue(toast);
+                }
+
+                drop(state);
+                tui_state_version.set(tui_state_version.get().wrapping_add(1));
+            }
+        }
+    });
 
     // NOTE: Toast polling loop removed - toasts now flow through UiUpdate channel
     // All toast operations (ShowToast, DismissToast, ClearAllToasts) send UiUpdate variants

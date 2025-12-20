@@ -31,7 +31,7 @@ use aura_terminal::tui::state_machine::{
     transition, DispatchCommand, GuardianCandidate, QueuedModal, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::Contact;
-use aura_terminal::tui::Screen;
+use aura_terminal::tui::screens::Screen;
 
 use aura_core::effects::terminal::events;
 

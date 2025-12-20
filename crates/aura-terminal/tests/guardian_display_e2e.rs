@@ -1,9 +1,12 @@
+//! Guardian display E2E tests (development-only).
+
 #![cfg(feature = "development")]
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::disallowed_methods,
-    clippy::needless_borrows_for_generic_args
+    clippy::needless_borrows_for_generic_args,
+    missing_docs,
 )]
 //! # Guardian Display E2E Test
 //!

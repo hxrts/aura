@@ -6,14 +6,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::signal_defs::{
-    ConnectionStatus, DiscoveredPeer, DiscoveredPeersState, CONNECTION_STATUS_SIGNAL,
-    DISCOVERED_PEERS_SIGNAL,
-};
 use aura_app::AppCore;
-use aura_core::effects::reactive::ReactiveEffects;
+use aura_effects::time::PhysicalTimeHandler;
 
-use super::types::{OpResponse, OpResult};
+use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 /// Handle network/peer commands
@@ -24,129 +20,74 @@ pub async fn handle_network(
 ) -> Option<OpResult> {
     match command {
         EffectCommand::AddPeer { peer_id } => {
-            {
+            let count = {
                 let mut peers = peers.write().await;
                 peers.insert(peer_id.clone());
-                let count = peers.len();
+                peers.len()
+            };
 
-                if let Some(core) = app_core.try_read() {
-                    let _ = core
-                        .emit(
-                            &*CONNECTION_STATUS_SIGNAL,
-                            ConnectionStatus::Online { peer_count: count },
-                        )
-                        .await;
-                }
+            if let Err(e) = aura_app::workflows::network::update_connection_status(app_core, count).await
+            {
+                tracing::debug!("Failed to update connection status: {}", e);
             }
+
             tracing::info!("Added peer: {}", peer_id);
             Some(Ok(OpResponse::Ok))
         }
 
         EffectCommand::RemovePeer { peer_id } => {
-            {
+            let count = {
                 let mut peers = peers.write().await;
                 peers.remove(peer_id);
-                let count = peers.len();
+                peers.len()
+            };
 
-                if let Some(core) = app_core.try_read() {
-                    let status = if count == 0 {
-                        ConnectionStatus::Offline
-                    } else {
-                        ConnectionStatus::Online { peer_count: count }
-                    };
-                    let _ = core.emit(&*CONNECTION_STATUS_SIGNAL, status).await;
-                }
+            if let Err(e) = aura_app::workflows::network::update_connection_status(app_core, count).await
+            {
+                tracing::debug!("Failed to update connection status: {}", e);
             }
+
             tracing::info!("Removed peer: {}", peer_id);
             Some(Ok(OpResponse::Ok))
         }
 
         EffectCommand::ListPeers => {
-            // Query actual peers from runtime via AppCore
-            let app_core = app_core.read().await;
-
-            // Get sync peers (DeviceIds)
-            let sync_peers = match app_core.sync_peers().await {
-                Ok(peers) => peers,
-                Err(e) => {
-                    tracing::debug!("No sync peers available: {}", e);
-                    vec![]
+            let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
+            match aura_app::workflows::network::list_peers(app_core, now_ms).await {
+                Ok(peer_list) => {
+                    tracing::info!("Listed {} peers", peer_list.len());
+                    Some(Ok(OpResponse::List(peer_list)))
                 }
-            };
-
-            // Get discovered peers (AuthorityIds from rendezvous)
-            let discovered_peers = match app_core.discover_peers().await {
-                Ok(peers) => peers,
-                Err(e) => {
-                    tracing::debug!("No discovered peers available: {}", e);
-                    vec![]
-                }
-            };
-
-            // Combine into a list of strings
-            let mut peer_list: Vec<String> =
-                sync_peers.iter().map(|d| format!("sync:{}", d)).collect();
-
-            peer_list.extend(discovered_peers.iter().map(|a| format!("discovered:{}", a)));
-
-            tracing::info!(
-                "Listed {} peers ({} sync, {} discovered)",
-                peer_list.len(),
-                sync_peers.len(),
-                discovered_peers.len()
-            );
-
-            // Emit discovered peers signal
-            emit_discovered_peers_signal(&app_core).await;
-
-            Some(Ok(OpResponse::List(peer_list)))
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
+            }
         }
 
         EffectCommand::DiscoverPeers => {
-            // Trigger peer discovery via rendezvous
-            // Currently this is implicit in the rendezvous service
-            // NOTE: Explicit trigger_discovery() could be added to RuntimeBridge
-            // for on-demand discovery refresh.
-            tracing::info!("Peer discovery triggered");
-
-            // For now, return the currently discovered peers
-            let app_core = app_core.read().await;
-            let discovered = match app_core.discover_peers().await {
-                Ok(peers) => peers.len(),
-                Err(_) => 0,
-            };
-
-            // Emit discovered peers signal
-            emit_discovered_peers_signal(&app_core).await;
-
-            Some(Ok(OpResponse::Data(format!(
-                "Discovery active, {} peers known",
-                discovered
-            ))))
+            let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
+            match aura_app::workflows::network::discover_peers(app_core, now_ms).await {
+                Ok(discovered) => {
+                    tracing::info!("Peer discovery triggered");
+                    Some(Ok(OpResponse::Data(format!(
+                        "Discovery active, {} peers known",
+                        discovered
+                    ))))
+                }
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
+            }
         }
 
         EffectCommand::ListLanPeers => {
-            // Get LAN-discovered peers from the runtime
-            let app_core = app_core.read().await;
-            let lan_peers = app_core.get_lan_peers().await;
-
-            let peer_list: Vec<String> = lan_peers
-                .iter()
-                .map(|peer| format!("{} ({})", peer.authority_id, peer.address))
-                .collect();
-
-            tracing::info!("Found {} LAN peers", peer_list.len());
-
-            // Emit discovered peers signal
-            emit_discovered_peers_signal(&app_core).await;
-
-            Some(Ok(OpResponse::List(peer_list)))
+            let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
+            match aura_app::workflows::network::list_lan_peers(app_core, now_ms).await {
+                Ok(peer_list) => {
+                    tracing::info!("Found {} LAN peers", peer_list.len());
+                    Some(Ok(OpResponse::List(peer_list)))
+                }
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
+            }
         }
 
-        EffectCommand::InviteLanPeer {
-            authority_id,
-            address,
-        } => {
+        EffectCommand::InviteLanPeer { authority_id, address } => {
             // LAN peer invitation flow:
             // 1. Create a contact invitation for this peer
             // 2. Export the invitation code
@@ -166,8 +107,10 @@ pub async fn handle_network(
             // Try to export an invitation (requires runtime)
             // The invitation_id would normally come from a created invitation
             // For LAN invites, we generate a placeholder ID based on the target
-            let invitation_id =
-                format!("lan-invite-{}", &authority_id[..8.min(authority_id.len())]);
+            let invitation_id = format!(
+                "lan-invite-{}",
+                &authority_id[..8.min(authority_id.len())]
+            );
 
             match app_core.export_invitation(&invitation_id).await {
                 Ok(code) => {
@@ -196,59 +139,4 @@ pub async fn handle_network(
 
         _ => None,
     }
-}
-
-/// Helper function to emit discovered peers signal with current state
-async fn emit_discovered_peers_signal(app_core: &AppCore) {
-    // Get both rendezvous and LAN peers
-    let rendezvous_peers = app_core.discover_peers().await.unwrap_or_default();
-    let lan_peers = app_core.get_lan_peers().await;
-
-    // Get invited peer IDs to mark peers as invited
-    let invited_ids: std::collections::HashSet<String> = if let Some(runtime) = app_core.runtime() {
-        runtime.get_invited_peer_ids().await.into_iter().collect()
-    } else {
-        std::collections::HashSet::new()
-    };
-
-    // Combine into discovered peers state
-    let mut peers = Vec::new();
-
-    // Add rendezvous peers
-    for peer in rendezvous_peers {
-        let peer_str = peer.to_string();
-        peers.push(DiscoveredPeer {
-            authority_id: peer_str.clone(),
-            address: String::new(),
-            method: "rendezvous".to_string(),
-            invited: invited_ids.contains(&peer_str),
-        });
-    }
-
-    // Add LAN peers (avoiding duplicates)
-    for peer in lan_peers {
-        let peer_str = peer.authority_id.to_string();
-        if !peers.iter().any(|p| p.authority_id == peer_str) {
-            peers.push(DiscoveredPeer {
-                authority_id: peer_str.clone(),
-                address: peer.address,
-                method: "LAN".to_string(),
-                invited: invited_ids.contains(&peer_str),
-            });
-        }
-    }
-
-    // Get current timestamp (using system time for UI display)
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-
-    let state = DiscoveredPeersState {
-        peers,
-        last_updated_ms: now_ms,
-    };
-
-    // Emit the signal
-    let _ = app_core.emit(&*DISCOVERED_PEERS_SIGNAL, state).await;
 }

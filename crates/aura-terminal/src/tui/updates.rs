@@ -10,13 +10,19 @@
 //!
 //! This replaces the previous polling-based approach with true reactive updates.
 //!
+//! ## Error Surfacing
+//!
+//! - **Domain/runtime failures** emit `ERROR_SIGNAL` (via dispatch/operational handlers) and are
+//!   surfaced centrally by the app shell as error toasts (or routed into the account setup modal).
+//! - **UI-only failures** (e.g., account file I/O during setup) use `UiUpdate::OperationFailed` and
+//!   are handled by the same shell processor.
+//!
 //! ## Usage
 //!
 //! ```rust,ignore
 //! // In callback:
 //! let tx = update_tx.clone();
 //! tokio::spawn(async move {
-//!     ctx.set_display_name(&name).await;
 //!     let _ = tx.send(UiUpdate::DisplayNameChanged(name));
 //! });
 //!

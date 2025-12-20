@@ -114,7 +114,7 @@ This diagram shows the main CLI path from parsing to rendering. Some handlers al
 
 ## Reactive data model
 
-The reactive system is owned by `aura-app`. Domain state is maintained in `ViewState` (`aura-app/src/views/state.rs`), which uses `futures-signals` `Mutable<T>` for reactive updates. Signals are defined in `aura_app::signal_defs` and are automatically derived from ViewState changes via the signal forwarding infrastructure.
+The reactive system is owned by `aura-app`. Domain state is maintained in `ViewState` (`crates/aura-app/src/views/state.rs`), which uses `futures-signals` `Mutable<T>` for reactive updates. Signals are defined in `aura_app::signal_defs` and are automatically derived from ViewState changes via the signal forwarding infrastructure.
 
 ### ViewState as single source of truth
 
@@ -127,7 +127,7 @@ flowchart LR
   S --> CLI[CLI Commands]
 ```
 
-External code should update state through AppCore methods (like `add_contact()`, `set_contact_guardian_status()`) rather than emitting directly to signals. The SignalForwarder in `aura-app/src/core/signal_sync.rs` subscribes to ViewState's Mutable signals and forwards changes to ReactiveEffects signals automatically.
+External code should update state through AppCore methods (like `add_contact()`, `set_contact_guardian_status()`) rather than emitting directly to signals. The SignalForwarder in `crates/aura-app/src/core/signal_sync.rs` subscribes to ViewState's Mutable signals and forwards changes to ReactiveEffects signals automatically.
 
 The CLI usually reads state at a point in time. It can still use signals for watch-like commands or daemon commands. When a command needs continuous updates, it should subscribe to the relevant signals and render incremental output.
 
@@ -178,7 +178,7 @@ flowchart TD
   S --> UI2[Screens subscribe]
 ```
 
-This diagram shows the default journaled TUI path. The operational path bypasses journal commits. It still emits signals and errors for UI updates.
+This diagram shows the default journaled TUI path. The operational path bypasses journal commits. The operational path may emit only operational signals such as `SYNC_STATUS_SIGNAL`, `CONNECTION_STATUS_SIGNAL`, and `ERROR_SIGNAL`. It must not emit domain signals such as `CHAT_SIGNAL` directly.
 
 ## Screens, modals, and callbacks
 
@@ -198,7 +198,9 @@ This policy aligns with [Privacy and Information Flow](003_information_flow_cont
 
 ## Errors and user feedback
 
-Domain and dispatch failures are surfaced as errors. Errors are emitted through `aura_app::signal_defs::ERROR_SIGNAL`. Screens can render errors as toasts or modal content.
+Domain and dispatch failures are emitted through `aura_app::signal_defs::ERROR_SIGNAL`. The app shell subscribes to this signal and renders errors as queued toasts. When the account setup modal is active, errors are routed into the modal instead of creating a toast.
+
+UI-only failures use `UiUpdate::OperationFailed`. This is used primarily for account file operations that occur before AppCore dispatch.
 
 CLI commands should return errors through `TerminalResult` and render them through `CliOutput`. Avoid printing error text directly from deep helper functions. Prefer returning structured error types.
 

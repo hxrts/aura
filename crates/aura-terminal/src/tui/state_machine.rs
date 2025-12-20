@@ -34,7 +34,7 @@
 
 use crate::tui::navigation::{navigate_list, GridNav, NavKey};
 use crate::tui::types::{InvitationFilter, MfaPolicy, RecoveryTab, SettingsSection};
-use crate::tui::{Router, Screen};
+use crate::tui::screens::{Router, Screen};
 use aura_core::effects::terminal::{KeyCode, KeyEvent, TerminalEvent};
 use std::collections::VecDeque;
 

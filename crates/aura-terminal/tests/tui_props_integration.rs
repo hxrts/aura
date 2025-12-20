@@ -23,7 +23,7 @@ use aura_terminal::tui::props::{
 use aura_terminal::tui::screens::{BlockFocus, ChatFocus};
 use aura_terminal::tui::state_machine::{transition, ChatFocus as StateChatFocus, TuiState};
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
-use aura_terminal::tui::Screen;
+use aura_terminal::tui::screens::Screen;
 
 // ============================================================================
 // Test Harness

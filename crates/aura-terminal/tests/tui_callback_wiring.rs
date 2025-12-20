@@ -91,6 +91,76 @@ fn cleanup_test_dir(name: &str) {
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
+
+async fn wait_for_chat(
+    app_core: &Arc<RwLock<AppCore>>,
+    mut predicate: impl FnMut(&aura_app::views::ChatState) -> bool,
+) -> aura_app::views::ChatState {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+    loop {
+        let chat = {
+            let core = app_core.read().await;
+            core.read(&*CHAT_SIGNAL).await.unwrap()
+        };
+
+        if predicate(&chat) {
+            return chat;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            panic!("Timed out waiting for chat state to satisfy predicate");
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+async fn wait_for_contacts(
+    app_core: &Arc<RwLock<AppCore>>,
+    mut predicate: impl FnMut(&aura_app::views::ContactsState) -> bool,
+) -> aura_app::views::ContactsState {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+    loop {
+        let contacts = {
+            let core = app_core.read().await;
+            core.read(&*CONTACTS_SIGNAL).await.unwrap()
+        };
+
+        if predicate(&contacts) {
+            return contacts;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            panic!("Timed out waiting for contacts state to satisfy predicate");
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+async fn wait_for_recovery(
+    app_core: &Arc<RwLock<AppCore>>,
+    mut predicate: impl FnMut(&aura_app::views::RecoveryState) -> bool,
+) -> aura_app::views::RecoveryState {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+    loop {
+        let recovery = {
+            let core = app_core.read().await;
+            core.read(&*RECOVERY_SIGNAL).await.unwrap()
+        };
+
+        if predicate(&recovery) {
+            return recovery;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            panic!("Timed out waiting for recovery state to satisfy predicate");
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
 // ============================================================================
 // SETTINGS FLOW TESTS - Validate actual state changes
 // ============================================================================
@@ -248,8 +318,7 @@ async fn test_chat_signal_message_accumulation() {
     // Phase 1: Verify initial state is empty
     println!("Phase 1: Verify initial chat state is empty");
     {
-        let core = app_core.read().await;
-        let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
+        let chat = wait_for_chat(&app_core, |chat| chat.messages.is_empty()).await;
         assert!(
             chat.messages.is_empty(),
             "Initial chat should have no messages"
@@ -289,15 +358,14 @@ async fn test_chat_signal_message_accumulation() {
             reply_to: None,
         });
 
-        core.emit(&*CHAT_SIGNAL, chat).await.unwrap();
+        core.views().set_chat(chat);
         println!("  Emitted 2 messages to signal");
     }
 
     // Phase 3: Verify messages are preserved
     println!("\nPhase 3: Verify messages are preserved");
     {
-        let core = app_core.read().await;
-        let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
+        let chat = wait_for_chat(&app_core, |chat| chat.messages.len() == 2).await;
 
         assert_eq!(chat.messages.len(), 2, "Should have 2 messages");
         assert_eq!(
@@ -347,12 +415,11 @@ async fn test_chat_signal_message_accumulation() {
             });
         }
 
-        core.emit(&*CHAT_SIGNAL, chat).await.unwrap();
+        core.views().set_chat(chat);
     }
 
     {
-        let core = app_core.read().await;
-        let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
+        let chat = wait_for_chat(&app_core, |chat| chat.messages.len() == 5).await;
         assert_eq!(chat.messages.len(), 5, "Should now have 5 messages");
         println!(
             "  Total messages after accumulation: {}",
@@ -384,8 +451,7 @@ async fn test_contacts_signal_contact_tracking() {
     // Phase 1: Get initial contacts
     println!("Phase 1: Get initial contacts");
     let initial_count = {
-        let core = app_core.read().await;
-        let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
+        let contacts = wait_for_contacts(&app_core, |_| true).await;
         println!("  Initial contact count: {}", contacts.contacts.len());
         contacts.contacts.len()
     };
@@ -407,15 +473,14 @@ async fn test_contacts_signal_contact_tracking() {
             is_online: true,
         });
 
-        core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();
+        core.views().set_contacts(contacts);
         println!("  Emitted contact 'Alice' to signal");
     }
 
     // Phase 3: Verify contact is preserved
     println!("\nPhase 3: Verify contact is preserved");
     {
-        let core = app_core.read().await;
-        let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
+        let contacts = wait_for_contacts(&app_core, |contacts| contacts.contacts.len() == initial_count + 1).await;
 
         assert_eq!(
             contacts.contacts.len(),
@@ -457,15 +522,20 @@ async fn test_contacts_signal_contact_tracking() {
             alice.nickname = "Alice (Guardian)".to_string();
         }
 
-        core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();
+        core.views().set_contacts(contacts);
         println!("  Updated Alice to guardian");
     }
 
     // Phase 5: Verify guardian update persisted
     println!("\nPhase 5: Verify guardian update persisted");
     {
-        let core = app_core.read().await;
-        let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
+        let contacts = wait_for_contacts(&app_core, |contacts| {
+            contacts
+                .contacts
+                .iter()
+                .any(|c| c.id == contact_alice_id && c.is_guardian)
+        })
+        .await;
 
         let alice = contacts
             .contacts
@@ -507,8 +577,7 @@ async fn test_recovery_signal_state_tracking() {
     // Phase 1: Verify no active recovery initially
     println!("Phase 1: Verify no active recovery initially");
     {
-        let core = app_core.read().await;
-        let recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
+        let recovery = wait_for_recovery(&app_core, |r| r.active_recovery.is_none()).await;
         assert!(
             recovery.active_recovery.is_none(),
             "Should have no active recovery initially"
@@ -535,15 +604,19 @@ async fn test_recovery_signal_state_tracking() {
             progress: 0,
         });
 
-        core.emit(&*RECOVERY_SIGNAL, recovery).await.unwrap();
+        core.views().set_recovery(recovery);
         println!("  Emitted active recovery to signal");
     }
 
     // Phase 3: Verify recovery session exists
     println!("\nPhase 3: Verify recovery session exists");
     {
-        let core = app_core.read().await;
-        let recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
+        let recovery = wait_for_recovery(&app_core, |r| {
+            r.active_recovery
+                .as_ref()
+                .is_some_and(|a| a.id == "recovery-session-123")
+        })
+        .await;
 
         let active = recovery
             .active_recovery
@@ -580,15 +653,20 @@ async fn test_recovery_signal_state_tracking() {
             active.progress = 50;
         }
 
-        core.emit(&*RECOVERY_SIGNAL, recovery).await.unwrap();
+        core.views().set_recovery(recovery);
         println!("  First approval recorded");
     }
 
     // Phase 5: Verify approval was recorded
     println!("\nPhase 5: Verify approval was recorded");
     {
-        let core = app_core.read().await;
-        let recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
+        let recovery = wait_for_recovery(&app_core, |r| {
+            r.active_recovery
+                .as_ref()
+                .map(|a| a.approvals_received)
+                == Some(1)
+        })
+        .await;
         let active = recovery.active_recovery.as_ref().unwrap();
 
         assert_eq!(active.approvals_received, 1, "Should have 1 approval");
@@ -619,15 +697,20 @@ async fn test_recovery_signal_state_tracking() {
             active.progress = 100;
         }
 
-        core.emit(&*RECOVERY_SIGNAL, recovery).await.unwrap();
+        core.views().set_recovery(recovery);
         println!("  Recovery completed");
     }
 
     // Phase 7: Verify recovery completed
     println!("\nPhase 7: Verify recovery completed");
     {
-        let core = app_core.read().await;
-        let recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
+        let recovery = wait_for_recovery(&app_core, |r| {
+            r.active_recovery.as_ref().is_some_and(|a| {
+                a.approvals_received == 2
+                    && matches!(a.status, aura_app::views::RecoveryProcessStatus::Approved)
+            })
+        })
+        .await;
         let active = recovery.active_recovery.as_ref().unwrap();
 
         assert_eq!(active.approvals_received, 2, "Should have 2 approvals");
@@ -894,9 +977,8 @@ async fn test_invalid_operations_return_errors() {
     // Phase 3: Verify state is not corrupted
     println!("\nPhase 3: Verify state is not corrupted");
     {
-        let core = app_core.read().await;
-        let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
-        let recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
+        let chat = wait_for_chat(&app_core, |_chat| true).await;
+        let recovery = wait_for_recovery(&app_core, |_recovery| true).await;
 
         // Signals should still be readable
         println!("  Chat signal readable: {} messages", chat.messages.len());

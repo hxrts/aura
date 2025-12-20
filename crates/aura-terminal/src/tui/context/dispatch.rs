@@ -62,7 +62,7 @@ impl AccountFilesHelper {
             &self.base_path,
             &self.device_id_str,
             self.mode,
-            display_name,
+                    display_name,
         ) {
             Ok((_authority_id, _context_id)) => {
                 self.set_account_created();
@@ -141,8 +141,6 @@ pub struct DispatchHelper {
     // Local, UI-only state updates driven by OpResponse.
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
-    display_name: Arc<RwLock<String>>,
-    mfa_policy: Arc<RwLock<crate::tui::types::MfaPolicy>>,
     invited_lan_peers: Arc<RwLock<HashSet<String>>>,
 }
 
@@ -155,8 +153,6 @@ impl DispatchHelper {
         toasts: ToastHelper,
         account_files: AccountFilesHelper,
         invited_lan_peers: Arc<RwLock<HashSet<String>>>,
-        display_name: Arc<RwLock<String>>,
-        mfa_policy: Arc<RwLock<crate::tui::types::MfaPolicy>>,
         current_context: Arc<RwLock<Option<String>>>,
         channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     ) -> Self {
@@ -168,8 +164,6 @@ impl DispatchHelper {
             account_files,
             current_context,
             channel_modes,
-            display_name,
-            mfa_policy,
             invited_lan_peers,
         }
     }
@@ -295,19 +289,8 @@ impl DispatchHelper {
                 mode.parse_flags(&flags);
                 Ok(())
             }
-            OpResponse::NicknameUpdated { name } => {
-                *self.display_name.write().await = name;
-                Ok(())
-            }
-            OpResponse::MfaPolicyUpdated { require_mfa } => {
-                use crate::tui::types::MfaPolicy;
-                *self.mfa_policy.write().await = if require_mfa {
-                    MfaPolicy::SensitiveOnly
-                } else {
-                    MfaPolicy::Disabled
-                };
-                Ok(())
-            }
+            OpResponse::NicknameUpdated { name: _ } => Ok(()),
+            OpResponse::MfaPolicyUpdated { require_mfa: _ } => Ok(()),
             OpResponse::InvitationImported {
                 sender_id,
                 invitation_type: _,

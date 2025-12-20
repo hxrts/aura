@@ -27,6 +27,53 @@ async fn test_app_core() -> Arc<RwLock<AppCore>> {
     Arc::new(RwLock::new(core))
 }
 
+
+async fn wait_for_chat_signal(
+    app_core: &Arc<RwLock<AppCore>>,
+    mut predicate: impl FnMut(&aura_app::views::ChatState) -> bool,
+) -> aura_app::views::ChatState {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+    loop {
+        let chat = {
+            let core = app_core.read().await;
+            core.read(&*CHAT_SIGNAL).await.unwrap()
+        };
+
+        if predicate(&chat) {
+            return chat;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            panic!("Timed out waiting for chat signal to satisfy predicate");
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+async fn wait_for_recovery_signal(
+    app_core: &Arc<RwLock<AppCore>>,
+    mut predicate: impl FnMut(&aura_app::views::RecoveryState) -> bool,
+) -> aura_app::views::RecoveryState {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+    loop {
+        let recovery = {
+            let core = app_core.read().await;
+            core.read(&*RECOVERY_SIGNAL).await.unwrap()
+        };
+
+        if predicate(&recovery) {
+            return recovery;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            panic!("Timed out waiting for recovery signal to satisfy predicate");
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
 #[tokio::test]
 async fn test_signal_read_write_roundtrip() {
     let app_core = test_app_core().await;
@@ -98,10 +145,11 @@ async fn test_chat_signal_state_updates() {
     });
 
     // Emit updated state
-    core.emit(&*CHAT_SIGNAL, updated_state).await.unwrap();
+    core.views().set_chat(updated_state);
 
-    // Read and verify
-    let read_state = core.read(&*CHAT_SIGNAL).await.unwrap();
+    // Read and verify (signal is forwarded from ViewState)
+    drop(core);
+    let read_state = wait_for_chat_signal(&app_core, |chat| chat.messages.len() == 1).await;
     assert_eq!(read_state.messages.len(), 1);
     assert_eq!(read_state.messages[0].content, "Hello, world!");
 }
@@ -131,10 +179,11 @@ async fn test_recovery_signal_state_updates() {
     });
 
     // Emit updated state
-    core.emit(&*RECOVERY_SIGNAL, updated_state).await.unwrap();
+    core.views().set_recovery(updated_state);
 
-    // Read and verify
-    let read_state = core.read(&*RECOVERY_SIGNAL).await.unwrap();
+    // Read and verify (signal is forwarded from ViewState)
+    drop(core);
+    let read_state = wait_for_recovery_signal(&app_core, |r| r.active_recovery.is_some()).await;
     assert!(read_state.active_recovery.is_some());
     let active = read_state.active_recovery.unwrap();
     assert_eq!(active.id, "recovery-123");
@@ -210,7 +259,7 @@ async fn test_chat_message_accumulation() {
 
     // Add multiple messages
     for i in 0..5 {
-        let mut state = core.read(&*CHAT_SIGNAL).await.unwrap();
+        let mut state = core.snapshot().chat;
         state.messages.push(Message {
             id: format!("msg-{}", i),
             channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
@@ -224,11 +273,12 @@ async fn test_chat_message_accumulation() {
             is_read: true,
             reply_to: None,
         });
-        core.emit(&*CHAT_SIGNAL, state).await.unwrap();
+        core.views().set_chat(state);
     }
 
-    // Verify all messages were accumulated
-    let final_state = core.read(&*CHAT_SIGNAL).await.unwrap();
+    // Verify all messages were accumulated (signal is forwarded from ViewState)
+    drop(core);
+    let final_state = wait_for_chat_signal(&app_core, |chat| chat.messages.len() == 5).await;
     assert_eq!(final_state.messages.len(), 5);
     assert_eq!(final_state.messages[4].content, "Message number 4");
 }

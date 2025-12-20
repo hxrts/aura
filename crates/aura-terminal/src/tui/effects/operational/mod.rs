@@ -240,15 +240,15 @@ mod tests {
     use super::*;
     use aura_app::AppConfig;
 
-    fn test_app_core() -> Arc<RwLock<AppCore>> {
-        Arc::new(RwLock::new(
-            AppCore::new(AppConfig::default()).expect("Failed to create test AppCore"),
-        ))
+    async fn test_app_core() -> Arc<RwLock<AppCore>> {
+        let mut core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
+        core.init_signals().await.expect("Failed to init signals");
+        Arc::new(RwLock::new(core))
     }
 
     #[tokio::test]
     async fn test_ping_command() {
-        let app_core = test_app_core();
+        let app_core = test_app_core().await;
         let handler = OperationalHandler::new(app_core);
 
         let result = handler.execute(&EffectCommand::Ping).await;
@@ -257,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_peers_returns_list() {
-        let app_core = test_app_core();
+        let app_core = test_app_core().await;
         let handler = OperationalHandler::new(app_core);
 
         let result = handler.execute(&EffectCommand::ListPeers).await;
@@ -266,7 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_invitation_fails_without_runtime() {
-        let app_core = test_app_core();
+        let app_core = test_app_core().await;
         let handler = OperationalHandler::new(app_core);
 
         // Without RuntimeBridge, export should fail gracefully
@@ -294,7 +294,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_intent_commands_return_none() {
-        let app_core = test_app_core();
+        let app_core = test_app_core().await;
         let handler = OperationalHandler::new(app_core);
 
         // SendMessage should return None (handled by intent dispatch)
@@ -309,7 +309,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_import_invitation_fails_without_runtime() {
-        let app_core = test_app_core();
+        let app_core = test_app_core().await;
         let handler = OperationalHandler::new(app_core);
 
         // Without RuntimeBridge, import should fail gracefully
@@ -340,7 +340,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_import_invitation_rejects_invalid_code() {
-        let app_core = test_app_core();
+        let app_core = test_app_core().await;
         let handler = OperationalHandler::new(app_core);
 
         let result = handler

@@ -297,7 +297,7 @@ impl<T: TerminalEffects> TuiRuntime<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::Screen;
+    use crate::tui::screens::Screen;
     use aura_core::effects::terminal::events;
 
     /// Simple mock terminal for testing

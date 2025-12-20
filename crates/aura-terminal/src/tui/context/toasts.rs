@@ -1,6 +1,11 @@
 //! # Toast Notification Helper
 //!
 //! Manages toast notifications for the TUI.
+//!
+//! Note: The fullscreen iocraft shell renders user-visible toasts via the
+//! type-enforced `ToastQueue` in `tui/state_machine.rs`. `ToastHelper` is kept
+//! for non-shell contexts (e.g., tests, helper APIs) and as a staging area where
+//! needed.
 
 use std::sync::Arc;
 

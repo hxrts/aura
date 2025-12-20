@@ -17,12 +17,11 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 // Import app types from aura-app (pure layer)
-use aura_app::{signal_defs::SETTINGS_SIGNAL, AppConfig, AppCore};
+use aura_app::{AppConfig, AppCore};
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
-use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::StorageEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -769,18 +768,11 @@ async fn handle_tui_launch(
         }
     }
 
-    {
-        let core = app_core.read().await;
-        if let Some(runtime) = core.runtime() {
-            let settings = runtime.get_settings().await;
-            let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
-            state.display_name = settings.display_name;
-            state.mfa_policy = settings.mfa_policy;
-            state.threshold_k = settings.threshold_k as u8;
-            state.threshold_n = settings.threshold_n as u8;
-            state.contact_count = settings.contact_count;
-            let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
-        }
+    if let Err(e) = aura_app::workflows::settings::refresh_settings_from_runtime(&app_core).await {
+        stdio.eprintln(format_args!(
+            "Warning: Failed to refresh settings: {}",
+            e
+        ));
     }
 
     stdio.println(format_args!(

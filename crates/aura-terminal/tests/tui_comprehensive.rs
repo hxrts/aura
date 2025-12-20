@@ -28,7 +28,7 @@ use aura_terminal::tui::state_machine::{
     TuiState,
 };
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
-use aura_terminal::tui::Screen;
+use aura_terminal::tui::screens::Screen;
 use proptest::prelude::*;
 
 // ============================================================================

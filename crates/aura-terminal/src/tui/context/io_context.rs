@@ -11,7 +11,7 @@ use std::sync::Arc;
 use async_lock::RwLock;
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
-    SYNC_STATUS_SIGNAL,
+    SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -42,8 +42,6 @@ pub struct IoContext {
     #[cfg(feature = "development")]
     demo_hints: Option<crate::demo::DemoHints>,
     invited_lan_peers: Arc<RwLock<HashSet<String>>>,
-    display_name: Arc<RwLock<String>>,
-    mfa_policy: Arc<RwLock<crate::tui::types::MfaPolicy>>,
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
 }
@@ -75,8 +73,6 @@ impl IoContext {
             AccountFilesHelper::new(base_path, device_id_str, mode, has_existing_account.clone());
 
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
-        let display_name = Arc::new(RwLock::new(String::new()));
-        let mfa_policy = Arc::new(RwLock::new(crate::tui::types::MfaPolicy::default()));
         let current_context = Arc::new(RwLock::new(None));
         let channel_modes = Arc::new(RwLock::new(HashMap::new()));
 
@@ -87,8 +83,6 @@ impl IoContext {
             toasts.clone(),
             account_files.clone(),
             invited_lan_peers.clone(),
-            display_name.clone(),
-            mfa_policy.clone(),
             current_context.clone(),
             channel_modes.clone(),
         );
@@ -103,8 +97,6 @@ impl IoContext {
             #[cfg(feature = "development")]
             demo_hints: None,
             invited_lan_peers,
-            display_name,
-            mfa_policy,
             current_context,
             channel_modes,
         }
@@ -459,26 +451,52 @@ impl IoContext {
     pub async fn get_invited_peer_ids(&self) -> HashSet<String> {
         self.invited_lan_peers.read().await.clone()
     }
-
     // =========================================================================
-    // Display name / MFA policy / context / channel modes (UI-only)
+    // Settings helpers (via SETTINGS_SIGNAL)
     // =========================================================================
 
     pub async fn get_display_name(&self) -> String {
-        self.display_name.read().await.clone()
+        let core = self.app_core.read().await;
+        core.read(&*SETTINGS_SIGNAL)
+            .await
+            .unwrap_or_default()
+            .display_name
     }
 
     pub async fn set_display_name(&self, name: &str) {
-        *self.display_name.write().await = name.to_string();
+        let core = self.app_core.read().await;
+        let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
+        state.display_name = name.to_string();
+        let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
     }
 
     pub async fn get_mfa_policy(&self) -> crate::tui::types::MfaPolicy {
-        *self.mfa_policy.read().await
+        use crate::tui::types::MfaPolicy;
+
+        let core = self.app_core.read().await;
+        let state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
+        match state.mfa_policy.as_str() {
+            "Disabled" => MfaPolicy::Disabled,
+            "SensitiveOnly" | "" => MfaPolicy::SensitiveOnly,
+            "AlwaysRequired" => MfaPolicy::AlwaysRequired,
+            _ => MfaPolicy::SensitiveOnly,
+        }
     }
 
     pub async fn set_mfa_policy(&self, policy: crate::tui::types::MfaPolicy) {
-        *self.mfa_policy.write().await = policy;
+        let core = self.app_core.read().await;
+        let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
+        state.mfa_policy = match policy {
+            crate::tui::types::MfaPolicy::Disabled => "Disabled".to_string(),
+            crate::tui::types::MfaPolicy::SensitiveOnly => "SensitiveOnly".to_string(),
+            crate::tui::types::MfaPolicy::AlwaysRequired => "AlwaysRequired".to_string(),
+        };
+        let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
     }
+
+    // =========================================================================
+    // Context / channel modes (UI-only)
+    // =========================================================================
 
     pub async fn get_current_context(&self) -> Option<String> {
         self.current_context.read().await.clone()

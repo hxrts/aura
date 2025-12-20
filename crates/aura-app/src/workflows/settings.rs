@@ -11,6 +11,33 @@ use async_lock::RwLock;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::sync::Arc;
 
+async fn refresh_settings_signal_from_runtime(core: &AppCore) -> Result<(), AuraError> {
+    let Some(runtime) = core.runtime() else {
+        // No runtime bridge: keep default settings state.
+        return Ok(());
+    };
+
+    let settings = runtime.get_settings().await;
+    let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
+    state.display_name = settings.display_name;
+    state.mfa_policy = settings.mfa_policy;
+    state.threshold_k = settings.threshold_k as u8;
+    state.threshold_n = settings.threshold_n as u8;
+    state.contact_count = settings.contact_count;
+
+    core.emit(&*SETTINGS_SIGNAL, state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit settings signal: {}", e)))
+}
+
+/// Refresh SETTINGS_SIGNAL from the current RuntimeBridge settings.
+///
+/// This is used at startup (to seed UI state) and after settings writes.
+pub async fn refresh_settings_from_runtime(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
+    let core = app_core.read().await;
+    refresh_settings_signal_from_runtime(&core).await
+}
+
 /// Update MFA policy
 ///
 /// **What it does**: Updates MFA policy and emits SETTINGS_SIGNAL
@@ -38,20 +65,7 @@ pub async fn update_mfa_policy(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to update MFA policy: {}", e)))?;
 
-    {
-        let core = app_core.read().await;
-        if let Some(runtime) = core.runtime() {
-            let settings = runtime.get_settings().await;
-            let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
-            state.display_name = settings.display_name;
-            state.mfa_policy = settings.mfa_policy;
-            state.threshold_k = settings.threshold_k as u8;
-            state.threshold_n = settings.threshold_n as u8;
-            state.contact_count = settings.contact_count;
-            let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
-        }
-    }
-
+    refresh_settings_from_runtime(app_core).await?;
     Ok(())
 }
 
@@ -60,10 +74,7 @@ pub async fn update_mfa_policy(
 /// **What it does**: Updates display name and emits SETTINGS_SIGNAL
 /// **Returns**: Unit result
 /// **Signal pattern**: RuntimeBridge handles signal emission
-pub async fn update_nickname(
-    app_core: &Arc<RwLock<AppCore>>,
-    name: String,
-) -> Result<(), AuraError> {
+pub async fn update_nickname(app_core: &Arc<RwLock<AppCore>>, name: String) -> Result<(), AuraError> {
     let runtime = {
         let core = app_core.read().await;
         core.runtime()
@@ -76,20 +87,7 @@ pub async fn update_nickname(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to update display name: {}", e)))?;
 
-    {
-        let core = app_core.read().await;
-        if let Some(runtime) = core.runtime() {
-            let settings = runtime.get_settings().await;
-            let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
-            state.display_name = settings.display_name;
-            state.mfa_policy = settings.mfa_policy;
-            state.threshold_k = settings.threshold_k as u8;
-            state.threshold_n = settings.threshold_n as u8;
-            state.contact_count = settings.contact_count;
-            let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
-        }
-    }
-
+    refresh_settings_from_runtime(app_core).await?;
     Ok(())
 }
 

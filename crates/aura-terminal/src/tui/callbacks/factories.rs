@@ -64,12 +64,9 @@ impl ChatCallbacks {
                             content: content_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "SendMessage".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -91,12 +88,9 @@ impl ChatCallbacks {
                         Ok(_) => {
                             let _ = tx.send(UiUpdate::MessageRetried { message_id: msg_id });
                         }
-                        Err(e) => {
-                            let _ = tx.send(UiUpdate::OperationFailed {
-                                operation: "RetryMessage".to_string(),
-                                error: e.to_string(),
-                            });
-                        }
+                        Err(_e) => {
+                            // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                     }
                 });
             },
@@ -136,12 +130,9 @@ impl ChatCallbacks {
                     Ok(_) => {
                         let _ = tx.send(UiUpdate::ChannelCreated(channel_name));
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "CreateChannel".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -165,12 +156,9 @@ impl ChatCallbacks {
                             topic: t,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "SetTopic".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -218,12 +206,9 @@ impl ContactsCallbacks {
                             nickname: nickname_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "UpdateNickname".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -242,12 +227,9 @@ impl ContactsCallbacks {
                             contact_id: contact_id_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "StartChat".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -266,12 +248,9 @@ impl ContactsCallbacks {
                             invitation_code: code_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "ImportInvitation".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -297,12 +276,9 @@ impl ContactsCallbacks {
                             peer_id: authority_id_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "InviteLanPeer".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -347,12 +323,9 @@ impl InvitationsCallbacks {
                             invitation_id: inv_id,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "AcceptInvitation".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -371,12 +344,9 @@ impl InvitationsCallbacks {
                             invitation_id: inv_id,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "DeclineInvitation".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -400,12 +370,9 @@ impl InvitationsCallbacks {
                                 invitation_code: inv_type,
                             });
                         }
-                        Err(e) => {
-                            let _ = tx.send(UiUpdate::OperationFailed {
-                                operation: "CreateInvitation".to_string(),
-                                error: e.to_string(),
-                            });
-                        }
+                        Err(_e) => {
+                            // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                     }
                 });
             },
@@ -421,12 +388,9 @@ impl InvitationsCallbacks {
                     Ok(code) => {
                         let _ = tx.send(UiUpdate::InvitationExported { code });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "ExportInvitation".to_string(),
-                            error: e,
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -445,12 +409,9 @@ impl InvitationsCallbacks {
                             invitation_code: code_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "ImportInvitation".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -490,12 +451,9 @@ impl RecoveryCallbacks {
                     Ok(_) => {
                         let _ = tx.send(UiUpdate::RecoveryStarted);
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "StartRecovery".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -513,12 +471,9 @@ impl RecoveryCallbacks {
                             contact_id: "unknown".to_string(),
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "AddGuardian".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -539,12 +494,9 @@ impl RecoveryCallbacks {
                             contact_id: contact_id_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "SelectGuardian".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -565,12 +517,9 @@ impl RecoveryCallbacks {
                             request_id: request_id_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "SubmitApproval".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -613,17 +562,13 @@ impl SettingsCallbacks {
                 require_mfa: policy.requires_mfa(),
             };
             tokio::spawn(async move {
-                ctx.set_mfa_policy(policy).await;
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.send(UiUpdate::MfaPolicyChanged(policy));
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "UpdateMfaPolicy".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -641,15 +586,11 @@ impl SettingsCallbacks {
             tokio::spawn(async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        ctx.set_display_name(&name_clone).await;
                         let _ = tx.send(UiUpdate::DisplayNameChanged(name_clone));
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "UpdateDisplayName".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -671,12 +612,9 @@ impl SettingsCallbacks {
                             n: threshold_n,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "UpdateThreshold".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -699,12 +637,9 @@ impl SettingsCallbacks {
                         };
                         let _ = tx.send(UiUpdate::DeviceAdded(device));
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "AddDevice".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -723,12 +658,9 @@ impl SettingsCallbacks {
                             device_id: device_id_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "RemoveDevice".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -798,12 +730,9 @@ impl BlockCallbacks {
                             content: content_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "SendBlockMessage".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -824,12 +753,9 @@ impl BlockCallbacks {
                             contact_id: contact_id_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "SendBlockInvitation".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -849,12 +775,9 @@ impl BlockCallbacks {
                     Ok(_) => {
                         let _ = tx.send(UiUpdate::NavigatedToNeighborhood);
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "NavigateToNeighborhood".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -875,12 +798,9 @@ impl BlockCallbacks {
                             contact_id: resident_id_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "GrantSteward".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -901,12 +821,9 @@ impl BlockCallbacks {
                             contact_id: resident_id_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "RevokeSteward".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -960,12 +877,9 @@ impl NeighborhoodCallbacks {
                             block_id: block_id_clone,
                         });
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "EnterBlock".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -985,12 +899,9 @@ impl NeighborhoodCallbacks {
                     Ok(_) => {
                         let _ = tx.send(UiUpdate::NavigatedHome);
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "GoHome".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
@@ -1010,12 +921,9 @@ impl NeighborhoodCallbacks {
                     Ok(_) => {
                         let _ = tx.send(UiUpdate::NavigatedToStreet);
                     }
-                    Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
-                            operation: "BackToStreet".to_string(),
-                            error: e.to_string(),
-                        });
-                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                }
                 }
             });
         })
