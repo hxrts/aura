@@ -59,7 +59,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
     app_core
         .init_signals()
         .await
@@ -335,7 +335,9 @@ async fn test_chat_signal_message_accumulation() {
             chat.messages.push(Message {
                 id: format!("msg-{}", i),
                 channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
-                sender_id: format!("user-{}", i).parse::<AuthorityId>().unwrap_or_default(),
+                sender_id: format!("user-{}", i)
+                    .parse::<AuthorityId>()
+                    .unwrap_or_default(),
                 sender_name: format!("User{}", i),
                 content: format!("Message number {}", i),
                 timestamp: i as u64 * 1000,

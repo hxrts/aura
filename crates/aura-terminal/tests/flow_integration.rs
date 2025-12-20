@@ -75,15 +75,11 @@ impl TestAgent {
     async fn new(name: &str) -> Self {
         // Use UUID v4 to ensure unique directories even when tests run concurrently
         let unique_id = uuid::Uuid::new_v4();
-        let test_dir = std::env::temp_dir().join(format!(
-            "aura-flow-test-{}-{}",
-            name,
-            unique_id
-        ));
+        let test_dir = std::env::temp_dir().join(format!("aura-flow-test-{}-{}", name, unique_id));
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-        let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+        let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
         app_core
             .init_signals()
             .await

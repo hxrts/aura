@@ -55,6 +55,7 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
 
     let status = match c.status {
         ContactStatus::Active => crate::tui::components::Status::Online,
+        ContactStatus::Offline => crate::tui::components::Status::Offline,
         ContactStatus::Pending => crate::tui::components::Status::Warning,
         ContactStatus::Blocked => crate::tui::components::Status::Error,
     };
@@ -133,6 +134,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
     let content: Vec<AnyElement<'static>> = if let Some(c) = &props.contact {
         let status_label = match c.status {
             ContactStatus::Active => "Active",
+            ContactStatus::Offline => "Offline",
             ContactStatus::Pending => "Pending",
             ContactStatus::Blocked => "Blocked",
         };

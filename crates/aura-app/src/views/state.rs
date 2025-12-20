@@ -400,6 +400,8 @@ cfg_if! {
                         is_guardian,
                     } => {
                         self.recovery.lock_mut().toggle_guardian(contact_id, is_guardian);
+                        // Also update the contact's is_guardian flag
+                        self.contacts.lock_mut().set_guardian_status(contact_id, is_guardian);
                     }
                     ViewDelta::GuardianThresholdSet { threshold } => {
                         self.recovery.lock_mut().set_threshold(threshold);
@@ -483,6 +485,8 @@ cfg_if! {
                         is_guardian,
                     } => {
                         self.recovery.toggle_guardian(contact_id, is_guardian);
+                        // Also update the contact's is_guardian flag
+                        self.contacts.set_guardian_status(contact_id, is_guardian);
                     }
                     ViewDelta::GuardianThresholdSet { threshold } => {
                         self.recovery.set_threshold(threshold);

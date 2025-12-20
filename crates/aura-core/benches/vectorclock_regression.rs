@@ -154,7 +154,11 @@ fn bench_timestamp_sorting(c: &mut Criterion) {
             |b, timestamps| {
                 b.iter(|| {
                     let mut to_sort = timestamps.clone();
-                    TimeStamp::sort_collection_optimized(&mut to_sort, OrderingPolicy::Native, false);
+                    TimeStamp::sort_collection_optimized(
+                        &mut to_sort,
+                        OrderingPolicy::Native,
+                        false,
+                    );
                     black_box(to_sort)
                 });
             },

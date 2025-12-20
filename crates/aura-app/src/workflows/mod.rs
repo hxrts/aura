@@ -14,16 +14,17 @@
 //!
 //! All workflows follow these patterns:
 //!
-//! **1. Reactive Signal Pattern**
-//! - Read current state from signals
+//! **1. ViewState-First Pattern**
+//! - Read current state from ViewState (`app_core.views().snapshot()`)
 //! - Perform operations via AppCore's runtime bridge
-//! - Emit updated signals when state changes
+//! - Update ViewState via AppCore methods (signals auto-forward)
 //! - Return domain types (not UI types)
 //!
 //! **2. AppCore Integration**
 //! - All workflows take `&Arc<RwLock<AppCore>>` reference
 //! - Use AppCore's runtime bridge for effect execution
-//! - Emit signals via `core.emit()` after operations
+//! - Update ViewState via `core.views().set_*()` or AppCore helper methods
+//! - ReactiveEffects signals update automatically via signal forwarding
 //!
 //! **3. Error Handling**
 //! - Return `Result<T, AppError>` (not terminal-specific errors)
@@ -41,8 +42,8 @@
 //!     // Business logic - portable across all frontends
 //!     let invitation = /* ... */;
 //!
-//!     // Emit signal for reactive UI updates
-//!     emit_invitations_signal(app_core).await;
+//!     // Update ViewState - signal forwarding handles ReactiveEffects
+//!     app_core.add_invitation(invitation.clone());
 //!
 //!     Ok(invitation)
 //! }
@@ -65,9 +66,11 @@
 pub mod budget;
 pub mod context;
 pub mod invitation;
+#[cfg(feature = "signals")]
 pub mod messaging;
 pub mod network;
 pub mod query;
+#[cfg(feature = "signals")]
 pub mod recovery;
 pub mod settings;
 pub mod steward;
@@ -104,6 +107,7 @@ pub use invitation::{
     decline_invitation, export_invitation, import_invitation, import_invitation_details,
     list_invitations, list_pending_invitations,
 };
+#[cfg(feature = "signals")]
 pub use messaging::{
     get_chat_state, invite_user_to_channel, send_action, send_direct_message, start_direct_chat,
 };
@@ -111,6 +115,7 @@ pub use network::{
     discover_peers, get_discovered_peers, list_lan_peers, list_peers, update_connection_status,
 };
 pub use query::{get_user_info, list_contacts, list_participants};
+#[cfg(feature = "signals")]
 pub use recovery::{approve_recovery, dispute_recovery, get_recovery_status, start_recovery};
 pub use settings::{get_settings, set_channel_mode, update_mfa_policy, update_nickname};
 pub use steward::{grant_steward, is_admin, revoke_steward};

@@ -135,6 +135,14 @@ pub struct AppCore {
     /// signals before using reactive operations.
     reactive: ReactiveHandler,
 
+    /// Signal forwarder for auto-syncing ViewState to ReactiveEffects signals.
+    ///
+    /// When enabled (signals feature), this automatically forwards ViewState
+    /// changes to the corresponding ReactiveEffects signals. ViewState is the
+    /// single source of truth; ReactiveEffects signals are derived.
+    #[cfg(feature = "signals")]
+    signal_forwarder: Option<super::signal_sync::SignalForwarder>,
+
     /// Observer registry for callback-based subscriptions (UniFFI/mobile)
     #[cfg(feature = "callbacks")]
     observer_registry: crate::bridge::callback::ObserverRegistry,
@@ -167,6 +175,8 @@ impl AppCore {
             journal_path,
             runtime: None,
             reactive,
+            #[cfg(feature = "signals")]
+            signal_forwarder: None,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
         })
@@ -227,6 +237,8 @@ impl AppCore {
             journal_path: None,
             runtime: None,
             reactive,
+            #[cfg(feature = "signals")]
+            signal_forwarder: None,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
         })
@@ -292,6 +304,9 @@ impl AppCore {
     /// This must be called before using reactive operations (read, emit, subscribe).
     /// Typically called once during app startup.
     ///
+    /// When the `signals` feature is enabled, this also starts the signal forwarder
+    /// which automatically syncs ViewState changes to ReactiveEffects signals.
+    ///
     /// # Example
     ///
     /// ```rust,ignore
@@ -301,12 +316,25 @@ impl AppCore {
     /// // Now reactive operations work
     /// let chat = app.read(&CHAT_SIGNAL).await?;
     /// ```
-    pub async fn init_signals(&self) -> Result<(), IntentError> {
+    pub async fn init_signals(&mut self) -> Result<(), IntentError> {
+        // Register all domain signals with default values
         crate::signal_defs::register_app_signals(&self.reactive)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to initialize signals: {}", e))
-            })
+            })?;
+
+        // Start signal forwarding (ViewState → ReactiveEffects)
+        #[cfg(feature = "signals")]
+        {
+            let forwarder = super::signal_sync::SignalForwarder::start_all(
+                &self.views,
+                Arc::new(self.reactive.clone()),
+            );
+            self.signal_forwarder = Some(forwarder);
+        }
+
+        Ok(())
     }
 
     // ==================== Threshold Signing Operations ====================
@@ -570,53 +598,19 @@ impl AppCore {
         count
     }
 
-    /// Commit pending facts, apply to ViewState, and emit to reactive signals.
+    /// Commit pending facts, apply to ViewState.
     ///
     /// This is the preferred async method for reactive applications. It:
-    /// 1. Commits pending facts to ViewState
-    /// 2. Emits updated state to reactive signals (ChatState, RecoveryState, etc.)
-    /// 3. Invalidates queries affected by fact predicates
+    /// 1. Commits pending facts to ViewState (via reducer)
+    /// 2. ViewState changes automatically propagate to reactive signals via signal forwarding
+    ///
+    /// Note: Signal emission is handled automatically by the SignalForwarder infrastructure.
+    /// Direct emit() calls are no longer needed here.
     ///
     /// Returns the number of facts committed.
     pub async fn commit_pending_facts_and_emit(&mut self) -> Result<usize, IntentError> {
-        use crate::signal_defs::{
-            CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL,
-        };
-
-        // Commit facts synchronously first
+        // Commit facts synchronously - ViewState updates auto-forward to signals
         let count = self.commit_pending_facts();
-
-        if count == 0 {
-            return Ok(0);
-        }
-
-        // Get current state snapshot
-        let snapshot = self.views.snapshot();
-
-        // Emit to reactive signals for subscribers
-        // These emit calls notify any TUI screens subscribed to these signals
-        // Errors are silently ignored as signal emission is best-effort
-        let _ = self
-            .reactive
-            .emit(&*CHAT_SIGNAL, snapshot.chat.clone())
-            .await;
-        let _ = self
-            .reactive
-            .emit(&*RECOVERY_SIGNAL, snapshot.recovery.clone())
-            .await;
-        let _ = self
-            .reactive
-            .emit(&*INVITATIONS_SIGNAL, snapshot.invitations.clone())
-            .await;
-        let _ = self
-            .reactive
-            .emit(&*CONTACTS_SIGNAL, snapshot.contacts.clone())
-            .await;
-        let _ = self
-            .reactive
-            .emit(&*NEIGHBORHOOD_SIGNAL, snapshot.neighborhood.clone())
-            .await;
-
         Ok(count)
     }
 
@@ -910,10 +904,103 @@ impl AppCore {
     /// This updates the selected channel in ChatState and triggers
     /// the chat signal for UI updates. Channel selection is a UI
     /// concern and doesn't need to be persisted to the journal.
+    #[cfg(feature = "signals")]
     pub fn select_channel(&self, channel_id: Option<ChannelId>) {
         self.views.select_channel(channel_id);
     }
+}
 
+// =============================================================================
+// ViewState Helper Methods (signals feature only)
+// =============================================================================
+// These methods update ViewState directly. With signal forwarding enabled,
+// changes automatically propagate to ReactiveEffects signals.
+// DO NOT call emit() on domain signals directly - use these methods instead.
+
+#[cfg(feature = "signals")]
+impl AppCore {
+    /// Add a contact to ViewState
+    ///
+    /// If a contact with the same ID already exists, it is not added again.
+    /// The signal forwarding infrastructure will automatically update
+    /// CONTACTS_SIGNAL for any subscribers.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let contact = Contact {
+    ///     id: authority_id,
+    ///     nickname: "Alice".to_string(),
+    ///     ..Default::default()
+    /// };
+    /// app_core.add_contact(contact);
+    /// // CONTACTS_SIGNAL is automatically updated
+    /// ```
+    pub fn add_contact(&self, contact: crate::views::contacts::Contact) {
+        let mut contacts = self.views.snapshot().contacts;
+        if !contacts.contacts.iter().any(|c| c.id == contact.id) {
+            contacts.contacts.push(contact);
+            self.views.set_contacts(contacts);
+        }
+    }
+
+    /// Set guardian status on a contact
+    ///
+    /// Updates the is_guardian flag for the contact with the given ID.
+    /// The signal forwarding infrastructure will automatically update
+    /// CONTACTS_SIGNAL for any subscribers.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// app_core.set_contact_guardian_status(&authority_id, true);
+    /// // CONTACTS_SIGNAL is automatically updated
+    /// ```
+    pub fn set_contact_guardian_status(&self, contact_id: &AuthorityId, is_guardian: bool) {
+        let mut contacts = self.views.snapshot().contacts;
+        if let Some(contact) = contacts.contacts.iter_mut().find(|c| &c.id == contact_id) {
+            contact.is_guardian = is_guardian;
+            self.views.set_contacts(contacts);
+        }
+    }
+
+    /// Add a guardian to the recovery state
+    ///
+    /// If a guardian with the same ID already exists, it is not added again.
+    /// The signal forwarding infrastructure will automatically update
+    /// RECOVERY_SIGNAL for any subscribers.
+    pub fn add_guardian(&self, guardian: crate::views::recovery::Guardian) {
+        let mut recovery = self.views.snapshot().recovery;
+        if !recovery.guardians.iter().any(|g| g.id == guardian.id) {
+            recovery.guardians.push(guardian);
+            recovery.guardian_count = recovery.guardians.len() as u32;
+            self.views.set_recovery(recovery);
+        }
+    }
+
+    /// Add a message to chat state
+    ///
+    /// The signal forwarding infrastructure will automatically update
+    /// CHAT_SIGNAL for any subscribers.
+    pub fn add_chat_message(&self, message: crate::views::chat::Message) {
+        let mut chat = self.views.snapshot().chat;
+        chat.messages.push(message);
+        self.views.set_chat(chat);
+    }
+
+    /// Update recovery approval status
+    ///
+    /// Adds an approval to the active recovery process if one exists.
+    /// The signal forwarding infrastructure will automatically update
+    /// RECOVERY_SIGNAL for any subscribers.
+    pub fn add_recovery_approval(&self, guardian_id: AuthorityId) {
+        let mut recovery = self.views.snapshot().recovery;
+        recovery.add_guardian_approval(guardian_id);
+        self.views.set_recovery(recovery);
+    }
+}
+
+impl AppCore {
     /// Async dispatch for Rust consumers
     ///
     /// This is the preferred method for native Rust consumers as it
@@ -932,7 +1019,20 @@ impl AppCore {
     /// Reduce a fact to a view delta and apply it
     ///
     /// This is called after facts are committed to update the view state.
+    /// In signals mode, uses interior mutability; in non-signals mode, needs mutable self.
+    #[cfg(feature = "signals")]
     fn reduce_and_apply(&self, fact: &aura_journal::JournalFact) {
+        if let Some(authority) = &self.authority {
+            let delta = super::reduce_fact(fact, authority);
+            self.views.apply_delta(delta);
+        }
+    }
+
+    /// Reduce a fact to a view delta and apply it (non-signals mode)
+    ///
+    /// This is called after facts are committed to update the view state.
+    #[cfg(not(feature = "signals"))]
+    fn reduce_and_apply(&mut self, fact: &aura_journal::JournalFact) {
         if let Some(authority) = &self.authority {
             let delta = super::reduce_fact(fact, authority);
             self.views.apply_delta(delta);

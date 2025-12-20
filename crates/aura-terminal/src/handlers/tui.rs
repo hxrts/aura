@@ -760,7 +760,7 @@ async fn handle_tui_launch(
     // This registers all application signals (CHAT_SIGNAL, RECOVERY_SIGNAL, etc.)
     // with the ReactiveHandler so screens can subscribe to state changes
     {
-        let core = app_core.write().await;
+        let mut core = app_core.write().await;
         if let Err(e) = core.init_signals().await {
             stdio.eprintln(format_args!(
                 "Warning: Failed to initialize signals: {} - reactive updates may not work",

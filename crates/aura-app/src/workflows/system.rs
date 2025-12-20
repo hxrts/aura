@@ -32,8 +32,11 @@ pub async fn ping(_app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
 /// This operation triggers a state refresh by calling domain-specific
 /// workflows that re-read and emit their respective signals.
 pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
-    // Refresh chat state
-    let _ = super::messaging::get_chat_state(app_core).await;
+    // Refresh chat state (signals feature only)
+    #[cfg(feature = "signals")]
+    {
+        let _ = super::messaging::get_chat_state(app_core).await;
+    }
 
     // Refresh contacts state
     let _ = super::query::list_contacts(app_core).await;
@@ -44,8 +47,11 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     // Refresh settings state
     let _ = super::settings::get_settings(app_core).await;
 
-    // Refresh recovery state
-    let _ = super::recovery::get_recovery_status(app_core).await;
+    // Refresh recovery state (signals feature only)
+    #[cfg(feature = "signals")]
+    {
+        let _ = super::recovery::get_recovery_status(app_core).await;
+    }
 
     // Refresh discovered peers
     let _ = super::network::get_discovered_peers(app_core).await;

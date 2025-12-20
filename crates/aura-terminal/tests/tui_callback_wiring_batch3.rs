@@ -47,7 +47,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
     app_core
         .init_signals()
         .await

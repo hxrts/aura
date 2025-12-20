@@ -59,7 +59,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
     app_core
         .init_signals()
         .await
@@ -79,6 +79,29 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         .expect("Failed to create account");
 
     (Arc::new(ctx), app_core)
+}
+
+async fn wait_for_chat(
+    app_core: &Arc<RwLock<AppCore>>,
+    mut predicate: impl FnMut(&aura_app::views::ChatState) -> bool,
+) -> aura_app::views::ChatState {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+    loop {
+        let chat = {
+            let core = app_core.read().await;
+            core.read(&*CHAT_SIGNAL).await.unwrap()
+        };
+
+        if predicate(&chat) {
+            return chat;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            panic!("Timed out waiting for chat state to satisfy predicate");
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }
 
 /// Cleanup test directory
@@ -234,43 +257,38 @@ async fn test_start_direct_chat_creates_dm_channel() {
     // Phase 3: Verify DM channel was created
     println!("\nPhase 3: Verify DM channel was created");
     let expected_channel_id = dm_channel_id(contact_id);
-    {
-        let core = app_core.read().await;
-        let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
+    let chat = wait_for_chat(&app_core, |chat| {
+        let has_channel = chat.channels.iter().any(|c| c.id == expected_channel_id);
+        let selected = chat.selected_channel_id.as_ref() == Some(&expected_channel_id);
+        has_channel && selected
+    })
+    .await;
 
-        assert!(
-            chat.channels.len() > initial_count,
-            "Should have more channels after DM start"
-        );
+    assert!(
+        chat.channels.len() > initial_count,
+        "Should have more channels after DM start"
+    );
 
-        // Find the DM channel
-        let dm_channel = chat.channels.iter().find(|c| c.id == expected_channel_id);
-        assert!(dm_channel.is_some(), "DM channel should exist");
-
-        let dm = dm_channel.unwrap();
-        assert!(dm.is_dm, "Channel should be marked as DM");
-        assert!(
-            matches!(dm.channel_type, ChannelType::DirectMessage),
-            "Channel type should be DirectMessage"
-        );
-        println!("  DM channel created: {}", dm.id);
-        println!("  Channel name: {}", dm.name);
-        println!("  Is DM: {}", dm.is_dm);
-    }
+    let dm_channel = chat.channels.iter().find(|c| c.id == expected_channel_id);
+    assert!(dm_channel.is_some(), "DM channel should exist");
+    let dm = dm_channel.unwrap();
+    assert!(dm.is_dm, "Channel should be marked as DM");
+    assert!(
+        matches!(dm.channel_type, ChannelType::DirectMessage),
+        "Channel type should be DirectMessage"
+    );
+    println!("  DM channel created: {}", dm.id);
+    println!("  Channel name: {}", dm.name);
+    println!("  Is DM: {}", dm.is_dm);
 
     // Phase 4: Verify channel is selected
     println!("\nPhase 4: Verify channel is selected");
-    {
-        let core = app_core.read().await;
-        let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
-
-        assert_eq!(
-            chat.selected_channel_id.as_ref(),
-            Some(&expected_channel_id),
-            "DM channel should be selected"
-        );
-        println!("  Selected channel: {:?}", chat.selected_channel_id);
-    }
+    assert_eq!(
+        chat.selected_channel_id.as_ref(),
+        Some(&expected_channel_id),
+        "DM channel should be selected"
+    );
+    println!("  Selected channel: {:?}", chat.selected_channel_id);
 
     cleanup_test_dir("dm-start");
     println!("\n=== Start Direct Chat Creates DM Channel Test PASSED ===\n");
@@ -315,52 +333,50 @@ async fn test_send_direct_message_adds_message() {
     );
     println!("  SendDirectMessage dispatched successfully");
 
-    // Phase 3: Verify channel was created
+    // Phase 3: Verify DM channel was created
     println!("\nPhase 3: Verify DM channel was created");
     let expected_channel_id = dm_channel_id(target);
-    {
-        let core = app_core.read().await;
-        let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
+    let chat = wait_for_chat(&app_core, |chat| {
+        chat.channels.iter().any(|c| c.id == expected_channel_id)
+            && chat.messages.iter().any(|m| m.channel_id == expected_channel_id)
+    })
+    .await;
 
-        let dm_channel = chat.channels.iter().find(|c| c.id == expected_channel_id);
-        assert!(
-            dm_channel.is_some(),
-            "DM channel should be created: {}",
-            expected_channel_id
-        );
+    let dm_channel = chat.channels.iter().find(|c| c.id == expected_channel_id);
+    assert!(
+        dm_channel.is_some(),
+        "DM channel should be created: {}",
+        expected_channel_id
+    );
+    let channel = dm_channel.unwrap();
+    assert!(channel.is_dm, "Channel should be marked as DM");
+    println!("  DM channel created: {}", channel.id);
+    println!("  Channel name: {}", channel.name);
 
-        let channel = dm_channel.unwrap();
-        assert!(channel.is_dm, "Channel should be marked as DM");
-        println!("  DM channel created: {}", channel.id);
-        println!("  Channel name: {}", channel.name);
-
-        assert!(
-            chat.channels.len() > initial_channel_count,
-            "Should have more channels after DM send"
-        );
-    }
+    assert!(
+        chat.channels.len() > initial_channel_count,
+        "Should have more channels after DM send"
+    );
 
     // Phase 4: Verify message was added
     println!("\nPhase 4: Verify message was added");
-    {
-        let core = app_core.read().await;
-        let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
+    assert!(
+        chat.messages.len() > initial_message_count,
+        "Should have more messages after send"
+    );
 
-        assert!(
-            chat.messages.len() > initial_message_count,
-            "Should have more messages after send"
-        );
+    let message = chat
+        .messages
+        .iter()
+        .find(|m| m.channel_id == expected_channel_id);
+    assert!(message.is_some(), "Message should exist in DM channel");
 
-        let message = chat.messages.iter().find(|m| m.channel_id == expected_channel_id);
-        assert!(message.is_some(), "Message should exist in DM channel");
-
-        let msg = message.unwrap();
-        assert_eq!(msg.content, content, "Message content should match");
-        assert!(msg.is_own, "Message should be marked as own");
-        println!("  Message found: '{}'", msg.content);
-        println!("  Channel: {}", msg.channel_id);
-        println!("  Is own: {}", msg.is_own);
-    }
+    let msg = message.unwrap();
+    assert_eq!(msg.content, content, "Message content should match");
+    assert!(msg.is_own, "Message should be marked as own");
+    println!("  Message found: '{}'", msg.content);
+    println!("  Channel: {}", msg.channel_id);
+    println!("  Is own: {}", msg.is_own);
 
     cleanup_test_dir("dm-send");
     println!("\n=== Send Direct Message Adds Message Test PASSED ===\n");
@@ -907,7 +923,10 @@ async fn test_complete_dm_flow() {
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
 
         // Find DM channel
-        let dm_channel = chat.channels.iter().find(|c| c.id.to_string() == dm_channel_id);
+        let dm_channel = chat
+            .channels
+            .iter()
+            .find(|c| c.id.to_string() == dm_channel_id);
         assert!(dm_channel.is_some(), "DM channel should exist");
 
         // Count messages in DM channel

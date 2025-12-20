@@ -125,7 +125,7 @@ pub enum QueuedModal {
     // Settings Screen Modals
     // ========================================================================
     /// Edit display name
-    SettingsNickname(DisplayNameModalState),
+    SettingsDisplayName(DisplayNameModalState),
 
     /// Configure threshold
     SettingsThreshold(ThresholdModalState),
@@ -1588,7 +1588,7 @@ impl TuiState {
             Some(QueuedModal::ContactsNickname(_)) => true,
             Some(QueuedModal::ContactsImport(_)) => true,
             Some(QueuedModal::InvitationsImport(_)) => true,
-            Some(QueuedModal::SettingsNickname(_)) => true,
+            Some(QueuedModal::SettingsDisplayName(_)) => true,
             Some(QueuedModal::SettingsAddDevice(_)) => true,
             _ => false,
         }
@@ -2271,7 +2271,7 @@ fn handle_queued_modal_key(
             }
         }
         // Settings screen modals
-        QueuedModal::SettingsNickname(modal_state) => {
+        QueuedModal::SettingsDisplayName(modal_state) => {
             handle_settings_display_name_key_queue(state, commands, key, modal_state);
         }
         QueuedModal::SettingsThreshold(modal_state) => {
@@ -2940,14 +2940,14 @@ fn handle_settings_display_name_key_queue(
         }
         KeyCode::Char(c) => {
             state.modal_queue.update_active(|modal| {
-                if let QueuedModal::SettingsNickname(ref mut s) = modal {
+                if let QueuedModal::SettingsDisplayName(ref mut s) = modal {
                     s.value.push(c);
                 }
             });
         }
         KeyCode::Backspace => {
             state.modal_queue.update_active(|modal| {
-                if let QueuedModal::SettingsNickname(ref mut s) = modal {
+                if let QueuedModal::SettingsDisplayName(ref mut s) = modal {
                     s.value.pop();
                 }
             });
@@ -3442,7 +3442,7 @@ fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
         KeyCode::Char('e') => {
             if state.settings.section == SettingsSection::Profile {
                 // Open display name edit modal via queue
-                state.modal_queue.enqueue(QueuedModal::SettingsNickname(
+                state.modal_queue.enqueue(QueuedModal::SettingsDisplayName(
                     DisplayNameModalState::default(),
                 ));
             }
@@ -3451,7 +3451,7 @@ fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
             match state.settings.section {
                 SettingsSection::Profile => {
                     // Open display name edit modal via queue
-                    state.modal_queue.enqueue(QueuedModal::SettingsNickname(
+                    state.modal_queue.enqueue(QueuedModal::SettingsDisplayName(
                         DisplayNameModalState::default(),
                     ));
                 }

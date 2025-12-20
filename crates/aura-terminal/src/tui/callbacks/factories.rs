@@ -8,11 +8,11 @@
 
 use std::sync::Arc;
 
-use aura_core::identifiers::ChannelId;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::types::{Device, MfaPolicy, TraversalDepth};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
+use aura_core::identifiers::ChannelId;
 
 use super::types::*;
 

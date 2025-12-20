@@ -114,7 +114,20 @@ This diagram shows the main CLI path from parsing to rendering. Some handlers al
 
 ## Reactive data model
 
-The reactive system is owned by `aura-app`. Signals are defined in `aura_app::signal_defs` and are emitted by workflows and handlers after effects complete. The TUI treats signals as inputs and converts them to view models.
+The reactive system is owned by `aura-app`. Domain state is maintained in `ViewState` (`aura-app/src/views/state.rs`), which uses `futures-signals` `Mutable<T>` for reactive updates. Signals are defined in `aura_app::signal_defs` and are automatically derived from ViewState changes via the signal forwarding infrastructure.
+
+### ViewState as single source of truth
+
+ViewState is the canonical source for all domain state. ReactiveEffects signals (CHAT_SIGNAL, CONTACTS_SIGNAL, etc.) are automatically updated when ViewState changes. This pattern eliminates the dual-write bug class where ViewState and signals could become desynchronized.
+
+```mermaid
+flowchart LR
+  V[ViewState] -->|auto-forward| S[ReactiveEffects Signals]
+  S --> TUI[TUI Screens]
+  S --> CLI[CLI Commands]
+```
+
+External code should update state through AppCore methods (like `add_contact()`, `set_contact_guardian_status()`) rather than emitting directly to signals. The SignalForwarder in `aura-app/src/core/signal_sync.rs` subscribes to ViewState's Mutable signals and forwards changes to ReactiveEffects signals automatically.
 
 The CLI usually reads state at a point in time. It can still use signals for watch-like commands or daemon commands. When a command needs continuous updates, it should subscribe to the relevant signals and render incremental output.
 
@@ -125,12 +138,12 @@ Subscriptions follow a two-phase pattern. Read the current value first. Then sub
 ```rust
 let current = {
     let core = app_core.read().await;
-    core.read(&*SOME_SIGNAL).await?
+    core.views().snapshot().contacts  // Read from ViewState
 };
 
 let mut stream = {
     let core = app_core.read().await;
-    core.subscribe(&*SOME_SIGNAL)
+    core.subscribe(&*CONTACTS_SIGNAL)  // Subscribe for updates
 };
 ```
 

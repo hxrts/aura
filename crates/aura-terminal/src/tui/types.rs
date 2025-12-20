@@ -516,7 +516,10 @@ impl From<&AppInvitation> for Invitation {
         // For direction-aware display names
         let (other_party_id, other_party_name) = match inv.direction {
             AppInvitationDirection::Sent => (
-                inv.to_id.as_ref().map(|id| id.to_string()).unwrap_or_default(),
+                inv.to_id
+                    .as_ref()
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
                 inv.to_name.clone().unwrap_or_default(),
             ),
             AppInvitationDirection::Received => (inv.from_id.to_string(), inv.from_name.clone()),
@@ -795,8 +798,8 @@ impl GuardianStatus {
     pub fn icon(self) -> &'static str {
         match self {
             Self::Active => "●",
+            Self::Offline => "○",
             Self::Pending => "○",
-            Self::Offline => "◌",
             Self::Declined => "✕",
             Self::Removed => "⊝",
         }
@@ -816,8 +819,8 @@ impl GuardianStatus {
     pub fn color(self) -> Color {
         match self {
             Self::Active => Theme::SUCCESS,
+            Self::Offline => Theme::TEXT_DISABLED,
             Self::Pending => Theme::WARNING,
-            Self::Offline => Theme::LIST_TEXT_MUTED,
             Self::Declined | Self::Removed => Theme::ERROR,
         }
     }
@@ -935,7 +938,7 @@ impl From<&AppRecoveryApproval> for GuardianApproval {
     fn from(a: &AppRecoveryApproval) -> Self {
         Self {
             guardian_name: a.guardian_id.to_string(), // Will be resolved to name by UI
-            approved: true,                           // If there's an approval record, it's approved
+            approved: true, // If there's an approval record, it's approved
         }
     }
 }
@@ -1012,6 +1015,7 @@ impl From<&AppRecoveryProcess> for PendingRequest {
 pub enum ContactStatus {
     #[default]
     Active,
+    Offline,
     Pending,
     Blocked,
 }
@@ -1020,6 +1024,7 @@ impl ContactStatus {
     pub fn icon(self) -> &'static str {
         match self {
             Self::Active => "●",
+            Self::Offline => "○",
             Self::Pending => "○",
             Self::Blocked => "⊗",
         }
@@ -1029,6 +1034,7 @@ impl ContactStatus {
     pub fn color(self) -> Color {
         match self {
             Self::Active => Theme::SUCCESS,
+            Self::Offline => Theme::TEXT_DISABLED,
             Self::Pending => Theme::WARNING,
             Self::Blocked => Theme::ERROR,
         }
@@ -1230,7 +1236,7 @@ impl From<&AppContact> for Contact {
             status: if c.is_online {
                 ContactStatus::Active
             } else {
-                ContactStatus::Pending
+                ContactStatus::Offline
             },
             is_guardian: c.is_guardian,
         }

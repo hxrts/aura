@@ -321,11 +321,8 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
             async move {
                 // Helper closure to convert BlockState to TUI types
                 let convert_block_state = |block_state: &aura_app::views::BlockState| {
-                    let residents: Vec<Resident> = block_state
-                        .residents
-                        .iter()
-                        .map(convert_resident)
-                        .collect();
+                    let residents: Vec<Resident> =
+                        block_state.residents.iter().map(convert_resident).collect();
 
                     let budget = convert_budget(&block_state.storage, block_state.resident_count);
 

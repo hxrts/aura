@@ -22,7 +22,7 @@ use aura_core::identifiers::{AuthorityId, ChannelId};
 
 /// Helper to create a test AppCore with signals initialized
 async fn test_app_core() -> Arc<RwLock<AppCore>> {
-    let core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
+    let mut core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
     core.init_signals().await.expect("Failed to init signals");
     Arc::new(RwLock::new(core))
 }
@@ -214,7 +214,9 @@ async fn test_chat_message_accumulation() {
         state.messages.push(Message {
             id: format!("msg-{}", i),
             channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
-            sender_id: format!("user-{}", i % 3).parse::<AuthorityId>().unwrap_or_default(),
+            sender_id: format!("user-{}", i % 3)
+                .parse::<AuthorityId>()
+                .unwrap_or_default(),
             sender_name: format!("User{}", i % 3),
             content: format!("Message number {}", i),
             timestamp: 1234567890 + i as u64,

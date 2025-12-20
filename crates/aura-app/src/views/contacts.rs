@@ -117,6 +117,15 @@ impl ContactsState {
         id.to_string()
     }
 
+    /// Set guardian status for a contact
+    ///
+    /// Updates the is_guardian flag on the contact if it exists.
+    pub fn set_guardian_status(&mut self, contact_id: AuthorityId, is_guardian: bool) {
+        if let Some(contact) = self.contacts.iter_mut().find(|c| c.id == contact_id) {
+            contact.is_guardian = is_guardian;
+        }
+    }
+
     /// Set nickname for a contact
     ///
     /// If the contact doesn't exist, creates a new contact entry.

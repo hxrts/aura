@@ -44,9 +44,15 @@ pub enum ViewDelta {
     /// A channel was closed/archived
     ChannelClosed { channel_id: ChannelId },
     /// Channel topic was updated
-    TopicUpdated { channel_id: ChannelId, topic: String },
+    TopicUpdated {
+        channel_id: ChannelId,
+        topic: String,
+    },
     /// A nickname was set for a contact
-    NicknameSet { target: AuthorityId, nickname: String },
+    NicknameSet {
+        target: AuthorityId,
+        nickname: String,
+    },
     /// A block name was set
     BlockNameSet { block_id: ChannelId, name: String },
     /// A recovery request was initiated

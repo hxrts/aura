@@ -42,7 +42,8 @@ web-dominator = ["wasm", "signals", "dep:dominator"]
 
 # Enable futures-signals based reactivity
 # Used by: native, web-dominator
-signals = ["dep:futures-signals"]
+# Also enables tokio for signal forwarding tasks
+signals = ["dep:futures-signals", "dep:tokio", "dep:futures"]
 
 # Enable callback-based reactivity (StateObserver trait)
 # Used by: ios, android, web-js
@@ -101,6 +102,10 @@ async-lock = "3"
 
 # Optional: Signals-based reactivity
 futures-signals = { version = "0.3", optional = true }
+
+# Optional: Async runtime for signal forwarding (signals feature)
+tokio = { version = "1", features = ["rt", "sync"], optional = true }
+futures = { version = "0.3", optional = true }
 
 # Optional: FFI for mobile
 uniffi = { version = "0.25", optional = true }

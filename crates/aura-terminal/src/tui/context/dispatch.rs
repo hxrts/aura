@@ -11,10 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_app::views::contacts::Contact as ViewContact;
 use aura_app::AppCore;
-use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::AuthorityId;
 
 use super::{SnapshotHelper, ToastHelper};
@@ -278,7 +276,9 @@ impl DispatchHelper {
         }
     }
 
-    /// Legacy compatibility wrapper.
+    /// Dispatch a command and wait for completion.
+    ///
+    /// This is an alias for `dispatch()` with more explicit semantics.
     pub async fn dispatch_and_wait(&self, command: EffectCommand) -> Result<(), String> {
         self.dispatch(command).await
     }
@@ -395,17 +395,11 @@ impl DispatchHelper {
             is_online: true,
         };
 
+        // Use AppCore's add_contact method which updates ViewState.
+        // Signal forwarding automatically propagates to CONTACTS_SIGNAL.
         let core = self.app_core.read().await;
-        if let Ok(mut contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-            if !contacts_state.contacts.iter().any(|c| c.id == authority_id) {
-                contacts_state.contacts.push(contact);
-                if let Err(e) = core.emit(&*CONTACTS_SIGNAL, contacts_state).await {
-                    tracing::warn!("Failed to update contacts signal: {}", e);
-                } else {
-                    tracing::info!("Added contact from invitation: {}", sender_id);
-                }
-            }
-        }
+        core.add_contact(contact);
+        tracing::info!("Added contact from invitation: {}", sender_id);
     }
 
     pub async fn mark_peer_invited(&self, authority_id: &str) {
@@ -468,7 +462,8 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_command_emits_error_signal() {
-        let app_core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
+        let mut app_core =
+            AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
         app_core
             .init_signals()
             .await

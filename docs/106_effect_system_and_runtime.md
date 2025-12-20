@@ -176,26 +176,27 @@ pub trait ReactiveEffects: Send + Sync {
 
 ### 4.3 Usage Pattern
 
-The typical usage pattern follows Intent → Signal → UI:
+The typical usage pattern follows Intent → ViewState → Signal → UI:
 
 ```rust
 // 1. Register signals on startup (in AppCore::init_signals)
 app.register(&*CHAT_SIGNAL, ChatState::default()).await?;
 
-// 2. UI reads current state
-let chat = app.read(&*CHAT_SIGNAL).await?;
+// 2. UI reads current state from ViewState
+let chat = app_core.views().snapshot().chat;
 
-// 3. Intent handler updates state after processing
-let mut state = app.read(&*CHAT_SIGNAL).await?;
-state.messages.push(new_message);
-app.emit(&*CHAT_SIGNAL, state).await?;
+// 3. Intent handler updates ViewState (auto-forwards to signals)
+app_core.add_chat_message(new_message);
+// Signal forwarding automatically emits to CHAT_SIGNAL
 
 // 4. UI automatically receives updates via subscription
-let mut stream = app.subscribe(&*CHAT_SIGNAL);
+let mut stream = app_core.subscribe(&*CHAT_SIGNAL);
 while let Ok(state) = stream.recv().await {
     render_chat_view(&state);
 }
 ```
+
+**Important**: Domain signals (CHAT_SIGNAL, CONTACTS_SIGNAL, etc.) should not be emitted to directly. All state updates go through ViewState, and the SignalForwarder in `aura-app/src/core/signal_sync.rs` automatically propagates changes to ReactiveEffects signals.
 
 ### 4.4 Implementation
 
@@ -388,21 +389,19 @@ pub async fn register_app_signals_with_queries<R: ReactiveEffects>(
 }
 ```
 
-When facts are committed, the commit path emits to signals:
+When facts are committed, ViewState is updated and signals auto-forward:
 
 ```rust
 // In AppCore
 pub async fn commit_pending_facts_and_emit(&mut self) -> Result<usize, IntentError> {
+    // Commit facts synchronously - each fact updates ViewState
+    // SignalForwarder automatically propagates ViewState changes to signals
     let count = self.commit_pending_facts();
-    let snapshot = self.views.snapshot();
-
-    // Emit to reactive signals for subscribers
-    let _ = self.reactive.emit(&*CHAT_SIGNAL, snapshot.chat.clone()).await;
-    let _ = self.reactive.emit(&*INVITATIONS_SIGNAL, snapshot.invitations.clone()).await;
-    // ...
     Ok(count)
 }
 ```
+
+The SignalForwarder subscribes to ViewState's `Mutable<T>` signals and forwards changes to ReactiveEffects signals automatically. This eliminates the dual-write bug class where ViewState and signals could desync.
 
 This enables TUI screens to subscribe and automatically receive updates:
 

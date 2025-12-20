@@ -825,7 +825,8 @@ async fn test_account_creation_callback_flow() {
     println!("Account file: {:?}", account_file);
 
     // STEP 1: Create AppCore (the application core)
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     // STEP 2: Create IoContext with no existing account
@@ -944,7 +945,8 @@ async fn test_device_id_determinism() {
     // =========================================================================
     println!("Phase 1: Creating account with device_id '{}'", device_id);
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -1102,7 +1104,8 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
 
     let original_device_id = "bobs-original-phone-12345";
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -1634,7 +1637,8 @@ async fn test_invitation_export_import_roundtrip() {
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
     // Create AppCore and IoContext
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -1760,7 +1764,8 @@ async fn test_moderation_commands_dispatch() {
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
     // Create AppCore and IoContext
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -1852,7 +1857,8 @@ async fn test_peer_discovery_commands() {
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
     // Create AppCore and IoContext
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -1936,7 +1942,8 @@ async fn test_lan_peer_invitation_flow() {
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
     // Create AppCore and IoContext
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -2065,7 +2072,8 @@ async fn test_direct_messaging_flow() {
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
     // Create AppCore and IoContext
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -2201,7 +2209,8 @@ async fn test_display_name_editing_flow() {
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
     // Create AppCore and IoContext
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -2414,7 +2423,8 @@ async fn test_threshold_configuration_flow() {
     println!("\nPhase 7: Testing UpdateThreshold command construction");
 
     // Create AppCore and IoContext
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -2539,7 +2549,8 @@ async fn test_mfa_policy_configuration_flow() {
     // Phase 4: Test IoContext MFA policy get/set
     println!("\nPhase 4: Testing IoContext MFA policy persistence");
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -2650,7 +2661,8 @@ async fn test_block_messaging_flow() {
     // Phase 1: Create AppCore and IoContext
     println!("Phase 1: Setting up test environment");
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -2788,7 +2800,8 @@ async fn test_set_context_flow() {
     // Phase 1: Create AppCore and IoContext
     println!("Phase 1: Setting up test environment");
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -2927,7 +2940,8 @@ async fn test_steward_role_flow() {
     // Phase 1: Create AppCore and IoContext
     println!("Phase 1: Setting up test environment");
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -2947,9 +2961,10 @@ async fn test_steward_role_flow() {
     println!("\nPhase 2: Setting up block with residents");
 
     let block_id = "test-block-1".parse::<ChannelId>().unwrap_or_default();
-    let owner_id = "owner-id".parse::<AuthorityId>().unwrap_or_default();
-    let resident1_id = "resident-1".parse::<AuthorityId>().unwrap_or_default();
-    let resident2_id = "resident-2".parse::<AuthorityId>().unwrap_or_default();
+    let owner_id = AuthorityId::new_from_entropy([1u8; 32]);
+    let resident1_id = AuthorityId::new_from_entropy([2u8; 32]);
+    let resident2_id = AuthorityId::new_from_entropy([3u8; 32]);
+    let missing_id = AuthorityId::new_from_entropy([4u8; 32]);
 
     {
         let core = app_core.write().await;
@@ -3002,7 +3017,7 @@ async fn test_steward_role_flow() {
 
     let result = ctx
         .dispatch(EffectCommand::GrantSteward {
-            target: "resident-1".to_string(),
+            target: resident1_id.to_string(),
         })
         .await;
 
@@ -3014,7 +3029,9 @@ async fn test_steward_role_flow() {
         let core = app_core.read().await;
         let blocks = core.views().get_blocks();
         let block = blocks.current_block().expect("Block should exist");
-        let resident = block.resident(&resident1_id).expect("Resident should exist");
+        let resident = block
+            .resident(&resident1_id)
+            .expect("Resident should exist");
         assert!(
             matches!(resident.role, ResidentRole::Admin),
             "Resident should now be Admin"
@@ -3039,7 +3056,9 @@ async fn test_steward_role_flow() {
         let core = app_core.read().await;
         let blocks = core.views().get_blocks();
         let block = blocks.current_block().expect("Block should exist");
-        let resident = block.resident(&resident1_id).expect("Resident should exist");
+        let resident = block
+            .resident(&resident1_id)
+            .expect("Resident should exist");
         assert!(
             matches!(resident.role, ResidentRole::Resident),
             "Resident should now be back to Resident role"
@@ -3053,7 +3072,7 @@ async fn test_steward_role_flow() {
     // Can't modify Owner
     let result = ctx
         .dispatch(EffectCommand::GrantSteward {
-            target: "owner-id".to_string(),
+            target: owner_id.to_string(),
         })
         .await;
 
@@ -3070,7 +3089,7 @@ async fn test_steward_role_flow() {
     // Can't revoke non-Admin
     let result = ctx
         .dispatch(EffectCommand::RevokeSteward {
-            target: "resident-2".to_string(), // Still a Resident, not Admin
+            target: resident2_id.to_string(), // Still a Resident, not Admin
         })
         .await;
 
@@ -3087,7 +3106,7 @@ async fn test_steward_role_flow() {
     // Can't find non-existent resident
     let result = ctx
         .dispatch(EffectCommand::GrantSteward {
-            target: "non-existent".to_string(),
+            target: missing_id.to_string(),
         })
         .await;
 
@@ -3139,7 +3158,8 @@ async fn test_neighborhood_navigation_flow() {
     // Phase 1: Create AppCore and IoContext
     println!("Phase 1: Setting up test environment");
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -3599,7 +3619,8 @@ async fn test_channel_mode_operations() {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -4146,7 +4167,8 @@ async fn test_authorization_checking() {
     // Phase 2: Test authorization checking with IoContext
     println!("\nPhase 2: Testing authorization checking with IoContext");
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
@@ -4456,7 +4478,8 @@ async fn test_device_management() {
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
     // Create AppCore and IoContext with a specific device ID
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
     let device_id = "test-device-mgmt-123";
 
@@ -4567,7 +4590,8 @@ async fn test_snapshot_data_accuracy() {
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
     // Create AppCore
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core =
+        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     app_core
         .init_signals()
         .await
@@ -4704,7 +4728,7 @@ async fn test_snapshot_data_accuracy() {
             .is_some_and(|suggested| !suggested.is_empty() && *suggested != contact.nickname);
 
         let expected = if contact.id == contact1_id {
-            true  // suggested_name differs from nickname
+            true // suggested_name differs from nickname
         } else if contact.id == contact2_id {
             false // suggested_name equals nickname
         } else if contact.id == contact3_id {

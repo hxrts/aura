@@ -294,7 +294,11 @@ fn convert_invitation(inv: &aura_app::views::Invitation) -> Invitation {
     // Get the "other party" name and ID based on direction
     let (other_party_id, other_party_name) = match inv.direction {
         aura_app::views::InvitationDirection::Sent => {
-            let id = inv.to_id.as_ref().map(|id| id.to_string()).unwrap_or_default();
+            let id = inv
+                .to_id
+                .as_ref()
+                .map(|id| id.to_string())
+                .unwrap_or_default();
             let name = inv.to_name.clone().unwrap_or_else(|| id.clone());
             (id, name)
         }

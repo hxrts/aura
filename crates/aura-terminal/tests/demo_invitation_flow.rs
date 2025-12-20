@@ -79,7 +79,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
     app_core
         .init_signals()
         .await
@@ -118,7 +118,7 @@ async fn test_demo_invitation_codes_are_parseable() {
     println!("\n=== Demo Invitation Code Parsing Test ===\n");
 
     let seed = 2024; // Standard demo seed
-    // Names and seeds must match AgentFactory::create_demo_agents
+                     // Names and seeds must match AgentFactory::create_demo_agents
     let alice_code = generate_demo_invite_code("Alice", seed);
     let carol_code = generate_demo_invite_code("Carol", seed + 1);
 
@@ -177,7 +177,10 @@ async fn test_demo_invitation_codes_are_parseable() {
     // Both should be Contact type (Guardian requests are sent in-band)
     match &alice_invitation.invitation_type {
         aura_invitation::InvitationType::Contact { nickname } => {
-            println!("  Alice is a Contact invitation with nickname: {:?}", nickname);
+            println!(
+                "  Alice is a Contact invitation with nickname: {:?}",
+                nickname
+            );
             assert_eq!(nickname, &Some("Alice".to_string()));
         }
         other => panic!("Expected Contact type for Alice, got {:?}", other),
@@ -185,7 +188,10 @@ async fn test_demo_invitation_codes_are_parseable() {
 
     match &carol_invitation.invitation_type {
         aura_invitation::InvitationType::Contact { nickname } => {
-            println!("  Carol is a Contact invitation with nickname: {:?}", nickname);
+            println!(
+                "  Carol is a Contact invitation with nickname: {:?}",
+                nickname
+            );
             assert_eq!(nickname, &Some("Carol".to_string()));
         }
         other => panic!("Expected Contact type for Carol, got {:?}", other),
@@ -505,10 +511,10 @@ async fn test_guardian_authority_id_matching() {
     let carol_code = generate_demo_invite_code("Carol", seed + 1);
 
     // Step 2: Parse the invitations to get AuthorityIds
-    let alice_invitation = ShareableInvitation::from_code(&alice_code)
-        .expect("Alice invitation should parse");
-    let carol_invitation = ShareableInvitation::from_code(&carol_code)
-        .expect("Carol invitation should parse");
+    let alice_invitation =
+        ShareableInvitation::from_code(&alice_code).expect("Alice invitation should parse");
+    let carol_invitation =
+        ShareableInvitation::from_code(&carol_code).expect("Carol invitation should parse");
 
     let alice_invitation_authority = alice_invitation.sender_id;
     let carol_invitation_authority = carol_invitation.sender_id;

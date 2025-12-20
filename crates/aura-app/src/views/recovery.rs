@@ -122,7 +122,12 @@ impl RecoveryState {
     }
 
     /// Initiate a recovery process
-    pub fn initiate_recovery(&mut self, session_id: String, account_id: AuthorityId, initiated_at: u64) {
+    pub fn initiate_recovery(
+        &mut self,
+        session_id: String,
+        account_id: AuthorityId,
+        initiated_at: u64,
+    ) {
         self.active_recovery = Some(RecoveryProcess {
             id: session_id,
             account_id,
@@ -143,7 +148,11 @@ impl RecoveryState {
     }
 
     /// Add a guardian approval with timestamp to the active recovery
-    pub fn add_guardian_approval_with_timestamp(&mut self, guardian_id: AuthorityId, timestamp: u64) {
+    pub fn add_guardian_approval_with_timestamp(
+        &mut self,
+        guardian_id: AuthorityId,
+        timestamp: u64,
+    ) {
         if let Some(ref mut recovery) = self.active_recovery {
             if !recovery.approved_by.contains(&guardian_id) {
                 recovery.approved_by.push(guardian_id);

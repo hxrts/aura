@@ -489,7 +489,7 @@ pub struct SettingsViewProps {
 pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     // Extract modal state from queue (all modals now use queue system)
     let (display_name_visible, display_name_value) = match state.modal_queue.current() {
-        Some(QueuedModal::SettingsNickname(s)) => (true, s.value.clone()),
+        Some(QueuedModal::SettingsDisplayName(s)) => (true, s.value.clone()),
         _ => (false, String::new()),
     };
 
@@ -739,7 +739,7 @@ mod tests {
         display_name_modal.value = "new-nick".to_string();
         state
             .modal_queue
-            .enqueue(QueuedModal::SettingsNickname(display_name_modal));
+            .enqueue(QueuedModal::SettingsDisplayName(display_name_modal));
 
         let props = extract_settings_view_props(&state);
 

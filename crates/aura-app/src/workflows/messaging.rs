@@ -1,17 +1,15 @@
 //! Messaging Workflow - Portable Business Logic
 //!
 //! This module contains messaging operations that are portable across all frontends.
-//! It follows the reactive signal pattern and emits CHAT_SIGNAL updates.
+//! Uses ViewState as single source of truth; signal forwarding handles CHAT_SIGNAL updates.
 
 use crate::{
-    signal_defs::CHAT_SIGNAL,
     views::chat::{Channel, ChannelType, ChatState, Message},
     AppCore,
 };
 use async_lock::RwLock;
 use aura_core::{
     crypto::hash::hash,
-    effects::reactive::ReactiveEffects,
     identifiers::{AuthorityId, ChannelId},
     AuraError,
 };
@@ -27,12 +25,12 @@ fn dm_channel_id(target: &str) -> ChannelId {
 ///
 /// **What it does**: Sends a message in a DM channel with the contact
 /// **Returns**: DM channel ID
-/// **Signal pattern**: Emits CHAT_SIGNAL after message is added
+/// **Signal pattern**: Updates ViewState; signal forwarding handles CHAT_SIGNAL
 ///
 /// This operation:
 /// 1. Creates DM channel if it doesn't exist
 /// 2. Adds message to chat state
-/// 3. Emits CHAT_SIGNAL for UI updates
+/// 3. ViewState update auto-forwards to CHAT_SIGNAL for UI updates
 ///
 /// **Note**: Full implementation would use Intent::SendMessage for persistence.
 /// Currently updates chat state locally for UI responsiveness.
@@ -51,7 +49,7 @@ pub async fn send_direct_message(
     let channel_id = dm_channel_id(target);
 
     let core = app_core.read().await;
-    let mut chat_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+    let mut chat_state = core.views().snapshot().chat;
 
     let now = timestamp_ms;
 
@@ -92,10 +90,8 @@ pub async fn send_direct_message(
     // Apply message to state
     chat_state.apply_message(channel_id.clone(), message);
 
-    // Emit updated state
-    core.emit(&*CHAT_SIGNAL, chat_state)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit chat signal: {}", e)))?;
+    // Update ViewState - signal forwarding auto-propagates to CHAT_SIGNAL
+    core.views().set_chat(chat_state);
 
     Ok(channel_id.to_string())
 }
@@ -104,13 +100,13 @@ pub async fn send_direct_message(
 ///
 /// **What it does**: Creates a DM channel and selects it
 /// **Returns**: DM channel ID
-/// **Signal pattern**: Emits CHAT_SIGNAL after channel is created
+/// **Signal pattern**: Updates ViewState; signal forwarding handles CHAT_SIGNAL
 ///
 /// This operation:
 /// 1. Gets contact name from ViewState
 /// 2. Creates DM channel if it doesn't exist
 /// 3. Selects the channel for active conversation
-/// 4. Emits CHAT_SIGNAL for UI updates
+/// 4. ViewState update auto-forwards to CHAT_SIGNAL for UI updates
 ///
 /// # Arguments
 /// * `app_core` - The application core
@@ -128,18 +124,17 @@ pub async fn start_direct_chat(
         .parse::<AuthorityId>()
         .unwrap_or_else(|_| AuthorityId::default());
 
+    let core = app_core.read().await;
+    let snapshot = core.views().snapshot();
+
     // Get contact name from ViewState for the channel name
-    let contact_name = {
-        let core = app_core.read().await;
-        let snapshot = core.snapshot();
-        snapshot
-            .contacts
-            .contacts
-            .iter()
-            .find(|c| c.id == authority_id)
-            .map(|c| c.nickname.clone())
-            .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]))
-    };
+    let contact_name = snapshot
+        .contacts
+        .contacts
+        .iter()
+        .find(|c| c.id == authority_id)
+        .map(|c| c.nickname.clone())
+        .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]));
 
     let now = timestamp_ms;
 
@@ -157,9 +152,8 @@ pub async fn start_direct_chat(
         last_activity: now,
     };
 
-    // Add channel to ChatState and select it
-    let core = app_core.read().await;
-    let mut chat_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+    // Get current chat state and update it
+    let mut chat_state = snapshot.chat;
 
     // Add the DM channel (add_channel avoids duplicates)
     chat_state.add_channel(dm_channel);
@@ -167,30 +161,28 @@ pub async fn start_direct_chat(
     // Select this channel (don't clear messages - retain history)
     chat_state.selected_channel_id = Some(channel_id.clone());
 
-    // Emit updated state
-    core.emit(&*CHAT_SIGNAL, chat_state)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit chat signal: {}", e)))?;
+    // Update ViewState - signal forwarding auto-propagates to CHAT_SIGNAL
+    core.views().set_chat(chat_state);
 
     Ok(channel_id.to_string())
 }
 
 /// Get current chat state
 ///
-/// **What it does**: Reads chat state from CHAT_SIGNAL
+/// **What it does**: Reads chat state from ViewState
 /// **Returns**: Current chat state with channels and messages
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> ChatState {
     let core = app_core.read().await;
 
-    core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
+    core.views().snapshot().chat
 }
 
 /// Send an action/emote message to a channel
 ///
 /// **What it does**: Sends an IRC-style /me action to a channel
 /// **Returns**: Message ID
-/// **Signal pattern**: Emits CHAT_SIGNAL after message is added
+/// **Signal pattern**: Updates ViewState; signal forwarding handles CHAT_SIGNAL
 ///
 /// Action messages are formatted as "* Sender action text" and displayed
 /// differently from regular messages in the UI.
@@ -212,7 +204,7 @@ pub async fn send_action(
         .map_err(|_| AuraError::agent(format!("Invalid channel ID: {}", channel_id_str)))?;
 
     let core = app_core.read().await;
-    let mut chat_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+    let mut chat_state = core.views().snapshot().chat;
 
     // Verify channel exists
     if chat_state.channel(&channel_id).is_none() {
@@ -243,10 +235,8 @@ pub async fn send_action(
     // Apply message to state
     chat_state.apply_message(channel_id, message);
 
-    // Emit updated state
-    core.emit(&*CHAT_SIGNAL, chat_state)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit chat signal: {}", e)))?;
+    // Update ViewState - signal forwarding auto-propagates to CHAT_SIGNAL
+    core.views().set_chat(chat_state);
 
     Ok(message_id)
 }

@@ -139,8 +139,6 @@ pub enum AgentResponse {
         /// Context in which the guardian binding applies
         context_id: ContextId,
     },
-    /// Emit an AuraEvent for the TUI
-    EmitEvent(AuraEvent),
 }
 
 /// Simulator-backed automated agent
@@ -1151,9 +1149,6 @@ impl SimulatedBridge {
                         account,
                         context_id
                     );
-                }
-                AgentResponse::EmitEvent(event) => {
-                    let _ = self.tui_event_tx.send(event);
                 }
             }
         }

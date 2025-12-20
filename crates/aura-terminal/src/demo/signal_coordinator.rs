@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, RECOVERY_SIGNAL};
+use aura_app::signal_defs::{CHAT_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::views::chat::Message as ChatMessage;
 use aura_app::views::recovery::{Guardian, GuardianStatus, RecoveryProcessStatus};
 use aura_app::views::{ChatState, RecoveryState};
@@ -195,11 +195,15 @@ impl DemoSignalCoordinator {
         }
     }
 
-    /// Handle an agent response by updating signals
+    /// Handle an agent response by updating ViewState
+    ///
+    /// Uses AppCore methods to update ViewState. Signal forwarding
+    /// automatically propagates changes to ReactiveEffects signals.
     async fn handle_agent_response(&self, authority_id: AuthorityId, response: AgentResponse) {
         match response {
             AgentResponse::SendMessage { channel, content } => {
-                // Add message to chat signal
+                // Add message via ViewState
+                // Signal forwarding automatically propagates to CHAT_SIGNAL
                 let channel_id = channel.parse().unwrap_or_default();
                 let new_message = ChatMessage {
                     id: crate::ids::uuid("demo-msg").to_string(),
@@ -216,13 +220,9 @@ impl DemoSignalCoordinator {
                     is_read: false,
                 };
 
-                // Update chat signal with new message
                 if let Some(core) = self.app_core.try_read() {
-                    if let Ok(mut state) = core.read(&*CHAT_SIGNAL).await {
-                        state.messages.push(new_message);
-                        let _ = core.emit(&*CHAT_SIGNAL, state).await;
-                        tracing::debug!("Demo: Added agent message to chat signal");
-                    }
+                    core.add_chat_message(new_message);
+                    tracing::debug!("Demo: Added agent message to chat");
                 }
             }
 
@@ -230,30 +230,26 @@ impl DemoSignalCoordinator {
                 session_id,
                 account: _,
             } => {
-                // Update recovery signal with approval
+                // Update recovery via ViewState
+                // Signal forwarding automatically propagates to RECOVERY_SIGNAL
                 if let Some(core) = self.app_core.try_read() {
-                    if let Ok(mut state) = core.read(&*RECOVERY_SIGNAL).await {
-                        if let Some(ref mut active) = state.active_recovery {
-                            if active.id == session_id {
-                                // Add guardian to approved list
-                                if !active.approved_by.contains(&authority_id) {
-                                    active.approved_by.push(authority_id.clone());
-                                    active.approvals_received = active.approved_by.len() as u32;
+                    // Check if this is the active recovery session
+                    let recovery = core.views().snapshot().recovery;
+                    if let Some(ref active) = recovery.active_recovery {
+                        if active.id == session_id && !active.approved_by.contains(&authority_id) {
+                            core.add_recovery_approval(authority_id.clone());
 
-                                    tracing::info!(
-                                        "Demo: Guardian {} approved recovery ({}/{})",
-                                        authority_id,
-                                        active.approvals_received,
-                                        active.approvals_required
-                                    );
-
-                                    // Check if threshold met
-                                    if active.approvals_received >= active.approvals_required {
-                                        active.status = RecoveryProcessStatus::Approved;
-                                        tracing::info!("Demo: Recovery threshold reached!");
-                                    }
-
-                                    let _ = core.emit(&*RECOVERY_SIGNAL, state).await;
+                            // Log approval status
+                            let updated_recovery = core.views().snapshot().recovery;
+                            if let Some(ref active) = updated_recovery.active_recovery {
+                                tracing::info!(
+                                    "Demo: Guardian {} approved recovery ({}/{})",
+                                    authority_id,
+                                    active.approvals_received,
+                                    active.approvals_required
+                                );
+                                if active.approvals_received >= active.approvals_required {
+                                    tracing::info!("Demo: Recovery threshold reached!");
                                 }
                             }
                         }
@@ -274,59 +270,40 @@ impl DemoSignalCoordinator {
                     context_id
                 );
 
-                // Update CONTACTS_SIGNAL to mark contact as guardian
+                // Update ViewState to mark contact as guardian
+                // Signal forwarding automatically propagates to CONTACTS_SIGNAL
                 if let Some(core) = self.app_core.try_read() {
-                    if let Ok(mut contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-                        if let Some(contact) = contacts_state
-                            .contacts
-                            .iter_mut()
-                            .find(|c| c.id == authority_id)
-                        {
-                            contact.is_guardian = true;
-                            tracing::info!(
-                                "Demo: Updated contact {} is_guardian=true",
-                                authority_id
-                            );
-                        }
-                        let _ = core.emit(&*CONTACTS_SIGNAL, contacts_state).await;
+                    // Check if contact exists first
+                    let contacts = core.views().snapshot().contacts;
+                    if contacts.contacts.iter().any(|c| c.id == authority_id) {
+                        core.set_contact_guardian_status(&authority_id, true);
+                        tracing::info!("Demo: Updated contact {} is_guardian=true", authority_id);
+                    } else {
+                        tracing::warn!(
+                            "Demo: Contact {} not found ({} contacts present)",
+                            authority_id,
+                            contacts.contacts.len()
+                        );
                     }
                 }
 
-                // Update RECOVERY_SIGNAL to add guardian to recovery state
+                // Update ViewState to add guardian to recovery state
+                // Signal forwarding automatically propagates to RECOVERY_SIGNAL
                 if let Some(core) = self.app_core.try_read() {
-                    if let Ok(mut recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
-                        // Check if guardian already exists
-                        let exists = recovery_state.guardians.iter().any(|g| g.id == authority_id);
-                        if !exists {
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as u64;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
 
-                            recovery_state.guardians.push(Guardian {
-                                id: authority_id.clone(),
-                                name: guardian_name,
-                                status: GuardianStatus::Active,
-                                added_at: now,
-                                last_seen: Some(now),
-                            });
-                            recovery_state.guardian_count = recovery_state.guardians.len() as u32;
-
-                            tracing::info!(
-                                "Demo: Added {} to guardians list (total: {})",
-                                authority_id,
-                                recovery_state.guardian_count
-                            );
-                        }
-                        let _ = core.emit(&*RECOVERY_SIGNAL, recovery_state).await;
-                    }
+                    core.add_guardian(Guardian {
+                        id: authority_id.clone(),
+                        name: guardian_name,
+                        status: GuardianStatus::Active,
+                        added_at: now,
+                        last_seen: Some(now),
+                    });
+                    tracing::info!("Demo: Added {} to guardians list", authority_id);
                 }
-            }
-
-            AgentResponse::EmitEvent(_event) => {
-                // Legacy event emission - convert to signal if needed
-                // For now, log and skip since screens use signals
-                tracing::debug!("Demo: Skipping legacy event emission (screens use signals)");
             }
         }
     }

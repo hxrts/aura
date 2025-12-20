@@ -30,7 +30,7 @@ async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::signal_def
 async fn test_ctx(
     has_existing_account: bool,
 ) -> (Arc<RwLock<AppCore>>, IoContext, tempfile::TempDir) {
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
+    let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
     app_core
         .init_signals()
         .await
