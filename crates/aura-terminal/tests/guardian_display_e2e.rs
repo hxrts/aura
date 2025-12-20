@@ -39,7 +39,7 @@ use aura_core::identifiers::AuthorityId;
 use aura_terminal::demo::{DemoSignalCoordinator, DemoSimulator};
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::ids;
-use aura_terminal::tui::context::IoContext;
+use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 use base64::Engine;
 
@@ -110,16 +110,16 @@ async fn setup_test_env(
         debug: false,
         journal_path: Some(test_dir.join("journal.json").to_string_lossy().to_string()),
     };
-    let mut app_core =
+    let app_core =
         AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge()).expect("AppCore");
-    app_core
-        .init_signals()
-        .await
-        .expect("Failed to init signals");
     let app_core = Arc::new(RwLock::new(app_core));
 
+    let app_core_init = InitializedAppCore::new(app_core.clone())
+        .await
+        .expect("Failed to init signals");
+
     let mut ctx = IoContext::with_account_status(
-        app_core.clone(),
+        app_core_init,
         false,
         test_dir,
         format!("test-device-{}", name),
@@ -132,6 +132,7 @@ async fn setup_test_env(
     }
 
     ctx.create_account(&format!("DemoUser-{}", name))
+        .await
         .expect("Failed to create account");
 
     (Arc::new(ctx), app_core, agent)

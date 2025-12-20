@@ -443,6 +443,14 @@ impl SimulatedAgent {
             }
         }
 
+        // Keep transport-driven responses consistent with event-driven ones:
+        // if a coordinator is listening for agent responses via channel, forward them.
+        if let Some(tx) = &self.response_tx {
+            for response in &responses {
+                let _ = tx.send((self.authority_id, response.clone()));
+            }
+        }
+
         Ok(responses)
     }
 
