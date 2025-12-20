@@ -1021,7 +1021,7 @@ impl SimulatedBridge {
                     };
                     if let Ok(channel_id) = amp.create_channel(params).await {
                         let channel = crate::tui::Channel {
-                            id: channel_id.to_string(),
+                            id: channel_id,
                             name: name.clone(),
                             topic: topic.clone(),
                             channel_type: aura_app::ChannelType::Block,

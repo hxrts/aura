@@ -118,12 +118,13 @@ impl DemoSignalCoordinator {
         if current_count > *last_count {
             // New messages - check if any are from Bob
             for msg in chat_state.messages.iter().skip(*last_count) {
-                if msg.sender_id == self.bob_authority.to_string() {
+                if msg.sender_id == self.bob_authority {
                     // Use sender_name as best-effort contact label; channel id as fallback
                     let channel = chat_state
                         .selected_channel_id
-                        .clone()
-                        .unwrap_or_else(|| msg.channel_id.clone());
+                        .as_ref()
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| msg.channel_id.to_string());
 
                     let agent_event = AgentEvent::MessageReceived {
                         from: self.bob_authority,
@@ -199,10 +200,11 @@ impl DemoSignalCoordinator {
         match response {
             AgentResponse::SendMessage { channel, content } => {
                 // Add message to chat signal
+                let channel_id = channel.parse().unwrap_or_default();
                 let new_message = ChatMessage {
                     id: crate::ids::uuid("demo-msg").to_string(),
-                    channel_id: channel.clone(),
-                    sender_id: authority_id.to_string(),
+                    channel_id,
+                    sender_id: authority_id,
                     sender_name: self.get_agent_name(&authority_id),
                     content,
                     timestamp: std::time::SystemTime::now()
@@ -234,14 +236,13 @@ impl DemoSignalCoordinator {
                         if let Some(ref mut active) = state.active_recovery {
                             if active.id == session_id {
                                 // Add guardian to approved list
-                                let guardian_id = authority_id.to_string();
-                                if !active.approved_by.contains(&guardian_id) {
-                                    active.approved_by.push(guardian_id.clone());
+                                if !active.approved_by.contains(&authority_id) {
+                                    active.approved_by.push(authority_id.clone());
                                     active.approvals_received = active.approved_by.len() as u32;
 
                                     tracing::info!(
                                         "Demo: Guardian {} approved recovery ({}/{})",
-                                        guardian_id,
+                                        authority_id,
                                         active.approvals_received,
                                         active.approvals_required
                                     );
@@ -264,14 +265,11 @@ impl DemoSignalCoordinator {
                 account,
                 context_id,
             } => {
-                // Use uuid().to_string() to match the format used in invitation codes
-                // (hints.rs uses sender_id.uuid().to_string(), not sender_id.to_string())
-                let guardian_id = authority_id.uuid().to_string();
                 let guardian_name = self.get_agent_name(&authority_id);
                 tracing::info!(
                     "Demo: Guardian {} ({}) accepted binding for {} in {}",
                     guardian_name,
-                    guardian_id,
+                    authority_id,
                     account,
                     context_id
                 );
@@ -282,12 +280,12 @@ impl DemoSignalCoordinator {
                         if let Some(contact) = contacts_state
                             .contacts
                             .iter_mut()
-                            .find(|c| c.id == guardian_id)
+                            .find(|c| c.id == authority_id)
                         {
                             contact.is_guardian = true;
                             tracing::info!(
                                 "Demo: Updated contact {} is_guardian=true",
-                                guardian_id
+                                authority_id
                             );
                         }
                         let _ = core.emit(&*CONTACTS_SIGNAL, contacts_state).await;
@@ -298,7 +296,7 @@ impl DemoSignalCoordinator {
                 if let Some(core) = self.app_core.try_read() {
                     if let Ok(mut recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
                         // Check if guardian already exists
-                        let exists = recovery_state.guardians.iter().any(|g| g.id == guardian_id);
+                        let exists = recovery_state.guardians.iter().any(|g| g.id == authority_id);
                         if !exists {
                             let now = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
@@ -306,7 +304,7 @@ impl DemoSignalCoordinator {
                                 .as_millis() as u64;
 
                             recovery_state.guardians.push(Guardian {
-                                id: guardian_id.clone(),
+                                id: authority_id.clone(),
                                 name: guardian_name,
                                 status: GuardianStatus::Active,
                                 added_at: now,
@@ -316,7 +314,7 @@ impl DemoSignalCoordinator {
 
                             tracing::info!(
                                 "Demo: Added {} to guardians list (total: {})",
-                                guardian_id,
+                                authority_id,
                                 recovery_state.guardian_count
                             );
                         }
