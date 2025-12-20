@@ -626,9 +626,8 @@ mod tests {
         state.chat.input_buffer = "test message".to_string();
         state.chat.selected_channel = 5;
         state.chat.message_scroll = 10;
-        // Use queue for modal visibility
-        let mut create_modal = CreateChannelModalState::default();
-        create_modal.visible = true;
+        // Use queue for modal visibility - create modal with name set
+        let mut create_modal = CreateChannelModalState::new();
         create_modal.name = "channel-name".to_string();
         state
             .modal_queue
@@ -652,10 +651,8 @@ mod tests {
         use crate::tui::state_machine::ChannelInfoModalState;
 
         let mut state = TuiState::new();
-        // Use queue for modal visibility
-        let mut info_modal = ChannelInfoModalState::default();
-        info_modal.visible = true;
-        info_modal.channel_name = "info-channel".to_string();
+        // Use queue for modal visibility - use factory constructor
+        let info_modal = ChannelInfoModalState::for_channel("ch-123", "info-channel", None);
         state.modal_queue.enqueue(QueuedModal::ChatInfo(info_modal));
 
         let props = extract_chat_view_props(&state);
@@ -671,10 +668,8 @@ mod tests {
         let mut state = TuiState::new();
         state.contacts.selected_index = 7;
         state.contacts.filter = "search".to_string();
-        // Use queue for modal visibility
-        let mut nickname_modal = NicknameModalState::default();
-        nickname_modal.visible = true;
-        nickname_modal.contact_id = "contact-123".to_string();
+        // Use queue for modal visibility - use factory constructor
+        let mut nickname_modal = NicknameModalState::for_contact("contact-123", "");
         nickname_modal.value = "new-name".to_string();
         state
             .modal_queue
@@ -697,9 +692,7 @@ mod tests {
         state.invitations.selected_index = 3;
         state.invitations.filter = InvitationFilter::Sent;
         // Use queue for modal visibility (only one modal at a time)
-        let mut import_modal = ImportInvitationModalState::default();
-        import_modal.visible = true;
-        import_modal.code = "ABC123".to_string();
+        let import_modal = ImportInvitationModalState::with_code("ABC123");
         state
             .modal_queue
             .enqueue(QueuedModal::InvitationsImport(import_modal));
@@ -735,9 +728,7 @@ mod tests {
         state.settings.selected_index = 1;
         state.settings.mfa_policy = MfaPolicy::AlwaysRequired;
         // Use queue for modal visibility (only one modal at a time)
-        let mut display_name_modal = DisplayNameModalState::default();
-        display_name_modal.visible = true;
-        display_name_modal.value = "new-nick".to_string();
+        let display_name_modal = DisplayNameModalState::with_name("new-nick");
         state
             .modal_queue
             .enqueue(QueuedModal::SettingsDisplayName(display_name_modal));
@@ -749,7 +740,7 @@ mod tests {
         assert_eq!(props.mfa_policy, MfaPolicy::AlwaysRequired);
         assert!(props.display_name_modal_visible);
         assert_eq!(props.display_name_modal_value, "new-nick");
-        // add_device_modal is not active because nickname_modal is (only one modal at a time)
+        // add_device_modal is not active because display_name_modal is (only one modal at a time)
         assert!(!props.add_device_modal_visible);
     }
 
@@ -759,8 +750,7 @@ mod tests {
 
         let mut state = TuiState::new();
         // Use queue for modal visibility
-        let mut add_device_modal = AddDeviceModalState::default();
-        add_device_modal.visible = true;
+        let mut add_device_modal = AddDeviceModalState::new();
         add_device_modal.name = "my-device".to_string();
         state
             .modal_queue

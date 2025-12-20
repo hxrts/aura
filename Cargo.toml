@@ -101,6 +101,7 @@ parking_lot = "0.12"
 subtle = "2.6"
 getrandom = "0.2"
 futures-util = { version = "0.3", features = ["alloc"] }
+futures-signals = "0.3"
 
 # Session types & choreographic programming
 rumpsteak-aura = "0.7.0"

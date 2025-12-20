@@ -35,7 +35,7 @@
 //!         async move {
 //!             // Get subscription via ReactiveEffects
 //!             let mut stream = {
-//!                 let core = app_core.read().await;
+//!                 let core = app_core.raw().read().await;
 //!                 core.subscribe(&*CHAT_SIGNAL)
 //!             };
 //!
@@ -58,11 +58,15 @@
 //! point-in-time reads of reactive state.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_lock::RwLock;
+use aura_app::signal_defs::{AppError, ERROR_SIGNAL};
 use aura_app::{AppCore, ReactiveState, ReactiveVec};
+use aura_core::effects::reactive::{ReactiveEffects, ReactiveError, Signal};
+use aura_effects::ReactiveHandler;
 
-use crate::tui::context::IoContext;
+use crate::tui::context::{InitializedAppCore, IoContext};
 
 // =============================================================================
 // AppCore Context for iocraft
@@ -94,7 +98,7 @@ use crate::tui::context::IoContext;
 ///         let app_core = ctx.app_core.clone();
 ///         async move {
 ///             let mut stream = {
-///                 let core = app_core.read().await;
+///                 let core = app_core.raw().read().await;
 ///                 core.subscribe(&*CHAT_SIGNAL)
 ///             };
 ///             while let Ok(state) = stream.recv().await {
@@ -108,8 +112,8 @@ use crate::tui::context::IoContext;
 /// ```
 #[derive(Clone)]
 pub struct AppCoreContext {
-    /// The shared AppCore instance
-    pub app_core: Arc<RwLock<AppCore>>,
+    /// The shared AppCore instance (signals initialized)
+    pub app_core: InitializedAppCore,
 
     /// The IoContext for effect dispatch
     io_context: Arc<IoContext>,
@@ -117,7 +121,7 @@ pub struct AppCoreContext {
 
 impl AppCoreContext {
     /// Create a new AppCoreContext
-    pub fn new(app_core: Arc<RwLock<AppCore>>, io_context: Arc<IoContext>) -> Self {
+    pub fn new(app_core: InitializedAppCore, io_context: Arc<IoContext>) -> Self {
         Self {
             app_core,
             io_context,
@@ -131,6 +135,7 @@ impl AppCoreContext {
         // Use try_read to avoid blocking in sync context
         // Fall back to default if lock is held
         self.app_core
+            .raw()
             .try_read()
             .map(|guard| guard.snapshot())
             .unwrap_or_default()
@@ -162,6 +167,139 @@ impl AppCoreContext {
 
     pub async fn add_info_toast(&self, id: impl Into<String>, message: impl Into<String>) {
         self.io_context.add_info_toast(id, message).await;
+    }
+}
+
+
+// =============================================================================
+// Signal Subscription Helpers
+// =============================================================================
+
+/// Subscribe to a reactive signal and keep the subscription alive.
+///
+/// This is the default TUI subscription primitive. It avoids a class of
+/// "silent non-updating" UIs by ensuring that:
+/// - subscription failures emit `ERROR_SIGNAL` (best-effort), and
+/// - subscriptions retry with backoff instead of terminating permanently.
+///
+/// **Behavior**:
+/// - Reads the current value first (catch-up).
+/// - Subscribes and forwards values to `on_value`.
+/// - On any error, emits `ERROR_SIGNAL` and retries.
+pub async fn subscribe_signal_with_retry<T, F>(
+    app_core: InitializedAppCore,
+    signal: &'static Signal<T>,
+    mut on_value: F,
+) where
+    T: Clone + Send + Sync + 'static,
+    F: FnMut(T) + Send + 'static,
+{
+    let reactive: ReactiveHandler = {
+        let core = app_core.raw().read().await;
+        core.reactive().clone()
+    };
+
+    let mut last_emitted: Option<String> = None;
+    let mut backoff = Duration::from_millis(50);
+
+    loop {
+        // Guard against races where a component subscribes before init_signals().
+        if !reactive.is_registered(signal.id()) {
+            maybe_emit_reactive_error(
+                &reactive,
+                &mut last_emitted,
+                format!("Reactive signal not registered: {}", signal.id()),
+            )
+            .await;
+
+            tokio::time::sleep(backoff).await;
+            backoff = (backoff * 2).min(Duration::from_secs(2));
+            continue;
+        }
+
+        // Catch-up read.
+        match reactive.read(signal).await {
+            Ok(value) => {
+                on_value(value);
+                backoff = Duration::from_millis(50);
+            }
+            Err(e) => {
+                maybe_emit_reactive_error(
+                    &reactive,
+                    &mut last_emitted,
+                    format!(
+                        "Reactive read failed ({}): {}",
+                        signal.id(),
+                        format_reactive_error(&e)
+                    ),
+                )
+                .await;
+
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(Duration::from_secs(2));
+                continue;
+            }
+        }
+
+        // Subscribe and forward updates. If the stream errors, retry.
+        let mut stream = reactive.subscribe(signal);
+        loop {
+            match stream.recv().await {
+                Ok(value) => {
+                    on_value(value);
+                    backoff = Duration::from_millis(50);
+                }
+                Err(e) => {
+                    maybe_emit_reactive_error(
+                        &reactive,
+                        &mut last_emitted,
+                        format!(
+                            "Reactive subscription failed ({}): {}",
+                            signal.id(),
+                            format_reactive_error(&e)
+                        ),
+                    )
+                    .await;
+                    break;
+                }
+            }
+        }
+
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(Duration::from_secs(2));
+    }
+}
+
+async fn maybe_emit_reactive_error(
+    reactive: &ReactiveHandler,
+    last_emitted: &mut Option<String>,
+    message: String,
+) {
+    if last_emitted.as_deref() == Some(&message) {
+        return;
+    }
+
+    *last_emitted = Some(message.clone());
+    let _ = reactive
+        .emit(&*ERROR_SIGNAL, Some(AppError::new("tui:reactive", message)))
+        .await;
+}
+
+fn format_reactive_error(err: &ReactiveError) -> String {
+    match err {
+        ReactiveError::SignalNotFound { id } => format!("signal not found: {}", id),
+        ReactiveError::TypeMismatch {
+            id,
+            expected,
+            actual,
+        } => format!("type mismatch ({}): expected {}, got {}", id, expected, actual),
+        ReactiveError::SubscriptionClosed { id } => format!("subscription closed: {}", id),
+        ReactiveError::EmissionFailed { id, reason } => {
+            format!("emission failed ({}): {}", id, reason)
+        }
+        ReactiveError::CycleDetected { path } => format!("cycle detected: {}", path),
+        ReactiveError::HandlerUnavailable => "handler unavailable".to_string(),
+        ReactiveError::Internal { reason } => format!("internal error: {}", reason),
     }
 }
 

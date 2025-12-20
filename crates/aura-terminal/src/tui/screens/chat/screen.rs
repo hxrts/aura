@@ -18,14 +18,13 @@
 use iocraft::prelude::*;
 
 use aura_app::signal_defs::CHAT_SIGNAL;
-use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
     SetTopicCallback,
 };
 use crate::tui::components::{MessageBubble, MessageInput};
-use crate::tui::hooks::AppCoreContext;
+use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
 use crate::tui::theme::{focus_border_color, list_item_colors, Spacing, Theme};
@@ -177,6 +176,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
 
     // Subscribe to chat signal updates if AppCoreContext is available
     // Uses the unified ReactiveEffects system from aura-core
+
     if let Some(ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_channels = reactive_channels.clone();
@@ -209,29 +209,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                     (channels, messages)
                 };
 
-                // FIRST: Read current signal value to catch up on any changes
-                // that happened while this screen was unmounted
-                {
-                    let core = app_core.read().await;
-                    if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
-                        let (channels, messages) = convert_chat_state(&chat_state);
-                        reactive_channels.set(channels);
-                        reactive_messages.set(messages);
-                    }
-                }
-
-                // THEN: Subscribe for future updates
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*CHAT_SIGNAL)
-                };
-
-                // Subscribe to signal updates - this runs indefinitely until component unmounts
-                while let Ok(chat_state) = stream.recv().await {
+                subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                     let (channels, messages) = convert_chat_state(&chat_state);
                     reactive_channels.set(channels);
                     reactive_messages.set(messages);
-                }
+                })
+                .await;
             }
         });
     }

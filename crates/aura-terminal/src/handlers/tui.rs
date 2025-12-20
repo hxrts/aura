@@ -11,7 +11,6 @@
 #![deny(clippy::print_stderr)]
 
 use std::env;
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -21,6 +20,7 @@ use aura_app::{AppConfig, AppCore};
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
+use aura_agent::reactive::SignalForwarder;
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::StorageEffects;
@@ -28,7 +28,6 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_effects::time::PhysicalTimeHandler;
 use aura_effects::PathFilesystemStorageHandler;
-use tokio::runtime::Handle;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::tui::TuiArgs;
@@ -98,39 +97,6 @@ fn journal_filename(mode: TuiMode) -> &'static str {
         TuiMode::Production => "journal.json",
         TuiMode::Demo { .. } => "demo-journal.json",
     }
-}
-
-#[allow(clippy::expect_used)] // Panicking is appropriate when runtime/channel fails
-fn block_on<F>(fut: F) -> F::Output
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    // Avoid `tokio::runtime::Runtime::block_on` on the caller thread entirely.
-    // In `#[tokio::test]` contexts this can panic ("Cannot start a runtime from within a runtime").
-    let (tx, rx) = std::sync::mpsc::sync_channel(1);
-
-    match Handle::try_current() {
-        Ok(handle) => {
-            std::thread::spawn(move || {
-                let out = handle.block_on(fut);
-                let _ = tx.send(out);
-            });
-        }
-        Err(_) => {
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("Failed to build tokio runtime for blocking storage ops");
-                let out = rt.block_on(fut);
-                let _ = tx.send(out);
-            });
-        }
-    }
-
-    rx.recv()
-        .expect("Failed to receive result from blocking storage thread")
 }
 
 /// Clean up demo files before starting demo mode
@@ -245,7 +211,7 @@ async fn persist_account_config(
 /// Create a new account and save to disk
 ///
 /// Called when user completes the account setup modal.
-pub fn create_account(
+pub async fn create_account(
     base_path: &Path,
     device_id_str: &str,
     mode: TuiMode,
@@ -263,22 +229,16 @@ pub fn create_account(
     let authority_id = AuthorityId::new_from_entropy(authority_entropy);
     let context_id = ContextId::new_from_entropy(context_entropy);
 
-    // Convert to owned String before async block to satisfy 'static requirement
-    let display_name_owned = display_name.to_string();
-
     // Persist to storage using effect-backed handlers.
-    let result = block_on(async move {
-        persist_account_config(
-            &storage,
-            &time,
-            mode,
-            authority_id,
-            context_id,
-            Some(display_name_owned),
-        )
-        .await
-    });
-    result?;
+    persist_account_config(
+        &storage,
+        &time,
+        mode,
+        authority_id,
+        context_id,
+        Some(display_name.to_string()),
+    )
+    .await?;
 
     Ok((authority_id, context_id))
 }
@@ -297,7 +257,7 @@ pub fn create_account(
 ///
 /// # Returns
 /// * The authority and context IDs written to disk
-pub fn restore_recovered_account(
+pub async fn restore_recovered_account(
     base_path: &Path,
     recovered_authority_id: AuthorityId,
     recovered_context_id: Option<ContextId>,
@@ -318,18 +278,15 @@ pub fn restore_recovered_account(
         ContextId::new_from_entropy(context_entropy)
     });
 
-    let result = block_on(async move {
-        persist_account_config(
-            &storage,
-            &time,
-            mode,
-            recovered_authority_id,
-            context_id,
-            None,
-        )
-        .await
-    });
-    result?;
+    persist_account_config(
+        &storage,
+        &time,
+        mode,
+        recovered_authority_id,
+        context_id,
+        None,
+    )
+    .await?;
 
     Ok((recovered_authority_id, context_id))
 }
@@ -375,7 +332,7 @@ pub struct AccountBackup {
 ///
 /// # Returns
 /// * Portable backup code string
-pub fn export_account_backup(
+pub async fn export_account_backup(
     base_path: &Path,
     device_id: Option<&str>,
     mode: TuiMode,
@@ -383,35 +340,31 @@ pub fn export_account_backup(
     let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
     let time = PhysicalTimeHandler::new();
 
-    let (account, journal, backup_at) = block_on(async move {
-        let Some(account_bytes) = storage
-            .retrieve(account_filename(mode))
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?
-        else {
-            return Err(AuraError::internal("No account exists to backup"));
-        };
+    let Some(account_bytes) = storage
+        .retrieve(account_filename(mode))
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?
+    else {
+        return Err(AuraError::internal("No account exists to backup"));
+    };
 
-        let account_content = String::from_utf8(account_bytes)
-            .map_err(|e| AuraError::internal(format!("Invalid account config UTF-8: {}", e)))?;
+    let account_content = String::from_utf8(account_bytes)
+        .map_err(|e| AuraError::internal(format!("Invalid account config UTF-8: {}", e)))?;
 
-        let account: AccountConfig = serde_json::from_str(&account_content)
-            .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
+    let account: AccountConfig = serde_json::from_str(&account_content)
+        .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
 
-        let journal = storage
-            .retrieve(journal_filename(mode))
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to read journal: {}", e)))?
-            .and_then(|b| String::from_utf8(b).ok());
+    let journal = storage
+        .retrieve(journal_filename(mode))
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read journal: {}", e)))?
+        .and_then(|b| String::from_utf8(b).ok());
 
-        let backup_at = time
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to fetch physical time: {}", e)))?
-            .ts_ms;
-
-        Ok::<_, AuraError>((account, journal, backup_at))
-    })?;
+    let backup_at = time
+        .physical_time()
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to fetch physical time: {}", e)))?
+        .ts_ms;
 
     // Create backup structure
     let backup = AccountBackup {
@@ -443,7 +396,7 @@ pub fn export_account_backup(
 ///
 /// # Returns
 /// * The restored authority and context IDs
-pub fn import_account_backup(
+pub async fn import_account_backup(
     base_path: &Path,
     backup_code: &str,
     overwrite: bool,
@@ -496,39 +449,34 @@ pub fn import_account_backup(
         .map_err(|_| AuraError::internal("Invalid context_id length in backup"))?;
     let context_id = ContextId::from_uuid(uuid::Uuid::from_bytes(context_bytes));
 
-    block_on(async move {
-        // Check for existing account
-        if storage
-            .exists(account_filename(mode))
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to check account existence: {}", e)))?
-            && !overwrite
-        {
-            return Err(AuraError::internal(
-                "Account already exists. Use overwrite=true to replace.",
-            ));
-        }
+    // Check for existing account
+    if storage
+        .exists(account_filename(mode))
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to check account existence: {}", e)))?
+        && !overwrite
+    {
+        return Err(AuraError::internal(
+            "Account already exists. Use overwrite=true to replace.",
+        ));
+    }
 
-        // Write account configuration (pretty JSON for readability).
-        let account_content = serde_json::to_string_pretty(&backup.account).map_err(|e| {
-            AuraError::internal(format!("Failed to serialize account config: {}", e))
-        })?;
+    // Write account configuration (pretty JSON for readability).
+    let account_content = serde_json::to_string_pretty(&backup.account)
+        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
 
+    storage
+        .store(account_filename(mode), account_content.into_bytes())
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
+
+    // Write journal if present in backup
+    if let Some(ref journal_content) = backup.journal {
         storage
-            .store(account_filename(mode), account_content.into_bytes())
+            .store(journal_filename(mode), journal_content.as_bytes().to_vec())
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
-
-        // Write journal if present in backup
-        if let Some(ref journal_content) = backup.journal {
-            storage
-                .store(journal_filename(mode), journal_content.as_bytes().to_vec())
-                .await
-                .map_err(|e| AuraError::internal(format!("Failed to write journal: {}", e)))?;
-        }
-
-        Ok::<_, AuraError>(())
-    })?;
+            .map_err(|e| AuraError::internal(format!("Failed to write journal: {}", e)))?;
+    }
 
     Ok((authority_id, context_id))
 }
@@ -759,7 +707,8 @@ async fn handle_tui_launch(
     // Initialize reactive signals for the unified effect system
     // This registers all application signals (CHAT_SIGNAL, RECOVERY_SIGNAL, etc.)
     // with the ReactiveHandler so screens can subscribe to state changes
-    {
+    // Note: signal_forwarder must stay in scope for the duration of the TUI to keep forwarding active
+    let _signal_forwarder = {
         let mut core = app_core.write().await;
         if let Err(e) = core.init_signals().await {
             stdio.eprintln(format_args!(
@@ -767,7 +716,10 @@ async fn handle_tui_launch(
                 e
             ));
         }
-    }
+        // Start signal forwarding: ViewState changes → ReactiveEffects signals
+        // This bridges the view layer to the reactive system for UI updates
+        SignalForwarder::start_all(core.views(), Arc::new(core.reactive().clone()))
+    };
 
     if let Err(e) = aura_app::workflows::settings::refresh_settings_from_runtime(&app_core).await {
         stdio.eprintln(format_args!("Warning: Failed to refresh settings: {}", e));
@@ -851,7 +803,7 @@ async fn handle_tui_launch(
     // Create IoContext with AppCore integration
     // Pass has_existing_account so the TUI knows whether to show the account setup modal
     // Also pass base_path and device_id for account file creation
-    // In demo mode, include hints with Alice/Carol invite codes
+    // In demo mode, include hints with Alice/Carol invite codes AND the demo bridge
     #[cfg(feature = "development")]
     let ctx = match mode {
         TuiMode::Demo { seed } => {
@@ -865,14 +817,23 @@ async fn handle_tui_launch(
                 "  Carol invite code: {}",
                 hints.carol_invite_code
             ));
-            IoContext::with_demo_hints(
+            let mut ctx = IoContext::with_demo_hints(
                 app_core,
                 hints,
                 has_existing_account,
                 base_path.clone(),
                 device_id_for_account.to_string(),
                 mode,
-            )
+            );
+
+            // Wire up the demo bridge so IoContext.dispatch() routes commands to simulated agents
+            // This allows Alice/Carol to respond to guardian invitations and other interactions
+            if let Some(ref sim) = simulator {
+                ctx.set_demo_bridge(sim.bridge());
+                stdio.println(format_args!("Demo bridge connected to IoContext"));
+            }
+
+            ctx
         }
         TuiMode::Production => IoContext::with_account_status(
             app_core.clone(),

@@ -63,8 +63,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     );
 
     // Create account for testing
-    ctx.create_account(&format!("TestUser-{}", name))
-        .expect("Failed to create account");
+    ctx.create_account(&format!("TestUser-{}", name)).await.expect("Failed to create account");
 
     (Arc::new(ctx), app_core)
 }

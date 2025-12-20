@@ -252,41 +252,51 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             }
 
             // Subscribe for updates.
-            let mut stream = {
-                let core = app_core.read().await;
-                core.subscribe(&*ERROR_SIGNAL)
-            };
+            // IMPORTANT: never permanently stop listening. If the subscription stream
+            // errors (e.g., closed/lost), retry with backoff instead of silently ending.
+            let mut backoff = std::time::Duration::from_millis(50);
+            loop {
+                let mut stream = {
+                    let core = app_core.read().await;
+                    core.subscribe(&*ERROR_SIGNAL)
+                };
 
-            while let Ok(err_opt) = stream.recv().await {
-                let Some(err) = err_opt else { continue };
-                let msg = format_error(&err);
+                while let Ok(err_opt) = stream.recv().await {
+                    let Some(err) = err_opt else { continue };
+                    let msg = format_error(&err);
 
-                let mut state = tui_state.write();
-                let routed = matches!(
-                    state.modal_queue.current(),
-                    Some(QueuedModal::AccountSetup(_))
-                );
-                if routed {
-                    state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::AccountSetup(ref mut s) = modal {
-                            s.set_error(msg.clone());
-                        }
-                    });
-                }
-
-                if !routed {
-                    let toast_id = state.next_toast_id;
-                    state.next_toast_id += 1;
-                    let toast = crate::tui::state_machine::QueuedToast::new(
-                        toast_id,
-                        msg,
-                        crate::tui::state_machine::ToastLevel::Error,
+                    let mut state = tui_state.write();
+                    let routed = matches!(
+                        state.modal_queue.current(),
+                        Some(QueuedModal::AccountSetup(_))
                     );
-                    state.toast_queue.enqueue(toast);
+                    if routed {
+                        state.modal_queue.update_active(|modal| {
+                            if let QueuedModal::AccountSetup(ref mut s) = modal {
+                                s.set_error(msg.clone());
+                            }
+                        });
+                    }
+
+                    if !routed {
+                        let toast_id = state.next_toast_id;
+                        state.next_toast_id += 1;
+                        let toast = crate::tui::state_machine::QueuedToast::new(
+                            toast_id,
+                            msg,
+                            crate::tui::state_machine::ToastLevel::Error,
+                        );
+                        state.toast_queue.enqueue(toast);
+                    }
+
+                    drop(state);
+                    tui_state_version.set(tui_state_version.get().wrapping_add(1));
+
+                    backoff = std::time::Duration::from_millis(50);
                 }
 
-                drop(state);
-                tui_state_version.set(tui_state_version.get().wrapping_add(1));
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(2));
             }
         }
     });
@@ -335,15 +345,34 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                 // Process updates as they arrive
                 while let Some(update) = rx.recv().await {
+                    // IMPORTANT: This match is intentionally exhaustive (no `_ => {}`).
+                    // Adding a new UiUpdate variant must cause a compile-time error here,
+                    // so the shell cannot silently drop UI updates.
                     match update {
-                        // Settings updates - State<T>.set() triggers re-render automatically
+                        // =========================================================================
+                        // Settings updates
+                        // =========================================================================
                         UiUpdate::DisplayNameChanged(name) => {
                             display_name_state.set(name);
                         }
+                        UiUpdate::MfaPolicyChanged(_policy) => {
+                            // Settings screen renders from SETTINGS_SIGNAL; no local state update.
+                        }
+                        UiUpdate::ThresholdChanged { k: _, n: _ } => {
+                            // Settings screen renders from SETTINGS_SIGNAL; no local state update.
+                        }
+                        UiUpdate::DeviceAdded(_device) => {
+                            // Settings screen renders from SETTINGS_SIGNAL; no local state update.
+                        }
+                        UiUpdate::DeviceRemoved { device_id: _ } => {
+                            // Settings screen renders from SETTINGS_SIGNAL; no local state update.
+                        }
 
-                        // Toast notifications - now use queue system
+                        // =========================================================================
+                        // Toast notifications
+                        // =========================================================================
                         UiUpdate::ToastAdded(toast) => {
-                            // Convert ToastMessage to QueuedToast and enqueue
+                            // Convert ToastMessage to QueuedToast and enqueue.
                             let level = match toast.level {
                                 ToastLevel::Info => crate::tui::state_machine::ToastLevel::Info,
                                 ToastLevel::Success => {
@@ -359,7 +388,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             enqueue_toast!(toast.message, level);
                         }
                         UiUpdate::ToastDismissed { toast_id: _ } => {
-                            // Dismiss from queue (FIFO, ignores ID)
+                            // Dismiss from queue (FIFO, ignores ID).
                             tui_state.write().toast_queue.dismiss();
                             tui_state_version.set(tui_state_version.get().wrapping_add(1));
                         }
@@ -368,62 +397,174 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             tui_state_version.set(tui_state_version.get().wrapping_add(1));
                         }
 
-                        // Error handling - show in modal or as toast depending on operation
-                        UiUpdate::OperationFailed { operation, error } => {
-                            // For account creation, show error in the modal instead of toast
-                            if operation == "CreateAccount" {
-                                // Update queue-based state
-                                tui_state.write().modal_queue.update_active(|modal| {
-                                    if let QueuedModal::AccountSetup(ref mut s) = modal {
-                                        s.set_error(error.clone());
-                                    }
-                                });
-                                tui_state_version.set(tui_state_version.get().wrapping_add(1));
-                            } else {
-                                // For other operations, show as toast via queue
-                                enqueue_toast!(
-                                    format!("{} failed: {}", operation, error),
-                                    crate::tui::state_machine::ToastLevel::Error
-                                );
-                            }
-                        }
-
-                        // Success notifications - show informational toasts via queue
+                        // =========================================================================
+                        // Chat / messaging
+                        // =========================================================================
                         UiUpdate::MessageSent { channel, .. } => {
                             enqueue_toast!(
                                 format!("Message sent to {}", channel),
                                 crate::tui::state_machine::ToastLevel::Info
                             );
                         }
+                        UiUpdate::MessageRetried { message_id: _ } => {
+                            enqueue_toast!(
+                                "Retrying message…".to_string(),
+                                crate::tui::state_machine::ToastLevel::Info
+                            );
+                        }
+                        UiUpdate::ChannelSelected(_) => {
+                            // Navigation/state machine owns selected channel.
+                        }
+                        UiUpdate::ChannelCreated(_) => {
+                            // CHAT_SIGNAL should reflect the new channel; no extra work.
+                        }
+                        UiUpdate::TopicSet { channel: _, topic: _ } => {
+                            // CHAT_SIGNAL should reflect updated topic; no extra work.
+                        }
 
+                        // =========================================================================
+                        // Invitations
+                        // =========================================================================
                         UiUpdate::InvitationAccepted { invitation_id: _ } => {
                             enqueue_toast!(
                                 "Invitation accepted".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
                             );
                         }
-
                         UiUpdate::InvitationDeclined { invitation_id: _ } => {
                             enqueue_toast!(
                                 "Invitation declined".to_string(),
                                 crate::tui::state_machine::ToastLevel::Info
                             );
                         }
-
                         UiUpdate::InvitationCreated { invitation_code: _ } => {
                             enqueue_toast!(
                                 "Invitation created".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
                             );
                         }
+                        UiUpdate::InvitationExported { code: _ } => {
+                            // The code is surfaced via a dedicated modal/clipboard path.
+                        }
+                        UiUpdate::InvitationImported { invitation_code: _ } => {
+                            enqueue_toast!(
+                                "Invitation imported".to_string(),
+                                crate::tui::state_machine::ToastLevel::Success
+                            );
+                        }
 
+                        // =========================================================================
+                        // Navigation
+                        // =========================================================================
+                        UiUpdate::BlockEntered { block_id: _ } => {
+                            // Navigation/state machine owns the current block selection.
+                        }
+                        UiUpdate::NavigatedHome => {
+                            // Navigation/state machine handles this.
+                        }
+                        UiUpdate::NavigatedToStreet => {
+                            // Navigation/state machine handles this.
+                        }
+                        UiUpdate::NavigatedToNeighborhood => {
+                            // Navigation/state machine handles this.
+                        }
+
+                        // =========================================================================
+                        // Recovery
+                        // =========================================================================
+                        UiUpdate::RecoveryStarted => {
+                            enqueue_toast!(
+                                "Recovery process started".to_string(),
+                                crate::tui::state_machine::ToastLevel::Info
+                            );
+                        }
+                        UiUpdate::GuardianAdded { contact_id: _ } => {
+                            // RECOVERY_SIGNAL owns guardian state; no local state update.
+                        }
+                        UiUpdate::GuardianSelected { contact_id: _ } => {
+                            // RECOVERY_SIGNAL owns guardian state; no local state update.
+                        }
+                        UiUpdate::ApprovalSubmitted { request_id: _ } => {
+                            enqueue_toast!(
+                                "Approval submitted".to_string(),
+                                crate::tui::state_machine::ToastLevel::Success
+                            );
+                        }
+                        UiUpdate::GuardianCeremonyProgress { step: _ } => {
+                            // Ceremony progress is currently user-facing via other UI paths.
+                        }
+
+                        // =========================================================================
+                        // Contacts
+                        // =========================================================================
+                        UiUpdate::NicknameUpdated {
+                            contact_id: _,
+                            nickname: _,
+                        } => {
+                            // CONTACTS_SIGNAL owns contact data; no local state update.
+                        }
+                        UiUpdate::ChatStarted { contact_id: _ } => {
+                            // Navigation/state machine handles screen changes.
+                        }
+                        UiUpdate::LanPeerInvited { peer_id: _ } => {
+                            enqueue_toast!(
+                                "LAN peer invited".to_string(),
+                                crate::tui::state_machine::ToastLevel::Success
+                            );
+                        }
+
+                        // =========================================================================
+                        // Block operations
+                        // =========================================================================
+                        UiUpdate::BlockMessageSent { block_id: _, content: _ } => {
+                            enqueue_toast!(
+                                "Block message sent".to_string(),
+                                crate::tui::state_machine::ToastLevel::Success
+                            );
+                        }
+                        UiUpdate::BlockInviteSent { contact_id: _ } => {
+                            enqueue_toast!(
+                                "Invite sent".to_string(),
+                                crate::tui::state_machine::ToastLevel::Success
+                            );
+                        }
+                        UiUpdate::StewardGranted { contact_id: _ } => {
+                            enqueue_toast!(
+                                "Steward granted".to_string(),
+                                crate::tui::state_machine::ToastLevel::Success
+                            );
+                        }
+                        UiUpdate::StewardRevoked { contact_id: _ } => {
+                            enqueue_toast!(
+                                "Steward revoked".to_string(),
+                                crate::tui::state_machine::ToastLevel::Info
+                            );
+                        }
+
+                        // =========================================================================
+                        // Account
+                        // =========================================================================
+                        UiUpdate::AccountCreated => {
+                            // Update the account setup modal to show success screen.
+                            tui_state.write().account_created_queued();
+                            tui_state_version.set(tui_state_version.get().wrapping_add(1));
+                        }
+
+                        // =========================================================================
+                        // Sync
+                        // =========================================================================
+                        UiUpdate::SyncStarted => {
+                            enqueue_toast!(
+                                "Syncing…".to_string(),
+                                crate::tui::state_machine::ToastLevel::Info
+                            );
+                        }
                         UiUpdate::SyncCompleted => {
                             enqueue_toast!(
                                 "Sync completed".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
                             );
                         }
-
                         UiUpdate::SyncFailed { error } => {
                             enqueue_toast!(
                                 format!("Sync failed: {}", error),
@@ -431,35 +572,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             );
                         }
 
-                        UiUpdate::AccountCreated => {
-                            // Update the account setup modal to show success screen
-                            // Uses only the queue-based state (legacy state is deprecated)
-                            tui_state.write().account_created_queued();
-                            tui_state_version.set(tui_state_version.get().wrapping_add(1));
-                        }
-
-                        UiUpdate::RecoveryStarted => {
-                            enqueue_toast!(
-                                "Recovery process started".to_string(),
-                                crate::tui::state_machine::ToastLevel::Info
-                            );
-                        }
-
-                        // Navigation and state changes - no toast needed, handled by navigation system
-                        UiUpdate::ChannelSelected(_)
-                        | UiUpdate::ChannelCreated(_)
-                        | UiUpdate::BlockEntered { .. }
-                        | UiUpdate::NavigatedHome
-                        | UiUpdate::NavigatedToStreet
-                        | UiUpdate::NavigatedToNeighborhood => {
-                            // Navigation handled elsewhere - no additional UI update needed
-                        }
-
-                        // Other updates - log in debug mode only
-                        _ => {
-                            // Intentionally no stdout/stderr logging here: writing to the terminal
-                            // while iocraft is in fullscreen mode can scroll the buffer and create
-                            // visual artifacts (e.g., duplicated nav bar).
+                        // =========================================================================
+                        // UI-only errors (domain/runtime errors use ERROR_SIGNAL)
+                        // =========================================================================
+                        UiUpdate::OperationFailed { operation, error } => {
+                            // For account creation, show error in the modal instead of toast.
+                            if operation == "CreateAccount" {
+                                tui_state.write().modal_queue.update_active(|modal| {
+                                    if let QueuedModal::AccountSetup(ref mut s) = modal {
+                                        s.set_error(error.clone());
+                                    }
+                                });
+                                tui_state_version.set(tui_state_version.get().wrapping_add(1));
+                            } else {
+                                enqueue_toast!(
+                                    format!("{} failed: {}", operation, error),
+                                    crate::tui::state_machine::ToastLevel::Error
+                                );
+                            }
                         }
                     }
                 }
@@ -966,8 +1096,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         });
 
                                         // Update TUI state to close modal and show completion
-                                        tui_state.write().contacts.guardian_setup_modal.visible = false;
-                                        tui_state.write().contacts.guardian_setup_modal.has_pending_ceremony = false;
+                                        tui_state.write().contacts.guardian_setup_modal.reset();
                                         tui_state_version.set(tui_state_version.get() + 1);
                                     }
                                     DispatchCommand::CancelGuardianCeremony => {
@@ -979,11 +1108,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tracing::info!("Would rollback any pending key rotation");
 
                                         // Close the modal and reset ceremony state
-                                        tui_state.write().contacts.guardian_setup_modal.visible = false;
-                                        tui_state.write().contacts.guardian_setup_modal.has_pending_ceremony = false;
-                                        tui_state.write().contacts.guardian_setup_modal.step = Default::default();
-                                        tui_state.write().contacts.guardian_setup_modal.selected_indices.clear();
-                                        tui_state.write().contacts.guardian_setup_modal.ceremony_responses.clear();
+                                        tui_state.write().contacts.guardian_setup_modal.reset();
                                         tui_state_version.set(tui_state_version.get() + 1);
                                     }
 
@@ -1309,7 +1434,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // Settings data - reactively updated via SETTINGS_SIGNAL
     let devices = Vec::new();
     let display_name = {
-        let core = ctx_arc.app_core().read().await;
+        let core = ctx_arc.app_core_raw().read().await;
         core.read(&*SETTINGS_SIGNAL)
             .await
             .unwrap_or_default()

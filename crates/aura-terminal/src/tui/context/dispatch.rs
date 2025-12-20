@@ -57,13 +57,15 @@ impl AccountFilesHelper {
         self.has_existing_account.store(true, Ordering::Relaxed);
     }
 
-    pub fn create_account(&self, display_name: &str) -> Result<(), String> {
+    pub async fn create_account(&self, display_name: &str) -> Result<(), String> {
         match crate::handlers::tui::create_account(
             &self.base_path,
             &self.device_id_str,
             self.mode,
             display_name,
-        ) {
+        )
+        .await
+        {
             Ok((_authority_id, _context_id)) => {
                 self.set_account_created();
                 Ok(())
@@ -75,7 +77,7 @@ impl AccountFilesHelper {
         }
     }
 
-    pub fn restore_recovered_account(
+    pub async fn restore_recovered_account(
         &self,
         recovered_authority_id: aura_core::identifiers::AuthorityId,
         recovered_context_id: Option<aura_core::identifiers::ContextId>,
@@ -85,7 +87,9 @@ impl AccountFilesHelper {
             recovered_authority_id,
             recovered_context_id,
             self.mode,
-        ) {
+        )
+        .await
+        {
             Ok((_authority_id, _context_id)) => {
                 self.set_account_created();
                 Ok(())
@@ -97,7 +101,7 @@ impl AccountFilesHelper {
         }
     }
 
-    pub fn export_account_backup(&self) -> Result<String, String> {
+    pub async fn export_account_backup(&self) -> Result<String, String> {
         if !self.has_account() {
             return Err("No account exists to backup".to_string());
         }
@@ -107,16 +111,19 @@ impl AccountFilesHelper {
             Some(&self.device_id_str),
             self.mode,
         )
+        .await
         .map_err(|e| format!("Failed to export backup: {}", e))
     }
 
-    pub fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
+    pub async fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
         match crate::handlers::tui::import_account_backup(
             &self.base_path,
             backup_code,
             true,
             self.mode,
-        ) {
+        )
+        .await
+        {
             Ok((_authority_id, _context_id)) => {
                 self.set_account_created();
                 Ok(())
@@ -181,20 +188,14 @@ impl DispatchHelper {
         match &command {
             EffectCommand::ExportAccountBackup => {
                 // Show the code via a toast so users can copy it.
-                let account_files = self.account_files.clone();
-                let result =
-                    tokio::task::spawn_blocking(move || account_files.export_account_backup())
-                        .await
-                        .map_err(|e| format!("Backup export task failed: {}", e));
-
-                match result {
-                    Ok(Ok(code)) => {
+                match self.account_files.export_account_backup().await {
+                    Ok(code) => {
                         self.toasts
                             .success("account-backup", format!("Backup code: {}", code))
                             .await;
                         return Ok(());
                     }
-                    Ok(Err(msg)) | Err(msg) => {
+                    Err(msg) => {
                         self.operational
                             .emit_error(TerminalError::Operation(msg.clone()))
                             .await;
@@ -203,22 +204,14 @@ impl DispatchHelper {
                 }
             }
             EffectCommand::ImportAccountBackup { backup_code } => {
-                let account_files = self.account_files.clone();
-                let backup_code = backup_code.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    account_files.import_account_backup(&backup_code)
-                })
-                .await
-                .map_err(|e| format!("Backup import task failed: {}", e));
-
-                match result {
-                    Ok(Ok(())) => {
+                match self.account_files.import_account_backup(backup_code).await {
+                    Ok(()) => {
                         self.toasts
                             .success("account-backup", "Backup imported successfully")
                             .await;
                         return Ok(());
                     }
-                    Ok(Err(msg)) | Err(msg) => {
+                    Err(msg) => {
                         self.operational
                             .emit_error(TerminalError::Operation(msg.clone()))
                             .await;

@@ -19,10 +19,9 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use aura_app::signal_defs::NEIGHBORHOOD_SIGNAL;
-use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::GoHomeCallback;
-use crate::tui::hooks::AppCoreContext;
+use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::NeighborhoodViewProps;
 use crate::tui::theme::Theme;
@@ -325,31 +324,13 @@ pub fn NeighborhoodScreen(
                         (neighborhood_state.home_block_name.clone(), blocks, depth)
                     };
 
-                // FIRST: Read current signal value to catch up on any changes
-                // that happened while this screen was unmounted
-                {
-                    let core = app_core.read().await;
-                    if let Ok(neighborhood_state) = core.read(&*NEIGHBORHOOD_SIGNAL).await {
-                        let (name, blocks, depth) = convert_neighborhood_state(&neighborhood_state);
-                        reactive_neighborhood_name.set(name);
-                        reactive_blocks.set(blocks);
-                        reactive_depth.set(depth);
-                    }
-                }
-
-                // THEN: Subscribe for future updates
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*NEIGHBORHOOD_SIGNAL)
-                };
-
-                // Subscribe to signal updates - runs until component unmounts
-                while let Ok(neighborhood_state) = stream.recv().await {
+                subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood_state| {
                     let (name, blocks, depth) = convert_neighborhood_state(&neighborhood_state);
                     reactive_neighborhood_name.set(name);
                     reactive_blocks.set(blocks);
                     reactive_depth.set(depth);
-                }
+                })
+                .await;
             }
         });
     }

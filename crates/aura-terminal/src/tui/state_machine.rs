@@ -634,10 +634,11 @@ pub struct ChatViewState {
 }
 
 /// State for create channel modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
+/// Use `modal_queue.enqueue(QueuedModal::ChatCreate(state))` to show.
 #[derive(Clone, Debug, Default)]
 pub struct CreateChannelModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Channel name input
     pub name: String,
     /// Optional topic input
@@ -649,18 +650,16 @@ pub struct CreateChannelModalState {
 }
 
 impl CreateChannelModalState {
-    pub fn show(&mut self) {
-        self.visible = true;
+    /// Create a new modal state ready to be enqueued
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Reset state (called when dismissed or re-opened)
+    pub fn reset(&mut self) {
         self.name.clear();
         self.topic.clear();
         self.active_field = 0;
-        self.error = None;
-    }
-
-    pub fn hide(&mut self) {
-        self.visible = false;
-        self.name.clear();
-        self.topic.clear();
         self.error = None;
     }
 
@@ -670,10 +669,10 @@ impl CreateChannelModalState {
 }
 
 /// State for topic edit modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct TopicModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Topic input value
     pub value: String,
     /// Channel ID being edited
@@ -683,15 +682,17 @@ pub struct TopicModalState {
 }
 
 impl TopicModalState {
-    pub fn show(&mut self, channel_id: &str, current_topic: &str) {
-        self.visible = true;
-        self.channel_id = channel_id.to_string();
-        self.value = current_topic.to_string();
-        self.error = None;
+    /// Create initialized state for a channel topic edit
+    pub fn for_channel(channel_id: &str, current_topic: &str) -> Self {
+        Self {
+            channel_id: channel_id.to_string(),
+            value: current_topic.to_string(),
+            error: None,
+        }
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
         self.value.clear();
         self.channel_id.clear();
         self.error = None;
@@ -699,10 +700,10 @@ impl TopicModalState {
 }
 
 /// State for channel info modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct ChannelInfoModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Channel ID
     pub channel_id: String,
     /// Channel name
@@ -714,15 +715,18 @@ pub struct ChannelInfoModalState {
 }
 
 impl ChannelInfoModalState {
-    pub fn show(&mut self, channel_id: &str, name: &str, topic: Option<&str>) {
-        self.visible = true;
-        self.channel_id = channel_id.to_string();
-        self.channel_name = name.to_string();
-        self.topic = topic.unwrap_or("").to_string();
+    /// Create initialized state for channel info display
+    pub fn for_channel(channel_id: &str, name: &str, topic: Option<&str>) -> Self {
+        Self {
+            channel_id: channel_id.to_string(),
+            channel_name: name.to_string(),
+            topic: topic.unwrap_or("").to_string(),
+            participants: Vec::new(),
+        }
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
         self.channel_id.clear();
         self.channel_name.clear();
         self.topic.clear();
@@ -770,10 +774,10 @@ pub struct ContactsViewState {
 }
 
 /// State for nickname edit modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct NicknameModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Contact ID being edited
     pub contact_id: String,
     /// Current nickname value
@@ -783,15 +787,17 @@ pub struct NicknameModalState {
 }
 
 impl NicknameModalState {
-    pub fn show(&mut self, contact_id: &str, current_name: &str) {
-        self.visible = true;
-        self.contact_id = contact_id.to_string();
-        self.value = current_name.to_string();
-        self.error = None;
+    /// Create initialized state for editing a contact's nickname
+    pub fn for_contact(contact_id: &str, current_name: &str) -> Self {
+        Self {
+            contact_id: contact_id.to_string(),
+            value: current_name.to_string(),
+            error: None,
+        }
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
         self.contact_id.clear();
         self.value.clear();
         self.error = None;
@@ -826,10 +832,10 @@ pub struct InvitationsViewState {
 }
 
 /// State for create invitation modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct CreateInvitationModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Invitation type selection index
     pub type_index: usize,
     /// Optional message
@@ -843,18 +849,23 @@ pub struct CreateInvitationModalState {
 }
 
 impl CreateInvitationModalState {
-    pub fn show(&mut self) {
-        self.visible = true;
-        self.type_index = 0;
-        self.message.clear();
-        self.ttl_hours = 24; // Default 24 hours
-        self.step = 0;
-        self.error = None;
+    /// Create new modal state with defaults
+    pub fn new() -> Self {
+        Self {
+            type_index: 0,
+            message: String::new(),
+            ttl_hours: 24, // Default 24 hours
+            step: 0,
+            error: None,
+        }
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
+        self.type_index = 0;
         self.message.clear();
+        self.ttl_hours = 24;
+        self.step = 0;
         self.error = None;
     }
 
@@ -872,10 +883,10 @@ impl CreateInvitationModalState {
 }
 
 /// State for import invitation modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct ImportInvitationModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Code input buffer
     pub code: String,
     /// Error message if any
@@ -885,15 +896,22 @@ pub struct ImportInvitationModalState {
 }
 
 impl ImportInvitationModalState {
-    pub fn show(&mut self) {
-        self.visible = true;
-        self.code.clear();
-        self.error = None;
-        self.importing = false;
+    /// Create new modal state
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Create with pre-filled code
+    pub fn with_code(code: &str) -> Self {
+        Self {
+            code: code.to_string(),
+            error: None,
+            importing: false,
+        }
+    }
+
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
         self.code.clear();
         self.error = None;
         self.importing = false;
@@ -905,10 +923,10 @@ impl ImportInvitationModalState {
 }
 
 /// State for invitation code display modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct InvitationCodeModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Invitation ID
     pub invitation_id: String,
     /// The code to display
@@ -920,12 +938,14 @@ pub struct InvitationCodeModalState {
 }
 
 impl InvitationCodeModalState {
-    pub fn show(&mut self, invitation_id: &str) {
-        self.visible = true;
-        self.invitation_id = invitation_id.to_string();
-        self.code.clear();
-        self.loading = true;
-        self.error = None;
+    /// Create initialized state for showing an invitation code
+    pub fn for_invitation(invitation_id: &str) -> Self {
+        Self {
+            invitation_id: invitation_id.to_string(),
+            code: String::new(),
+            loading: true,
+            error: None,
+        }
     }
 
     pub fn set_code(&mut self, code: String) {
@@ -938,8 +958,8 @@ impl InvitationCodeModalState {
         self.loading = false;
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
         self.invitation_id.clear();
         self.code.clear();
         self.loading = false;
@@ -986,10 +1006,10 @@ pub struct GuardianCandidate {
 }
 
 /// State for guardian setup modal (multi-select + threshold + ceremony)
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct GuardianSetupModalState {
-    /// Whether the modal is visible
-    pub visible: bool,
     /// Current step in the wizard
     pub step: GuardianSetupStep,
     /// Available contacts for selection
@@ -1016,30 +1036,34 @@ impl GuardianSetupModalState {
         self.selected_indices.len() as u8
     }
 
-    /// Show the modal with contacts and pre-select current guardians
-    pub fn show(&mut self, contacts: Vec<GuardianCandidate>) {
-        self.visible = true;
-        self.step = GuardianSetupStep::SelectContacts;
-        self.selected_indices.clear();
+    /// Create initialized state with contacts, pre-selecting current guardians
+    pub fn with_contacts(contacts: Vec<GuardianCandidate>) -> Self {
+        let mut selected_indices = Vec::new();
         // Pre-select current guardians
         for (idx, contact) in contacts.iter().enumerate() {
             if contact.is_current_guardian {
-                self.selected_indices.push(idx);
+                selected_indices.push(idx);
             }
         }
-        self.contacts = contacts;
-        self.focused_index = 0;
         // Default threshold: majority (n/2 + 1) or 1 if no selection
-        let n = self.selected_indices.len() as u8;
-        self.threshold_k = if n > 0 { (n / 2) + 1 } else { 1 };
-        self.ceremony_id = None;
-        self.ceremony_responses.clear();
-        self.error = None;
+        let n = selected_indices.len() as u8;
+        let threshold_k = if n > 0 { (n / 2) + 1 } else { 1 };
+
+        Self {
+            step: GuardianSetupStep::SelectContacts,
+            contacts,
+            selected_indices,
+            focused_index: 0,
+            threshold_k,
+            ceremony_id: None,
+            ceremony_responses: Vec::new(),
+            error: None,
+            has_pending_ceremony: false,
+        }
     }
 
-    /// Hide the modal and reset state
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
         self.step = GuardianSetupStep::SelectContacts;
         self.contacts.clear();
         self.selected_indices.clear();
@@ -1158,7 +1182,7 @@ impl GuardianSetupModalState {
     /// Complete the ceremony successfully
     pub fn complete_ceremony(&mut self) {
         self.has_pending_ceremony = false;
-        self.hide();
+        self.reset();
     }
 
     /// Fail/cancel the ceremony
@@ -1204,10 +1228,10 @@ pub struct SettingsViewState {
 }
 
 /// State for display name edit modal (settings screen)
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct DisplayNameModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Display name input buffer
     pub value: String,
     /// Error message if any
@@ -1215,14 +1239,16 @@ pub struct DisplayNameModalState {
 }
 
 impl DisplayNameModalState {
-    pub fn show(&mut self, current_name: &str) {
-        self.visible = true;
-        self.value = current_name.to_string();
-        self.error = None;
+    /// Create initialized state with current name
+    pub fn with_name(current_name: &str) -> Self {
+        Self {
+            value: current_name.to_string(),
+            error: None,
+        }
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
         self.value.clear();
         self.error = None;
     }
@@ -1233,10 +1259,10 @@ impl DisplayNameModalState {
 }
 
 /// State for threshold config modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct ThresholdModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Threshold K (required signatures)
     pub k: u8,
     /// Threshold N (total guardians)
@@ -1248,16 +1274,21 @@ pub struct ThresholdModalState {
 }
 
 impl ThresholdModalState {
-    pub fn show(&mut self, current_k: u8, current_n: u8) {
-        self.visible = true;
-        self.k = current_k;
-        self.n = current_n;
-        self.active_field = 0;
-        self.error = None;
+    /// Create initialized state with current threshold
+    pub fn with_threshold(current_k: u8, current_n: u8) -> Self {
+        Self {
+            k: current_k,
+            n: current_n,
+            active_field: 0,
+            error: None,
+        }
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
+        self.k = 0;
+        self.n = 0;
+        self.active_field = 0;
         self.error = None;
     }
 
@@ -1289,10 +1320,10 @@ impl ThresholdModalState {
 }
 
 /// State for add device modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct AddDeviceModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Device name input
     pub name: String,
     /// Error message if any
@@ -1300,14 +1331,13 @@ pub struct AddDeviceModalState {
 }
 
 impl AddDeviceModalState {
-    pub fn show(&mut self) {
-        self.visible = true;
-        self.name.clear();
-        self.error = None;
+    /// Create new modal state
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
         self.name.clear();
         self.error = None;
     }
@@ -1318,10 +1348,10 @@ impl AddDeviceModalState {
 }
 
 /// State for confirm remove device modal
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct ConfirmRemoveModalState {
-    /// Whether visible
-    pub visible: bool,
     /// Device ID to remove
     pub device_id: String,
     /// Device name (for display)
@@ -1331,15 +1361,17 @@ pub struct ConfirmRemoveModalState {
 }
 
 impl ConfirmRemoveModalState {
-    pub fn show(&mut self, device_id: &str, device_name: &str) {
-        self.visible = true;
-        self.device_id = device_id.to_string();
-        self.device_name = device_name.to_string();
-        self.confirm_focused = false;
+    /// Create initialized state for device removal confirmation
+    pub fn for_device(device_id: &str, device_name: &str) -> Self {
+        Self {
+            device_id: device_id.to_string(),
+            device_name: device_name.to_string(),
+            confirm_focused: false,
+        }
     }
 
-    pub fn hide(&mut self) {
-        self.visible = false;
+    /// Reset state (called when dismissed)
+    pub fn reset(&mut self) {
         self.device_id.clear();
         self.device_name.clear();
         self.confirm_focused = false;
@@ -3241,8 +3273,7 @@ fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: Ke
         },
         KeyCode::Char('n') => {
             // Open create channel modal via queue
-            let mut modal_state = CreateChannelModalState::default();
-            modal_state.visible = true;
+            let modal_state = CreateChannelModalState::new();
             state
                 .modal_queue
                 .enqueue(QueuedModal::ChatCreate(modal_state));
@@ -3250,16 +3281,16 @@ fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: Ke
         KeyCode::Char('t') => {
             // Open topic edit modal via queue
             // Channel ID will be set based on currently selected channel
-            let mut modal_state = TopicModalState::default();
-            modal_state.visible = true;
+            // TODO: Pass actual channel_id from selected channel
+            let modal_state = TopicModalState::for_channel("", "");
             state
                 .modal_queue
                 .enqueue(QueuedModal::ChatTopic(modal_state));
         }
         KeyCode::Char('o') => {
             // Open channel info modal via queue
-            let mut modal_state = ChannelInfoModalState::default();
-            modal_state.visible = true;
+            // TODO: Pass actual channel info from selected channel
+            let modal_state = ChannelInfoModalState::for_channel("", "", None);
             state
                 .modal_queue
                 .enqueue(QueuedModal::ChatInfo(modal_state));

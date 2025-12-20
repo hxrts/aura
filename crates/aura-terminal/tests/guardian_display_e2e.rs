@@ -75,6 +75,7 @@ async fn setup_test_env(
     name: &str,
     seed: u64,
     shared_inbox: &std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>,
+    demo_bridge: Option<Arc<aura_terminal::demo::SimulatedBridge>>,
 ) -> (Arc<IoContext>, Arc<RwLock<AppCore>>, Arc<AuraAgent>) {
     let test_dir =
         std::env::temp_dir().join(format!("aura-guardian-e2e-{}-{}", name, std::process::id()));
@@ -117,13 +118,18 @@ async fn setup_test_env(
         .expect("Failed to init signals");
     let app_core = Arc::new(RwLock::new(app_core));
 
-    let ctx = IoContext::with_account_status(
+    let mut ctx = IoContext::with_account_status(
         app_core.clone(),
         false,
         test_dir,
         format!("test-device-{}", name),
         TuiMode::Demo { seed },
     );
+
+    // Wire up the demo bridge so commands get routed to simulated agents
+    if let Some(bridge) = demo_bridge {
+        ctx.set_demo_bridge(bridge);
+    }
 
     ctx.create_account(&format!("DemoUser-{}", name))
         .expect("Failed to create account");
@@ -162,9 +168,15 @@ async fn test_guardian_display_full_flow() {
     let alice_authority = simulator.alice_authority().await;
     println!("  Alice authority: {}", alice_authority);
 
-    // Now create test env with the shared inbox (for transport between Bob and Alice/Carol)
-    let (ctx, app_core, _agent) =
-        setup_test_env("guardian-e2e", seed, &simulator.shared_transport_inbox).await;
+    // Now create test env with the shared inbox AND bridge (for transport between Bob and Alice/Carol)
+    // The bridge is passed so IoContext.dispatch() routes commands to simulated agents
+    let (ctx, app_core, _agent) = setup_test_env(
+        "guardian-e2e",
+        seed,
+        &simulator.shared_transport_inbox,
+        Some(simulator.bridge()),
+    )
+    .await;
 
     // Step 2: Take the response receiver and start signal coordinator
     println!("\nStep 2: Starting signal coordinator...");

@@ -19,12 +19,11 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use aura_app::signal_defs::SETTINGS_SIGNAL;
-use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::{
     AddDeviceCallback, RemoveDeviceCallback, UpdateDisplayNameCallback, UpdateThresholdCallback,
 };
-use crate::tui::hooks::AppCoreContext;
+use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
 use crate::tui::theme::Theme;
@@ -153,35 +152,7 @@ pub fn SettingsScreen(
             let mut reactive_threshold = reactive_threshold.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // FIRST: Read current signal value
-                {
-                    let core = app_core.read().await;
-                    if let Ok(settings_state) = core.read(&*SETTINGS_SIGNAL).await {
-                        reactive_display_name.set(settings_state.display_name);
-                        let devices: Vec<Device> = settings_state
-                            .devices
-                            .iter()
-                            .map(|d| Device {
-                                id: d.id.clone(),
-                                name: d.name.clone(),
-                                is_current: d.is_current,
-                                last_seen: d.last_seen,
-                            })
-                            .collect();
-                        reactive_devices.set(devices);
-                        reactive_threshold
-                            .set((settings_state.threshold_k, settings_state.threshold_n));
-                    }
-                }
-
-                // THEN: Subscribe for future updates
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*SETTINGS_SIGNAL)
-                };
-
-                // Subscribe to signal updates - runs until component unmounts
-                while let Ok(settings_state) = stream.recv().await {
+                subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                     reactive_display_name.set(settings_state.display_name);
                     let devices: Vec<Device> = settings_state
                         .devices
@@ -194,9 +165,9 @@ pub fn SettingsScreen(
                         })
                         .collect();
                     reactive_devices.set(devices);
-                    reactive_threshold
-                        .set((settings_state.threshold_k, settings_state.threshold_n));
-                }
+                    reactive_threshold.set((settings_state.threshold_k, settings_state.threshold_n));
+                })
+                .await;
             }
         });
     }

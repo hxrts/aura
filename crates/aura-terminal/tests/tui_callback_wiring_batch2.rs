@@ -75,8 +75,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     );
 
     // Create account for testing
-    ctx.create_account(&format!("TestUser-{}", name))
-        .expect("Failed to create account");
+    ctx.create_account(&format!("TestUser-{}", name)).await.expect("Failed to create account");
 
     (Arc::new(ctx), app_core)
 }
@@ -788,7 +787,7 @@ async fn test_account_backup_roundtrip() {
 
     // Phase 1: Export account backup
     println!("Phase 1: Export account backup");
-    let result = ctx.export_account_backup();
+    let result = ctx.export_account_backup().await;
     assert!(result.is_ok(), "Export should succeed: {:?}", result);
     let backup_code = result.unwrap();
     println!("  Backup code length: {} bytes", backup_code.len());
@@ -802,7 +801,7 @@ async fn test_account_backup_roundtrip() {
     println!("\nPhase 2: Test backup import");
     // Note: In a real test, we'd create a new context and import
     // For now, verify the export produces valid data
-    let result = ctx.import_account_backup(&backup_code);
+    let result = ctx.import_account_backup(&backup_code).await;
     // This should succeed as we're importing into the same location
     assert!(result.is_ok(), "Import should succeed: {:?}", result);
     println!("  Backup import succeeded");

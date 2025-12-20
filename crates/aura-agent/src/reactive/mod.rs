@@ -35,6 +35,7 @@
 pub mod fact_stream;
 pub mod frp;
 pub mod scheduler;
+pub mod signal_forwarder;
 
 // Re-export main types for convenience
 pub use fact_stream::{FactStreamAdapter, FactStreamConfig, FactStreamStats};
@@ -44,6 +45,7 @@ pub use scheduler::{
     GuardianDelta, GuardianReduction, InvitationReduction, ReactiveScheduler, ReactiveView,
     RecoveryReduction, SchedulerConfig, ViewAdapter, ViewNode, ViewReduction, ViewUpdate,
 };
+pub use signal_forwarder::SignalForwarder;
 
 // Re-export domain delta types from their source crates
 pub use aura_chat::ChatDelta;

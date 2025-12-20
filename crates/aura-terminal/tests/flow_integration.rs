@@ -105,8 +105,10 @@ impl TestAgent {
     /// Create account for this agent and set authority on AppCore
     async fn create_account_with_authority(&self) -> Result<AuthorityId, String> {
         // Create the account
-        self.ctx
+        self
+            .ctx
             .create_account(&self.name)
+            .await
             .map_err(|e| format!("Failed to create account for {}: {:?}", self.name, e))?;
 
         // Read the account file to get authority_id
@@ -130,9 +132,11 @@ impl TestAgent {
     }
 
     /// Create account for this agent (legacy method without authority)
-    fn create_account(&self) -> Result<(), String> {
-        self.ctx
+    async fn create_account(&self) -> Result<(), String> {
+        self
+            .ctx
             .create_account(&self.name)
+            .await
             .map_err(|e| format!("Failed to create account for {}: {:?}", self.name, e))
     }
 
@@ -271,9 +275,11 @@ async fn test_invitation_flow_creates_contact() {
     println!("Phase 1: Creating accounts");
     env.get_agent("alice")
         .create_account()
+        .await
         .expect("Alice account creation");
     env.get_agent("bob")
         .create_account()
+        .await
         .expect("Bob account creation");
 
     // Phase 2: Check initial state
@@ -566,6 +572,7 @@ async fn test_block_lifecycle_flow() {
 
     env.get_agent("bob")
         .create_account()
+        .await
         .expect("Bob account creation");
 
     // Read initial block state
@@ -595,6 +602,7 @@ async fn test_neighborhood_formation_flow() {
 
     env.get_agent("bob")
         .create_account()
+        .await
         .expect("Bob account creation");
 
     // Read initial neighborhood state

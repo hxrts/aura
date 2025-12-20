@@ -702,7 +702,7 @@ impl BlockCallbacks {
                     use aura_app::signal_defs::{BLOCKS_SIGNAL, BLOCK_SIGNAL};
                     use aura_core::effects::reactive::ReactiveEffects;
 
-                    let core = ctx.app_core().read().await;
+                    let core = ctx.app_core_raw().read().await;
 
                     // Prefer multi-block selection; fall back to legacy singular block.
                     if let Ok(blocks) = core.read(&*BLOCKS_SIGNAL).await {
@@ -952,17 +952,9 @@ impl AppCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             tokio::spawn(async move {
-                // First create the account file (disk I/O) off the async runtime.
-                let ctx_for_files = ctx.clone();
-                let display_name_for_files = display_name.clone();
-                let file_result = tokio::task::spawn_blocking(move || {
-                    ctx_for_files.create_account(&display_name_for_files)
-                })
-                .await
-                .map_err(|e| format!("Account creation task failed: {}", e));
-
-                match file_result {
-                    Ok(Ok(())) => {
+                // Create the account file via async storage effects.
+                match ctx.create_account(&display_name).await {
+                    Ok(()) => {
                         // Then persist the display name to settings storage and emit SETTINGS_SIGNAL.
                         // This is best-effort and does not block account creation.
                         let _ = ctx
@@ -989,7 +981,7 @@ impl AppCallbacks {
                             }
                         }
                     }
-                    Ok(Err(e)) | Err(e) => {
+                    Err(e) => {
                         let _ = tx.send(UiUpdate::OperationFailed {
                             operation: "CreateAccount".to_string(),
                             error: e.to_string(),

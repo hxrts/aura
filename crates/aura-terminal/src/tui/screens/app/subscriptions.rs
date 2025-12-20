@@ -10,10 +10,9 @@ use iocraft::prelude::*;
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
-use aura_core::effects::reactive::ReactiveEffects;
 use aura_effects::time::PhysicalTimeHandler;
 
-use crate::tui::hooks::AppCoreContext;
+use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::Contact;
 
 pub struct NavStatusSignals {
@@ -38,17 +37,14 @@ pub fn use_nav_status_signals(
         let mut syncing = syncing.clone();
         let mut last_sync_time = last_sync_time.clone();
         async move {
-            let mut stream = {
-                let core = app_core.read().await;
-                core.subscribe(&*SYNC_STATUS_SIGNAL)
-            };
-            while let Ok(status) = stream.recv().await {
+            subscribe_signal_with_retry(app_core, &*SYNC_STATUS_SIGNAL, move |status| {
                 syncing.set(matches!(status, SyncStatus::Syncing { .. }));
 
                 if matches!(status, SyncStatus::Synced) {
                     last_sync_time.set(Some(now_millis()));
                 }
-            }
+            })
+            .await;
         }
     });
 
@@ -56,17 +52,14 @@ pub fn use_nav_status_signals(
         let app_core = app_ctx.app_core.clone();
         let mut peer_count = peer_count.clone();
         async move {
-            let mut stream = {
-                let core = app_core.read().await;
-                core.subscribe(&*CONNECTION_STATUS_SIGNAL)
-            };
-            while let Ok(status) = stream.recv().await {
+            subscribe_signal_with_retry(app_core, &*CONNECTION_STATUS_SIGNAL, move |status| {
                 let peers = match status {
                     ConnectionStatus::Online { peer_count } => peer_count,
                     _ => 0,
                 };
                 peer_count.set(peers);
-            }
+            })
+            .await;
         }
     });
 
@@ -100,31 +93,14 @@ pub fn use_contacts_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) ->
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
         async move {
-            // Initial read.
-            {
-                let core = app_core.read().await;
-                if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-                    let contact_list: Vec<Contact> =
-                        contacts_state.contacts.iter().map(Contact::from).collect();
-                    if let Ok(mut guard) = contacts.write() {
-                        *guard = contact_list;
-                    }
-                }
-            }
-
-            // Subscribe for updates.
-            let mut stream = {
-                let core = app_core.read().await;
-                core.subscribe(&*CONTACTS_SIGNAL)
-            };
-
-            while let Ok(contacts_state) = stream.recv().await {
+            subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
                     contacts_state.contacts.iter().map(Contact::from).collect();
                 if let Ok(mut guard) = contacts.write() {
                     *guard = contact_list;
                 }
-            }
+            })
+            .await;
         }
     });
 

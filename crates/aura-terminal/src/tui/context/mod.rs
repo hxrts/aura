@@ -14,8 +14,10 @@ pub mod dispatch;
 pub mod io_context;
 pub mod snapshots;
 pub mod toasts;
+pub mod initialized_app_core;
 
 pub use dispatch::{AccountFilesHelper, DispatchHelper};
 pub use io_context::IoContext;
 pub use snapshots::SnapshotHelper;
 pub use toasts::ToastHelper;
+pub use initialized_app_core::InitializedAppCore;

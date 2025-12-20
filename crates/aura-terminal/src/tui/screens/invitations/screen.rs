@@ -18,14 +18,13 @@
 use iocraft::prelude::*;
 
 use aura_app::signal_defs::INVITATIONS_SIGNAL;
-use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::{
     CreateInvitationCallback, ExportInvitationCallback, ImportInvitationCallback,
     InvitationCallback,
 };
 use crate::tui::components::{DetailPanel, KeyValue, ListPanel, TabBar, TabItem};
-use crate::tui::hooks::AppCoreContext;
+use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::props::InvitationsViewProps;
@@ -355,31 +354,7 @@ pub fn InvitationsScreen(
             let mut reactive_invitations = reactive_invitations.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // FIRST: Read current signal value to catch up on any changes
-                // that happened while this screen was unmounted
-                {
-                    let core = app_core.read().await;
-                    if let Ok(invitations_state) = core.read(&*INVITATIONS_SIGNAL).await {
-                        let all_invitations: Vec<Invitation> = invitations_state
-                            .pending
-                            .iter()
-                            .chain(invitations_state.sent.iter())
-                            .chain(invitations_state.history.iter())
-                            .map(convert_invitation)
-                            .collect();
-                        reactive_invitations.set(all_invitations);
-                    }
-                }
-
-                // THEN: Subscribe for future updates
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*INVITATIONS_SIGNAL)
-                };
-
-                // Subscribe to signal updates - runs until component unmounts
-                while let Ok(invitations_state) = stream.recv().await {
-                    // Combine all invitations from pending, sent, and history
+                subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |invitations_state| {
                     let all_invitations: Vec<Invitation> = invitations_state
                         .pending
                         .iter()
@@ -389,7 +364,8 @@ pub fn InvitationsScreen(
                         .collect();
 
                     reactive_invitations.set(all_invitations);
-                }
+                })
+                .await;
             }
         });
     }

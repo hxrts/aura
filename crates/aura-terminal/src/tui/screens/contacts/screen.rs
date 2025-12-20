@@ -26,14 +26,13 @@
 use iocraft::prelude::*;
 
 use aura_app::signal_defs::{CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL};
-use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::{ImportInvitationCallback, StartChatCallback, UpdateNicknameCallback};
 use crate::tui::components::{
     DetailPanel, DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState,
     InvitePeerCallback, KeyValue, ListPanel, StatusIndicator,
 };
-use crate::tui::hooks::AppCoreContext;
+use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::props::ContactsViewProps;
@@ -234,36 +233,18 @@ pub fn ContactsScreen(
 
     // Subscribe to contacts signal updates if AppCoreContext is available
     // Uses the unified ReactiveEffects system from aura-core
+
     if let Some(ref ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_contacts = reactive_contacts.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // FIRST: Read current signal value to catch up on any changes
-                // that happened while this screen was unmounted (e.g., contacts
-                // added via invitation import while on another screen)
-                {
-                    let core = app_core.read().await;
-                    if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-                        let contacts: Vec<Contact> =
-                            contacts_state.contacts.iter().map(Contact::from).collect();
-                        reactive_contacts.set(contacts);
-                    }
-                }
-
-                // THEN: Subscribe for future updates
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*CONTACTS_SIGNAL)
-                };
-
-                // Subscribe to signal updates - runs until component unmounts
-                while let Ok(contacts_state) = stream.recv().await {
+                subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                     let contacts: Vec<Contact> =
                         contacts_state.contacts.iter().map(Contact::from).collect();
-
                     reactive_contacts.set(contacts);
-                }
+                })
+                .await;
             }
         });
     }
@@ -282,43 +263,13 @@ pub fn ContactsScreen(
     });
 
     // Subscribe to discovered peers signal updates if AppCoreContext is available
+
     if let Some(ref ctx) = app_ctx {
         hooks.use_future({
             let mut lan_peers_state = lan_peers_state.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                // FIRST: Read current signal value
-                {
-                    let core = app_core.read().await;
-                    if let Ok(peers_state) = core.read(&*DISCOVERED_PEERS_SIGNAL).await {
-                        let discovered_peers: Vec<DiscoveredPeerInfo> = peers_state
-                            .peers
-                            .iter()
-                            .map(|p| {
-                                DiscoveredPeerInfo::new(&p.authority_id, &p.address)
-                                    .with_method(&p.method)
-                                    .with_status(if p.invited {
-                                        crate::tui::components::PeerInvitationStatus::Pending
-                                    } else {
-                                        crate::tui::components::PeerInvitationStatus::None
-                                    })
-                            })
-                            .collect();
-
-                        let mut state = DiscoveredPeersState::new();
-                        state.set_peers(discovered_peers);
-                        lan_peers_state.set(state);
-                    }
-                }
-
-                // THEN: Subscribe for future updates
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*DISCOVERED_PEERS_SIGNAL)
-                };
-
-                // Subscribe to signal updates - runs until component unmounts
-                while let Ok(peers_state) = stream.recv().await {
+                subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
                     let discovered_peers: Vec<DiscoveredPeerInfo> = peers_state
                         .peers
                         .iter()
@@ -336,7 +287,8 @@ pub fn ContactsScreen(
                     let mut state = DiscoveredPeersState::new();
                     state.set_peers(discovered_peers);
                     lan_peers_state.set(state);
-                }
+                })
+                .await;
             }
         });
     }

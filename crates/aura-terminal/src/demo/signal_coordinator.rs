@@ -220,10 +220,9 @@ impl DemoSignalCoordinator {
                     is_read: false,
                 };
 
-                if let Some(core) = self.app_core.try_read() {
-                    core.add_chat_message(new_message);
-                    tracing::debug!("Demo: Added agent message to chat");
-                }
+                let core = self.app_core.read().await;
+                core.add_chat_message(new_message);
+                tracing::debug!("Demo: Added agent message to chat");
             }
 
             AgentResponse::ApproveRecovery {
@@ -232,25 +231,24 @@ impl DemoSignalCoordinator {
             } => {
                 // Update recovery via ViewState
                 // Signal forwarding automatically propagates to RECOVERY_SIGNAL
-                if let Some(core) = self.app_core.try_read() {
-                    // Check if this is the active recovery session
-                    let recovery = core.views().snapshot().recovery;
-                    if let Some(ref active) = recovery.active_recovery {
-                        if active.id == session_id && !active.approved_by.contains(&authority_id) {
-                            core.add_recovery_approval(authority_id.clone());
+                let core = self.app_core.read().await;
+                // Check if this is the active recovery session
+                let recovery = core.views().snapshot().recovery;
+                if let Some(ref active) = recovery.active_recovery {
+                    if active.id == session_id && !active.approved_by.contains(&authority_id) {
+                        core.add_recovery_approval(authority_id.clone());
 
-                            // Log approval status
-                            let updated_recovery = core.views().snapshot().recovery;
-                            if let Some(ref active) = updated_recovery.active_recovery {
-                                tracing::info!(
-                                    "Demo: Guardian {} approved recovery ({}/{})",
-                                    authority_id,
-                                    active.approvals_received,
-                                    active.approvals_required
-                                );
-                                if active.approvals_received >= active.approvals_required {
-                                    tracing::info!("Demo: Recovery threshold reached!");
-                                }
+                        // Log approval status
+                        let updated_recovery = core.views().snapshot().recovery;
+                        if let Some(ref active) = updated_recovery.active_recovery {
+                            tracing::info!(
+                                "Demo: Guardian {} approved recovery ({}/{})",
+                                authority_id,
+                                active.approvals_received,
+                                active.approvals_required
+                            );
+                            if active.approvals_received >= active.approvals_required {
+                                tracing::info!("Demo: Recovery threshold reached!");
                             }
                         }
                     }
@@ -272,24 +270,15 @@ impl DemoSignalCoordinator {
 
                 // Update ViewState to mark contact as guardian
                 // Signal forwarding automatically propagates to CONTACTS_SIGNAL
-                if let Some(core) = self.app_core.try_read() {
-                    // Check if contact exists first
-                    let contacts = core.views().snapshot().contacts;
-                    if contacts.contacts.iter().any(|c| c.id == authority_id) {
-                        core.set_contact_guardian_status(&authority_id, true);
-                        tracing::info!("Demo: Updated contact {} is_guardian=true", authority_id);
-                    } else {
-                        tracing::warn!(
-                            "Demo: Contact {} not found ({} contacts present)",
-                            authority_id,
-                            contacts.contacts.len()
-                        );
-                    }
-                }
+                let core = self.app_core.read().await;
+                // Check if contact exists first
+                let contacts = core.views().snapshot().contacts;
+                if contacts.contacts.iter().any(|c| c.id == authority_id) {
+                    core.set_contact_guardian_status(&authority_id, true);
+                    tracing::info!("Demo: Updated contact {} is_guardian=true", authority_id);
 
-                // Update ViewState to add guardian to recovery state
-                // Signal forwarding automatically propagates to RECOVERY_SIGNAL
-                if let Some(core) = self.app_core.try_read() {
+                    // Update ViewState to add guardian to recovery state
+                    // Signal forwarding automatically propagates to RECOVERY_SIGNAL
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
@@ -303,6 +292,12 @@ impl DemoSignalCoordinator {
                         last_seen: Some(now),
                     });
                     tracing::info!("Demo: Added {} to guardians list", authority_id);
+                } else {
+                    tracing::warn!(
+                        "Demo: Contact {} not found ({} contacts present)",
+                        authority_id,
+                        contacts.contacts.len()
+                    );
                 }
             }
         }

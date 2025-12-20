@@ -17,7 +17,7 @@ use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::error::TerminalError;
-use crate::tui::context::{AccountFilesHelper, DispatchHelper, SnapshotHelper, ToastHelper};
+use crate::tui::context::{AccountFilesHelper, DispatchHelper, InitializedAppCore, SnapshotHelper, ToastHelper};
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
 
@@ -29,7 +29,7 @@ use crate::tui::hooks::{
 /// iocraft-friendly context.
 #[derive(Clone)]
 pub struct IoContext {
-    app_core: Arc<RwLock<AppCore>>,
+    app_core: InitializedAppCore,
     operational: Arc<OperationalHandler>,
 
     // Focused helpers
@@ -41,6 +41,8 @@ pub struct IoContext {
     // UI-only state
     #[cfg(feature = "development")]
     demo_hints: Option<crate::demo::DemoHints>,
+    #[cfg(feature = "development")]
+    demo_bridge: Option<Arc<crate::demo::SimulatedBridge>>,
     invited_lan_peers: Arc<RwLock<HashSet<String>>>,
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
@@ -48,7 +50,7 @@ pub struct IoContext {
 
 impl IoContext {
     pub fn new(
-        app_core: Arc<RwLock<AppCore>>,
+        app_core: InitializedAppCore,
         base_path: std::path::PathBuf,
         device_id_str: String,
         mode: crate::handlers::tui::TuiMode,
@@ -57,14 +59,14 @@ impl IoContext {
     }
 
     pub fn with_account_status(
-        app_core: Arc<RwLock<AppCore>>,
+        app_core: InitializedAppCore,
         has_existing_account: bool,
         base_path: std::path::PathBuf,
         device_id_str: String,
         mode: crate::handlers::tui::TuiMode,
     ) -> Self {
-        let operational = Arc::new(OperationalHandler::new(app_core.clone()));
-        let snapshots = SnapshotHelper::new(app_core.clone(), device_id_str.clone());
+        let operational = Arc::new(OperationalHandler::new(app_core.raw().clone()));
+        let snapshots = SnapshotHelper::new(app_core.raw().clone(), device_id_str.clone());
         let toasts = ToastHelper::new();
 
         let has_existing_account =
@@ -77,7 +79,7 @@ impl IoContext {
         let channel_modes = Arc::new(RwLock::new(HashMap::new()));
 
         let dispatch = DispatchHelper::new(
-            app_core.clone(),
+            app_core.raw().clone(),
             operational.clone(),
             snapshots.clone(),
             toasts.clone(),
@@ -96,6 +98,8 @@ impl IoContext {
             account_files,
             #[cfg(feature = "development")]
             demo_hints: None,
+            #[cfg(feature = "development")]
+            demo_bridge: None,
             invited_lan_peers,
             current_context,
             channel_modes,
@@ -104,7 +108,7 @@ impl IoContext {
 
     #[cfg(feature = "development")]
     pub fn with_demo_hints(
-        app_core: Arc<RwLock<AppCore>>,
+        app_core: InitializedAppCore,
         hints: crate::demo::DemoHints,
         has_existing_account: bool,
         base_path: std::path::PathBuf,
@@ -127,6 +131,12 @@ impl IoContext {
         let app_core =
             AppCore::new(aura_app::AppConfig::default()).expect("Failed to create default AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
+        let app_core = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to build tokio runtime for IoContext::with_defaults")
+            .block_on(InitializedAppCore::new(app_core))
+            .expect("Failed to init signals for IoContext::with_defaults");
         Self::with_account_status(
             app_core,
             true,
@@ -141,8 +151,12 @@ impl IoContext {
         true
     }
 
-    pub fn app_core(&self) -> &Arc<RwLock<AppCore>> {
+    pub fn app_core(&self) -> &InitializedAppCore {
         &self.app_core
+    }
+
+    pub fn app_core_raw(&self) -> &Arc<RwLock<AppCore>> {
+        self.app_core.raw()
     }
 
     pub fn has_account(&self) -> bool {
@@ -198,29 +212,46 @@ impl IoContext {
         String::new()
     }
 
+    /// Set the demo bridge for routing commands to simulated agents.
+    ///
+    /// When set, commands dispatched through this context will also be routed
+    /// to the SimulatedBridge, allowing demo agents (Alice/Carol) to respond
+    /// to guardian invitations and other interactions.
+    #[cfg(feature = "development")]
+    pub fn set_demo_bridge(&mut self, bridge: Arc<crate::demo::SimulatedBridge>) {
+        self.demo_bridge = Some(bridge);
+    }
+
+    /// Get the demo bridge if set.
+    #[cfg(feature = "development")]
+    pub fn demo_bridge(&self) -> Option<&Arc<crate::demo::SimulatedBridge>> {
+        self.demo_bridge.as_ref()
+    }
+
     // =========================================================================
     // Account file operations (isolated, async)
     // =========================================================================
 
-    pub fn create_account(&self, display_name: &str) -> Result<(), String> {
-        self.account_files.create_account(display_name)
+    pub async fn create_account(&self, display_name: &str) -> Result<(), String> {
+        self.account_files.create_account(display_name).await
     }
 
-    pub fn restore_recovered_account(
+    pub async fn restore_recovered_account(
         &self,
         recovered_authority_id: aura_core::identifiers::AuthorityId,
         recovered_context_id: Option<aura_core::identifiers::ContextId>,
     ) -> Result<(), String> {
         self.account_files
             .restore_recovered_account(recovered_authority_id, recovered_context_id)
+            .await
     }
 
-    pub fn export_account_backup(&self) -> Result<String, String> {
-        self.account_files.export_account_backup()
+    pub async fn export_account_backup(&self) -> Result<String, String> {
+        self.account_files.export_account_backup().await
     }
 
-    pub fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
-        self.account_files.import_account_backup(backup_code)
+    pub async fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
+        self.account_files.import_account_backup(backup_code).await
     }
 
     // =========================================================================
@@ -264,10 +295,23 @@ impl IoContext {
     // =========================================================================
 
     pub async fn dispatch(&self, command: EffectCommand) -> Result<(), String> {
+        // In demo mode, also route commands through the SimulatedBridge
+        // so that simulated agents (Alice/Carol) can respond to them
+        #[cfg(feature = "development")]
+        if let Some(bridge) = &self.demo_bridge {
+            bridge.route_command(&command).await;
+        }
+
         self.dispatch.dispatch(command).await
     }
 
     pub async fn dispatch_and_wait(&self, command: EffectCommand) -> Result<(), String> {
+        // In demo mode, also route commands through the SimulatedBridge
+        #[cfg(feature = "development")]
+        if let Some(bridge) = &self.demo_bridge {
+            bridge.route_command(&command).await;
+        }
+
         self.dispatch.dispatch_and_wait(command).await
     }
 
@@ -463,12 +507,10 @@ impl IoContext {
             .display_name
     }
 
-    pub async fn set_display_name(&self, name: &str) {
-        let core = self.app_core.read().await;
-        let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
-        state.display_name = name.to_string();
-        let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
-    }
+    // Note: set_display_name and set_mfa_policy were removed because they bypassed
+    // the proper command dispatch pattern. Use EffectCommand::UpdateNickname and
+    // EffectCommand::UpdateMfaPolicy instead, which go through the proper workflow
+    // and persist to storage.
 
     pub async fn get_mfa_policy(&self) -> crate::tui::types::MfaPolicy {
         use crate::tui::types::MfaPolicy;
@@ -481,17 +523,6 @@ impl IoContext {
             "AlwaysRequired" => MfaPolicy::AlwaysRequired,
             _ => MfaPolicy::SensitiveOnly,
         }
-    }
-
-    pub async fn set_mfa_policy(&self, policy: crate::tui::types::MfaPolicy) {
-        let core = self.app_core.read().await;
-        let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
-        state.mfa_policy = match policy {
-            crate::tui::types::MfaPolicy::Disabled => "Disabled".to_string(),
-            crate::tui::types::MfaPolicy::SensitiveOnly => "SensitiveOnly".to_string(),
-            crate::tui::types::MfaPolicy::AlwaysRequired => "AlwaysRequired".to_string(),
-        };
-        let _ = core.emit(&*SETTINGS_SIGNAL, state).await;
     }
 
     // =========================================================================

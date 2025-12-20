@@ -18,11 +18,10 @@
 use iocraft::prelude::*;
 
 use aura_app::signal_defs::RECOVERY_SIGNAL;
-use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::{ApprovalCallback, RecoveryCallback};
 use crate::tui::components::{EmptyState, KeyValue, TabBar, TabItem};
-use crate::tui::hooks::AppCoreContext;
+use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::RecoveryViewProps;
 use crate::tui::theme::{Icons, Spacing, Theme};
@@ -477,7 +476,7 @@ pub fn RecoveryScreen(
                     let pending: Vec<PendingRequest> = recovery_state
                         .pending_requests
                         .iter()
-                        .map(|p| PendingRequest::from(p))
+                        .map(PendingRequest::from)
                         .collect();
 
                     (
@@ -489,29 +488,7 @@ pub fn RecoveryScreen(
                     )
                 };
 
-                // FIRST: Read current signal value to catch up on any changes
-                // that happened while this screen was unmounted
-                {
-                    let core = app_core.read().await;
-                    if let Ok(recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
-                        let (guardians, threshold, total, status, pending) =
-                            convert_state(&recovery_state);
-                        reactive_guardians.set(guardians);
-                        reactive_threshold_required.set(threshold);
-                        reactive_threshold_total.set(total);
-                        reactive_recovery_status.set(status);
-                        reactive_pending_requests.set(pending);
-                    }
-                }
-
-                // THEN: Subscribe for future updates
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*RECOVERY_SIGNAL)
-                };
-
-                // Subscribe to signal updates - runs until component unmounts
-                while let Ok(recovery_state) = stream.recv().await {
+                subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |recovery_state| {
                     let (guardians, threshold, total, status, pending) =
                         convert_state(&recovery_state);
                     reactive_guardians.set(guardians);
@@ -519,7 +496,8 @@ pub fn RecoveryScreen(
                     reactive_threshold_total.set(total);
                     reactive_recovery_status.set(status);
                     reactive_pending_requests.set(pending);
-                }
+                })
+                .await;
             }
         });
     }

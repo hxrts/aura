@@ -13,7 +13,7 @@ categories = ["cryptography", "authentication"]
 [dependencies]
 # Workspace crates
 aura-core = { path = "../aura-core" }
-aura-app = { path = "../aura-app" }  # RuntimeBridge trait definition
+aura-app = { path = "../aura-app", features = ["signals"] }  # RuntimeBridge trait definition + signals for forwarding
 aura-effects = { path = "../aura-effects" }
 aura-composition = { path = "../aura-composition" }
 aura-protocol = { path = "../aura-protocol" }
@@ -51,6 +51,7 @@ biscuit-auth = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
+futures-signals = { workspace = true }  # For SignalForwarder signal streaming
 
 # Utilities
 uuid = { workspace = true }

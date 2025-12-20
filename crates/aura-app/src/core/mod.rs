@@ -14,14 +14,13 @@ mod app;
 mod error;
 mod intent;
 mod reducer;
+mod snapshot;
+
 #[cfg(feature = "signals")]
 mod signal_sync;
-mod snapshot;
 
 pub use app::{AppConfig, AppCore};
 pub use error::IntentError;
 pub use intent::{ChannelType as IntentChannelType, Intent, InvitationType, Screen};
 pub use reducer::{reduce_fact, ViewDelta};
-#[cfg(feature = "signals")]
-pub use signal_sync::SignalForwarder;
 pub use snapshot::StateSnapshot;

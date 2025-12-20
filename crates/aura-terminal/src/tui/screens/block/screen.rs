@@ -13,14 +13,13 @@
 use iocraft::prelude::*;
 
 use aura_app::signal_defs::BLOCK_SIGNAL;
-use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::tui::callbacks::{
     BlockInviteCallback, BlockNavCallback, BlockSendCallback, GrantStewardCallback,
     RevokeStewardCallback,
 };
 use crate::tui::components::MessageInput;
-use crate::tui::hooks::AppCoreContext;
+use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::BlockViewProps;
 use crate::tui::theme::{Spacing, Theme};
@@ -311,7 +310,6 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     });
 
     // Subscribe to block signal updates if AppCoreContext is available
-    // Uses the unified ReactiveEffects system from aura-core
     if let Some(ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_block_name = reactive_block_name.clone();
@@ -329,31 +327,13 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                     (block_state.name.clone(), residents, budget)
                 };
 
-                // FIRST: Read current signal value to catch up on any changes
-                // that happened while this screen was unmounted
-                {
-                    let core = app_core.read().await;
-                    if let Ok(block_state) = core.read(&*BLOCK_SIGNAL).await {
-                        let (name, residents, budget) = convert_block_state(&block_state);
-                        reactive_block_name.set(name);
-                        reactive_residents.set(residents);
-                        reactive_budget.set(budget);
-                    }
-                }
-
-                // THEN: Subscribe for future updates
-                let mut stream = {
-                    let core = app_core.read().await;
-                    core.subscribe(&*BLOCK_SIGNAL)
-                };
-
-                // Subscribe to signal updates - runs until component unmounts
-                while let Ok(block_state) = stream.recv().await {
+                subscribe_signal_with_retry(app_core, &*BLOCK_SIGNAL, move |block_state| {
                     let (name, residents, budget) = convert_block_state(&block_state);
                     reactive_block_name.set(name);
                     reactive_residents.set(residents);
                     reactive_budget.set(budget);
-                }
+                })
+                .await;
             }
         });
     }

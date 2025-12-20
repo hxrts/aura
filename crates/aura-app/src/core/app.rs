@@ -306,8 +306,9 @@ impl AppCore {
     /// This must be called before using reactive operations (read, emit, subscribe).
     /// Typically called once during app startup.
     ///
-    /// When the `signals` feature is enabled, this also starts the signal forwarder
-    /// which automatically syncs ViewState changes to ReactiveEffects signals.
+    /// Note: In `signals` builds, `init_signals()` also starts the internal
+    /// ViewState → ReactiveEffects signal forwarder so `views().set_*()` updates
+    /// become visible via `read()`/`subscribe()`.
     ///
     /// # Example
     ///
