@@ -109,7 +109,7 @@ async fn setup_test_env(
         debug: false,
         journal_path: Some(test_dir.join("journal.json").to_string_lossy().to_string()),
     };
-    let app_core =
+    let mut app_core =
         AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge()).expect("AppCore");
     app_core
         .init_signals()
@@ -233,14 +233,15 @@ async fn test_guardian_display_full_flow() {
         contact_id: Some(alice_authority.to_string()),
     };
 
-    // Dispatch through IoContext (for intent processing)
+    // Dispatch through IoContext ONLY - this is what the real TUI does
+    // The bug is that IoContext.dispatch() does NOT route to SimulatedBridge
+    // so the simulated agents never see the guardian request
     let result = ctx.dispatch(invite_cmd.clone()).await;
     println!("  InviteGuardian dispatch result: {:?}", result);
 
-    // ALSO route through SimulatedBridge (to trigger agent responses in demo mode)
-    // This is what the TUI should also do in demo mode
-    simulator.bridge().route_command(&invite_cmd).await;
-    println!("  InviteGuardian routed to agents");
+    // NOTE: We deliberately do NOT call simulator.bridge().route_command() here
+    // because the real TUI doesn't do that. The test should fail until we fix
+    // IoContext to route commands to SimulatedBridge in demo mode.
 
     // Step 5: Wait for simulated agent to respond
     println!("\nStep 5: Waiting for simulated agent response...");
