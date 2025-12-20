@@ -36,7 +36,7 @@ use aura_core::crypto::hash::hash;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::ChannelId;
 use aura_terminal::handlers::tui::TuiMode;
-use aura_terminal::tui::context::IoContext;
+use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 
 /// Helper to create a DM channel ID the same way the messaging workflow does
@@ -59,15 +59,14 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
-    app_core
-        .init_signals()
+    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    let app_core = Arc::new(RwLock::new(app_core));
+    let initialized_app_core = InitializedAppCore::new(app_core.clone())
         .await
         .expect("Failed to init signals");
-    let app_core = Arc::new(RwLock::new(app_core));
 
     let ctx = IoContext::with_account_status(
-        app_core.clone(),
+        initialized_app_core.clone(),
         false,
         test_dir,
         format!("test-device-{}", name),

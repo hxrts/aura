@@ -217,7 +217,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // Initial read.
             {
-                let core = app_core.read().await;
+                let core = app_core.raw().read().await;
                 if let Ok(Some(err)) = core.read(&*ERROR_SIGNAL).await {
                     let msg = format_error(&err);
                     let mut state = tui_state.write();
@@ -257,7 +257,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let mut backoff = std::time::Duration::from_millis(50);
             loop {
                 let mut stream = {
-                    let core = app_core.read().await;
+                    let core = app_core.raw().read().await;
                     core.subscribe(&*ERROR_SIGNAL)
                 };
 
@@ -1033,7 +1033,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             // Step 1: Rotate keys - generates new FROST threshold keys
                                             // The authority ID would come from the account context
                                             // For demo mode, we'll use the key rotation through the effect system
-                                            let core = app_core.read().await;
+                                            let core = app_core.raw().read().await;
 
                                             // Initiate guardian ceremony through the real protocol.
                                             // This sends guardian invitations to each guardian through
@@ -1070,7 +1070,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         for _ in 0..60 {
                                                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-                                                            let core = app_core_monitor.read().await;
+                                                            let core = app_core_monitor.raw().read().await;
                                                             if let Ok(status) = core.get_ceremony_status(&ceremony_id).await {
                                                                 if status.is_complete {
                                                                     tracing::info!("Guardian ceremony completed successfully");
@@ -1391,7 +1391,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
 
     // Create effect dispatch callbacks using CallbackRegistry
     let ctx_arc = Arc::new(ctx);
-    let app_core = ctx_arc.app_core().clone();
+    let app_core = ctx_arc.app_core_raw().clone();
     let callbacks = CallbackRegistry::new(ctx_arc.clone(), update_tx.clone(), app_core);
 
     // Create CallbackContext for providing callbacks to components via iocraft context

@@ -60,9 +60,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_lock::RwLock;
 use aura_app::signal_defs::{AppError, ERROR_SIGNAL};
-use aura_app::{AppCore, ReactiveState, ReactiveVec};
+use aura_app::{ReactiveState, ReactiveVec};
 use aura_core::effects::reactive::{ReactiveEffects, ReactiveError, Signal};
 use aura_effects::ReactiveHandler;
 

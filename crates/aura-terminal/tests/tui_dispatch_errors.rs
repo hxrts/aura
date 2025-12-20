@@ -8,7 +8,7 @@ use aura_app::{signal_defs::ERROR_SIGNAL, AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 
 use aura_terminal::handlers::tui::TuiMode;
-use aura_terminal::tui::context::IoContext;
+use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 
 async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::signal_defs::AppError {
@@ -31,12 +31,12 @@ async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::signal_def
 async fn test_ctx(
     has_existing_account: bool,
 ) -> (Arc<RwLock<AppCore>>, IoContext, tempfile::TempDir) {
-    let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
-    app_core
-        .init_signals()
+    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
+    let app_core = Arc::new(RwLock::new(app_core));
+    let app_core = InitializedAppCore::new(app_core)
         .await
         .expect("Failed to init signals");
-    let app_core = Arc::new(RwLock::new(app_core));
+    let raw_app_core = app_core.raw().clone();
 
     let dir = tempfile::tempdir().expect("Failed to create temp dir");
     let ctx = IoContext::with_account_status(
@@ -46,7 +46,7 @@ async fn test_ctx(
         "test-device".to_string(),
         TuiMode::Production,
     );
-    (app_core, ctx, dir)
+    (raw_app_core, ctx, dir)
 }
 
 #[tokio::test]

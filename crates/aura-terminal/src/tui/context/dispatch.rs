@@ -417,7 +417,7 @@ mod tests {
     use aura_core::effects::reactive::ReactiveEffects;
 
     use crate::handlers::tui::TuiMode;
-    use crate::tui::context::IoContext;
+    use crate::tui::context::{InitializedAppCore, IoContext};
     use crate::tui::effects::EffectCommand;
 
     async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::signal_defs::AppError {
@@ -439,13 +439,12 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_command_emits_error_signal() {
-        let mut app_core =
+        let app_core =
             AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
-        app_core
-            .init_signals()
+        let app_core = Arc::new(RwLock::new(app_core));
+        let app_core = InitializedAppCore::new(app_core)
             .await
             .expect("Failed to init signals");
-        let app_core = Arc::new(RwLock::new(app_core));
 
         let dir = tempfile::tempdir().expect("Failed to create temp dir");
         let ctx = IoContext::with_account_status(
@@ -457,7 +456,7 @@ mod tests {
         );
 
         let _ = ctx.dispatch(EffectCommand::UnknownCommandForTest).await;
-        let err = wait_for_error(&app_core).await;
+        let err = wait_for_error(app_core.raw()).await;
         assert_eq!(err.code, "OPERATION_FAILED");
         assert!(err.message.contains("Unknown command"));
     }

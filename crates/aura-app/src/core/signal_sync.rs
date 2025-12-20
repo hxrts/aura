@@ -68,9 +68,6 @@ impl SignalForwarder {
         }
     }
 
-    pub fn is_running(&self) -> bool {
-        self.handles.iter().all(|h| !h.is_finished())
-    }
 
     fn spawn<F>(&mut self, fut: F)
     where

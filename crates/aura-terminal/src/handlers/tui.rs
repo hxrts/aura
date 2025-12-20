@@ -20,7 +20,6 @@ use aura_app::{AppConfig, AppCore};
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
-use aura_agent::reactive::SignalForwarder;
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::StorageEffects;
@@ -34,7 +33,7 @@ use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
 use crate::demo::{DemoSignalCoordinator, DemoSimulator};
 use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
-use crate::tui::{context::IoContext, screens::run_app_with_context};
+use crate::tui::{context::{InitializedAppCore, IoContext}, screens::run_app_with_context};
 
 /// Whether the TUI is running in demo or production mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -704,24 +703,9 @@ async fn handle_tui_launch(
 
     let app_core = Arc::new(RwLock::new(app_core));
 
-    // Initialize reactive signals for the unified effect system
-    // This registers all application signals (CHAT_SIGNAL, RECOVERY_SIGNAL, etc.)
-    // with the ReactiveHandler so screens can subscribe to state changes
-    // Note: signal_forwarder must stay in scope for the duration of the TUI to keep forwarding active
-    let _signal_forwarder = {
-        let mut core = app_core.write().await;
-        if let Err(e) = core.init_signals().await {
-            stdio.eprintln(format_args!(
-                "Warning: Failed to initialize signals: {} - reactive updates may not work",
-                e
-            ));
-        }
-        // Start signal forwarding: ViewState changes → ReactiveEffects signals
-        // This bridges the view layer to the reactive system for UI updates
-        SignalForwarder::start_all(core.views(), Arc::new(core.reactive().clone()))
-    };
+    let app_core = InitializedAppCore::new(app_core).await?;
 
-    if let Err(e) = aura_app::workflows::settings::refresh_settings_from_runtime(&app_core).await {
+    if let Err(e) = aura_app::workflows::settings::refresh_settings_from_runtime(app_core.raw()).await {
         stdio.eprintln(format_args!("Warning: Failed to refresh settings: {}", e));
     }
 
@@ -761,7 +745,7 @@ async fn handle_tui_launch(
             // Create DemoSignalCoordinator - handles bidirectional event routing via signals
             // This replaces the manual AuraEvent forwarding with signal subscriptions
             let coordinator = Arc::new(DemoSignalCoordinator::new(
-                app_core.clone(),
+                app_core.raw().clone(),
                 authority_id, // Bob's authority
                 sim_bridge,
                 response_rx,

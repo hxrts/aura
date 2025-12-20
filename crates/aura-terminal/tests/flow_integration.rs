@@ -46,7 +46,7 @@ use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_terminal::handlers::tui::TuiMode;
-use aura_terminal::tui::context::IoContext;
+use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 
 /// Account config structure matching the account.json format
@@ -79,15 +79,14 @@ impl TestAgent {
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-        let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
-        app_core
-            .init_signals()
-            .await
-            .expect("Failed to init signals");
+        let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
+        let initialized_app_core = InitializedAppCore::new(app_core.clone())
+        .await
+        .expect("Failed to init signals");
 
         let ctx = IoContext::with_account_status(
-            app_core.clone(),
+            initialized_app_core.clone(),
             false,
             test_dir.clone(),
             format!("test-device-{}", name),

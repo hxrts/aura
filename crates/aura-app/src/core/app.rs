@@ -320,6 +320,23 @@ impl AppCore {
     /// let chat = app.read(&CHAT_SIGNAL).await?;
     /// ```
     pub async fn init_signals(&mut self) -> Result<(), IntentError> {
+        // Idempotent init: if signals are already registered, don't re-register.
+        // Still ensure forwarding is active for ViewState-driven updates.
+        let chat_id = (&*crate::signal_defs::CHAT_SIGNAL).id();
+        if self.reactive.is_registered(chat_id) {
+            #[cfg(feature = "signals")]
+            {
+                if self.signal_forwarder.is_none() {
+                    let forwarder = super::signal_sync::SignalForwarder::start_all(
+                        &self.views,
+                        Arc::new(self.reactive.clone()),
+                    );
+                    self.signal_forwarder = Some(forwarder);
+                }
+            }
+            return Ok(());
+        }
+
         // Register all domain signals with default values
         crate::signal_defs::register_app_signals(&self.reactive)
             .await

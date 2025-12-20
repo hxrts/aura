@@ -30,7 +30,7 @@ use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ChannelId};
 use aura_terminal::handlers::tui::TuiMode;
-use aura_terminal::tui::context::IoContext;
+use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 
 // ============================================================================
@@ -47,12 +47,12 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let mut app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
-    app_core
-        .init_signals()
+    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    let app_core = Arc::new(RwLock::new(app_core));
+    let app_core = InitializedAppCore::new(app_core)
         .await
         .expect("Failed to init signals");
-    let app_core = Arc::new(RwLock::new(app_core));
+    let raw_app_core = app_core.raw().clone();
 
     let ctx = IoContext::with_account_status(
         app_core.clone(),
@@ -65,7 +65,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     // Create account for testing
     ctx.create_account(&format!("TestUser-{}", name)).await.expect("Failed to create account");
 
-    (Arc::new(ctx), app_core)
+    (Arc::new(ctx), raw_app_core)
 }
 
 /// Cleanup test directory

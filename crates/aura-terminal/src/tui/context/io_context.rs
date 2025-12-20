@@ -128,6 +128,10 @@ impl IoContext {
 
     #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
     pub fn with_defaults() -> Self {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            panic!("IoContext::with_defaults() cannot be called inside a tokio runtime; use IoContext::with_defaults_async().await instead");
+        }
+
         let app_core =
             AppCore::new(aura_app::AppConfig::default()).expect("Failed to create default AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
@@ -137,6 +141,25 @@ impl IoContext {
             .expect("Failed to build tokio runtime for IoContext::with_defaults")
             .block_on(InitializedAppCore::new(app_core))
             .expect("Failed to init signals for IoContext::with_defaults");
+
+        Self::with_account_status(
+            app_core,
+            true,
+            std::path::PathBuf::from("./aura-data"),
+            "default-device".to_string(),
+            crate::handlers::tui::TuiMode::Production,
+        )
+    }
+
+    #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
+    pub async fn with_defaults_async() -> Self {
+        let app_core =
+            AppCore::new(aura_app::AppConfig::default()).expect("Failed to create default AppCore");
+        let app_core = Arc::new(RwLock::new(app_core));
+        let app_core = InitializedAppCore::new(app_core)
+            .await
+            .expect("Failed to init signals for IoContext::with_defaults_async");
+
         Self::with_account_status(
             app_core,
             true,
@@ -376,7 +399,7 @@ impl IoContext {
     // =========================================================================
 
     pub async fn is_connected(&self) -> bool {
-        let reactive = match self.app_core.try_read() {
+        let reactive = match self.app_core.raw().try_read() {
             Some(core) => core.reactive().clone(),
             None => return false,
         };
@@ -388,7 +411,7 @@ impl IoContext {
     }
 
     pub async fn last_error(&self) -> Option<String> {
-        let reactive = match self.app_core.try_read() {
+        let reactive = match self.app_core.raw().try_read() {
             Some(core) => core.reactive().clone(),
             None => return None,
         };
@@ -400,7 +423,7 @@ impl IoContext {
     }
 
     pub async fn is_syncing(&self) -> bool {
-        let reactive = match self.app_core.try_read() {
+        let reactive = match self.app_core.raw().try_read() {
             Some(core) => core.reactive().clone(),
             None => return false,
         };
@@ -414,6 +437,7 @@ impl IoContext {
     pub async fn last_sync_time(&self) -> Option<u64> {
         let runtime = self
             .app_core
+            .raw()
             .try_read()
             .and_then(|core| core.runtime().cloned());
 
@@ -424,7 +448,7 @@ impl IoContext {
     }
 
     pub async fn known_peers_count(&self) -> usize {
-        let (runtime, reactive) = match self.app_core.try_read() {
+        let (runtime, reactive) = match self.app_core.raw().try_read() {
             Some(core) => (core.runtime().cloned(), core.reactive().clone()),
             None => return 0,
         };
@@ -445,7 +469,7 @@ impl IoContext {
     }
 
     pub async fn get_discovered_peers(&self) -> Vec<(String, String)> {
-        let reactive = match self.app_core.try_read() {
+        let reactive = match self.app_core.raw().try_read() {
             Some(core) => core.reactive().clone(),
             None => return vec![],
         };
@@ -463,6 +487,7 @@ impl IoContext {
     pub async fn get_lan_peers(&self) -> Vec<(String, String)> {
         let runtime = self
             .app_core
+            .raw()
             .try_read()
             .and_then(|core| core.runtime().cloned());
 
@@ -500,7 +525,7 @@ impl IoContext {
     // =========================================================================
 
     pub async fn get_display_name(&self) -> String {
-        let core = self.app_core.read().await;
+        let core = self.app_core.raw().read().await;
         core.read(&*SETTINGS_SIGNAL)
             .await
             .unwrap_or_default()
@@ -515,7 +540,7 @@ impl IoContext {
     pub async fn get_mfa_policy(&self) -> crate::tui::types::MfaPolicy {
         use crate::tui::types::MfaPolicy;
 
-        let core = self.app_core.read().await;
+        let core = self.app_core.raw().read().await;
         let state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
         match state.mfa_policy.as_str() {
             "Disabled" => MfaPolicy::Disabled,
