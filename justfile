@@ -92,7 +92,8 @@ summary:
 
 # Build the book after regenerating the summary
 book: summary
-    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c 'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js'
+    echo '.chapter-item a strong { display: none; }' > custom.css
+    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c 'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js custom.css'
 
 # Serve locally with live reload
 serve-book: summary
@@ -106,8 +107,9 @@ serve-book: summary
         sleep 1
     fi
 
-    # Install mermaid, serve, then cleanup when server stops
-    trap 'rm -f mermaid-init.js mermaid.min.js' EXIT
+    # Create custom.css transiently, cleanup when server stops
+    echo '.chapter-item a strong { display: none; }' > custom.css
+    trap 'rm -f mermaid-init.js mermaid.min.js custom.css' EXIT
     AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c 'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook serve --open'
 
 # Serve documentation with live reload (alias for serve-book)
