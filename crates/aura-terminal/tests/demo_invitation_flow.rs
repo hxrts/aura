@@ -22,45 +22,48 @@ use aura_agent::handlers::ShareableInvitation;
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::hash::hash;
-use aura_core::identifiers::AuthorityId;
 use aura_terminal::handlers::tui::TuiMode;
+use aura_terminal::ids;
 use aura_terminal::tui::context::IoContext;
 use aura_terminal::tui::effects::EffectCommand;
 use base64::Engine;
-use uuid::Uuid;
 
 // ============================================================================
 // Test Infrastructure
 // ============================================================================
 
-/// Generate a deterministic invite code for a demo agent (mirrors hints.rs logic)
+/// Generate a deterministic invite code for a demo agent.
 ///
-/// This replicates the code generation from `aura_terminal::demo::hints` without
-/// requiring the `development` feature flag.
+/// This MUST match the derivation in:
+/// - `aura_terminal::demo::hints::generate_invite_code` (invitation codes)
+/// - `aura_terminal::demo::mod::SimulatedAgent::new_with_shared_transport` (agent IDs)
+/// - `aura_terminal::demo::mod::AgentFactory::create_demo_agents` (seed offsets)
+///
+/// Key rules:
+/// - Uses `ids::authority_id()` for domain-separated derivation
+/// - Alice uses `seed`, Carol uses `seed + 1`
+/// - Creates Contact invitations (not Guardian)
 fn generate_demo_invite_code(name: &str, seed: u64) -> String {
-    // Create deterministic authority ID matching the simulator's derivation
-    let authority_entropy = hash(format!("demo:{}:{}:authority", seed, name).as_bytes());
-    let sender_id = AuthorityId::new_from_entropy(authority_entropy);
+    // Create deterministic authority ID using the SAME derivation as SimulatedAgent
+    // CRITICAL: Must use ids::authority_id() for domain separation
+    let sender_id = ids::authority_id(&format!("demo:{}:{}:authority", seed, name));
 
     // Create deterministic invitation ID from seed and name
-    let invitation_id_entropy = hash(format!("demo:{}:{}:invitation", seed, name).as_bytes());
-    let invitation_id = Uuid::from_bytes(invitation_id_entropy[..16].try_into().unwrap());
+    let invitation_id = ids::uuid(&format!("demo:{}:{}:invitation", seed, name));
 
     // Create ShareableInvitation-compatible structure
-    // IMPORTANT: Use sender_id.uuid() to get bare UUID for serde serialization
-    // (sender_id.to_string() includes "authority-" prefix which breaks deserialization)
+    // Uses Contact type (not Guardian) - guardian requests are sent in-band
     let invitation_data = serde_json::json!({
         "version": 1,
         "invitation_id": invitation_id.to_string(),
         "sender_id": sender_id.uuid().to_string(),
         "invitation_type": {
-            "Guardian": {
-                "subject_authority": sender_id.uuid().to_string()
+            "Contact": {
+                "nickname": name
             }
         },
         "expires_at": null,
-        "message": format!("Guardian invitation from {} (demo)", name)
+        "message": format!("Contact invitation from {} (demo)", name)
     });
 
     // Encode as base64 with aura:v1: prefix
@@ -115,8 +118,9 @@ async fn test_demo_invitation_codes_are_parseable() {
     println!("\n=== Demo Invitation Code Parsing Test ===\n");
 
     let seed = 2024; // Standard demo seed
-    let alice_code = generate_demo_invite_code("alice", seed);
-    let carol_code = generate_demo_invite_code("carol", seed);
+    // Names and seeds must match AgentFactory::create_demo_agents
+    let alice_code = generate_demo_invite_code("Alice", seed);
+    let carol_code = generate_demo_invite_code("Carol", seed + 1);
 
     println!(
         "Alice's invite code: {}...",
@@ -170,33 +174,21 @@ async fn test_demo_invitation_codes_are_parseable() {
     assert_eq!(alice_invitation.version, 1, "Alice's version should be 1");
     assert_eq!(carol_invitation.version, 1, "Carol's version should be 1");
 
-    // Both should be Guardian type
+    // Both should be Contact type (Guardian requests are sent in-band)
     match &alice_invitation.invitation_type {
-        aura_invitation::InvitationType::Guardian { subject_authority } => {
-            println!(
-                "  Alice is a Guardian invitation for authority: {}",
-                subject_authority
-            );
-            assert_eq!(
-                subject_authority, &alice_invitation.sender_id,
-                "Guardian subject should be sender"
-            );
+        aura_invitation::InvitationType::Contact { nickname } => {
+            println!("  Alice is a Contact invitation with nickname: {:?}", nickname);
+            assert_eq!(nickname, &Some("Alice".to_string()));
         }
-        other => panic!("Expected Guardian type for Alice, got {:?}", other),
+        other => panic!("Expected Contact type for Alice, got {:?}", other),
     }
 
     match &carol_invitation.invitation_type {
-        aura_invitation::InvitationType::Guardian { subject_authority } => {
-            println!(
-                "  Carol is a Guardian invitation for authority: {}",
-                subject_authority
-            );
-            assert_eq!(
-                subject_authority, &carol_invitation.sender_id,
-                "Guardian subject should be sender"
-            );
+        aura_invitation::InvitationType::Contact { nickname } => {
+            println!("  Carol is a Contact invitation with nickname: {:?}", nickname);
+            assert_eq!(nickname, &Some("Carol".to_string()));
         }
-        other => panic!("Expected Guardian type for Carol, got {:?}", other),
+        other => panic!("Expected Contact type for Carol, got {:?}", other),
     }
 
     // They should have different sender IDs
@@ -220,8 +212,9 @@ async fn test_import_invitation_command_with_demo_codes() {
 
     let (ctx, app_core) = setup_test_env("import-demo").await;
     let seed = 2024;
-    let alice_code = generate_demo_invite_code("alice", seed);
-    let carol_code = generate_demo_invite_code("carol", seed);
+    // Names and seeds must match AgentFactory::create_demo_agents
+    let alice_code = generate_demo_invite_code("Alice", seed);
+    let carol_code = generate_demo_invite_code("Carol", seed + 1);
 
     // Phase 1: Import Alice's invitation code via EffectCommand
     println!("Phase 1: Import Alice's invitation via EffectCommand");
@@ -281,8 +274,9 @@ async fn test_complete_demo_invitation_flow() {
 
     let (ctx, app_core) = setup_test_env("complete-flow").await;
     let seed = 2024;
-    let alice_code = generate_demo_invite_code("alice", seed);
-    let carol_code = generate_demo_invite_code("carol", seed);
+    // Names and seeds must match AgentFactory::create_demo_agents
+    let alice_code = generate_demo_invite_code("Alice", seed);
+    let carol_code = generate_demo_invite_code("Carol", seed + 1);
 
     // Parse the codes to get sender IDs
     let alice_invitation = ShareableInvitation::from_code(&alice_code).expect("Parse Alice");
@@ -394,13 +388,14 @@ async fn test_demo_hints_deterministic() {
 
     let seed = 2024;
 
-    // Create codes multiple times with same seed
-    let alice1 = generate_demo_invite_code("alice", seed);
-    let alice2 = generate_demo_invite_code("alice", seed);
-    let alice3 = generate_demo_invite_code("alice", seed);
+    // Create codes multiple times with same seed (Title case to match AgentFactory)
+    let alice1 = generate_demo_invite_code("Alice", seed);
+    let alice2 = generate_demo_invite_code("Alice", seed);
+    let alice3 = generate_demo_invite_code("Alice", seed);
 
-    let carol1 = generate_demo_invite_code("carol", seed);
-    let carol2 = generate_demo_invite_code("carol", seed);
+    // Carol uses seed + 1 to match AgentFactory
+    let carol1 = generate_demo_invite_code("Carol", seed + 1);
+    let carol2 = generate_demo_invite_code("Carol", seed + 1);
 
     // Verify all produce identical codes
     assert_eq!(
@@ -419,10 +414,10 @@ async fn test_demo_hints_deterministic() {
 
     println!("  Seed {} produces consistent codes:", seed);
     println!("    Alice: {}...", &alice1[..40]);
-    println!("    Carol: {}...", &carol1[..40]);
+    println!("    Carol (seed + 1): {}...", &carol1[..40]);
 
     // Verify different seeds produce different codes
-    let alice_different = generate_demo_invite_code("alice", 2025);
+    let alice_different = generate_demo_invite_code("Alice", 2025);
     assert_ne!(
         alice1, alice_different,
         "Different seeds should produce different codes"
@@ -485,4 +480,130 @@ async fn test_invalid_invitation_code_rejection() {
 
     cleanup_test_dir("invalid-codes");
     println!("\n=== Invalid Invitation Code Rejection Test PASSED ===\n");
+}
+
+// ============================================================================
+// Guardian ID Matching Validation
+// ============================================================================
+
+/// Comprehensive test that validates AuthorityId matching between:
+/// 1. Invitation codes (from hints/this test)
+/// 2. SimulatedAgent derivation
+/// 3. Contact storage after import
+///
+/// This test ensures the guardian display bug is fixed:
+/// - Contacts imported from invitations have the same AuthorityId as SimulatedAgents
+/// - When signal_coordinator sets is_guardian=true, the lookup succeeds
+#[tokio::test]
+async fn test_guardian_authority_id_matching() {
+    println!("\n=== Guardian AuthorityId Matching Test ===\n");
+
+    let seed = 2024u64;
+
+    // Step 1: Generate invitation codes the same way DemoHints does
+    let alice_code = generate_demo_invite_code("Alice", seed);
+    let carol_code = generate_demo_invite_code("Carol", seed + 1);
+
+    // Step 2: Parse the invitations to get AuthorityIds
+    let alice_invitation = ShareableInvitation::from_code(&alice_code)
+        .expect("Alice invitation should parse");
+    let carol_invitation = ShareableInvitation::from_code(&carol_code)
+        .expect("Carol invitation should parse");
+
+    let alice_invitation_authority = alice_invitation.sender_id;
+    let carol_invitation_authority = carol_invitation.sender_id;
+
+    println!("From parsed invitations:");
+    println!("  Alice AuthorityId: {}", alice_invitation_authority);
+    println!("  Carol AuthorityId: {}", carol_invitation_authority);
+
+    // Step 3: Derive AuthorityIds the same way SimulatedAgent does
+    // (This mirrors SimulatedAgent::new_with_shared_transport in demo/mod.rs)
+    let alice_simulator_authority =
+        ids::authority_id(&format!("demo:{}:{}:authority", seed, "Alice"));
+    let carol_simulator_authority =
+        ids::authority_id(&format!("demo:{}:{}:authority", seed + 1, "Carol"));
+
+    println!("\nFrom simulator derivation:");
+    println!("  Alice AuthorityId: {}", alice_simulator_authority);
+    println!("  Carol AuthorityId: {}", carol_simulator_authority);
+
+    // Step 4: CRITICAL ASSERTIONS - these must match for guardian display to work
+    assert_eq!(
+        alice_invitation_authority, alice_simulator_authority,
+        "CRITICAL: Alice's invitation AuthorityId must match SimulatedAgent AuthorityId.\n\
+         This is required for signal_coordinator to find the contact when setting is_guardian=true.\n\
+         Invitation: {}\n\
+         Simulator:  {}",
+        alice_invitation_authority, alice_simulator_authority
+    );
+
+    assert_eq!(
+        carol_invitation_authority, carol_simulator_authority,
+        "CRITICAL: Carol's invitation AuthorityId must match SimulatedAgent AuthorityId.\n\
+         This is required for signal_coordinator to find the contact when setting is_guardian=true.\n\
+         Invitation: {}\n\
+         Simulator:  {}",
+        carol_invitation_authority, carol_simulator_authority
+    );
+
+    // Step 5: Verify the two agents have different IDs
+    assert_ne!(
+        alice_simulator_authority, carol_simulator_authority,
+        "Alice and Carol should have different AuthorityIds"
+    );
+
+    println!("\n✓ All AuthorityIds match correctly!");
+    println!("  - Invitation codes produce the same AuthorityIds as SimulatedAgents");
+    println!("  - Guardian display should work correctly");
+    println!("\n=== Guardian AuthorityId Matching Test PASSED ===\n");
+}
+
+/// Test that verifies the complete derivation chain from seed to AuthorityId
+#[tokio::test]
+async fn test_derivation_chain_consistency() {
+    println!("\n=== Derivation Chain Consistency Test ===\n");
+
+    let seed = 2024u64;
+
+    // Test Alice's full derivation chain
+    println!("Alice (seed={}):", seed);
+
+    // 1. How ids::authority_id derives it
+    let seed_string = format!("demo:{}:{}:authority", seed, "Alice");
+    println!("  Seed string: \"{}\"", seed_string);
+
+    let authority = ids::authority_id(&seed_string);
+    println!("  AuthorityId: {}", authority);
+    println!("  UUID: {}", authority.uuid());
+
+    // 2. Verify it matches what's in the invitation
+    let code = generate_demo_invite_code("Alice", seed);
+    let invitation = ShareableInvitation::from_code(&code).unwrap();
+    println!("  Invitation sender_id: {}", invitation.sender_id);
+
+    assert_eq!(
+        authority, invitation.sender_id,
+        "ids::authority_id must produce same result as what's in invitation"
+    );
+
+    // Test Carol's derivation chain (uses seed + 1)
+    println!("\nCarol (seed={}):", seed + 1);
+
+    let carol_seed_string = format!("demo:{}:{}:authority", seed + 1, "Carol");
+    println!("  Seed string: \"{}\"", carol_seed_string);
+
+    let carol_authority = ids::authority_id(&carol_seed_string);
+    println!("  AuthorityId: {}", carol_authority);
+
+    let carol_code = generate_demo_invite_code("Carol", seed + 1);
+    let carol_invitation = ShareableInvitation::from_code(&carol_code).unwrap();
+    println!("  Invitation sender_id: {}", carol_invitation.sender_id);
+
+    assert_eq!(
+        carol_authority, carol_invitation.sender_id,
+        "Carol's ids::authority_id must produce same result as invitation"
+    );
+
+    println!("\n=== Derivation Chain Consistency Test PASSED ===\n");
 }

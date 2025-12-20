@@ -39,10 +39,11 @@ impl DemoHints {
     /// Both the authority IDs and invitation IDs are derived deterministically
     /// from the seed, ensuring reproducible demo behavior.
     pub fn new(seed: u64) -> Self {
-        // IMPORTANT: Name case must match SimulatedAgent creation in demo/mod.rs
-        // SimulatedAgent uses "Alice" and "Carol" (Title case)
+        // IMPORTANT: Must match AgentFactory::create_demo_agents() in demo/mod.rs
+        // - Names are Title case ("Alice", "Carol")
+        // - Alice uses `seed`, Carol uses `seed + 1`
         let alice_code = generate_invite_code("Alice", seed);
-        let carol_code = generate_invite_code("Carol", seed);
+        let carol_code = generate_invite_code("Carol", seed + 1);
 
         Self {
             alice_invite_code: alice_code,
@@ -258,13 +259,14 @@ mod tests {
             "Hints and simulator must derive the same AuthorityId for Alice"
         );
 
-        // Same check for Carol
+        // Same check for Carol (uses seed + 1 like AgentFactory)
         let carol_parsed = ShareableInvitation::from_code(&hints.carol_invite_code)
             .expect("Carol's invitation code should be parseable");
         let hints_carol_authority = carol_parsed.sender_id;
 
+        // Carol's seed is seed + 1 (see AgentFactory::create_demo_agents)
         let simulator_carol_authority =
-            ids::authority_id(&format!("demo:{}:{}:authority", seed, "Carol"));
+            ids::authority_id(&format!("demo:{}:{}:authority", seed + 1, "Carol"));
 
         assert_eq!(
             hints_carol_authority, simulator_carol_authority,
