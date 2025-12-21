@@ -34,18 +34,18 @@
 
 pub mod fact_stream;
 pub mod frp;
+pub mod pipeline;
 pub mod scheduler;
-pub mod signal_forwarder;
 
 // Re-export main types for convenience
 pub use fact_stream::{FactStreamAdapter, FactStreamConfig, FactStreamStats};
 pub use frp::Dynamic;
+pub use pipeline::ReactivePipeline;
 pub use scheduler::{
     topological_sort_dag, AnyView, BlockDelta, BlockReduction, ChatReduction, FactSource,
     GuardianDelta, GuardianReduction, InvitationReduction, ReactiveScheduler, ReactiveView,
     RecoveryReduction, SchedulerConfig, ViewAdapter, ViewNode, ViewReduction, ViewUpdate,
 };
-pub use signal_forwarder::SignalForwarder;
 
 // Re-export domain delta types from their source crates
 pub use aura_chat::ChatDelta;

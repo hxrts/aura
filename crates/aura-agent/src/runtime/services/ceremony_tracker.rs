@@ -414,10 +414,15 @@ mod tests {
             .unwrap();
         assert!(!tracker.is_complete("ceremony-1").await.unwrap());
 
-        tracker
+        let threshold_reached = tracker
             .mark_accepted("ceremony-1", "bob".to_string())
             .await
             .unwrap();
+        assert!(threshold_reached);
+
+        // Completion is only true once the key rotation is committed.
+        assert!(!tracker.is_complete("ceremony-1").await.unwrap());
+        tracker.mark_committed("ceremony-1").await.unwrap();
         assert!(tracker.is_complete("ceremony-1").await.unwrap());
     }
 

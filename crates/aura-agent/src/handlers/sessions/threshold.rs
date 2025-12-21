@@ -15,7 +15,7 @@ impl SessionOperations {
         participants: Vec<DeviceId>,
         threshold: usize,
     ) -> AgentResult<SessionHandle> {
-        let _effects = self.effects().read().await;
+        let _effects = self.effects().clone();
 
         if participants.len() < threshold {
             return Err(AgentError::config("Not enough participants for threshold"));
@@ -44,7 +44,6 @@ impl SessionOperations {
     /// Create key rotation session
     #[allow(dead_code)] // Part of future threshold session API
     pub async fn create_key_rotation_session(&self) -> AgentResult<SessionHandle> {
-        let effects = self.effects().read().await;
         let device_id = self.device_id();
 
         let participants = vec![device_id]; // Single participant for self-rotation
@@ -59,7 +58,7 @@ impl SessionOperations {
             serde_json::Value::String("self_rotation".to_string()),
         );
 
-        let timestamp = effects.current_timestamp().await.unwrap_or(0);
+        let timestamp = self.effects().current_timestamp().await.unwrap_or(0);
 
         handle.metadata.insert(
             "requested_at".to_string(),
@@ -91,7 +90,7 @@ mod tests {
 
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config).unwrap();
-        let effects = Arc::new(RwLock::new(effect_system));
+        let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
@@ -124,7 +123,7 @@ mod tests {
 
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config).unwrap();
-        let effects = Arc::new(RwLock::new(effect_system));
+        let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 

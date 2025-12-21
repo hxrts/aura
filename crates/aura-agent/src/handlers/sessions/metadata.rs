@@ -35,10 +35,9 @@ impl SessionOperations {
             .or_insert_with(HashMap::new);
         entry.extend(_metadata);
         self.persist_metadata(_session_id, entry).await?;
-        let effects = self.effects().read().await;
         HandlerUtilities::append_relational_fact(
             &self.authority_context,
-            &effects,
+            &*self.effects(),
             self.guard_context(),
             "session_metadata_updated",
             &SessionMetadataFact {
@@ -66,10 +65,9 @@ impl SessionOperations {
             participants.push(_device_id);
         }
         self.persist_participants(_session_id, participants).await?;
-        let effects = self.effects().read().await;
         HandlerUtilities::append_relational_fact(
             &self.authority_context,
-            &effects,
+            &*self.effects(),
             self.guard_context(),
             "session_participant_added",
             &SessionParticipantsFact {
@@ -93,10 +91,10 @@ impl SessionOperations {
         if let Some(participants) = participant_registry.get_mut(_session_id) {
             participants.retain(|id| id != &_device_id);
             self.persist_participants(_session_id, participants).await?;
-            let effects = self.effects().read().await;
+            let effects = self.effects().clone();
             HandlerUtilities::append_relational_fact(
                 &self.authority_context,
-                &effects,
+                &*self.effects(),
                 self.guard_context(),
                 "session_participant_removed",
                 &SessionParticipantsFact {
@@ -131,7 +129,7 @@ mod tests {
 
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config).unwrap();
-        let effects = Arc::new(RwLock::new(effect_system));
+        let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
@@ -165,7 +163,7 @@ mod tests {
 
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config).unwrap();
-        let effects = Arc::new(RwLock::new(effect_system));
+        let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
@@ -205,7 +203,7 @@ mod tests {
 
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config).unwrap();
-        let effects = Arc::new(RwLock::new(effect_system));
+        let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
 

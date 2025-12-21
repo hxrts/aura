@@ -267,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn test_chat_service_creation() {
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
         let _service = ChatService::new(effects);
         // Service created successfully
@@ -276,7 +276,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_group_via_service() {
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let service = ChatService::new(effects);
 
         let creator_id = AuthorityId::new_from_entropy([1u8; 32]);
@@ -295,7 +295,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_and_retrieve_message() {
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let service = ChatService::new(effects);
 
         let creator_id = AuthorityId::new_from_entropy([3u8; 32]);
@@ -320,7 +320,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_user_groups() {
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let service = ChatService::new(effects);
 
         let user_id = AuthorityId::new_from_entropy([4u8; 32]);

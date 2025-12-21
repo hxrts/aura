@@ -10,6 +10,9 @@ use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
 };
 use crate::core::AgentConfig;
+use crate::fact_registry::build_fact_registry;
+use crate::reactive::{ReactivePipeline, SchedulerConfig};
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
 use std::sync::Arc;
 
@@ -55,6 +58,11 @@ pub struct RuntimeSystem {
 
     /// Authority ID
     authority_id: AuthorityId,
+
+    /// Reactive scheduler pipeline (facts → scheduler → view updates).
+    ///
+    /// This is optional while the single fact pipeline work is being completed.
+    reactive_pipeline: Option<ReactivePipeline>,
 }
 
 impl RuntimeSystem {
@@ -86,6 +94,7 @@ impl RuntimeSystem {
             ceremony_tracker: CeremonyTracker::new(),
             config,
             authority_id,
+            reactive_pipeline: None,
         }
     }
 
@@ -118,6 +127,7 @@ impl RuntimeSystem {
             ceremony_tracker: CeremonyTracker::new(),
             config,
             authority_id,
+            reactive_pipeline: None,
         }
     }
 
@@ -150,6 +160,7 @@ impl RuntimeSystem {
             ceremony_tracker: CeremonyTracker::new(),
             config,
             authority_id,
+            reactive_pipeline: None,
         }
     }
 
@@ -183,6 +194,7 @@ impl RuntimeSystem {
             ceremony_tracker: CeremonyTracker::new(),
             config,
             authority_id,
+            reactive_pipeline: None,
         }
     }
 
@@ -203,6 +215,30 @@ impl RuntimeSystem {
     /// internal state as needed.
     pub fn effects(&self) -> Arc<AuraEffectSystem> {
         self.effect_system.clone()
+    }
+
+    /// Start the reactive scheduler pipeline (facts → scheduler → view updates).
+    ///
+    /// This is a best-effort wiring step; the pipeline becomes fully useful once
+    /// the runtime publishes typed facts into it (work/002.md C2).
+    pub fn start_reactive_pipeline(&mut self) {
+        if self.reactive_pipeline.is_some() {
+            return;
+        }
+
+        let time_effects: Arc<dyn PhysicalTimeEffects> =
+            Arc::new(self.effect_system.time_effects().clone());
+
+        self.reactive_pipeline = Some(ReactivePipeline::start(
+            SchedulerConfig::default(),
+            build_fact_registry(),
+            time_effects,
+        ));
+    }
+
+    /// Access the running reactive pipeline (if started).
+    pub fn reactive_pipeline(&self) -> Option<&ReactivePipeline> {
+        self.reactive_pipeline.as_ref()
     }
 
     /// Get the context manager

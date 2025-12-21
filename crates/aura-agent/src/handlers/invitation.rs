@@ -432,14 +432,14 @@ mod tests {
     async fn invitation_can_be_created() {
         let authority_context = create_test_authority(91);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = InvitationHandler::new(authority_context.clone()).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([92u8; 32]);
 
         let invitation = handler
             .create_invitation(
-                &effects_guard,
+                &*effects,
                 receiver_id,
                 InvitationType::Contact {
                     nickname: Some("alice".to_string()),
@@ -461,14 +461,14 @@ mod tests {
     async fn invitation_can_be_accepted() {
         let authority_context = create_test_authority(93);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([94u8; 32]);
 
         let invitation = handler
             .create_invitation(
-                &effects_guard,
+                &*effects,
                 receiver_id,
                 InvitationType::Guardian {
                     subject_authority: AuthorityId::new_from_entropy([95u8; 32]),
@@ -480,7 +480,7 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .accept_invitation(&effects_guard, &invitation.invitation_id)
+            .accept_invitation(&*effects, &invitation.invitation_id)
             .await
             .unwrap();
 
@@ -492,14 +492,14 @@ mod tests {
     async fn invitation_can_be_declined() {
         let authority_context = create_test_authority(96);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([97u8; 32]);
 
         let invitation = handler
             .create_invitation(
-                &effects_guard,
+                &*effects,
                 receiver_id,
                 InvitationType::Channel {
                     block_id: "block-123".to_string(),
@@ -511,7 +511,7 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .decline_invitation(&effects_guard, &invitation.invitation_id)
+            .decline_invitation(&*effects, &invitation.invitation_id)
             .await
             .unwrap();
 
@@ -523,14 +523,14 @@ mod tests {
     async fn invitation_can_be_cancelled() {
         let authority_context = create_test_authority(98);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([99u8; 32]);
 
         let invitation = handler
             .create_invitation(
-                &effects_guard,
+                &*effects,
                 receiver_id,
                 InvitationType::Contact { nickname: None },
                 None,
@@ -540,7 +540,7 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .cancel_invitation(&effects_guard, &invitation.invitation_id)
+            .cancel_invitation(&*effects, &invitation.invitation_id)
             .await
             .unwrap();
 
@@ -556,14 +556,14 @@ mod tests {
     async fn list_pending_shows_only_pending() {
         let authority_context = create_test_authority(100);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = InvitationHandler::new(authority_context).unwrap();
 
 
         // Create 3 invitations
         let inv1 = handler
             .create_invitation(
-                &effects_guard,
+                &*effects,
                 AuthorityId::new_from_entropy([101u8; 32]),
                 InvitationType::Contact { nickname: None },
                 None,
@@ -574,7 +574,7 @@ mod tests {
 
         let inv2 = handler
             .create_invitation(
-                &effects_guard,
+                &*effects,
                 AuthorityId::new_from_entropy([102u8; 32]),
                 InvitationType::Contact { nickname: None },
                 None,
@@ -585,7 +585,7 @@ mod tests {
 
         let _inv3 = handler
             .create_invitation(
-                &effects_guard,
+                &*effects,
                 AuthorityId::new_from_entropy([103u8; 32]),
                 InvitationType::Contact { nickname: None },
                 None,
@@ -596,11 +596,11 @@ mod tests {
 
         // Accept one, decline another
         handler
-            .accept_invitation(&effects_guard, &inv1.invitation_id)
+            .accept_invitation(&*effects, &inv1.invitation_id)
             .await
             .unwrap();
         handler
-            .decline_invitation(&effects_guard, &inv2.invitation_id)
+            .decline_invitation(&*effects, &inv2.invitation_id)
             .await
             .unwrap();
 

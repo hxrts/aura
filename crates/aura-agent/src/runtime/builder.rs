@@ -193,6 +193,7 @@ impl EffectSystemBuilder {
             super::services::SyncServiceManager::with_indexed_journal(
                 sync_config,
                 effect_system.indexed_journal().clone(),
+                Arc::new(effect_system.time_effects().clone()),
             )
         });
 
@@ -207,7 +208,7 @@ impl EffectSystemBuilder {
             .map(|social_config| super::services::SocialManager::new(authority_id, social_config));
 
         // Build runtime system with configured services
-        Ok(RuntimeSystem::new_with_services(
+        let mut system = RuntimeSystem::new_with_services(
             effect_executor,
             Arc::new(effect_system),
             context_manager,
@@ -220,7 +221,12 @@ impl EffectSystemBuilder {
             social_manager,
             config,
             authority_id,
-        ))
+        );
+
+        // Start reactive pipeline (facts → scheduler).
+        system.start_reactive_pipeline();
+
+        Ok(system)
     }
 
     /// Build the runtime system (sync)
@@ -256,5 +262,15 @@ mod tests {
             ExecutionMode::Simulation { seed: 42 }
         );
         assert_ne!(ExecutionMode::Production, ExecutionMode::Testing);
+    }
+
+    #[test]
+    fn build_starts_reactive_pipeline() {
+        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
+        let runtime = EffectSystemBuilder::testing()
+            .with_authority(authority_id)
+            .build_sync()
+            .expect("build_sync should succeed in testing mode");
+        assert!(runtime.reactive_pipeline().is_some());
     }
 }

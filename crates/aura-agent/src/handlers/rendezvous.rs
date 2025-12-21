@@ -449,12 +449,12 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
         let context_id = ContextId::new_from_entropy([151u8; 32]);
         let result = handler
             .publish_descriptor(
-                &effects_guard,
+                &*effects,
                 context_id,
                 vec![TransportHint::QuicDirect {
                     addr: "127.0.0.1:8443".to_string(),
@@ -503,7 +503,7 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
         let context_id = ContextId::new_from_entropy([154u8; 32]);
         let peer = AuthorityId::new_from_entropy([55u8; 32]);
@@ -525,7 +525,7 @@ mod tests {
 
         // Now initiate channel
         let result = handler
-            .initiate_channel(&effects_guard, context_id, peer)
+            .initiate_channel(&*effects, context_id, peer)
             .await
             .unwrap();
 
@@ -540,14 +540,14 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
         let context_id = ContextId::new_from_entropy([156u8; 32]);
         let peer = AuthorityId::new_from_entropy([57u8; 32]);
         let channel_id = [99u8; 32];
 
         let result = handler
-            .complete_channel(&effects_guard, context_id, peer, channel_id, 1)
+            .complete_channel(&*effects, context_id, peer, channel_id, 1)
             .await
             .unwrap();
 

@@ -48,6 +48,7 @@
 use crate::verification::{MerkleComparison, MerkleVerifier, VerificationResult};
 use aura_core::domain::journal::FactValue;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::BloomFilter;
 use aura_core::{hash, AuraError};
 use bincode;
@@ -170,12 +171,13 @@ pub struct FactSyncProtocol {
 }
 
 impl FactSyncProtocol {
-    /// Create a new fact sync protocol with the given configuration and journal
+    /// Create a new fact sync protocol with the given configuration, journal, and time effects
     pub fn new(
         config: FactSyncConfig,
         indexed_journal: Arc<dyn IndexedJournalEffects + Send + Sync>,
+        time: Arc<dyn PhysicalTimeEffects>,
     ) -> Self {
-        let verifier = MerkleVerifier::new(indexed_journal.clone());
+        let verifier = MerkleVerifier::new(indexed_journal.clone(), time);
         Self {
             config,
             verifier,
@@ -428,8 +430,37 @@ mod tests {
     use aura_core::domain::journal::FactValue;
     use aura_core::effects::indexed::{FactId, FactStreamReceiver, IndexStats};
     use aura_core::effects::{BloomConfig, BloomFilter};
+    use aura_core::time::{PhysicalTime, TimeError};
     use aura_core::AuthorityId;
     use std::sync::Mutex;
+
+    /// Fixed time for deterministic tests
+    const TEST_TIME_MS: u64 = 1_700_000_000_000;
+
+    /// Mock time effects for testing
+    struct MockTimeEffects {
+        now_ms: u64,
+    }
+
+    impl MockTimeEffects {
+        fn new(now_ms: u64) -> Arc<Self> {
+            Arc::new(Self { now_ms })
+        }
+    }
+
+    #[async_trait]
+    impl PhysicalTimeEffects for MockTimeEffects {
+        async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+            Ok(PhysicalTime {
+                ts_ms: self.now_ms,
+                uncertainty_ms: None,
+            })
+        }
+
+        async fn sleep_ms(&self, _ms: u64) -> Result<(), TimeError> {
+            Ok(())
+        }
+    }
 
     /// Mock indexed journal for testing
     struct MockIndexedJournal {
@@ -528,7 +559,8 @@ mod tests {
     async fn test_sync_skipped_when_roots_match() {
         let root = [1u8; 32];
         let journal = Arc::new(MockIndexedJournal::new(root));
-        let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal);
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal, time);
 
         let (result, facts_to_send) = protocol.sync_with_peer(root, &[], vec![]).await.unwrap();
 
@@ -547,7 +579,8 @@ mod tests {
             local_root,
             local_facts.clone(),
         ));
-        let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal);
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal, time);
 
         let incoming = vec![create_test_fact(3)];
         let (result, facts_to_send) = protocol
@@ -567,12 +600,13 @@ mod tests {
         let local_root = [1u8; 32];
         let remote_root = [2u8; 32];
         let journal = Arc::new(MockIndexedJournal::new(local_root));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
 
         let config = FactSyncConfig {
             verify_merkle: false,
             ..Default::default()
         };
-        let protocol = FactSyncProtocol::new(config, journal);
+        let protocol = FactSyncProtocol::new(config, journal, time);
 
         let incoming = vec![create_test_fact(1)];
         let (result, _) = protocol
@@ -594,12 +628,13 @@ mod tests {
             facts.push(create_test_fact(i));
         }
         let journal = Arc::new(MockIndexedJournal::with_facts(root, facts));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
 
         let config = FactSyncConfig {
             max_batch_size: 10,
             ..Default::default()
         };
-        let protocol = FactSyncProtocol::new(config, journal);
+        let protocol = FactSyncProtocol::new(config, journal, time);
 
         let (_, facts_to_send) = protocol
             .sync_with_peer(remote_root, &[], vec![])
@@ -618,7 +653,8 @@ mod tests {
             local_root,
             local_facts.clone(),
         ));
-        let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal);
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal, time);
 
         // Peer already has fact 1
         let mut filter = BloomFilter::new(BloomConfig::for_sync(10)).unwrap();

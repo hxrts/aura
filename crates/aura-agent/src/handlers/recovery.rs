@@ -542,7 +542,7 @@ mod tests {
     async fn recovery_can_be_initiated() {
         let authority_context = create_test_authority(130);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![
@@ -553,7 +553,7 @@ mod tests {
 
         let request = handler
             .initiate(
-                &effects_guard,
+                &*effects,
                 RecoveryOperation::AddDevice {
                     device_public_key: vec![0u8; 32],
                 },
@@ -574,7 +574,7 @@ mod tests {
     async fn guardian_approvals_can_be_submitted() {
         let authority_context = create_test_authority(134);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![
@@ -584,7 +584,7 @@ mod tests {
 
         let request = handler
             .initiate(
-                &effects_guard,
+                &*effects,
                 RecoveryOperation::RemoveDevice { leaf_index: 0 },
                 guardians.clone(),
                 2, // 2-of-2
@@ -603,7 +603,7 @@ mod tests {
             approved_at: 12345,
         };
         let state = handler
-            .submit_approval(&effects_guard, approval1)
+            .submit_approval(&*effects, approval1)
             .await
             .unwrap();
 
@@ -623,7 +623,7 @@ mod tests {
             approved_at: 12346,
         };
         let state = handler
-            .submit_approval(&effects_guard, approval2)
+            .submit_approval(&*effects, approval2)
             .await
             .unwrap();
 
@@ -639,14 +639,14 @@ mod tests {
     async fn recovery_can_be_completed() {
         let authority_context = create_test_authority(137);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([138u8; 32])];
 
         let request = handler
             .initiate(
-                &effects_guard,
+                &*effects,
                 RecoveryOperation::ReplaceTree {
                     new_public_key: vec![0u8; 32],
                 },
@@ -667,13 +667,13 @@ mod tests {
             approved_at: 12345,
         };
         handler
-            .submit_approval(&effects_guard, approval)
+            .submit_approval(&*effects, approval)
             .await
             .unwrap();
 
         // Complete recovery
         let result = handler
-            .complete(&effects_guard, &request.recovery_id)
+            .complete(&*effects, &request.recovery_id)
             .await
             .unwrap();
 
@@ -688,7 +688,7 @@ mod tests {
     async fn recovery_can_be_cancelled() {
         let authority_context = create_test_authority(139);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![
@@ -698,7 +698,7 @@ mod tests {
 
         let request = handler
             .initiate(
-                &effects_guard,
+                &*effects,
                 RecoveryOperation::UpdateGuardians {
                     new_guardians: vec![],
                     new_threshold: 1,
@@ -713,7 +713,7 @@ mod tests {
 
         let result = handler
             .cancel(
-                &effects_guard,
+                &*effects,
                 &request.recovery_id,
                 "User cancelled".to_string(),
             )
@@ -733,14 +733,14 @@ mod tests {
     async fn invalid_threshold_is_rejected() {
         let authority_context = create_test_authority(142);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([143u8; 32])];
 
         let result = handler
             .initiate(
-                &effects_guard,
+                &*effects,
                 RecoveryOperation::AddDevice {
                     device_public_key: vec![0u8; 32],
                 },

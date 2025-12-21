@@ -218,7 +218,6 @@ impl SessionOperations {
     }
 
     pub(super) async fn persist_session_handle(&self, handle: &SessionHandle) -> AgentResult<()> {
-        let effects = self.effects().read().await;
         let key = format!("session/{}", handle.session_id);
         let bytes = serde_json::to_vec(handle)
             .map_err(|e| AgentError::effects(format!("serialize session: {e}")))?;
@@ -232,7 +231,6 @@ impl SessionOperations {
         &self,
         session_key: &str,
     ) -> AgentResult<Option<SessionHandle>> {
-        let effects = self.effects().read().await;
         let key = format!("session/{}", session_key);
         let maybe = self.effects
             .retrieve(&key)
@@ -252,7 +250,6 @@ impl SessionOperations {
         session_id: &str,
         participants: &[DeviceId],
     ) -> AgentResult<()> {
-        let effects = self.effects().read().await;
         let key = format!("session/{session_id}/participants");
         let bytes = serde_json::to_vec(participants)
             .map_err(|e| AgentError::effects(format!("serialize participants: {e}")))?;
@@ -267,7 +264,6 @@ impl SessionOperations {
         session_id: &str,
         metadata: &HashMap<String, serde_json::Value>,
     ) -> AgentResult<()> {
-        let effects = self.effects().read().await;
         let key = format!("session/{session_id}/metadata");
         let bytes = serde_json::to_vec(metadata)
             .map_err(|e| AgentError::effects(format!("serialize metadata: {e}")))?;
@@ -747,7 +743,7 @@ mod tests {
         let account_id = AccountId::new_from_entropy([3u8; 32]);
 
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
@@ -780,9 +776,9 @@ mod tests {
 
         // Use shared transport inbox to verify messages are sent
         let shared_inbox = Arc::new(StdRwLock::new(Vec::new()));
-        let effects = Arc::new(RwLock::new(
+        let effects = Arc::new(
             AuraEffectSystem::testing_with_shared_transport(&config, shared_inbox.clone()).unwrap(),
-        ));
+        );
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
 
         let other_device = DeviceId::new_from_entropy([5u8; 32]);
@@ -816,7 +812,7 @@ mod tests {
         });
         let account_id = AccountId::new_from_entropy([14u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
 
         let handle = sessions
@@ -825,7 +821,7 @@ mod tests {
             .unwrap();
 
         let storage_key = format!("session/{}", handle.session_id);
-        let stored = self.effects.retrieve(&storage_key).await.unwrap();
+        let stored = effects.retrieve(&storage_key).await.unwrap();
 
         assert!(stored.is_some(), "session handle persisted to storage");
     }

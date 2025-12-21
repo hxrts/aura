@@ -7,7 +7,7 @@
 //! - `invitations/` - InvitationsScreen, InvitationCodeModal, InvitationCreateModal, InvitationImportModal
 //! - `recovery/` - RecoveryScreen, GuardianSetupModal, ThresholdModal
 
-mod app;
+pub mod app;
 mod block;
 mod chat;
 mod contacts;

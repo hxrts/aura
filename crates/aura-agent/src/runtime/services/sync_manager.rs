@@ -118,6 +118,7 @@ impl SyncServiceManager {
     pub fn with_indexed_journal(
         config: SyncManagerConfig,
         indexed_journal: Arc<dyn IndexedJournalEffects + Send + Sync>,
+        time: Arc<dyn PhysicalTimeEffects>,
     ) -> Self {
         Self {
             service: Arc::new(RwLock::new(None)),
@@ -125,7 +126,7 @@ impl SyncServiceManager {
             state: Arc::new(RwLock::new(SyncManagerState::Stopped)),
             peers: Arc::new(RwLock::new(config.initial_peers)),
             background_task: Arc::new(RwLock::new(None)),
-            merkle_verifier: Some(Arc::new(MerkleVerifier::new(indexed_journal))),
+            merkle_verifier: Some(Arc::new(MerkleVerifier::new(indexed_journal, time))),
         }
     }
 
@@ -513,8 +514,12 @@ mod tests {
     async fn test_sync_manager_with_merkle_verification() {
         let root = [42u8; 32];
         let journal = Arc::new(MockIndexedJournal::new(root));
-        let manager =
-            SyncServiceManager::with_indexed_journal(SyncManagerConfig::for_testing(), journal);
+        let time = Arc::new(PhysicalTimeHandler::new());
+        let manager = SyncServiceManager::with_indexed_journal(
+            SyncManagerConfig::for_testing(),
+            journal,
+            time,
+        );
 
         // Manager with indexed journal should have Merkle verification
         assert!(manager.has_merkle_verification());
@@ -529,8 +534,12 @@ mod tests {
     async fn test_sync_manager_verify_facts() {
         let root = [42u8; 32];
         let journal = Arc::new(MockIndexedJournal::new(root));
-        let manager =
-            SyncServiceManager::with_indexed_journal(SyncManagerConfig::for_testing(), journal);
+        let time = Arc::new(PhysicalTimeHandler::new());
+        let manager = SyncServiceManager::with_indexed_journal(
+            SyncManagerConfig::for_testing(),
+            journal,
+            time,
+        );
 
         // Create test fact
         let fact = IndexedFact {

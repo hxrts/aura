@@ -257,7 +257,7 @@ mod tests {
     async fn test_invitation_service_creation() {
         let authority_context = create_test_authority(110);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
         let service = InvitationService::new(effects, authority_context);
         assert!(service.is_ok());
@@ -267,7 +267,7 @@ mod tests {
     async fn test_invite_as_contact() {
         let authority_context = create_test_authority(111);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let service = InvitationService::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([112u8; 32]);
@@ -290,7 +290,7 @@ mod tests {
     async fn test_invite_as_guardian() {
         let authority_context = create_test_authority(113);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let service = InvitationService::new(effects, authority_context.clone()).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([114u8; 32]);
@@ -312,7 +312,7 @@ mod tests {
     async fn test_invite_to_channel() {
         let authority_context = create_test_authority(115);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let service = InvitationService::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
@@ -328,7 +328,7 @@ mod tests {
     async fn test_accept_decline_flow() {
         let authority_context = create_test_authority(117);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let service = InvitationService::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([118u8; 32]);
@@ -362,7 +362,7 @@ mod tests {
     async fn test_is_pending() {
         let authority_context = create_test_authority(120);
         let config = AgentConfig::default();
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let service = InvitationService::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([121u8; 32]);

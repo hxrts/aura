@@ -16,8 +16,9 @@
 //! ```rust,ignore
 //! use aura_sync::verification::MerkleVerifier;
 //! use aura_core::effects::indexed::IndexedJournalEffects;
+//! use aura_core::effects::time::PhysicalTimeEffects;
 //!
-//! let verifier = MerkleVerifier::new(indexed_journal);
+//! let verifier = MerkleVerifier::new(indexed_journal, time_effects);
 //!
 //! // Check if local and remote journals are in sync
 //! let comparison = verifier.compare_roots(remote_root).await?;
@@ -27,6 +28,7 @@
 //! ```
 
 use aura_core::effects::indexed::{IndexStats, IndexedFact, IndexedJournalEffects};
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::BloomFilter;
 use aura_core::time::TimeStamp;
 use aura_core::AuraError;
@@ -90,12 +92,20 @@ pub struct VerificationStats {
 pub struct MerkleVerifier {
     /// Local indexed journal for verification operations
     indexed_journal: Arc<dyn IndexedJournalEffects + Send + Sync>,
+    /// Time effects for timestamp validation
+    time: Arc<dyn PhysicalTimeEffects>,
 }
 
 impl MerkleVerifier {
-    /// Create a new MerkleVerifier with the given indexed journal
-    pub fn new(indexed_journal: Arc<dyn IndexedJournalEffects + Send + Sync>) -> Self {
-        Self { indexed_journal }
+    /// Create a new MerkleVerifier with the given indexed journal and time effects
+    pub fn new(
+        indexed_journal: Arc<dyn IndexedJournalEffects + Send + Sync>,
+        time: Arc<dyn PhysicalTimeEffects>,
+    ) -> Self {
+        Self {
+            indexed_journal,
+            time,
+        }
     }
 
     /// Get local Merkle root for exchange with peer
@@ -171,6 +181,14 @@ impl MerkleVerifier {
         let mut verified = Vec::new();
         let mut rejected = Vec::new();
 
+        // Get current time from effect trait for timestamp validation
+        let now_ms = self
+            .time
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
+
         for fact in facts {
             // Check if fact is already in our index
             match self.indexed_journal.verify_fact_inclusion(&fact).await {
@@ -191,7 +209,7 @@ impl MerkleVerifier {
                         // 4. Signature verification (when signatures are provided)
 
                         // Validate timestamp consistency
-                        if let Err(reason) = Self::validate_timestamp(&fact) {
+                        if let Err(reason) = Self::validate_timestamp(&fact, now_ms) {
                             tracing::warn!(
                                 fact_id = ?fact.id,
                                 reason = %reason,
@@ -258,10 +276,15 @@ impl MerkleVerifier {
     /// Checks that the fact's timestamp is not too far in the future,
     /// which would indicate clock skew or potential manipulation.
     ///
+    /// # Arguments
+    ///
+    /// * `fact` - The fact to validate
+    /// * `now_ms` - Current time in milliseconds (from effect trait)
+    ///
     /// # Returns
     /// - `Ok(())` if timestamp is valid or not present
     /// - `Err(reason)` if timestamp is too far in the future
-    fn validate_timestamp(fact: &IndexedFact) -> Result<(), String> {
+    fn validate_timestamp(fact: &IndexedFact, now_ms: u64) -> Result<(), String> {
         let Some(timestamp) = &fact.timestamp else {
             // No timestamp is acceptable for facts that don't require it
             return Ok(());
@@ -277,12 +300,6 @@ impl MerkleVerifier {
             // Logical and Order clocks don't have physical time semantics
             TimeStamp::LogicalClock(_) | TimeStamp::OrderClock(_) => return Ok(()),
         };
-
-        // Get current time in milliseconds
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
 
         // Reject if timestamp is too far in the future
         if fact_time_ms > now_ms + MAX_CLOCK_SKEW_MS {
@@ -335,8 +352,37 @@ mod tests {
     use aura_core::domain::journal::FactValue;
     use aura_core::effects::indexed::{FactId, FactStreamReceiver};
     use aura_core::effects::BloomConfig;
+    use aura_core::time::{PhysicalTime, TimeError};
     use aura_core::AuthorityId;
     use std::sync::Mutex;
+
+    /// Fixed time for deterministic tests
+    const TEST_TIME_MS: u64 = 1_700_000_000_000;
+
+    /// Mock time effects for testing
+    struct MockTimeEffects {
+        now_ms: u64,
+    }
+
+    impl MockTimeEffects {
+        fn new(now_ms: u64) -> Arc<Self> {
+            Arc::new(Self { now_ms })
+        }
+    }
+
+    #[async_trait]
+    impl PhysicalTimeEffects for MockTimeEffects {
+        async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+            Ok(PhysicalTime {
+                ts_ms: self.now_ms,
+                uncertainty_ms: None,
+            })
+        }
+
+        async fn sleep_ms(&self, _ms: u64) -> Result<(), TimeError> {
+            Ok(())
+        }
+    }
 
     /// Mock indexed journal for testing
     struct MockIndexedJournal {
@@ -435,7 +481,8 @@ mod tests {
     async fn test_compare_roots_in_sync() {
         let root = [1u8; 32];
         let journal = Arc::new(MockIndexedJournal::new(root));
-        let verifier = MerkleVerifier::new(journal);
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
 
         let result = verifier.compare_roots(root).await.unwrap();
         assert_eq!(result, MerkleComparison::InSync);
@@ -446,7 +493,8 @@ mod tests {
         let local_root = [1u8; 32];
         let remote_root = [2u8; 32];
         let journal = Arc::new(MockIndexedJournal::new(local_root));
-        let verifier = MerkleVerifier::new(journal);
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
 
         let result = verifier.compare_roots(remote_root).await.unwrap();
         assert_eq!(
@@ -466,7 +514,8 @@ mod tests {
             root,
             vec![existing_fact.clone()],
         ));
-        let verifier = MerkleVerifier::new(journal);
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
 
         let result = verifier
             .verify_incoming_facts(vec![existing_fact], root)
@@ -481,7 +530,8 @@ mod tests {
     async fn test_verify_new_facts() {
         let root = [1u8; 32];
         let journal = Arc::new(MockIndexedJournal::new(root));
-        let verifier = MerkleVerifier::new(journal);
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
 
         let new_fact = create_test_fact(99);
         let result = verifier
@@ -503,7 +553,8 @@ mod tests {
             create_test_fact(3),
         ];
         let journal = Arc::new(MockIndexedJournal::with_facts(root, facts));
-        let verifier = MerkleVerifier::new(journal);
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
 
         let stats = verifier.stats().await.unwrap();
         assert_eq!(stats.fact_count, 3);

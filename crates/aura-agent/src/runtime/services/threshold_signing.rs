@@ -266,8 +266,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to store key package: {}", e)))?;
 
-        // Drop the effects lock before acquiring the contexts lock
-        drop(self.effects);
 
         // Create context state
         let config = ThresholdConfig::new(1, 1)?;
@@ -662,7 +660,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         // so no in-memory rollback is needed
 
         // For now, just acknowledge - actual cleanup would require delete capability
-        let _ = (self.effects, pubkey_location); // silence unused warnings
+        let _ = (&self.effects, pubkey_location); // silence unused warnings
 
         Ok(())
     }

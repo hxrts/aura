@@ -192,7 +192,7 @@ impl Journal {
     /// use aura_journal::fact_journal::RelationalFact;
     ///
     /// let fact = RelationalFact::Generic {
-    ///     context_id: ContextId::new(),
+    ///     context_id: ContextId::from(uuid::Uuid::from_bytes([0u8; 16])),
     ///     binding_type: "dkd_derivation".to_string(),
     ///     binding_data: serde_json::to_vec(&metadata).unwrap(),
     /// };
