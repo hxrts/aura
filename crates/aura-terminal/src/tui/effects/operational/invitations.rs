@@ -1,6 +1,6 @@
 //! Invitation command handlers
 //!
-//! Handlers for ExportInvitation, ImportInvitation, InviteGuardian, SubmitGuardianApproval.
+//! Handlers for invitation import/export and runtime-backed accept/decline.
 //!
 //! This module delegates to portable workflows in aura_app::workflows::invitation
 //! and adds terminal-specific response formatting.
@@ -15,7 +15,9 @@ use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::invitation::{export_invitation, import_invitation_details};
+pub use aura_app::workflows::invitation::{
+    accept_invitation, decline_invitation, export_invitation, import_invitation_details,
+};
 
 /// Handle invitation commands
 pub async fn handle_invitations(
@@ -45,6 +47,18 @@ pub async fn handle_invitations(
             // Delegate to workflow for parsing via RuntimeBridge
             match import_invitation_details(app_core, code).await {
                 Ok(invitation) => {
+                    // Demo semantics: importing a CONTACT invite code is the acceptance step.
+                    if matches!(invitation.invitation_type, InvitationBridgeType::Contact { .. }) {
+                        if let Err(e) =
+                            accept_invitation(app_core, &invitation.invitation_id).await
+                        {
+                            return Some(Err(OpError::InvalidArgument(format!(
+                                "Failed to accept invitation: {}",
+                                e
+                            ))));
+                        }
+                    }
+
                     // Format invitation type for display
                     let invitation_type = match &invitation.invitation_type {
                         InvitationBridgeType::Channel { block_id } => {
@@ -70,6 +84,26 @@ pub async fn handle_invitations(
                 }
                 Err(e) => Some(Err(OpError::InvalidArgument(format!(
                     "Invalid invitation code: {}",
+                    e
+                )))),
+            }
+        }
+
+        EffectCommand::AcceptInvitation { invitation_id } => {
+            match accept_invitation(app_core, invitation_id).await {
+                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(OpError::Failed(format!(
+                    "Failed to accept invitation: {}",
+                    e
+                )))),
+            }
+        }
+
+        EffectCommand::DeclineInvitation { invitation_id } => {
+            match decline_invitation(app_core, invitation_id).await {
+                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(OpError::Failed(format!(
+                    "Failed to decline invitation: {}",
                     e
                 )))),
             }

@@ -12,8 +12,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::views::contacts::Contact as ViewContact;
-use aura_app::AppCore;
 
 use super::{SnapshotHelper, ToastHelper};
 use crate::error::TerminalError;
@@ -139,10 +137,9 @@ impl AccountFilesHelper {
     }
 }
 
-/// Helper for dispatching commands through AppCore (intents) and OperationalHandler.
+/// Helper for dispatching commands through `OperationalHandler`.
 #[derive(Clone)]
 pub struct DispatchHelper {
-    app_core: Arc<RwLock<AppCore>>,
     operational: Arc<OperationalHandler>,
     snapshots: SnapshotHelper,
     toasts: ToastHelper,
@@ -157,7 +154,6 @@ pub struct DispatchHelper {
 impl DispatchHelper {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        app_core: Arc<RwLock<AppCore>>,
         operational: Arc<OperationalHandler>,
         snapshots: SnapshotHelper,
         toasts: ToastHelper,
@@ -167,7 +163,6 @@ impl DispatchHelper {
         channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     ) -> Self {
         Self {
-            app_core,
             operational,
             snapshots,
             toasts,
@@ -268,13 +263,14 @@ impl DispatchHelper {
             OpResponse::NicknameUpdated { name: _ } => Ok(()),
             OpResponse::MfaPolicyUpdated { require_mfa: _ } => Ok(()),
             OpResponse::InvitationImported {
-                sender_id,
                 invitation_type: _,
                 message,
                 ..
             } => {
-                self.add_contact_from_invitation(&sender_id, message.as_deref())
-                    .await;
+                // Importing a demo contact code triggers a runtime-backed accept which
+                // commits a ContactFact; the reactive scheduler will update CONTACTS_SIGNAL.
+                let summary = message.unwrap_or_else(|| "Invitation imported".to_string());
+                self.toasts.success("invitation", summary).await;
                 Ok(())
             }
             OpResponse::InvitationCode { id: _, code } => {
@@ -316,49 +312,6 @@ impl DispatchHelper {
                 }
             }
         }
-    }
-
-    async fn add_contact_from_invitation(&self, sender_id: &str, message: Option<&str>) {
-        // Parse sender_id to AuthorityId
-        let authority_id = match sender_id.parse::<AuthorityId>() {
-            Ok(id) => id,
-            Err(_) => {
-                tracing::warn!("Failed to parse sender_id as AuthorityId: {}", sender_id);
-                return;
-            }
-        };
-
-        let suggested_name = message.and_then(|msg| {
-            if msg.contains("from ") {
-                msg.split("from ")
-                    .nth(1)
-                    .and_then(|s| s.split(' ').next())
-                    .map(|s| s.to_string())
-            } else {
-                None
-            }
-        });
-
-        let contact = ViewContact {
-            id: authority_id.clone(),
-            nickname: suggested_name.clone().unwrap_or_default(),
-            suggested_name,
-            is_guardian: false,
-            is_resident: false,
-            last_interaction: Some(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64,
-            ),
-            is_online: true,
-        };
-
-        // Use AppCore's add_contact method which updates ViewState.
-        // Signal forwarding automatically propagates to CONTACTS_SIGNAL.
-        let core = self.app_core.read().await;
-        core.add_contact(contact);
-        tracing::info!("Added contact from invitation: {}", sender_id);
     }
 
     pub async fn mark_peer_invited(&self, authority_id: &str) {

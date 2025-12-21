@@ -5,7 +5,6 @@
 //! `aura-agent` provides the implementation.
 
 use crate::core::AuraAgent;
-use crate::handlers::invitation_service::InvitationService;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo, RendezvousStatus,
@@ -653,22 +652,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError> {
-        // Use the static method from InvitationService to parse the code
-        let shareable = InvitationService::import_code(code).map_err(|e| {
-            IntentError::validation_failed(format!("Invalid invitation code: {}", e))
+        let invitation_service = self.agent.invitations().map_err(|e| {
+            IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
-        // Convert shareable to bridge info
-        Ok(InvitationInfo {
-            invitation_id: shareable.invitation_id,
-            sender_id: shareable.sender_id,
-            receiver_id: self.agent.authority_id(), // Receiver is us (we're importing)
-            invitation_type: convert_invitation_type_to_bridge(&shareable.invitation_type),
-            status: InvitationBridgeStatus::Pending, // Imported invitations start as pending
-            created_at_ms: 0,                        // Not available in shareable format
-            expires_at_ms: shareable.expires_at,
-            message: shareable.message,
-        })
+        // Import into the agent cache so later operations (accept/decline) can resolve
+        // the invitation details by ID even when the original `Sent` fact isn't present.
+        let invitation = invitation_service
+            .import_and_cache(code)
+            .await
+            .map_err(|e| IntentError::validation_failed(format!("Invalid invitation code: {}", e)))?;
+
+        Ok(convert_invitation_to_bridge_info(&invitation))
     }
 
     async fn get_invited_peer_ids(&self) -> Vec<String> {

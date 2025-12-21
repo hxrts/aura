@@ -12,9 +12,14 @@ use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomEffects;
 use aura_core::identifiers::AuthorityId;
+use aura_core::time::PhysicalTime;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_protocol::effects::EffectApiEffects;
+use aura_journal::DomainFact;
+use aura_journal::fact::{FactContent, RelationalFact};
+use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
+use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -173,6 +178,33 @@ impl InvitationHandler {
         // Execute the outcome
         execute_guard_outcome(outcome, &self.context.authority, effects).await?;
 
+        // Best-effort: accepting a contact invitation should add the sender as a contact.
+        //
+        // This needs to be fact-backed so the Contacts reactive view (CONTACTS_SIGNAL)
+        // can converge from journal state rather than UI-local mutations.
+        if let Some((contact_id, nickname)) = self
+            .resolve_contact_invitation(effects, invitation_id)
+            .await?
+        {
+            let now_ms = effects.current_timestamp().await.unwrap_or(0);
+            let context_id = self.context.effect_context.context_id();
+            let fact = ContactFact::Added {
+                context_id,
+                owner_id: self.context.authority.authority_id,
+                contact_id,
+                nickname,
+                added_at: PhysicalTime {
+                    ts_ms: now_ms,
+                    uncertainty: None,
+                },
+            };
+
+            effects
+                .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID, fact.to_bytes())
+                .await
+                .map_err(|e| crate::core::AgentError::effects(format!("commit contact fact: {e}")))?;
+        }
+
         // Update cache if we have this invitation
         {
             let mut cache = self.pending_invitations.write().await;
@@ -187,6 +219,141 @@ impl InvitationHandler {
             new_status: Some(InvitationStatus::Accepted),
             error: None,
         })
+    }
+
+    async fn resolve_contact_invitation(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &str,
+    ) -> AgentResult<Option<(AuthorityId, String)>> {
+        let own_id = self.context.authority.authority_id;
+
+        // First try the local cache (covers out-of-band imports).
+        {
+            let cache = self.pending_invitations.read().await;
+            if let Some(inv) = cache.get(invitation_id) {
+                if let InvitationType::Contact { nickname } = &inv.invitation_type {
+                    let other = if inv.sender_id == own_id {
+                        inv.receiver_id
+                    } else {
+                        inv.sender_id
+                    };
+                    let nickname = nickname
+                        .clone()
+                        .unwrap_or_else(|| other.to_string());
+                    return Ok(Some((other, nickname)));
+                }
+            }
+        }
+
+        // Fallback: attempt to resolve from committed InvitationFact::Sent.
+        //
+        // This supports in-band invites that arrived via sync and are visible in the journal.
+        let Ok(facts) = effects.load_committed_facts(own_id).await else {
+            return Ok(None);
+        };
+
+        for fact in facts.iter().rev() {
+            let FactContent::Relational(RelationalFact::Generic {
+                binding_type,
+                binding_data,
+                ..
+            }) = &fact.content
+            else {
+                continue;
+            };
+
+            if binding_type != INVITATION_FACT_TYPE_ID {
+                continue;
+            }
+
+            let Some(inv_fact) = InvitationFact::from_bytes(binding_data) else {
+                continue;
+            };
+
+            let InvitationFact::Sent {
+                invitation_id: seen_id,
+                sender_id,
+                receiver_id,
+                invitation_type,
+                message,
+                ..
+            } = inv_fact
+            else {
+                continue;
+            };
+
+            if seen_id != invitation_id {
+                continue;
+            }
+
+            // Only treat it as a "contact invitation" if the type string is contact-like.
+            if invitation_type.to_lowercase() != "contact" {
+                return Ok(None);
+            }
+
+            if receiver_id != own_id {
+                // Not a received invite; don't derive contact relationship.
+                return Ok(None);
+            }
+
+            let nickname = message
+                .as_deref()
+                .and_then(|m| m.split("from ").nth(1))
+                .and_then(|s| s.split_whitespace().next())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| sender_id.to_string());
+
+            return Ok(Some((sender_id, nickname)));
+        }
+
+        Ok(None)
+    }
+
+    /// Import an invitation from a shareable code into the local cache.
+    ///
+    /// This is a best-effort, local-only operation used for out-of-band invite
+    /// transfer (copy/paste). It does not commit any facts by itself; callers
+    /// should accept/decline via the normal guard-chain paths.
+    pub async fn import_invitation_code(
+        &self,
+        effects: &AuraEffectSystem,
+        code: &str,
+    ) -> AgentResult<Invitation> {
+        HandlerUtilities::validate_authority_context(&self.context.authority)?;
+
+        let shareable = ShareableInvitation::from_code(code)
+            .map_err(|e| crate::core::AgentError::invalid(format!("{e}")))?;
+
+        let invitation_id = shareable.invitation_id.clone();
+
+        // Fast path: already cached.
+        {
+            let cache = self.pending_invitations.read().await;
+            if let Some(existing) = cache.get(&invitation_id) {
+                return Ok(existing.clone());
+            }
+        }
+
+        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+
+        // Imported invitations are "received" by the current authority.
+        let invitation = Invitation {
+            invitation_id: invitation_id.clone(),
+            context_id: self.context.effect_context.context_id(),
+            sender_id: shareable.sender_id,
+            receiver_id: self.context.authority.authority_id,
+            invitation_type: shareable.invitation_type,
+            status: InvitationStatus::Pending,
+            created_at: now_ms,
+            expires_at: shareable.expires_at,
+            message: shareable.message,
+        };
+
+        let mut cache = self.pending_invitations.write().await;
+        cache.insert(invitation_id, invitation.clone());
+
+        Ok(invitation)
     }
 
     /// Decline an invitation
@@ -414,6 +581,8 @@ mod tests {
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
     use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_journal::fact::{FactContent, RelationalFact};
+    use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
     use std::sync::Arc;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
@@ -516,6 +685,90 @@ mod tests {
 
         assert!(result.success);
         assert_eq!(result.new_status, Some(InvitationStatus::Declined));
+    }
+
+    #[tokio::test]
+    async fn importing_and_accepting_contact_invitation_commits_contact_fact() {
+        let own_authority = AuthorityId::new_from_entropy([120u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
+
+        let mut authority_context = AuthorityContext::new(own_authority);
+        authority_context.add_context(RelationalContext {
+            context_id: ContextId::new_from_entropy([120u8; 32]),
+            participants: vec![],
+            metadata: Default::default(),
+        });
+
+        let handler = InvitationHandler::new(authority_context).unwrap();
+
+        let sender_id = AuthorityId::new_from_entropy([121u8; 32]);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: "inv-demo-contact-1".to_string(),
+            sender_id,
+            invitation_type: InvitationType::Contact {
+                nickname: Some("Alice".to_string()),
+            },
+            expires_at: None,
+            message: Some("Contact invitation from Alice (demo)".to_string()),
+        };
+        let code = shareable.to_code();
+
+        let imported = handler
+            .import_invitation_code(&*effects, &code)
+            .await
+            .unwrap();
+        assert_eq!(imported.sender_id, sender_id);
+        assert_eq!(imported.receiver_id, own_authority);
+
+        handler
+            .accept_invitation(&*effects, &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let committed = effects.load_committed_facts(own_authority).await.unwrap();
+
+        let mut found = None::<ContactFact>;
+        let mut seen_binding_types: Vec<String> = Vec::new();
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic {
+                binding_type,
+                binding_data,
+                ..
+            }) = fact.content
+            else {
+                continue;
+            };
+
+            seen_binding_types.push(binding_type.clone());
+            if binding_type != CONTACT_FACT_TYPE_ID {
+                continue;
+            }
+
+            found = ContactFact::from_bytes(&binding_data);
+        }
+
+        if found.is_none() {
+            panic!(
+                "Expected a committed ContactFact, saw bindings: {:?}",
+                seen_binding_types
+            );
+        }
+        let fact = found.unwrap();
+        match fact {
+            ContactFact::Added {
+                owner_id,
+                contact_id,
+                nickname,
+                ..
+            } => {
+                assert_eq!(owner_id, own_authority);
+                assert_eq!(contact_id, sender_id);
+                assert_eq!(nickname, "Alice");
+            }
+            other => panic!("Expected ContactFact::Added, got {:?}", other),
+        }
     }
 
     #[tokio::test]

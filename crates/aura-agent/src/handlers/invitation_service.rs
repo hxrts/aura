@@ -233,6 +233,17 @@ impl InvitationService {
     pub fn import_code(code: &str) -> Result<ShareableInvitation, ShareableInvitationError> {
         ShareableInvitation::from_code(code)
     }
+
+    /// Import an out-of-band invitation code into the local invitation cache.
+    ///
+    /// This enables follow-up operations (e.g., accept) to look up the invitation
+    /// details by `invitation_id` without requiring the original `Sent` fact to
+    /// be present in the local journal.
+    pub async fn import_and_cache(&self, code: &str) -> AgentResult<Invitation> {
+        self.handler
+            .import_invitation_code(&self.effects, code)
+            .await
+    }
 }
 
 #[cfg(test)]

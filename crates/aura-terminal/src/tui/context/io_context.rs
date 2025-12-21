@@ -170,7 +170,6 @@ impl IoContextBuilder {
         let channel_modes = Arc::new(RwLock::new(HashMap::new()));
 
         let dispatch = DispatchHelper::new(
-            app_core.raw().clone(),
             operational.clone(),
             snapshots.clone(),
             toasts.clone(),
