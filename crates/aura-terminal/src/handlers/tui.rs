@@ -33,7 +33,10 @@ use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
 use crate::demo::{DemoSignalCoordinator, DemoSimulator};
 use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
-use crate::tui::{context::{InitializedAppCore, IoContext}, screens::run_app_with_context};
+use crate::tui::{
+    context::{InitializedAppCore, IoContext},
+    screens::run_app_with_context,
+};
 
 /// Whether the TUI is running in demo or production mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -705,7 +708,9 @@ async fn handle_tui_launch(
 
     let app_core = InitializedAppCore::new(app_core).await?;
 
-    if let Err(e) = aura_app::workflows::settings::refresh_settings_from_runtime(app_core.raw()).await {
+    if let Err(e) =
+        aura_app::workflows::settings::refresh_settings_from_runtime(app_core.raw()).await
+    {
         stdio.eprintln(format_args!("Warning: Failed to refresh settings: {}", e));
     }
 
@@ -801,41 +806,44 @@ async fn handle_tui_launch(
                 "  Carol invite code: {}",
                 hints.carol_invite_code
             ));
-            let mut ctx = IoContext::with_demo_hints(
-                app_core,
-                hints,
-                has_existing_account,
-                base_path.clone(),
-                device_id_for_account.to_string(),
-                mode,
-            );
+            let mut builder = IoContext::builder()
+                .with_app_core(app_core)
+                .with_base_path(base_path.clone())
+                .with_device_id(device_id_for_account.to_string())
+                .with_mode(mode)
+                .with_existing_account(has_existing_account)
+                .with_demo_hints(hints);
 
             // Wire up the demo bridge so IoContext.dispatch() routes commands to simulated agents
             // This allows Alice/Carol to respond to guardian invitations and other interactions
             if let Some(ref sim) = simulator {
-                ctx.set_demo_bridge(sim.bridge());
+                builder = builder.with_demo_bridge(sim.bridge());
                 stdio.println(format_args!("Demo bridge connected to IoContext"));
             }
 
-            ctx
+            builder
+                .build()
+                .expect("IoContext build failed with all required fields")
         }
-        TuiMode::Production => IoContext::with_account_status(
-            app_core.clone(),
-            has_existing_account,
-            base_path.clone(),
-            device_id_for_account.to_string(),
-            mode,
-        ),
+        TuiMode::Production => IoContext::builder()
+            .with_app_core(app_core.clone())
+            .with_base_path(base_path.clone())
+            .with_device_id(device_id_for_account.to_string())
+            .with_mode(mode)
+            .with_existing_account(has_existing_account)
+            .build()
+            .expect("IoContext build failed with all required fields"),
     };
 
     #[cfg(not(feature = "development"))]
-    let ctx = IoContext::with_account_status(
-        app_core.clone(),
-        has_existing_account,
-        base_path.clone(),
-        device_id_for_account.to_string(),
-        mode,
-    );
+    let ctx = IoContext::builder()
+        .with_app_core(app_core.clone())
+        .with_base_path(base_path.clone())
+        .with_device_id(device_id_for_account.to_string())
+        .with_mode(mode)
+        .with_existing_account(has_existing_account)
+        .build()
+        .expect("IoContext build failed with all required fields");
 
     // Without development feature, demo mode just shows a warning
     #[cfg(not(feature = "development"))]

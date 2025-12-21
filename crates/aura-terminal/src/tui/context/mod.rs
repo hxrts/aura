@@ -11,13 +11,13 @@
 //! - `io_context`: The main IoContext struct that composes these helpers
 
 pub mod dispatch;
+pub mod initialized_app_core;
 pub mod io_context;
 pub mod snapshots;
 pub mod toasts;
-pub mod initialized_app_core;
 
 pub use dispatch::{AccountFilesHelper, DispatchHelper};
-pub use io_context::IoContext;
+pub use initialized_app_core::InitializedAppCore;
+pub use io_context::{ContextBuildError, IoContext, IoContextBuilder};
 pub use snapshots::SnapshotHelper;
 pub use toasts::ToastHelper;
-pub use initialized_app_core::InitializedAppCore;

@@ -1,7 +1,7 @@
 //! # ViewState Snapshot Helper
 //!
 //! Provides **non-reactive** snapshot helpers for:
-//! - Building `CommandContext` for `command_to_intent` mapping
+//! - Building `IntentContext` for `command_to_intent` mapping
 //! - Best-effort role lookup for authorization gating
 //!
 //! Screens should subscribe directly to AppCore signals (two-phase pattern:
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use async_lock::RwLock;
 use aura_app::AppCore;
 
-use crate::tui::effects::CommandContext;
+use crate::tui::effects::IntentContext;
 
 use crate::tui::hooks::{
     BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
@@ -42,12 +42,12 @@ impl SnapshotHelper {
         self.app_core.try_read().map(|core| core.snapshot())
     }
 
-    /// Build a `CommandContext` from the latest available snapshot.
-    pub fn command_context(&self) -> CommandContext {
+    /// Build an `IntentContext` from the latest available snapshot.
+    pub fn intent_context(&self) -> IntentContext {
         self.try_state_snapshot()
             .as_ref()
-            .map(CommandContext::from_snapshot)
-            .unwrap_or_else(CommandContext::empty)
+            .map(IntentContext::from_snapshot)
+            .unwrap_or_else(IntentContext::empty)
     }
 }
 

@@ -4,8 +4,22 @@
 //!
 //! This type intentionally keeps UI state (toasts, local preferences) separate
 //! from Aura application state (signals in `AppCore`).
+//!
+//! ## Builder Pattern
+//!
+//! Use `IoContext::builder()` for flexible construction:
+//!
+//! ```rust,ignore
+//! let ctx = IoContext::builder()
+//!     .with_app_core(app_core)
+//!     .with_base_path(PathBuf::from("./data"))
+//!     .with_device_id("device-1".to_string())
+//!     .with_mode(TuiMode::Production)
+//!     .build()?;
+//! ```
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_lock::RwLock;
@@ -17,7 +31,10 @@ use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::error::TerminalError;
-use crate::tui::context::{AccountFilesHelper, DispatchHelper, InitializedAppCore, SnapshotHelper, ToastHelper};
+use crate::handlers::tui::TuiMode;
+use crate::tui::context::{
+    AccountFilesHelper, DispatchHelper, InitializedAppCore, SnapshotHelper, ToastHelper,
+};
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
 
@@ -25,6 +42,165 @@ use crate::tui::hooks::{
     BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
+
+// ============================================================================
+// Builder
+// ============================================================================
+
+/// Error returned when IoContextBuilder cannot build an IoContext.
+#[derive(Debug, Clone)]
+pub enum ContextBuildError {
+    /// Required field was not set
+    MissingField(&'static str),
+}
+
+impl std::fmt::Display for ContextBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContextBuildError::MissingField(field) => {
+                write!(f, "IoContextBuilder: missing required field '{}'", field)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ContextBuildError {}
+
+/// Builder for constructing IoContext with flexible configuration.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let ctx = IoContext::builder()
+///     .with_app_core(app_core)
+///     .with_base_path(PathBuf::from("./data"))
+///     .with_device_id("device-1".to_string())
+///     .with_mode(TuiMode::Production)
+///     .build()?;
+/// ```
+#[derive(Default)]
+pub struct IoContextBuilder {
+    app_core: Option<InitializedAppCore>,
+    base_path: Option<PathBuf>,
+    device_id: Option<String>,
+    mode: Option<TuiMode>,
+    has_existing_account: bool,
+    #[cfg(feature = "development")]
+    demo_hints: Option<crate::demo::DemoHints>,
+    #[cfg(feature = "development")]
+    demo_bridge: Option<Arc<crate::demo::SimulatedBridge>>,
+}
+
+impl IoContextBuilder {
+    /// Create a new builder with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the initialized AppCore (required).
+    pub fn with_app_core(mut self, app_core: InitializedAppCore) -> Self {
+        self.app_core = Some(app_core);
+        self
+    }
+
+    /// Set the base path for account files (required).
+    pub fn with_base_path(mut self, path: PathBuf) -> Self {
+        self.base_path = Some(path);
+        self
+    }
+
+    /// Set the device ID string (required).
+    pub fn with_device_id(mut self, id: String) -> Self {
+        self.device_id = Some(id);
+        self
+    }
+
+    /// Set the TUI mode (required).
+    pub fn with_mode(mut self, mode: TuiMode) -> Self {
+        self.mode = Some(mode);
+        self
+    }
+
+    /// Set whether an existing account is present (default: false).
+    pub fn with_existing_account(mut self, exists: bool) -> Self {
+        self.has_existing_account = exists;
+        self
+    }
+
+    /// Set demo hints for development mode.
+    #[cfg(feature = "development")]
+    pub fn with_demo_hints(mut self, hints: crate::demo::DemoHints) -> Self {
+        self.demo_hints = Some(hints);
+        self
+    }
+
+    /// Set the demo bridge for routing commands to simulated agents.
+    #[cfg(feature = "development")]
+    pub fn with_demo_bridge(mut self, bridge: Arc<crate::demo::SimulatedBridge>) -> Self {
+        self.demo_bridge = Some(bridge);
+        self
+    }
+
+    /// Build the IoContext, returning an error if required fields are missing.
+    pub fn build(self) -> Result<IoContext, ContextBuildError> {
+        let app_core = self
+            .app_core
+            .ok_or(ContextBuildError::MissingField("app_core"))?;
+        let base_path = self
+            .base_path
+            .ok_or(ContextBuildError::MissingField("base_path"))?;
+        let device_id = self
+            .device_id
+            .ok_or(ContextBuildError::MissingField("device_id"))?;
+        let mode = self
+            .mode
+            .ok_or(ContextBuildError::MissingField("mode"))?;
+
+        let operational = Arc::new(OperationalHandler::new(app_core.raw().clone()));
+        let snapshots = SnapshotHelper::new(app_core.raw().clone(), device_id.clone());
+        let toasts = ToastHelper::new();
+
+        let has_existing_account =
+            Arc::new(std::sync::atomic::AtomicBool::new(self.has_existing_account));
+        let account_files =
+            AccountFilesHelper::new(base_path, device_id, mode, has_existing_account.clone());
+
+        let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
+        let current_context = Arc::new(RwLock::new(None));
+        let channel_modes = Arc::new(RwLock::new(HashMap::new()));
+
+        let dispatch = DispatchHelper::new(
+            app_core.raw().clone(),
+            operational.clone(),
+            snapshots.clone(),
+            toasts.clone(),
+            account_files.clone(),
+            invited_lan_peers.clone(),
+            current_context.clone(),
+            channel_modes.clone(),
+        );
+
+        Ok(IoContext {
+            app_core,
+            operational,
+            dispatch,
+            snapshots,
+            toasts,
+            account_files,
+            #[cfg(feature = "development")]
+            demo_hints: self.demo_hints,
+            #[cfg(feature = "development")]
+            demo_bridge: self.demo_bridge,
+            invited_lan_peers,
+            current_context,
+            channel_modes,
+        })
+    }
+}
+
+// ============================================================================
+// IoContext
+// ============================================================================
 
 /// iocraft-friendly context.
 #[derive(Clone)]
@@ -49,83 +225,94 @@ pub struct IoContext {
 }
 
 impl IoContext {
+    /// Create a new IoContextBuilder for flexible construction.
+    ///
+    /// This is the preferred way to construct IoContext.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let ctx = IoContext::builder()
+    ///     .with_app_core(app_core)
+    ///     .with_base_path(PathBuf::from("./data"))
+    ///     .with_device_id("device-1".to_string())
+    ///     .with_mode(TuiMode::Production)
+    ///     .with_existing_account(true)
+    ///     .build()?;
+    /// ```
+    pub fn builder() -> IoContextBuilder {
+        IoContextBuilder::new()
+    }
+
+    /// Create a new IoContext with the given parameters.
+    ///
+    /// # Deprecated
+    ///
+    /// Use `IoContext::builder()` instead for more flexible construction.
+    #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
     pub fn new(
         app_core: InitializedAppCore,
-        base_path: std::path::PathBuf,
+        base_path: PathBuf,
         device_id_str: String,
-        mode: crate::handlers::tui::TuiMode,
+        mode: TuiMode,
     ) -> Self {
+        #[allow(deprecated)]
         Self::with_account_status(app_core, true, base_path, device_id_str, mode)
     }
 
+    /// Create a new IoContext with explicit account status.
+    ///
+    /// # Deprecated
+    ///
+    /// Use `IoContext::builder()` instead for more flexible construction.
+    #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
     pub fn with_account_status(
         app_core: InitializedAppCore,
         has_existing_account: bool,
-        base_path: std::path::PathBuf,
+        base_path: PathBuf,
         device_id_str: String,
-        mode: crate::handlers::tui::TuiMode,
+        mode: TuiMode,
     ) -> Self {
-        let operational = Arc::new(OperationalHandler::new(app_core.raw().clone()));
-        let snapshots = SnapshotHelper::new(app_core.raw().clone(), device_id_str.clone());
-        let toasts = ToastHelper::new();
-
-        let has_existing_account =
-            Arc::new(std::sync::atomic::AtomicBool::new(has_existing_account));
-        let account_files =
-            AccountFilesHelper::new(base_path, device_id_str, mode, has_existing_account.clone());
-
-        let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
-        let current_context = Arc::new(RwLock::new(None));
-        let channel_modes = Arc::new(RwLock::new(HashMap::new()));
-
-        let dispatch = DispatchHelper::new(
-            app_core.raw().clone(),
-            operational.clone(),
-            snapshots.clone(),
-            toasts.clone(),
-            account_files.clone(),
-            invited_lan_peers.clone(),
-            current_context.clone(),
-            channel_modes.clone(),
-        );
-
-        Self {
-            app_core,
-            operational,
-            dispatch,
-            snapshots,
-            toasts,
-            account_files,
-            #[cfg(feature = "development")]
-            demo_hints: None,
-            #[cfg(feature = "development")]
-            demo_bridge: None,
-            invited_lan_peers,
-            current_context,
-            channel_modes,
-        }
+        IoContext::builder()
+            .with_app_core(app_core)
+            .with_base_path(base_path)
+            .with_device_id(device_id_str)
+            .with_mode(mode)
+            .with_existing_account(has_existing_account)
+            .build()
+            .expect("IoContext::with_account_status: all required fields provided")
     }
 
+    /// Create a new IoContext with demo hints for development mode.
+    ///
+    /// # Deprecated
+    ///
+    /// Use `IoContext::builder()` instead for more flexible construction.
     #[cfg(feature = "development")]
+    #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
     pub fn with_demo_hints(
         app_core: InitializedAppCore,
         hints: crate::demo::DemoHints,
         has_existing_account: bool,
-        base_path: std::path::PathBuf,
+        base_path: PathBuf,
         device_id_str: String,
-        mode: crate::handlers::tui::TuiMode,
+        mode: TuiMode,
     ) -> Self {
-        let mut ctx = Self::with_account_status(
-            app_core,
-            has_existing_account,
-            base_path,
-            device_id_str,
-            mode,
-        );
-        ctx.demo_hints = Some(hints);
-        ctx
+        IoContext::builder()
+            .with_app_core(app_core)
+            .with_base_path(base_path)
+            .with_device_id(device_id_str)
+            .with_mode(mode)
+            .with_existing_account(has_existing_account)
+            .with_demo_hints(hints)
+            .build()
+            .expect("IoContext::with_demo_hints: all required fields provided")
     }
 
+    /// Create an IoContext with default configuration (for testing).
+    ///
+    /// **Note**: This method cannot be called inside a tokio runtime.
+    /// Use `with_defaults_async()` instead.
     #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
     pub fn with_defaults() -> Self {
         if tokio::runtime::Handle::try_current().is_ok() {
@@ -142,15 +329,17 @@ impl IoContext {
             .block_on(InitializedAppCore::new(app_core))
             .expect("Failed to init signals for IoContext::with_defaults");
 
-        Self::with_account_status(
-            app_core,
-            true,
-            std::path::PathBuf::from("./aura-data"),
-            "default-device".to_string(),
-            crate::handlers::tui::TuiMode::Production,
-        )
+        IoContext::builder()
+            .with_app_core(app_core)
+            .with_base_path(PathBuf::from("./aura-data"))
+            .with_device_id("default-device".to_string())
+            .with_mode(TuiMode::Production)
+            .with_existing_account(true)
+            .build()
+            .expect("IoContext::with_defaults: all required fields provided")
     }
 
+    /// Create an IoContext with default configuration (async version).
     #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
     pub async fn with_defaults_async() -> Self {
         let app_core =
@@ -160,13 +349,14 @@ impl IoContext {
             .await
             .expect("Failed to init signals for IoContext::with_defaults_async");
 
-        Self::with_account_status(
-            app_core,
-            true,
-            std::path::PathBuf::from("./aura-data"),
-            "default-device".to_string(),
-            crate::handlers::tui::TuiMode::Production,
-        )
+        IoContext::builder()
+            .with_app_core(app_core)
+            .with_base_path(PathBuf::from("./aura-data"))
+            .with_device_id("default-device".to_string())
+            .with_mode(TuiMode::Production)
+            .with_existing_account(true)
+            .build()
+            .expect("IoContext::with_defaults_async: all required fields provided")
     }
 
     #[inline]
@@ -256,7 +446,14 @@ impl IoContext {
     // =========================================================================
 
     pub async fn create_account(&self, display_name: &str) -> Result<(), String> {
-        self.account_files.create_account(display_name).await
+        let (authority_id, _context_id) = self.account_files.create_account(display_name).await?;
+
+        {
+            let mut core = self.app_core_raw().write().await;
+            core.set_authority(authority_id);
+        }
+
+        Ok(())
     }
 
     pub async fn restore_recovered_account(
@@ -417,7 +614,7 @@ impl IoContext {
         };
 
         if let Ok(error) = reactive.read(&*ERROR_SIGNAL).await {
-            return error.map(|e| e.message);
+            return error.map(|e| e.to_string());
         }
         None
     }

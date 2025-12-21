@@ -46,10 +46,14 @@ pub mod layout;
 pub mod props;
 pub mod runtime;
 pub mod screens;
-pub mod state_machine;
+pub mod state;
 pub mod theme;
 pub mod types;
 pub mod updates;
+
+// Backwards compatibility: re-export state as state_machine
+#[doc(hidden)]
+pub use state as state_machine;
 
 // Shared infrastructure
 pub mod callbacks;
@@ -59,6 +63,7 @@ pub mod flow_budget;
 pub mod local_store;
 pub mod navigation;
 pub mod recovery_session;
+pub mod subscriptions;
 
 // Public surface area
 //
@@ -67,4 +72,4 @@ pub mod recovery_session;
 
 pub use context::IoContext;
 pub use screens::{run_app_with_context, Screen};
-pub use state_machine::{transition, TuiCommand, TuiState};
+pub use state::{transition, TuiCommand, TuiState};

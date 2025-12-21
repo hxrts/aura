@@ -397,12 +397,16 @@ async fn test_screen_navigation() {
     tui.goto_screen(3).expect("Failed to go to Contacts");
     std::thread::sleep(Duration::from_millis(500));
 
-    // Navigate to Invitations screen (5)
-    tui.goto_screen(5).expect("Failed to go to Invitations");
+    // Navigate to Neighborhood screen (4)
+    tui.goto_screen(4).expect("Failed to go to Neighborhood");
     std::thread::sleep(Duration::from_millis(500));
 
-    // Navigate to Recovery screen (7)
-    tui.goto_screen(7).expect("Failed to go to Recovery");
+    // Navigate to Recovery screen (5)
+    tui.goto_screen(5).expect("Failed to go to Recovery");
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Navigate to Settings screen (6)
+    tui.goto_screen(6).expect("Failed to go to Settings");
     std::thread::sleep(Duration::from_millis(500));
 
     // Navigate back to Block screen (1)
@@ -883,7 +887,7 @@ async fn test_account_creation_callback_flow() {
     // This simulates restarting the TUI - it should find the existing account
     let app_core2 = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core2 = Arc::new(RwLock::new(app_core2));
-    let _initialized_app_core2 = InitializedAppCore::new(app_core2.clone())
+    let initialized_app_core2 = InitializedAppCore::new(app_core2.clone())
         .await
         .expect("Failed to init signals");
     // Note: The actual account loading happens in handle_tui_launch via try_load_account
@@ -964,7 +968,9 @@ async fn test_device_id_determinism() {
         TuiMode::Production,
     );
 
-    ctx.create_account("Bob").await.expect("Failed to create account");
+    ctx.create_account("Bob")
+        .await
+        .expect("Failed to create account");
 
     let original_content =
         std::fs::read_to_string(&account_file).expect("Failed to read account.json");
@@ -988,7 +994,7 @@ async fn test_device_id_determinism() {
 
     let app_core2 = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core2 = Arc::new(RwLock::new(app_core2));
-    let _initialized_app_core2 = InitializedAppCore::new(app_core2.clone())
+    let initialized_app_core2 = InitializedAppCore::new(app_core2.clone())
         .await
         .expect("Failed to init signals");
 
@@ -1000,7 +1006,9 @@ async fn test_device_id_determinism() {
         TuiMode::Production,
     );
 
-    ctx2.create_account("Bob Again").await.expect("Failed to recreate account");
+    ctx2.create_account("Bob Again")
+        .await
+        .expect("Failed to recreate account");
 
     let recreated_content =
         std::fs::read_to_string(&account_file).expect("Failed to read recreated account.json");
@@ -1040,7 +1048,9 @@ async fn test_device_id_determinism() {
         TuiMode::Production,
     );
 
-    ctx3.create_account("Bob New Device").await.expect("Failed to create account");
+    ctx3.create_account("Bob New Device")
+        .await
+        .expect("Failed to create account");
 
     let different_content =
         std::fs::read_to_string(&account_file).expect("Failed to read new account.json");
@@ -1128,7 +1138,9 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
         TuiMode::Production,
     );
 
-    ctx.create_account("Bob").await.expect("Failed to create account");
+    ctx.create_account("Bob")
+        .await
+        .expect("Failed to create account");
 
     let original_content =
         std::fs::read_to_string(&account_file).expect("Failed to read account.json");
@@ -1175,7 +1187,9 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     );
 
     ctx_wrong
-        .create_account("Bob (New Device)").await.expect("Failed to create account");
+        .create_account("Bob (New Device)")
+        .await
+        .expect("Failed to create account");
 
     let wrong_content =
         std::fs::read_to_string(&account_file).expect("Failed to read account.json");
@@ -1244,7 +1258,9 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     // THIS IS THE KEY CALL: restore_recovered_account() with the ORIGINAL authority_id
     // This is what happens after guardians reconstruct Bob's authority via FROST
     ctx_recovered
-        .restore_recovered_account(original_authority, None).await.expect("Failed to restore recovered account");
+        .restore_recovered_account(original_authority, None)
+        .await
+        .expect("Failed to restore recovered account");
 
     println!("  ✓ restore_recovered_account() succeeded");
 
@@ -1422,19 +1438,21 @@ fn test_screen_enum() {
     assert_eq!(Screen::Chat.key_number(), 2);
     assert_eq!(Screen::Contacts.key_number(), 3);
     assert_eq!(Screen::Neighborhood.key_number(), 4);
-    assert_eq!(Screen::Settings.key_number(), 5);
-    assert_eq!(Screen::Recovery.key_number(), 6);
+    assert_eq!(Screen::Settings.key_number(), 6);
+    assert_eq!(Screen::Recovery.key_number(), 5);
 
     // Test from_key
     assert_eq!(Screen::from_key(1), Some(Screen::Block));
-    assert_eq!(Screen::from_key(5), Some(Screen::Settings));
+    assert_eq!(Screen::from_key(5), Some(Screen::Recovery));
+    assert_eq!(Screen::from_key(6), Some(Screen::Settings));
     assert_eq!(Screen::from_key(7), None); // Only 6 screens
     assert_eq!(Screen::from_key(0), None);
 
     // Test next/prev
     assert_eq!(Screen::Block.next(), Screen::Chat);
     assert_eq!(Screen::Chat.prev(), Screen::Block);
-    assert_eq!(Screen::Recovery.next(), Screen::Block); // Recovery is last, wraps to Block
+    assert_eq!(Screen::Settings.next(), Screen::Block);
+    assert_eq!(Screen::Recovery.next(), Screen::Settings);
 
     // Test default
     assert_eq!(Screen::default(), Screen::Block);
@@ -1666,7 +1684,9 @@ async fn test_invitation_export_import_roundtrip() {
     );
 
     // Create account first
-    ctx.create_account("InvitationTester").await.expect("Failed to create account");
+    ctx.create_account("InvitationTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Load the authority from the account file and set it on AppCore
@@ -1760,7 +1780,7 @@ async fn test_invitation_export_import_roundtrip() {
 /// 2. Issue moderation commands (ban, mute, kick)
 /// 3. Verify the commands are properly dispatched
 ///
-/// Note: The block_id is injected via CommandContext during intent mapping,
+/// Note: The block_id is injected via IntentContext during intent mapping,
 /// not via the EffectCommand fields. The command uses 'target' for user.
 #[tokio::test]
 async fn test_moderation_commands_dispatch() {
@@ -1794,7 +1814,9 @@ async fn test_moderation_commands_dispatch() {
     );
 
     // Create account first
-    ctx.create_account("ModerationTester").await.expect("Failed to create account");
+    ctx.create_account("ModerationTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     let test_channel = "test_channel_123";
@@ -1888,7 +1910,9 @@ async fn test_peer_discovery_commands() {
     );
 
     // Create account first
-    ctx.create_account("PeerTester").await.expect("Failed to create account");
+    ctx.create_account("PeerTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Phase 1: Test ListPeers command
@@ -1974,7 +1998,9 @@ async fn test_lan_peer_invitation_flow() {
     );
 
     // Create account first
-    ctx.create_account("LanInviter").await.expect("Failed to create account");
+    ctx.create_account("LanInviter")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Phase 1: Test that no peers are invited initially
@@ -2105,7 +2131,9 @@ async fn test_direct_messaging_flow() {
     );
 
     // Create account first
-    ctx.create_account("DMTester").await.expect("Failed to create account");
+    ctx.create_account("DMTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Phase 1: Test StartDirectChat command
@@ -2243,7 +2271,9 @@ async fn test_display_name_editing_flow() {
     );
 
     // Create account first
-    ctx.create_account("SettingsTester").await.expect("Failed to create account");
+    ctx.create_account("SettingsTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Phase 1: Test that display name is empty initially
@@ -2303,7 +2333,11 @@ async fn test_display_name_editing_flow() {
                 name: name.to_string(),
             })
             .await;
-        assert!(result.is_ok(), "UpdateNickname should succeed for '{}'", name);
+        assert!(
+            result.is_ok(),
+            "UpdateNickname should succeed for '{}'",
+            name
+        );
         // Note: Display name may take time to propagate through signal forwarding
         println!("  ✓ UpdateNickname dispatched for '{}'", name);
     }
@@ -2315,7 +2349,10 @@ async fn test_display_name_editing_flow() {
             name: "".to_string(),
         })
         .await;
-    assert!(result.is_ok(), "UpdateNickname should succeed for empty name");
+    assert!(
+        result.is_ok(),
+        "UpdateNickname should succeed for empty name"
+    );
     println!("  ✓ UpdateNickname dispatched for empty name");
 
     // Cleanup
@@ -2468,7 +2505,9 @@ async fn test_threshold_configuration_flow() {
     );
 
     // Create account first
-    ctx.create_account("ThresholdTester").await.expect("Failed to create account");
+    ctx.create_account("ThresholdTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Test that UpdateThreshold command can be constructed and dispatched
@@ -2595,7 +2634,9 @@ async fn test_mfa_policy_configuration_flow() {
     );
 
     // Create account
-    ctx.create_account("MfaTester").await.expect("Failed to create account");
+    ctx.create_account("MfaTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Default should be Disabled
@@ -2692,7 +2733,9 @@ async fn test_block_messaging_flow() {
     );
 
     // Create account
-    ctx.create_account("BlockTester").await.expect("Failed to create account");
+    ctx.create_account("BlockTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Phase 2: Test SendMessage command for block channel
@@ -2832,7 +2875,9 @@ async fn test_set_context_flow() {
     );
 
     // Create account
-    ctx.create_account("ContextTester").await.expect("Failed to create account");
+    ctx.create_account("ContextTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Phase 2: Verify initial context is None
@@ -2943,7 +2988,7 @@ async fn test_steward_role_flow() {
     use async_lock::RwLock;
     use aura_app::views::block::{BlockState, Resident, ResidentRole};
     use aura_app::AppCore;
-    use aura_core::identifiers::{AuthorityId, ChannelId};
+    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use aura_terminal::tui::effects::EffectCommand;
@@ -2973,13 +3018,16 @@ async fn test_steward_role_flow() {
     );
 
     // Create account
-    ctx.create_account("StewardTester").await.expect("Failed to create account");
+    ctx.create_account("StewardTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Phase 2: Set up a block with residents
     println!("\nPhase 2: Setting up block with residents");
 
     let block_id = "test-block-1".parse::<ChannelId>().unwrap_or_default();
+    let block_context_id = ContextId::new_from_entropy([9u8; 32]);
     let owner_id = AuthorityId::new_from_entropy([1u8; 32]);
     let resident1_id = AuthorityId::new_from_entropy([2u8; 32]);
     let resident2_id = AuthorityId::new_from_entropy([3u8; 32]);
@@ -2994,7 +3042,7 @@ async fn test_steward_role_flow() {
             Some("Test Block".to_string()),
             owner_id.clone(),
             0,
-            "context-1".to_string(),
+            block_context_id.to_string(),
         );
 
         // Add some residents
@@ -3192,7 +3240,9 @@ async fn test_neighborhood_navigation_flow() {
     );
 
     // Create account
-    ctx.create_account("NavigationTester").await.expect("Failed to create account");
+    ctx.create_account("NavigationTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Phase 2: Set up neighborhood with blocks
@@ -3424,7 +3474,7 @@ async fn test_message_delivery_status_flow() {
     println!("  ✓ Default message has Sent status");
 
     // Sending message for optimistic UI
-    let sending_msg = Message::sending("m2", "Me", "Sending now...");
+    let sending_msg = Message::sending("m2", "ch1", "Me", "Sending now...");
     assert_eq!(
         sending_msg.delivery_status,
         DeliveryStatus::Sending,
@@ -3447,7 +3497,7 @@ async fn test_message_delivery_status_flow() {
     println!("\nPhase 3: Testing status transition model");
 
     // Typical flow: Sending -> Sent -> Delivered
-    let mut msg = Message::sending("m4", "Me", "Test message");
+    let mut msg = Message::sending("m4", "ch1", "Me", "Test message");
     assert_eq!(msg.delivery_status, DeliveryStatus::Sending);
 
     // Transition to Sent (when network acknowledges)
@@ -3460,7 +3510,7 @@ async fn test_message_delivery_status_flow() {
     println!("  ✓ Sending → Sent → Delivered transition works");
 
     // Failure flow: Sending -> Failed
-    let mut failed = Message::sending("m5", "Me", "Will fail");
+    let mut failed = Message::sending("m5", "ch1", "Me", "Will fail");
     assert_eq!(failed.delivery_status, DeliveryStatus::Sending);
 
     failed = failed.with_status(DeliveryStatus::Failed);
@@ -3484,7 +3534,7 @@ async fn test_message_delivery_status_flow() {
 #[tokio::test]
 async fn test_retry_message_command() {
     use aura_terminal::tui::effects::{
-        command_to_intent, CommandAuthorizationLevel, CommandContext, EffectCommand,
+        command_to_intent, CommandAuthorizationLevel, EffectCommand, IntentContext,
     };
     use aura_terminal::tui::types::{DeliveryStatus, Message};
 
@@ -3528,7 +3578,7 @@ async fn test_retry_message_command() {
     // Phase 3: Test intent mapping (RetryMessage maps to SendMessage)
     println!("\nPhase 3: Testing intent mapping");
 
-    let ctx = CommandContext::empty();
+    let ctx = IntentContext::empty();
     let intent = command_to_intent(&retry_cmd, &ctx);
     assert!(intent.is_some(), "RetryMessage should map to an intent");
     println!("  ✓ RetryMessage maps to SendMessage intent");
@@ -3537,13 +3587,13 @@ async fn test_retry_message_command() {
     println!("\nPhase 4: Testing retry flow scenario");
 
     // Create a failed message
-    let failed_msg =
-        Message::sending("msg-456", "Me", "This will fail").with_status(DeliveryStatus::Failed);
+    let failed_msg = Message::sending("msg-456", "general", "Me", "This will fail")
+        .with_status(DeliveryStatus::Failed);
     assert_eq!(failed_msg.delivery_status, DeliveryStatus::Failed);
     println!("  ✓ Failed message created");
 
     // Simulate retry by creating a new sending message with same content
-    let retry_msg = Message::sending("msg-456-retry", "Me", &failed_msg.content);
+    let retry_msg = Message::sending("msg-456-retry", "general", "Me", &failed_msg.content);
     assert_eq!(retry_msg.delivery_status, DeliveryStatus::Sending);
     assert_eq!(retry_msg.content, failed_msg.content);
     println!("  ✓ Retry creates new message in Sending state");
@@ -3631,7 +3681,7 @@ async fn test_channel_mode_operations() {
     use async_lock::RwLock;
     use aura_app::views::block::{BlockState, ResidentRole};
     use aura_app::AppCore;
-    use aura_core::identifiers::{AuthorityId, ChannelId};
+    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use std::sync::Arc;
 
     let test_dir =
@@ -3654,10 +3704,13 @@ async fn test_channel_mode_operations() {
     );
 
     // Create account
-    ctx.create_account("ChannelModeTester").await.expect("Failed to create account");
+    ctx.create_account("ChannelModeTester")
+        .await
+        .expect("Failed to create account");
 
     let block_id = "test-block-mode".parse::<ChannelId>().unwrap_or_default();
     let owner_id = "owner-id".parse::<AuthorityId>().unwrap_or_default();
+    let block_context_id = ContextId::new_from_entropy([10u8; 32]);
 
     // Set up a block with the user as owner (required for SetChannelMode)
     {
@@ -3667,7 +3720,7 @@ async fn test_channel_mode_operations() {
             Some("Test Block".to_string()),
             owner_id.clone(),
             0,
-            "context-1".to_string(),
+            block_context_id.to_string(),
         );
         block.my_role = ResidentRole::Owner;
         core.views().add_block(block);
@@ -4203,7 +4256,9 @@ async fn test_authorization_checking() {
     );
 
     // Create account
-    ctx.create_account("AuthTester").await.expect("Failed to create account");
+    ctx.create_account("AuthTester")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Test that Public commands pass authorization
@@ -4350,7 +4405,9 @@ async fn test_account_backup_restore_flow() {
 
     // Create account
     ctx_a
-        .create_account("BackupTester").await.expect("Failed to create account");
+        .create_account("BackupTester")
+        .await
+        .expect("Failed to create account");
     assert!(ctx_a.has_account(), "Account should exist after creation");
     println!("  ✓ Account created in test_dir_a");
 
@@ -4521,7 +4578,9 @@ async fn test_device_management() {
     );
 
     // Create account first to have an authority
-    ctx.create_account("DeviceTestUser").await.expect("Failed to create account");
+    ctx.create_account("DeviceTestUser")
+        .await
+        .expect("Failed to create account");
     println!("  ✓ Account created");
 
     // Set authority on AppCore (needed for intent dispatch)
@@ -4603,7 +4662,7 @@ async fn test_snapshot_data_accuracy() {
     use aura_app::views::contacts::{Contact, ContactsState};
     use aura_app::AppCore;
     use aura_core::effects::reactive::ReactiveEffects;
-    use aura_core::identifiers::{AuthorityId, ChannelId};
+    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use std::sync::Arc;
@@ -4648,6 +4707,7 @@ async fn test_snapshot_data_accuracy() {
     // Create a block with a specific created_at timestamp
     let test_created_at = 1702000000000u64; // A specific timestamp
     let block_id = "test-block-1".parse::<ChannelId>().unwrap_or_default();
+    let block_context_id = ContextId::new_from_entropy([9u8; 32]);
     let block_state = BlockState::new(
         block_id,
         Some("Test Block".to_string()),

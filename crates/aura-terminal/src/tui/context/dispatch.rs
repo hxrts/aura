@@ -5,6 +5,7 @@
 //! - Command dispatch (Intent via AppCore, Operational via OperationalHandler)
 //! - Emitting `ERROR_SIGNAL` on all error paths
 
+use aura_core::{AuthorityId, ContextId};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +14,6 @@ use std::sync::Arc;
 use async_lock::RwLock;
 use aura_app::views::contacts::Contact as ViewContact;
 use aura_app::AppCore;
-use aura_core::identifiers::AuthorityId;
 
 use super::{SnapshotHelper, ToastHelper};
 use crate::error::TerminalError;
@@ -57,7 +57,10 @@ impl AccountFilesHelper {
         self.has_existing_account.store(true, Ordering::Relaxed);
     }
 
-    pub async fn create_account(&self, display_name: &str) -> Result<(), String> {
+    pub async fn create_account(
+        &self,
+        display_name: &str,
+    ) -> Result<(AuthorityId, ContextId), String> {
         match crate::handlers::tui::create_account(
             &self.base_path,
             &self.device_id_str,
@@ -66,9 +69,9 @@ impl AccountFilesHelper {
         )
         .await
         {
-            Ok((_authority_id, _context_id)) => {
+            Ok((authority_id, context_id)) => {
                 self.set_account_created();
-                Ok(())
+                Ok((authority_id, context_id))
             }
             Err(e) => {
                 tracing::error!("Failed to create account: {}", e);
@@ -222,11 +225,11 @@ impl DispatchHelper {
             _ => {}
         }
 
-        // Build command context from current state for proper ID resolution.
-        let cmd_ctx = self.snapshots.command_context();
+        // Build intent context from current state for proper ID resolution.
+        let intent_ctx = self.snapshots.intent_context();
 
         // Intent path (journaled).
-        if let Some(intent) = command_to_intent(&command, &cmd_ctx) {
+        if let Some(intent) = command_to_intent(&command, &intent_ctx) {
             let mut core = self.app_core.write().await;
             match core.dispatch(intent) {
                 Ok(_fact_id) => {
@@ -420,7 +423,7 @@ mod tests {
     use crate::tui::context::{InitializedAppCore, IoContext};
     use crate::tui::effects::EffectCommand;
 
-    async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::signal_defs::AppError {
+    async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::AppError {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
         loop {
             {
@@ -439,25 +442,25 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_command_emits_error_signal() {
-        let app_core =
-            AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
+        let app_core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
         let app_core = InitializedAppCore::new(app_core)
             .await
             .expect("Failed to init signals");
 
         let dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let ctx = IoContext::with_account_status(
-            app_core.clone(),
-            false,
-            dir.path().to_path_buf(),
-            "test-device".to_string(),
-            TuiMode::Production,
-        );
+        let ctx = IoContext::builder()
+            .with_app_core(app_core.clone())
+            .with_base_path(dir.path().to_path_buf())
+            .with_device_id("test-device".to_string())
+            .with_mode(TuiMode::Production)
+            .with_existing_account(false)
+            .build()
+            .expect("Failed to build IoContext");
 
         let _ = ctx.dispatch(EffectCommand::UnknownCommandForTest).await;
         let err = wait_for_error(app_core.raw()).await;
-        assert_eq!(err.code, "OPERATION_FAILED");
-        assert!(err.message.contains("Unknown command"));
+        assert_eq!(err.code(), "INTERNAL");
+        assert!(err.to_string().contains("Unknown command"));
     }
 }
