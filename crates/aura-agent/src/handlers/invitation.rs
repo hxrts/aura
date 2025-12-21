@@ -11,6 +11,7 @@ use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomEffects;
+use aura_core::effects::storage::StorageEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
 use aura_invitation::guards::GuardSnapshot;
@@ -55,6 +56,8 @@ pub struct InvitationHandler {
 }
 
 impl InvitationHandler {
+    const IMPORTED_INVITATION_STORAGE_PREFIX: &'static str = "invitation/imported";
+
     /// Create a new invitation handler
     pub fn new(authority: AuthorityContext) -> AgentResult<Self> {
         HandlerUtilities::validate_authority_context(&authority)?;
@@ -67,6 +70,43 @@ impl InvitationHandler {
             service,
             pending_invitations: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    fn imported_invitation_key(authority_id: AuthorityId, invitation_id: &str) -> String {
+        format!(
+            "{}/{}/{}",
+            Self::IMPORTED_INVITATION_STORAGE_PREFIX,
+            authority_id.uuid(),
+            invitation_id
+        )
+    }
+
+    async fn persist_imported_invitation(
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+        shareable: &ShareableInvitation,
+    ) -> AgentResult<()> {
+        let key = Self::imported_invitation_key(authority_id, &shareable.invitation_id);
+        let bytes = serde_json::to_vec(shareable).map_err(|e| {
+            crate::core::AgentError::internal(format!("serialize shareable invitation: {e}"))
+        })?;
+        effects
+            .store(&key, bytes)
+            .await
+            .map_err(|e| crate::core::AgentError::effects(format!("store invitation: {e}")))?;
+        Ok(())
+    }
+
+    async fn load_imported_invitation(
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+        invitation_id: &str,
+    ) -> Option<ShareableInvitation> {
+        let key = Self::imported_invitation_key(authority_id, invitation_id);
+        let Ok(Some(bytes)) = effects.retrieve(&key).await else {
+            return None;
+        };
+        serde_json::from_slice::<ShareableInvitation>(&bytes).ok()
     }
 
     /// Get the authority context
@@ -228,7 +268,7 @@ impl InvitationHandler {
     ) -> AgentResult<Option<(AuthorityId, String)>> {
         let own_id = self.context.authority.authority_id;
 
-        // First try the local cache (covers out-of-band imports).
+        // First try the local cache (fast path when the same handler instance is reused).
         {
             let cache = self.pending_invitations.read().await;
             if let Some(inv) = cache.get(invitation_id) {
@@ -241,6 +281,20 @@ impl InvitationHandler {
                     let nickname = nickname
                         .clone()
                         .unwrap_or_else(|| other.to_string());
+                    return Ok(Some((other, nickname)));
+                }
+            }
+        }
+
+        // Next try the persisted imported invitation store (covers out-of-band imports across
+        // handler instances, since AuraAgent constructs services on demand).
+        if let Some(shareable) =
+            Self::load_imported_invitation(effects, own_id, invitation_id).await
+        {
+            if let InvitationType::Contact { nickname } = shareable.invitation_type {
+                if shareable.sender_id != own_id {
+                    let other = shareable.sender_id;
+                    let nickname = nickname.unwrap_or_else(|| other.to_string());
                     return Ok(Some((other, nickname)));
                 }
             }
@@ -324,6 +378,11 @@ impl InvitationHandler {
 
         let shareable = ShareableInvitation::from_code(code)
             .map_err(|e| crate::core::AgentError::invalid(format!("{e}")))?;
+
+        // Persist the shareable invitation so later operations (accept/decline) can resolve it
+        // even if AuraAgent constructs a fresh InvitationService/InvitationHandler.
+        Self::persist_imported_invitation(effects, self.context.authority.authority_id, &shareable)
+            .await?;
 
         let invitation_id = shareable.invitation_id.clone();
 
@@ -766,6 +825,76 @@ mod tests {
                 assert_eq!(owner_id, own_authority);
                 assert_eq!(contact_id, sender_id);
                 assert_eq!(nickname, "Alice");
+            }
+            other => panic!("Expected ContactFact::Added, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn imported_invitation_is_resolvable_across_handler_instances() {
+        let own_authority = AuthorityId::new_from_entropy([122u8; 32]);
+        let config = AgentConfig::default();
+        let effects =
+            Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
+
+        let mut authority_context = AuthorityContext::new(own_authority);
+        authority_context.add_context(RelationalContext {
+            context_id: ContextId::new_from_entropy([122u8; 32]),
+            participants: vec![],
+            metadata: Default::default(),
+        });
+
+        let handler_import = InvitationHandler::new(authority_context.clone()).unwrap();
+        let handler_accept = InvitationHandler::new(authority_context).unwrap();
+
+        let sender_id = AuthorityId::new_from_entropy([123u8; 32]);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: "inv-demo-contact-2".to_string(),
+            sender_id,
+            invitation_type: InvitationType::Contact {
+                nickname: Some("Alice".to_string()),
+            },
+            expires_at: None,
+            message: Some("Contact invitation from Alice (demo)".to_string()),
+        };
+        let code = shareable.to_code();
+
+        let imported = handler_import
+            .import_invitation_code(&*effects, &code)
+            .await
+            .unwrap();
+
+        // Accept using a separate handler instance to ensure we don't rely on in-memory caches.
+        handler_accept
+            .accept_invitation(&*effects, &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let committed = effects.load_committed_facts(own_authority).await.unwrap();
+
+        let mut found = None::<ContactFact>;
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic {
+                binding_type,
+                binding_data,
+                ..
+            }) = fact.content
+            else {
+                continue;
+            };
+
+            if binding_type != CONTACT_FACT_TYPE_ID {
+                continue;
+            }
+
+            found = ContactFact::from_bytes(&binding_data);
+        }
+
+        let fact = found.expect("expected a committed ContactFact");
+        match fact {
+            ContactFact::Added { contact_id, .. } => {
+                assert_eq!(contact_id, sender_id);
             }
             other => panic!("Expected ContactFact::Added, got {:?}", other),
         }

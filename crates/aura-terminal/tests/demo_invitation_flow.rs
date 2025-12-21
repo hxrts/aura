@@ -17,20 +17,34 @@
 
 use async_lock::RwLock;
 use std::sync::Arc;
+use std::time::Duration;
 
+use aura_agent::core::{AgentBuilder, AgentConfig, AuraAgent};
+use aura_agent::EffectContext;
 use aura_agent::handlers::ShareableInvitation;
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::{AppConfig, AppCore};
+use aura_core::effects::ExecutionMode;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::AuthorityId;
 use aura_terminal::handlers::tui::TuiMode;
+use aura_terminal::handlers::tui::create_account;
 use aura_terminal::ids;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 use base64::Engine;
+use uuid::Uuid;
 
 // ============================================================================
 // Test Infrastructure
 // ============================================================================
+
+struct TestEnv {
+    ctx: Arc<IoContext>,
+    app_core: Arc<RwLock<AppCore>>,
+    _agent: Arc<AuraAgent>,
+    test_dir: std::path::PathBuf,
+}
 
 /// Generate a deterministic invite code for a demo agent.
 ///
@@ -73,39 +87,90 @@ fn generate_demo_invite_code(name: &str, seed: u64) -> String {
 }
 
 /// Create a test environment with IoContext and AppCore
-async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir =
-        std::env::temp_dir().join(format!("aura-demo-test-{}-{}", name, std::process::id()));
+async fn setup_test_env(name: &str) -> TestEnv {
+    let unique = Uuid::new_v4();
+    let test_dir = std::env::temp_dir().join(format!("aura-demo-test-{}-{}", name, unique));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    let device_id_str = format!("test-device-{}", name);
+    let display_name = format!("DemoUser-{}", name);
+
+    let (authority_id, context_id) =
+        create_account(&test_dir, &device_id_str, TuiMode::Production, &display_name)
+            .await
+            .expect("Failed to create account");
+
+    let mut agent_config = AgentConfig::default();
+    agent_config.device_id = ids::device_id(&device_id_str);
+    agent_config.storage.base_path = test_dir.clone();
+
+    let seed = 2024u64;
+    let effect_ctx = EffectContext::new(
+        authority_id,
+        context_id,
+        ExecutionMode::Simulation { seed },
+    );
+
+    let agent = AgentBuilder::new()
+        .with_config(agent_config)
+        .with_authority(authority_id)
+        .build_simulation_async(seed, &effect_ctx)
+        .await
+        .expect("Failed to build simulation agent");
+    let agent = Arc::new(agent);
+
+    let app_config = AppConfig {
+        data_dir: test_dir.to_string_lossy().to_string(),
+        ..AppConfig::default()
+    };
+    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
+        .expect("Failed to create AppCore with runtime");
     let app_core = Arc::new(RwLock::new(app_core));
     let initialized_app_core = InitializedAppCore::new(app_core.clone())
         .await
         .expect("Failed to init signals");
 
+    #[allow(deprecated)] // Tests use legacy helper; production uses IoContext::builder()
     let ctx = IoContext::with_account_status(
         initialized_app_core.clone(),
-        false,
-        test_dir,
-        format!("test-device-{}", name),
+        true,
+        test_dir.clone(),
+        device_id_str,
         TuiMode::Production,
     );
 
-    // Create account for testing
-    ctx.create_account(&format!("DemoUser-{}", name))
-        .await
-        .expect("Failed to create account");
-
-    (Arc::new(ctx), app_core)
+    TestEnv {
+        ctx: Arc::new(ctx),
+        app_core,
+        _agent: agent,
+        test_dir,
+    }
 }
 
-/// Cleanup test directory
-fn cleanup_test_dir(name: &str) {
-    let test_dir =
-        std::env::temp_dir().join(format!("aura-demo-test-{}-{}", name, std::process::id()));
-    let _ = std::fs::remove_dir_all(&test_dir);
+async fn wait_for_contact(app_core: &Arc<RwLock<AppCore>>, contact_id: AuthorityId) {
+    let start = tokio::time::Instant::now();
+    loop {
+        let state = {
+            let core = app_core.read().await;
+            core.read(&*CONTACTS_SIGNAL)
+                .await
+                .expect("Failed to read CONTACTS_SIGNAL")
+        };
+
+        if state.contacts.iter().any(|c| c.id == contact_id) {
+            return;
+        }
+
+        if start.elapsed() > Duration::from_secs(2) {
+            panic!(
+                "Timed out waiting for contact {} ({} contacts present)",
+                contact_id,
+                state.contacts.len()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 // ============================================================================
@@ -207,24 +272,26 @@ async fn test_demo_invitation_codes_are_parseable() {
 }
 
 /// Test that ImportInvitation command successfully imports demo codes
-///
-/// NOTE: This test is currently ignored because it requires a RuntimeBridge to be set up,
-/// which involves full agent initialization. The test will be re-enabled once we have
-/// a lightweight test harness that provides mock RuntimeBridge functionality.
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge - see setup_test_env for details"]
 async fn test_import_invitation_command_with_demo_codes() {
     println!("\n=== ImportInvitation Command Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("import-demo").await;
+    let env = setup_test_env("import-demo").await;
     let seed = 2024;
     // Names and seeds must match AgentFactory::create_demo_agents
     let alice_code = generate_demo_invite_code("Alice", seed);
     let carol_code = generate_demo_invite_code("Carol", seed + 1);
+    let alice_sender = ShareableInvitation::from_code(&alice_code)
+        .expect("Parse Alice code")
+        .sender_id;
+    let carol_sender = ShareableInvitation::from_code(&carol_code)
+        .expect("Parse Carol code")
+        .sender_id;
 
     // Phase 1: Import Alice's invitation code via EffectCommand
     println!("Phase 1: Import Alice's invitation via EffectCommand");
-    let result = ctx
+    let result = env
+        .ctx
         .dispatch(EffectCommand::ImportInvitation {
             code: alice_code.clone(),
         })
@@ -236,10 +303,12 @@ async fn test_import_invitation_command_with_demo_codes() {
         }
         Err(e) => panic!("Failed to import Alice's invitation: {:?}", e),
     }
+    wait_for_contact(&env.app_core, alice_sender).await;
 
     // Phase 2: Import Carol's invitation code
     println!("\nPhase 2: Import Carol's invitation via EffectCommand");
-    let result = ctx
+    let result = env
+        .ctx
         .dispatch(EffectCommand::ImportInvitation {
             code: carol_code.clone(),
         })
@@ -251,34 +320,39 @@ async fn test_import_invitation_command_with_demo_codes() {
         }
         Err(e) => panic!("Failed to import Carol's invitation: {:?}", e),
     }
+    wait_for_contact(&env.app_core, carol_sender).await;
 
-    // Phase 3: Verify invitations appear in signal state
-    println!("\nPhase 3: Verify invitation state");
-    let core = app_core.read().await;
-    if let Ok(inv_state) = core.read(&*INVITATIONS_SIGNAL).await {
-        println!("  Pending invitations: {}", inv_state.pending.len());
-        println!("  Sent invitations: {}", inv_state.sent.len());
-        for inv in &inv_state.pending {
-            println!("    - {} from {}", inv.id, inv.from_id);
-        }
-    }
-    drop(core);
+    // Phase 3: Verify contacts appear in signal state (the user-visible behavior).
+    println!("\nPhase 3: Verify contacts state");
+    let contacts_state = {
+        let core = env.app_core.read().await;
+        core.read(&*CONTACTS_SIGNAL)
+            .await
+            .expect("Failed to read CONTACTS_SIGNAL")
+    };
+    assert!(
+        contacts_state.contacts.iter().any(|c| c.id == alice_sender),
+        "Alice should appear in contacts after import"
+    );
+    assert!(
+        contacts_state.contacts.iter().any(|c| c.id == carol_sender),
+        "Carol should appear in contacts after import"
+    );
 
-    cleanup_test_dir("import-demo");
+    let _ = std::fs::remove_dir_all(&env.test_dir);
     println!("\n=== ImportInvitation Command Test PASSED ===\n");
 }
 
 /// Test complete demo flow: import invitations, accept them, create channel, send message
 ///
-/// NOTE: This test is currently ignored because it requires a RuntimeBridge to be set up,
-/// which involves full agent initialization. The test will be re-enabled once we have
-/// a lightweight test harness that provides mock RuntimeBridge functionality.
+/// NOTE: This test exercises multiple runtime-backed protocols and is kept ignored
+/// until the channel/chat flow is fully wired end-to-end in the demo harness.
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge - see setup_test_env for details"]
+#[ignore = "Full flow is still being stabilized"]
 async fn test_complete_demo_invitation_flow() {
     println!("\n=== Complete Demo Invitation Flow Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("complete-flow").await;
+    let env = setup_test_env("complete-flow").await;
     let seed = 2024;
     // Names and seeds must match AgentFactory::create_demo_agents
     let alice_code = generate_demo_invite_code("Alice", seed);
@@ -291,14 +365,16 @@ async fn test_complete_demo_invitation_flow() {
     // Phase 1: Import both invitation codes
     println!("Phase 1: Import Alice and Carol's invitation codes");
 
-    ctx.dispatch(EffectCommand::ImportInvitation {
+    env.ctx
+        .dispatch(EffectCommand::ImportInvitation {
         code: alice_code.clone(),
     })
     .await
     .expect("Alice import should succeed");
     println!("  Alice's invitation imported successfully");
 
-    ctx.dispatch(EffectCommand::ImportInvitation {
+    env.ctx
+        .dispatch(EffectCommand::ImportInvitation {
         code: carol_code.clone(),
     })
     .await
@@ -308,14 +384,14 @@ async fn test_complete_demo_invitation_flow() {
     // Phase 2: Accept the invitations
     println!("\nPhase 2: Accept invitations to create contacts");
 
-    let accept_alice = ctx
+    let accept_alice = env.ctx
         .dispatch(EffectCommand::AcceptInvitation {
             invitation_id: alice_invitation.invitation_id.clone(),
         })
         .await;
     println!("  Accept Alice result: {:?}", accept_alice);
 
-    let accept_carol = ctx
+    let accept_carol = env.ctx
         .dispatch(EffectCommand::AcceptInvitation {
             invitation_id: carol_invitation.invitation_id.clone(),
         })
@@ -325,7 +401,7 @@ async fn test_complete_demo_invitation_flow() {
     // Phase 3: Create a group channel with Alice and Carol
     println!("\nPhase 3: Create group channel with Alice and Carol");
 
-    let channel_result = ctx
+    let channel_result = env.ctx
         .dispatch(EffectCommand::CreateChannel {
             name: "Guardians".to_string(),
             topic: Some("Guardian coordination channel".to_string()),
@@ -340,7 +416,7 @@ async fn test_complete_demo_invitation_flow() {
     // Phase 4: Send a message to the channel
     println!("\nPhase 4: Send message to guardians");
 
-    let send_result = ctx
+    let send_result = env.ctx
         .dispatch(EffectCommand::SendMessage {
             channel: "guardians".to_string(),
             content: "Hello Alice and Carol! Thanks for being my guardians.".to_string(),
@@ -351,7 +427,7 @@ async fn test_complete_demo_invitation_flow() {
     // Phase 5: Verify state via signals
     println!("\nPhase 5: Verify state via signals");
 
-    let core = app_core.read().await;
+    let core = env.app_core.read().await;
 
     // Check chat state
     if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
@@ -383,7 +459,7 @@ async fn test_complete_demo_invitation_flow() {
     }
 
     drop(core);
-    cleanup_test_dir("complete-flow");
+    let _ = std::fs::remove_dir_all(&env.test_dir);
     println!("\n=== Complete Demo Invitation Flow Test PASSED ===\n");
 }
 
@@ -440,11 +516,12 @@ async fn test_demo_hints_deterministic() {
 async fn test_invalid_invitation_code_rejection() {
     println!("\n=== Invalid Invitation Code Rejection Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("invalid-codes").await;
+    let env = setup_test_env("invalid-codes").await;
 
     // Test 1: Completely invalid format
     println!("Test 1: Invalid format");
-    let result = ctx
+    let result = env
+        .ctx
         .dispatch(EffectCommand::ImportInvitation {
             code: "not-a-valid-code".to_string(),
         })
@@ -454,7 +531,8 @@ async fn test_invalid_invitation_code_rejection() {
 
     // Test 2: Wrong prefix
     println!("\nTest 2: Wrong prefix");
-    let result = ctx
+    let result = env
+        .ctx
         .dispatch(EffectCommand::ImportInvitation {
             code: "wrong:v1:abc123".to_string(),
         })
@@ -464,7 +542,8 @@ async fn test_invalid_invitation_code_rejection() {
 
     // Test 3: Invalid base64
     println!("\nTest 3: Invalid base64");
-    let result = ctx
+    let result = env
+        .ctx
         .dispatch(EffectCommand::ImportInvitation {
             code: "aura:v1:not-valid-base64!!!".to_string(),
         })
@@ -476,7 +555,8 @@ async fn test_invalid_invitation_code_rejection() {
     println!("\nTest 4: Valid base64 but invalid JSON");
     let invalid_json =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("not json at all".as_bytes());
-    let result = ctx
+    let result = env
+        .ctx
         .dispatch(EffectCommand::ImportInvitation {
             code: format!("aura:v1:{}", invalid_json),
         })
@@ -484,7 +564,7 @@ async fn test_invalid_invitation_code_rejection() {
     println!("  Result: {:?}", result);
     assert!(result.is_err(), "Invalid JSON should fail");
 
-    cleanup_test_dir("invalid-codes");
+    let _ = std::fs::remove_dir_all(&env.test_dir);
     println!("\n=== Invalid Invitation Code Rejection Test PASSED ===\n");
 }
 
