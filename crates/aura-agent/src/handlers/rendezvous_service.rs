@@ -9,20 +9,19 @@ use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Rendezvous service
 ///
 /// Provides rendezvous operations through a clean public API.
 pub struct RendezvousServiceApi {
     handler: RendezvousHandler,
-    effects: Arc<RwLock<AuraEffectSystem>>,
+    effects: Arc<AuraEffectSystem>,
 }
 
 impl RendezvousServiceApi {
     /// Create a new rendezvous service
     pub fn new(
-        effects: Arc<RwLock<AuraEffectSystem>>,
+        effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
         let handler = RendezvousHandler::new(authority_context)?;
@@ -50,10 +49,9 @@ impl RendezvousServiceApi {
         psk_commitment: [u8; 32],
         validity_duration_ms: u64,
     ) -> AgentResult<RendezvousResult> {
-        let effects = self.effects.read().await;
         self.handler
             .publish_descriptor(
-                &effects,
+                &self.effects,
                 context_id,
                 transport_hints,
                 psk_commitment,
@@ -123,8 +121,7 @@ impl RendezvousServiceApi {
         context_id: ContextId,
         refresh_window_ms: u64,
     ) -> AgentResult<bool> {
-        let effects = self.effects.read().await;
-        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let now_ms = self.effects.current_timestamp().await.unwrap_or(0);
         Ok(self
             .handler
             .needs_descriptor_refresh(context_id, now_ms, refresh_window_ms)
@@ -148,9 +145,8 @@ impl RendezvousServiceApi {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> AgentResult<ChannelResult> {
-        let effects = self.effects.read().await;
         self.handler
-            .initiate_channel(&effects, context_id, peer)
+            .initiate_channel(&self.effects, context_id, peer)
             .await
     }
 
@@ -171,9 +167,8 @@ impl RendezvousServiceApi {
         channel_id: [u8; 32],
         epoch: u64,
     ) -> AgentResult<ChannelResult> {
-        let effects = self.effects.read().await;
         self.handler
-            .complete_channel(&effects, context_id, peer, channel_id, epoch)
+            .complete_channel(&self.effects, context_id, peer, channel_id, epoch)
             .await
     }
 
@@ -196,9 +191,8 @@ impl RendezvousServiceApi {
         relay: AuthorityId,
         target: AuthorityId,
     ) -> AgentResult<RendezvousResult> {
-        let effects = self.effects.read().await;
         self.handler
-            .request_relay(&effects, context_id, relay, target)
+            .request_relay(&self.effects, context_id, relay, target)
             .await
     }
 
@@ -208,8 +202,7 @@ impl RendezvousServiceApi {
 
     /// Clean up expired descriptors
     pub async fn cleanup_expired(&self) -> AgentResult<()> {
-        let effects = self.effects.read().await;
-        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let now_ms = self.effects.current_timestamp().await.unwrap_or(0);
         self.handler.cleanup_expired(now_ms).await;
         Ok(())
     }
@@ -287,6 +280,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         service.cache_peer_descriptor(descriptor.clone()).await;
@@ -318,6 +312,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
+            display_name: None,
         };
         service.cache_peer_descriptor(descriptor).await;
 

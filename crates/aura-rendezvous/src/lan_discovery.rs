@@ -665,6 +665,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [42u8; 32],
+            display_name: None,
         }
     }
 

@@ -854,6 +854,19 @@ impl aura_core::effects::ThresholdSigningEffects for MockEffects {
         })
     }
 
+    async fn threshold_state(
+        &self,
+        authority: &AuthorityId,
+    ) -> Option<aura_core::threshold::ThresholdState> {
+        // Default 1-of-1 threshold state for mock
+        Some(aura_core::threshold::ThresholdState {
+            epoch: 0,
+            threshold: 1,
+            total_participants: 1,
+            guardian_ids: vec![authority.to_string()],
+        })
+    }
+
     async fn has_signing_capability(&self, _authority: &AuthorityId) -> bool {
         true
     }

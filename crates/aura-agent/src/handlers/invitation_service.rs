@@ -11,20 +11,19 @@ use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::AuthorityId;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Invitation service
 ///
 /// Provides invitation operations through a clean public API.
 pub struct InvitationService {
     handler: InvitationHandler,
-    effects: Arc<RwLock<AuraEffectSystem>>,
+    effects: Arc<AuraEffectSystem>,
 }
 
 impl InvitationService {
     /// Create a new invitation service
     pub fn new(
-        effects: Arc<RwLock<AuraEffectSystem>>,
+        effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
         let handler = InvitationHandler::new(authority_context)?;
@@ -48,10 +47,9 @@ impl InvitationService {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        let effects = self.effects.read().await;
         self.handler
             .create_invitation(
-                &effects,
+                &self.effects,
                 receiver_id,
                 InvitationType::Channel { block_id },
                 message,
@@ -77,10 +75,9 @@ impl InvitationService {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        let effects = self.effects.read().await;
         self.handler
             .create_invitation(
-                &effects,
+                &self.effects,
                 receiver_id,
                 InvitationType::Guardian { subject_authority },
                 message,
@@ -106,10 +103,9 @@ impl InvitationService {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        let effects = self.effects.read().await;
         self.handler
             .create_invitation(
-                &effects,
+                &self.effects,
                 receiver_id,
                 InvitationType::Contact { nickname },
                 message,
@@ -126,9 +122,8 @@ impl InvitationService {
     /// # Returns
     /// Result of the acceptance
     pub async fn accept(&self, invitation_id: &str) -> AgentResult<InvitationResult> {
-        let effects = self.effects.read().await;
         self.handler
-            .accept_invitation(&effects, invitation_id)
+            .accept_invitation(&self.effects, invitation_id)
             .await
     }
 
@@ -140,9 +135,8 @@ impl InvitationService {
     /// # Returns
     /// Result of the decline
     pub async fn decline(&self, invitation_id: &str) -> AgentResult<InvitationResult> {
-        let effects = self.effects.read().await;
         self.handler
-            .decline_invitation(&effects, invitation_id)
+            .decline_invitation(&self.effects, invitation_id)
             .await
     }
 
@@ -154,9 +148,8 @@ impl InvitationService {
     /// # Returns
     /// Result of the cancellation
     pub async fn cancel(&self, invitation_id: &str) -> AgentResult<InvitationResult> {
-        let effects = self.effects.read().await;
         self.handler
-            .cancel_invitation(&effects, invitation_id)
+            .cancel_invitation(&self.effects, invitation_id)
             .await
     }
 

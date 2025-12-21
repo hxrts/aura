@@ -10,7 +10,6 @@ use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_protocol::effects::SessionType;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Session management service
 ///
@@ -23,7 +22,7 @@ pub struct SessionService {
 impl SessionService {
     /// Create a new session service
     pub fn new(
-        effects: Arc<RwLock<AuraEffectSystem>>,
+        effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         account_id: AccountId,
     ) -> Self {

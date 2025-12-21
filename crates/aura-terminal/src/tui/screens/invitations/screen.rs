@@ -354,17 +354,21 @@ pub fn InvitationsScreen(
             let mut reactive_invitations = reactive_invitations.clone();
             let app_core = ctx.app_core.clone();
             async move {
-                subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |invitations_state| {
-                    let all_invitations: Vec<Invitation> = invitations_state
-                        .pending
-                        .iter()
-                        .chain(invitations_state.sent.iter())
-                        .chain(invitations_state.history.iter())
-                        .map(convert_invitation)
-                        .collect();
+                subscribe_signal_with_retry(
+                    app_core,
+                    &*INVITATIONS_SIGNAL,
+                    move |invitations_state| {
+                        let all_invitations: Vec<Invitation> = invitations_state
+                            .pending
+                            .iter()
+                            .chain(invitations_state.sent.iter())
+                            .chain(invitations_state.history.iter())
+                            .map(convert_invitation)
+                            .collect();
 
-                    reactive_invitations.set(all_invitations);
-                })
+                        reactive_invitations.set(all_invitations);
+                    },
+                )
                 .await;
             }
         });

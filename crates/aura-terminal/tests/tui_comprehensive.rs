@@ -25,8 +25,8 @@
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state_machine::{
-    transition, BlockFocus, ChatFocus, DispatchCommand, ModalType, QueuedModal, TuiCommand,
-    TuiState,
+    transition, BlockFocus, ChannelInfoModalState, ChatFocus, ContactSelectModalState,
+    DispatchCommand, ModalType, QueuedModal, TopicModalState, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
 use proptest::prelude::*;
@@ -164,8 +164,8 @@ impl TestTui {
             Screen::Chat => '2',
             Screen::Contacts => '3',
             Screen::Neighborhood => '4',
-            Screen::Settings => '5',
-            Screen::Recovery => '6',
+            Screen::Recovery => '5',
+            Screen::Settings => '6',
         };
         self.send_char(key);
         self.assert_screen(screen);
@@ -239,7 +239,6 @@ mod block_screen {
 
         // Set up item counts for navigation to work
         tui.state.block.resident_count = 10;
-        tui.state.block.invite_contact_count = 5;
 
         // Navigate down in resident list
         let initial = tui.state.block.selected_resident;
@@ -255,21 +254,36 @@ mod block_screen {
     fn test_block_invite_modal() {
         let mut tui = TestTui::new();
 
-        // Set up item counts for navigation to work
-        tui.state.block.resident_count = 10;
-        tui.state.block.invite_contact_count = 5;
-
-        // Open invite modal with 'v'
+        // Pressing 'v' requests the shell to open the modal (contacts are populated outside the pure state machine).
+        tui.clear_commands();
         tui.send_char('v');
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenBlockInvite)));
+
+        // Simulate the shell opening a populated modal.
+        tui.state
+            .modal_queue
+            .enqueue(QueuedModal::BlockInvite(ContactSelectModalState::single(
+                "Invite to Block",
+                vec![
+                    ("c1".to_string(), "Alice".to_string()),
+                    ("c2".to_string(), "Bob".to_string()),
+                ],
+            )));
         assert!(tui.state.is_block_invite_modal_active());
 
-        // Navigate selection - this now happens within the modal state
-        // The block.invite_selection is used for the modal's internal state
-        let initial = tui.state.block.invite_selection;
+        // Navigate selection inside queued modal state.
+        let initial = match tui.state.modal_queue.current() {
+            Some(QueuedModal::BlockInvite(s)) => s.selected_index,
+            _ => 0,
+        };
         tui.send_char('j');
-        assert_eq!(tui.state.block.invite_selection, initial + 1);
+        let after = match tui.state.modal_queue.current() {
+            Some(QueuedModal::BlockInvite(s)) => s.selected_index,
+            _ => 0,
+        };
+        assert_eq!(after, initial + 1);
 
-        // Close with Escape
+        // Close with Escape.
         tui.send_escape();
         assert!(!tui.state.is_block_invite_modal_active());
     }
@@ -278,19 +292,31 @@ mod block_screen {
     fn test_block_invite_confirm() {
         let mut tui = TestTui::new();
 
-        // Open invite modal and select
-        tui.send_char('v');
-        tui.send_char('j'); // Select second contact
+        // Simulate a populated invite modal.
+        tui.state
+            .modal_queue
+            .enqueue(QueuedModal::BlockInvite(ContactSelectModalState::single(
+                "Invite to Block",
+                vec![
+                    ("c1".to_string(), "Alice".to_string()),
+                    ("c2".to_string(), "Bob".to_string()),
+                ],
+            )));
 
-        // Confirm with Enter
+        // Select second contact.
+        tui.send_char('j');
+
+        // Confirm with Enter.
         tui.clear_commands();
         tui.send_enter();
 
-        // Modal should close
+        // Modal should close.
         assert!(!tui.state.is_block_invite_modal_active());
 
-        // Dispatch command should be generated
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::InviteToBlock { .. })));
+        // Dispatch command should include the real contact id.
+        assert!(tui.has_dispatch(|d| {
+            matches!(d, DispatchCommand::InviteToBlock { contact_id } if contact_id == "c2")
+        }));
     }
 
     #[test]
@@ -303,7 +329,7 @@ mod block_screen {
 
         // Grant steward with 'g'
         tui.send_char('g');
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::GrantSteward { .. })));
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::GrantStewardSelected)));
     }
 
     #[test]
@@ -316,7 +342,7 @@ mod block_screen {
 
         // Revoke steward with 'R' (uppercase to distinguish from 'r' toggle residents)
         tui.send_char('R');
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::RevokeSteward { .. })));
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::RevokeStewardSelected)));
     }
 
     #[test]
@@ -462,8 +488,17 @@ mod chat_screen {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Chat);
 
-        // Open set topic modal with 't'
+        // 't' triggers a shell-populated modal open.
         tui.send_char('t');
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenChatTopicModal)));
+
+        // Simulate the shell opening the modal with selected channel details.
+        tui.state
+            .modal_queue
+            .enqueue(QueuedModal::ChatTopic(TopicModalState::for_channel(
+                "ch-123", "",
+            )));
+
         assert!(tui.has_modal());
         assert!(tui.state.is_chat_topic_modal_active());
 
@@ -478,7 +513,13 @@ mod chat_screen {
         tui.clear_commands();
         tui.send_enter();
 
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::SetChannelTopic { topic, .. } if topic == "Welcome to the channel!")));
+        assert!(tui.has_dispatch(|d| {
+            matches!(
+                d,
+                DispatchCommand::SetChannelTopic { channel_id, topic }
+                    if channel_id == "ch-123" && topic == "Welcome to the channel!"
+            )
+        }));
     }
 
     #[test]
@@ -486,8 +527,19 @@ mod chat_screen {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Chat);
 
-        // Open channel info with 'o'
+        // 'o' triggers a shell-populated modal open.
         tui.send_char('o');
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenChatInfoModal)));
+
+        // Simulate the shell opening the modal with selected channel details.
+        tui.state
+            .modal_queue
+            .enqueue(QueuedModal::ChatInfo(ChannelInfoModalState::for_channel(
+                "ch-123",
+                "info-channel",
+                None,
+            )));
+
         assert!(tui.has_modal());
         assert!(tui.state.is_chat_info_modal_active());
 
@@ -507,7 +559,7 @@ mod chat_screen {
 
         // Retry with 'r'
         tui.send_char('r');
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::RetryMessage { .. })));
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::RetryMessage)));
     }
 }
 
@@ -1388,8 +1440,8 @@ proptest! {
             '2' => Screen::Chat,
             '3' => Screen::Contacts,
             '4' => Screen::Neighborhood,
-            '5' => Screen::Settings,
-            '6' => Screen::Recovery,
+            '5' => Screen::Recovery,
+            '6' => Screen::Settings,
             _ => unreachable!(),
         };
 

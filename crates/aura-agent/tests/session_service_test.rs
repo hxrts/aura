@@ -28,7 +28,7 @@ async fn test_session_service_via_agent() -> Result<(), Box<dyn std::error::Erro
         .await?;
 
     // Get the session service
-    let sessions = agent.sessions().await;
+    let sessions = agent.sessions();
 
     // Create a coordination session
     let participants = vec![sessions.device_id()];
@@ -51,7 +51,7 @@ async fn test_session_stats_via_agent() -> Result<(), Box<dyn std::error::Error>
         .build_testing_async(&ctx)
         .await?;
 
-    let sessions = agent.sessions().await;
+    let sessions = agent.sessions();
     let stats = sessions.get_stats().await?;
 
     // Initially no active sessions
@@ -68,7 +68,7 @@ async fn test_threshold_session_via_agent() -> Result<(), Box<dyn std::error::Er
         .build_testing_async(&ctx)
         .await?;
 
-    let sessions = agent.sessions().await;
+    let sessions = agent.sessions();
     let device_id = sessions.device_id();
 
     // Create 3 device IDs for a 2-of-3 threshold
@@ -97,7 +97,7 @@ async fn test_key_rotation_session_via_agent() -> Result<(), Box<dyn std::error:
         .build_testing_async(&ctx)
         .await?;
 
-    let sessions = agent.sessions().await;
+    let sessions = agent.sessions();
 
     let handle = sessions.create_key_rotation_session().await?;
 
@@ -116,7 +116,7 @@ async fn test_end_session_via_agent() -> Result<(), Box<dyn std::error::Error>> 
         .build_testing_async(&ctx)
         .await?;
 
-    let sessions = agent.sessions().await;
+    let sessions = agent.sessions();
     let participants = vec![sessions.device_id()];
 
     // Create and then end a session

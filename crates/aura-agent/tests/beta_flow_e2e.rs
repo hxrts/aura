@@ -85,7 +85,7 @@ async fn test_two_agent_invitation_flow() -> TestResult {
     let authority_b = agent_b.authority_id();
 
     // User A creates an invitation for User B
-    let invitation_service_a = agent_a.invitations().await?;
+    let invitation_service_a = agent_a.invitations()?;
 
     let invitation = invitation_service_a
         .invite_as_contact(
@@ -196,7 +196,7 @@ async fn test_complete_beta_flow() -> TestResult {
     let bob_id = AuthorityId::new_from_entropy([200u8; 32]); // Bob's authority ID
 
     // === Step 1: Alice creates an invitation ===
-    let alice_invitations = agent_alice.invitations().await?;
+    let alice_invitations = agent_alice.invitations()?;
 
     let invitation = alice_invitations
         .invite_as_contact(bob_id, Some("bob".to_string()), None, None)
@@ -263,7 +263,7 @@ async fn test_guardian_invitation() -> TestResult {
     let authority = agent.authority_id();
     let guardian_candidate = AuthorityId::new_from_entropy([51u8; 32]);
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     // Create guardian invitation
     let invitation = invitations
@@ -298,7 +298,7 @@ async fn test_channel_invitation() -> TestResult {
     let agent = create_test_agent(60).await?;
     let invitee = AuthorityId::new_from_entropy([61u8; 32]);
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     // Create channel invitation
     let invitation = invitations
@@ -330,7 +330,7 @@ async fn test_invitation_decline() -> TestResult {
     let agent = create_test_agent(70).await?;
     let invitee = AuthorityId::new_from_entropy([71u8; 32]);
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     // Create invitation
     let invitation = invitations
@@ -356,7 +356,7 @@ async fn test_invitation_cancel() -> TestResult {
     let agent = create_test_agent(80).await?;
     let invitee = AuthorityId::new_from_entropy([81u8; 32]);
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     // Create invitation
     let invitation = invitations

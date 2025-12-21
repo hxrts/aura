@@ -176,7 +176,7 @@ pub struct SessionCreationFailed {
 #[allow(dead_code)] // Part of future session coordination API
 pub struct SessionOperations {
     /// Effect system for session operations
-    effects: Arc<RwLock<AuraEffectSystem>>,
+    effects: Arc<AuraEffectSystem>,
     /// Authority context
     pub(super) authority_context: AuthorityContext,
     /// Account ID
@@ -192,7 +192,7 @@ impl SessionOperations {
     /// Create new session operations handler
     #[allow(dead_code)] // Part of future session coordination API
     pub fn new(
-        effects: Arc<RwLock<AuraEffectSystem>>,
+        effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         account_id: AccountId,
     ) -> Self {
@@ -213,7 +213,7 @@ impl SessionOperations {
 
     /// Access to effects system for submodules
     #[allow(dead_code)] // Part of future session coordination API
-    pub(super) fn effects(&self) -> &Arc<RwLock<AuraEffectSystem>> {
+    pub(super) fn effects(&self) -> &Arc<AuraEffectSystem> {
         &self.effects
     }
 
@@ -222,7 +222,7 @@ impl SessionOperations {
         let key = format!("session/{}", handle.session_id);
         let bytes = serde_json::to_vec(handle)
             .map_err(|e| AgentError::effects(format!("serialize session: {e}")))?;
-        effects
+        self.effects
             .store(&key, bytes)
             .await
             .map_err(|e| AgentError::effects(format!("store session: {e}")))
@@ -234,7 +234,7 @@ impl SessionOperations {
     ) -> AgentResult<Option<SessionHandle>> {
         let effects = self.effects().read().await;
         let key = format!("session/{}", session_key);
-        let maybe = effects
+        let maybe = self.effects
             .retrieve(&key)
             .await
             .map_err(|e| AgentError::effects(format!("retrieve session: {e}")))?;
@@ -256,7 +256,7 @@ impl SessionOperations {
         let key = format!("session/{session_id}/participants");
         let bytes = serde_json::to_vec(participants)
             .map_err(|e| AgentError::effects(format!("serialize participants: {e}")))?;
-        effects
+        self.effects
             .store(&key, bytes)
             .await
             .map_err(|e| AgentError::effects(format!("store participants: {e}")))
@@ -271,7 +271,7 @@ impl SessionOperations {
         let key = format!("session/{session_id}/metadata");
         let bytes = serde_json::to_vec(metadata)
             .map_err(|e| AgentError::effects(format!("serialize metadata: {e}")))?;
-        effects
+        self.effects
             .store(&key, bytes)
             .await
             .map_err(|e| AgentError::effects(format!("store metadata: {e}")))
@@ -332,13 +332,12 @@ impl SessionOperations {
         session_type: SessionType,
         participants: Vec<DeviceId>,
     ) -> AgentResult<SessionHandle> {
-        let effects = self.effects.read().await;
-        self.enforce_guard(&effects, "session:create", 100).await?;
+        self.enforce_guard(&self.effects, "session:create", 100).await?;
         let device_id = self.device_id();
-        let _timestamp_millis = effects.current_timestamp().await.unwrap_or(0);
+        let _timestamp_millis = self.effects.current_timestamp().await.unwrap_or(0);
 
         // Generate unique session ID
-        let session_uuid = effects.random_uuid().await;
+        let session_uuid = self.effects.random_uuid().await;
         let session_id = format!("session-{}", session_uuid.simple());
 
         // Create session request message for choreography
@@ -352,7 +351,7 @@ impl SessionOperations {
 
         // Execute the choreographic protocol
         match self
-            .execute_session_creation_choreography(&session_request, &effects)
+            .execute_session_creation_choreography(&session_request, &self.effects)
             .await
         {
             Ok(session_handle) => {
@@ -371,7 +370,7 @@ impl SessionOperations {
                 self.persist_session_handle(&session_handle).await?;
                 HandlerUtilities::append_relational_fact(
                     &self.authority_context,
-                    &effects,
+                    &self.effects,
                     self.guard_context(),
                     "session_created",
                     &SessionCreatedFact {
@@ -473,7 +472,7 @@ impl SessionOperations {
         effects: &AuraEffectSystem,
     ) -> AgentResult<Vec<ParticipantResponse>> {
         let mut responses = Vec::new();
-        let timestamp = effects.current_timestamp().await.unwrap_or(0);
+        let timestamp = self.effects.current_timestamp().await.unwrap_or(0);
 
         // For each participant (excluding initiator), send invitation over transport
         for participant_id in &request.participants {
@@ -510,7 +509,7 @@ impl SessionOperations {
                 receipt: None,
             };
 
-            effects
+            self.effects
                 .send_envelope(envelope)
                 .await
                 .map_err(|e| AgentError::effects(format!("send invitation failed: {e}")))?;
@@ -550,7 +549,7 @@ impl SessionOperations {
         effects: &AuraEffectSystem,
     ) -> AgentResult<SessionHandle> {
         let device_id = self.device_id();
-        let timestamp_millis = effects.current_timestamp().await.unwrap_or(0);
+        let timestamp_millis = self.effects.current_timestamp().await.unwrap_or(0);
         let my_role = ChoreographicRole::new(device_id.0, 0);
 
         let session_handle = SessionHandle {
@@ -582,7 +581,6 @@ struct ParticipantResponse {
 impl SessionOperations {
     /// Get session information
     pub async fn get_session(&self, session_id: &str) -> AgentResult<Option<SessionHandle>> {
-        let effects = self.effects.read().await;
 
         // Convert string to SessionId by parsing the UUID part
         let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
@@ -596,7 +594,7 @@ impl SessionOperations {
 
         // Implement session status lookup via effects system
         match self
-            .get_session_status_via_effects(&effects, &session_id_typed)
+            .get_session_status_via_effects(&self.effects, &session_id_typed)
             .await
         {
             Ok(Some(handle)) => Ok(Some(handle)),
@@ -607,26 +605,22 @@ impl SessionOperations {
 
     /// End a session
     pub async fn end_session(&self, session_id: &str) -> AgentResult<SessionHandle> {
-        let effects = self.effects.read().await;
-        self.end_session_via_effects(&effects, session_id).await
+        self.end_session_via_effects(&self.effects, session_id).await
     }
 
     /// List all active sessions
     pub async fn list_active_sessions(&self) -> AgentResult<Vec<String>> {
-        let effects = self.effects.read().await;
-        self.list_sessions_via_effects(&effects).await
+        self.list_sessions_via_effects(&self.effects).await
     }
 
     /// Get session statistics
     pub async fn get_session_stats(&self) -> AgentResult<SessionStats> {
-        let effects = self.effects.read().await;
-        self.get_session_stats_via_effects(&effects).await
+        self.get_session_stats_via_effects(&self.effects).await
     }
 
     /// Cleanup expired sessions
     pub async fn cleanup_expired_sessions(&self, max_age_seconds: u64) -> AgentResult<Vec<String>> {
-        let effects = self.effects.read().await;
-        self.cleanup_sessions_via_effects(&effects, max_age_seconds)
+        self.cleanup_sessions_via_effects(&self.effects, max_age_seconds)
             .await
     }
 
@@ -669,7 +663,7 @@ impl SessionOperations {
         session_id: &str,
     ) -> AgentResult<SessionHandle> {
         // End session (logging removed for simplicity)
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
+        let current_time = self.effects.current_timestamp().await.unwrap_or(0);
 
         let device_id = self.device_id();
         Ok(SessionHandle {
@@ -709,7 +703,7 @@ impl SessionOperations {
         &self,
         effects: &AuraEffectSystem,
     ) -> AgentResult<SessionStats> {
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
+        let current_time = self.effects.current_timestamp().await.unwrap_or(0);
 
         // Return empty stats (no persistent storage yet)
         Ok(SessionStats {
@@ -831,7 +825,7 @@ mod tests {
             .unwrap();
 
         let storage_key = format!("session/{}", handle.session_id);
-        let stored = effects.read().await.retrieve(&storage_key).await.unwrap();
+        let stored = self.effects.retrieve(&storage_key).await.unwrap();
 
         assert!(stored.is_some(), "session handle persisted to storage");
     }

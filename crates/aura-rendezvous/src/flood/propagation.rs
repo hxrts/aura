@@ -346,12 +346,12 @@ where
         FloodAction::Forward
     }
 
-    fn budget(&self) -> &FloodBudget {
-        // This is a bit awkward with async locks, but the trait requires &FloodBudget
-        // We'll need to return a reference somehow - for now panic to indicate
-        // this needs async redesign or we need interior mutability pattern
-        // In practice, callers should use budget_snapshot() instead
-        panic!("Use budget_snapshot() for async-safe budget access")
+    async fn budget(&self) -> FloodBudget {
+        *self.budget.read().await
+    }
+
+    async fn update_budget(&self, budget: FloodBudget) {
+        *self.budget.write().await = budget;
     }
 }
 
@@ -360,18 +360,6 @@ where
     C: CryptoEffects,
     N: NetworkEffects,
 {
-    /// Get a snapshot of the current budget.
-    ///
-    /// Use this instead of budget() for async-safe access.
-    pub async fn budget_snapshot(&self) -> FloodBudget {
-        *self.budget.read().await
-    }
-
-    /// Update the flood budget.
-    pub async fn set_budget(&self, budget: FloodBudget) {
-        *self.budget.write().await = budget;
-    }
-
     /// Rotate budget to a new epoch.
     pub async fn rotate_epoch(&self, epoch: aura_core::types::epochs::Epoch) {
         self.budget.write().await.rotate_epoch(epoch);

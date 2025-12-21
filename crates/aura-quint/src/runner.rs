@@ -414,7 +414,9 @@ impl CounterexampleGenerator {
 
         // Extract counterexample and apply shrinking if available
         if let Some(counterexample) = parsed_result.get("counterexample") {
-            let shrunk = self.shrink_counterexample(counterexample)?;
+            let shrunk = self
+                .shrink_counterexample(counterexample, property_spec, evaluator)
+                .await?;
             debug!(
                 "Counterexample found and shrunk: {} steps -> {} steps",
                 counterexample.as_array().map(|a| a.len()).unwrap_or(0),
@@ -467,7 +469,14 @@ impl CounterexampleGenerator {
     ///
     /// Uses delta debugging with deterministic random selection (if seed provided)
     /// to find the smallest trace that still demonstrates the property violation.
-    fn shrink_counterexample(&self, counterexample: &Value) -> AuraResult<Value> {
+    /// Re-verifies the property on each candidate shrunk trace to ensure it
+    /// still demonstrates the violation.
+    async fn shrink_counterexample(
+        &self,
+        counterexample: &Value,
+        property_spec: &PropertySpec,
+        evaluator: &QuintEvaluator,
+    ) -> AuraResult<Value> {
         // If counterexample is an array (trace), try to shrink it
         if let Some(trace) = counterexample.as_array() {
             if trace.len() <= 1 || trace.len() <= self.max_depth / 10 {
@@ -481,8 +490,13 @@ impl CounterexampleGenerator {
             // Simple delta debugging: try removing steps
             let mut shrunk_trace = trace.clone();
             let mut step_size = shrunk_trace.len() / 2;
+            let mut shrink_attempts = 0;
+            const MAX_SHRINK_ATTEMPTS: usize = 100;
 
-            while step_size >= 1 && shrunk_trace.len() > 1 {
+            while step_size >= 1 && shrunk_trace.len() > 1 && shrink_attempts < MAX_SHRINK_ATTEMPTS
+            {
+                shrink_attempts += 1;
+
                 // Deterministic pseudo-random index selection
                 rng_state = rng_state.wrapping_mul(1103515245).wrapping_add(12345);
                 let start_idx = (rng_state as usize) % shrunk_trace.len().max(1);
@@ -497,24 +511,106 @@ impl CounterexampleGenerator {
                     .collect();
 
                 if !candidate.is_empty() {
-                    // In a real implementation, we'd re-verify the property here
-                    // For now, we assume the shrunk trace is valid if it's non-empty
-                    shrunk_trace = candidate;
+                    // Re-verify property on shrunk trace before accepting
+                    let candidate_value = Value::Array(candidate.clone());
+                    match self
+                        .verify_trace_violates_property(&candidate_value, property_spec, evaluator)
+                        .await
+                    {
+                        Ok(true) => {
+                            // Candidate still violates property, accept it
+                            debug!(
+                                "Shrink attempt {}: accepted trace of {} steps (still violates property)",
+                                shrink_attempts,
+                                candidate.len()
+                            );
+                            shrunk_trace = candidate;
+                        }
+                        Ok(false) => {
+                            // Candidate no longer violates property, reject it
+                            debug!(
+                                "Shrink attempt {}: rejected trace of {} steps (no longer violates property)",
+                                shrink_attempts,
+                                candidate.len()
+                            );
+                        }
+                        Err(e) => {
+                            // Verification failed, log and skip this candidate
+                            warn!(
+                                "Shrink attempt {}: verification failed, skipping candidate: {}",
+                                shrink_attempts, e
+                            );
+                        }
+                    }
                 }
 
                 step_size /= 2;
             }
 
             debug!(
-                "Shrunk counterexample from {} to {} steps",
+                "Shrunk counterexample from {} to {} steps ({} attempts)",
                 trace.len(),
-                shrunk_trace.len()
+                shrunk_trace.len(),
+                shrink_attempts
             );
             Ok(Value::Array(shrunk_trace))
         } else {
             // Not a trace, return as-is
             Ok(counterexample.clone())
         }
+    }
+
+    /// Verify that a trace still violates the property
+    ///
+    /// Returns true if the trace demonstrates a property violation,
+    /// false if the property holds on this trace.
+    async fn verify_trace_violates_property(
+        &self,
+        trace: &Value,
+        property_spec: &PropertySpec,
+        evaluator: &QuintEvaluator,
+    ) -> AuraResult<bool> {
+        // Parse the spec file to get the IR
+        let json_ir = evaluator.parse_file(&property_spec.spec_file).await?;
+
+        // Create a verification config that replays the specific trace
+        let mut ir_value: Value = serde_json::from_str(&json_ir)
+            .map_err(|e| AuraError::invalid(format!("Failed to parse JSON IR: {}", e)))?;
+
+        // Inject the trace into the IR for replay verification
+        if let Some(ir_obj) = ir_value.as_object_mut() {
+            ir_obj.insert(
+                "replayConfig".to_string(),
+                serde_json::json!({
+                    "mode": "replay",
+                    "trace": trace,
+                    "checkProperty": property_spec.name,
+                }),
+            );
+        }
+
+        let enhanced_ir = serde_json::to_string(&ir_value)
+            .map_err(|e| AuraError::invalid(format!("Failed to serialize replay config: {}", e)))?;
+
+        // Run the replayed trace through the evaluator
+        let result = evaluator.simulate_via_evaluator(&enhanced_ir).await?;
+
+        // Parse result to check if property was violated
+        let parsed_result: Value = serde_json::from_str(&result)
+            .map_err(|e| AuraError::invalid(format!("Failed to parse replay result: {}", e)))?;
+
+        // Check if the result indicates property violation
+        // A trace violates the property if the evaluator returns a counterexample
+        // or indicates the property failed
+        let violates = parsed_result
+            .get("propertyViolated")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_else(|| {
+                // Fallback: check if there's a counterexample in the result
+                parsed_result.get("counterexample").is_some()
+            });
+
+        Ok(violates)
     }
 }
 

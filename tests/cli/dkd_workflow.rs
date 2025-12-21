@@ -21,10 +21,10 @@ use aura_core::{
     effects::{CryptoEffects, JournalEffects, RandomEffects},
     AuraResult, AccountId,
 };
-use aura_agent::{AuraAgent, AgentConfig};
+use aura_agent::{AuraAgent, AgentConfig, create_testing_agent};
 use aura_journal::{
     journal_api::Journal,
-    fact_journal::{FactContent, RelationalFact},
+    RelationalFact,
 };
 use std::collections::HashMap;
 use std::process::Command;
@@ -83,13 +83,12 @@ impl DkdTestHarness {
         let mut authorities = Vec::new();
         let mut agents = HashMap::new();
         
-        for i in 0..config.participants {
+        for _i in 0..config.participants {
             let authority_id = AuthorityId::new();
             authorities.push(authority_id);
-            
-            let effects = aura_agent::runtime::AuraEffectSystem::testing(&AgentConfig::default());
-            let agent = AuraAgent::new(effects, authority_id);
-            // Note: Seeding removed as it's handled at effect system level
+
+            // Create a testing agent using the proper builder pattern
+            let agent = create_testing_agent(authority_id)?;
             agents.insert(authority_id, agent);
         }
         
@@ -113,31 +112,34 @@ impl DkdTestHarness {
         // Each authority records DKD participation intent
         for authority_id in &self.authorities {
             let agent = &self.agents[authority_id];
-            
+
             // Create account ID from authority ID
             let account_id = AccountId::from(authority_id.uuid());
-            let mut journal = Journal::new(account_id);
-            
+
+            // Create journal with placeholder group key for testing
+            let placeholder_group_key = vec![0u8; 32];
+            let mut journal = Journal::new_with_group_key_bytes(account_id, placeholder_group_key);
+
             // Record DKD intent
             let mut metadata = HashMap::new();
             metadata.insert("app_id".to_string(), self.config.app_id.clone());
             metadata.insert("derivation_context".to_string(), self.config.context.clone());
             metadata.insert("participants".to_string(), self.config.participants.to_string());
             metadata.insert("authority_id".to_string(), authority_id.to_string());
-            
+
             let dkd_fact = RelationalFact::Generic {
                 context_id: dkd_context,
                 binding_type: "dkd_derivation".to_string(),
                 binding_data: serde_json::to_vec(&metadata).unwrap(),
             };
-            
-            // For now, skip adding to fact journal since the API is incomplete
-            // This would need proper implementation in journal_api.rs
-            // let fact = Fact {
-            //     content: FactContent::Relational(dkd_fact),
-            // };
-            // journal.fact_journal_mut().add_fact(fact)?;
-            // Note: Journal persistence would be handled through sync_journal() method when implemented
+
+            // Add the relational fact to the journal using the agent's random effects
+            let effects = agent.runtime().effects();
+            let effects_guard = effects.read().await;
+            journal.add_relational_fact(dkd_fact, &*effects_guard).await?;
+
+            // Sync the journal to persistent storage
+            journal.sync(&*effects_guard).await?;
         }
         
         // === Phase 2: Key Derivation Process ===
@@ -172,32 +174,34 @@ impl DkdTestHarness {
         let keys_match = derived_keys.values().all(|key| key == first_key);
         
         // === Phase 4: Record Results ===
-        
+
         for authority_id in &self.authorities {
             let agent = &self.agents[authority_id];
-            
-            // Note: Journal access would be through agent methods when implemented
+
+            // Create journal with placeholder group key for testing
             let account_id = AccountId::from(authority_id.uuid());
-            let journal = Journal::new(account_id);
-            
+            let placeholder_group_key = vec![0u8; 32];
+            let mut journal = Journal::new_with_group_key_bytes(account_id, placeholder_group_key);
+
             // Record DKD completion
             let mut metadata = HashMap::new();
             metadata.insert("key_derived".to_string(), "true".to_string());
             metadata.insert("derivation_time".to_string(), start_time.elapsed().as_millis().to_string());
             metadata.insert("authority_id".to_string(), authority_id.to_string());
-            
+
             let completion_fact = RelationalFact::Generic {
                 context_id: dkd_context,
                 binding_type: "dkd_completed".to_string(),
                 binding_data: serde_json::to_vec(&metadata).unwrap(),
             };
-            
-            // For now, skip adding completion fact since the API is incomplete
-            // let completion_fact_obj = Fact {
-            //     content: FactContent::Relational(completion_fact),
-            // };
-            // journal.fact_journal_mut().add_fact(completion_fact_obj)?;
-            // Note: Journal persistence would be handled through sync_journal() method when implemented
+
+            // Add the completion fact to the journal using the agent's random effects
+            let effects = agent.runtime().effects();
+            let effects_guard = effects.read().await;
+            journal.add_relational_fact(completion_fact, &*effects_guard).await?;
+
+            // Sync the journal to persistent storage
+            journal.sync(&*effects_guard).await?;
         }
         
         Ok(DkdTestResults {

@@ -208,6 +208,7 @@ impl IosPresetBuilder {
             // - OSLogConsoleHandler
             // - URLSessionTransportHandler
 
+            // TODO: Implement iOS platform handlers (KeychainSecureStorageHandler, etc.)
             // For now, fall back to testing mode until iOS handlers are implemented
             let _ = (
                 app_group,

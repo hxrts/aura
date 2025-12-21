@@ -229,6 +229,8 @@ impl SyncStatus {
 #[derive(Clone, Debug, Default)]
 pub struct Message {
     pub id: String,
+    /// Channel this message belongs to
+    pub channel_id: String,
     pub sender: String,
     pub content: String,
     pub timestamp: String,
@@ -241,6 +243,7 @@ impl From<&AppMessage> for Message {
     fn from(msg: &AppMessage) -> Self {
         Self {
             id: msg.id.clone(),
+            channel_id: msg.channel_id.to_string(),
             sender: msg.sender_name.clone(),
             content: msg.content.clone(),
             timestamp: format_timestamp(msg.timestamp),
@@ -259,6 +262,7 @@ impl Message {
     ) -> Self {
         Self {
             id: id.into(),
+            channel_id: String::new(),
             sender: sender.into(),
             content: content.into(),
             timestamp: String::new(),
@@ -270,17 +274,25 @@ impl Message {
     /// Create a new message in sending state (for optimistic UI)
     pub fn sending(
         id: impl Into<String>,
+        channel_id: impl Into<String>,
         sender: impl Into<String>,
         content: impl Into<String>,
     ) -> Self {
         Self {
             id: id.into(),
+            channel_id: channel_id.into(),
             sender: sender.into(),
             content: content.into(),
             timestamp: String::new(),
             is_own: true,
             delivery_status: DeliveryStatus::Sending,
         }
+    }
+
+    /// Builder method to set channel_id
+    pub fn with_channel(mut self, channel_id: impl Into<String>) -> Self {
+        self.channel_id = channel_id.into();
+        self
     }
 
     /// Builder method to set delivery status

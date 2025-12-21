@@ -4,14 +4,14 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::{signal_defs::ERROR_SIGNAL, AppConfig, AppCore};
+use aura_app::{signal_defs::ERROR_SIGNAL, AppConfig, AppCore, AppError};
 use aura_core::effects::reactive::ReactiveEffects;
 
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 
-async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::signal_defs::AppError {
+async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> AppError {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
     loop {
         {
@@ -61,7 +61,7 @@ async fn capability_denied_emits_error_signal() {
         })
         .await;
     let err = wait_for_error(&app_core).await;
-    assert_eq!(err.code, "CAPABILITY_DENIED");
+    assert_eq!(err.code(), "AUTH_CAPABILITY");
 }
 
 #[tokio::test]
@@ -70,7 +70,7 @@ async fn operational_failure_emits_error_signal() {
 
     let _ = ctx.dispatch(EffectCommand::ForceSync).await;
     let err = wait_for_error(&app_core).await;
-    assert_eq!(err.code, "OPERATION_FAILED");
+    assert_eq!(err.code(), "INTERNAL");
 }
 
 #[tokio::test]
@@ -84,5 +84,5 @@ async fn unknown_command_emits_error_signal() {
 
     let _ = ctx.dispatch(EffectCommand::ForceSync).await;
     let err = wait_for_error(&app_core).await;
-    assert_eq!(err.code, "OPERATION_FAILED");
+    assert_eq!(err.code(), "INTERNAL");
 }

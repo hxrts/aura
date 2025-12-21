@@ -200,9 +200,23 @@ mod tests {
     fn test_exact_compositor() {
         let comp = LayoutCompositor::exact();
 
-        assert_eq!(comp.nav_rect(), Rect::new(0, 0, 80, 3));
-        assert_eq!(comp.middle_rect(), Rect::new(0, 3, 80, 25));
-        assert_eq!(comp.footer_rect(), Rect::new(0, 28, 80, 3));
+        assert_eq!(
+            comp.nav_rect(),
+            Rect::new(0, 0, dim::TOTAL_WIDTH, dim::NAV_HEIGHT)
+        );
+        assert_eq!(
+            comp.middle_rect(),
+            Rect::new(0, dim::NAV_HEIGHT, dim::TOTAL_WIDTH, dim::MIDDLE_HEIGHT)
+        );
+        assert_eq!(
+            comp.footer_rect(),
+            Rect::new(
+                0,
+                dim::NAV_HEIGHT + dim::MIDDLE_HEIGHT,
+                dim::TOTAL_WIDTH,
+                dim::FOOTER_HEIGHT
+            )
+        );
         assert!(!comp.is_centered());
     }
 
@@ -227,9 +241,12 @@ mod tests {
         assert_eq!(comp.nav_rect().x, 10);
         assert_eq!(comp.nav_rect().y, 4);
         assert_eq!(comp.middle_rect().x, 10);
-        assert_eq!(comp.middle_rect().y, 7); // 4 + 3
+        assert_eq!(comp.middle_rect().y, 4 + dim::NAV_HEIGHT);
         assert_eq!(comp.footer_rect().x, 10);
-        assert_eq!(comp.footer_rect().y, 32); // 4 + 3 + 25
+        assert_eq!(
+            comp.footer_rect().y,
+            4 + dim::NAV_HEIGHT + dim::MIDDLE_HEIGHT
+        );
     }
 
     #[test]

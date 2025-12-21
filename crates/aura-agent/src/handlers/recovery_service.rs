@@ -11,20 +11,19 @@ use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::AuthorityId;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Recovery service
 ///
 /// Provides recovery operations through a clean public API.
 pub struct RecoveryService {
     handler: RecoveryHandler,
-    effects: Arc<RwLock<AuraEffectSystem>>,
+    effects: Arc<AuraEffectSystem>,
 }
 
 impl RecoveryService {
     /// Create a new recovery service
     pub fn new(
-        effects: Arc<RwLock<AuraEffectSystem>>,
+        effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
         let handler = RecoveryHandler::new(authority_context)?;
@@ -50,10 +49,9 @@ impl RecoveryService {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
-        let effects = self.effects.read().await;
         self.handler
             .initiate(
-                &effects,
+                &self.effects,
                 RecoveryOperation::AddDevice { device_public_key },
                 guardians,
                 threshold,
@@ -82,10 +80,9 @@ impl RecoveryService {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
-        let effects = self.effects.read().await;
         self.handler
             .initiate(
-                &effects,
+                &self.effects,
                 RecoveryOperation::RemoveDevice { leaf_index },
                 guardians,
                 threshold,
@@ -114,10 +111,9 @@ impl RecoveryService {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
-        let effects = self.effects.read().await;
         self.handler
             .initiate(
-                &effects,
+                &self.effects,
                 RecoveryOperation::ReplaceTree { new_public_key },
                 guardians,
                 threshold,
@@ -148,10 +144,9 @@ impl RecoveryService {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
-        let effects = self.effects.read().await;
         self.handler
             .initiate(
-                &effects,
+                &self.effects,
                 RecoveryOperation::UpdateGuardians {
                     new_guardians,
                     new_threshold,
@@ -172,8 +167,7 @@ impl RecoveryService {
     /// # Returns
     /// The updated recovery state
     pub async fn submit_approval(&self, approval: GuardianApproval) -> AgentResult<RecoveryState> {
-        let effects = self.effects.read().await;
-        self.handler.submit_approval(&effects, approval).await
+        self.handler.submit_approval(&self.effects, approval).await
     }
 
     /// Complete a recovery ceremony
@@ -184,8 +178,7 @@ impl RecoveryService {
     /// # Returns
     /// The recovery result
     pub async fn complete(&self, recovery_id: &str) -> AgentResult<RecoveryResult> {
-        let effects = self.effects.read().await;
-        self.handler.complete(&effects, recovery_id).await
+        self.handler.complete(&self.effects, recovery_id).await
     }
 
     /// Cancel a recovery ceremony
@@ -197,8 +190,7 @@ impl RecoveryService {
     /// # Returns
     /// The recovery result
     pub async fn cancel(&self, recovery_id: &str, reason: String) -> AgentResult<RecoveryResult> {
-        let effects = self.effects.read().await;
-        self.handler.cancel(&effects, recovery_id, reason).await
+        self.handler.cancel(&self.effects, recovery_id, reason).await
     }
 
     /// Get the state of a recovery ceremony
@@ -287,7 +279,6 @@ impl RecoveryService {
         }
 
         // Get effect system read lock
-        let effects = self.effects.read().await;
         let authority_id = self.handler.authority_context().authority_id;
 
         // Convert AuthorityId to String for the effect system interface
@@ -295,7 +286,7 @@ impl RecoveryService {
             guardian_ids.iter().map(|id| id.to_string()).collect();
 
         // Generate new threshold keys
-        let (new_epoch, key_packages, public_key) = effects
+        let (new_epoch, key_packages, public_key) = self.effects
             .rotate_keys(&authority_id, threshold_k, total_n, &guardian_id_strings)
             .await
             .map_err(|e| {
@@ -323,10 +314,9 @@ impl RecoveryService {
         use crate::core::AgentError;
         use aura_core::effects::ThresholdSigningEffects;
 
-        let effects = self.effects.read().await;
         let authority_id = self.handler.authority_context().authority_id;
 
-        effects
+        self.effects
             .commit_key_rotation(&authority_id, new_epoch)
             .await
             .map_err(|e| AgentError::internal(format!("Failed to commit key rotation: {}", e)))?;
@@ -348,10 +338,9 @@ impl RecoveryService {
         use crate::core::AgentError;
         use aura_core::effects::ThresholdSigningEffects;
 
-        let effects = self.effects.read().await;
         let authority_id = self.handler.authority_context().authority_id;
 
-        effects
+        self.effects
             .rollback_key_rotation(&authority_id, failed_epoch)
             .await
             .map_err(|e| AgentError::internal(format!("Failed to rollback key rotation: {}", e)))?;
@@ -452,8 +441,8 @@ impl RecoveryService {
         let operation = GuardianRotationOp {
             threshold_k,
             total_n,
-            guardian_ids: vec![guardian_authority], // Simplified for now
-            new_epoch: 1,                           // Will be updated by actual ceremony state
+            guardian_ids: vec![guardian_authority], // TODO: Populate all guardian IDs from ceremony state
+            new_epoch: 1,                           // TODO: Get epoch from actual ceremony state
         };
 
         // Create the ceremony proposal
@@ -490,8 +479,7 @@ impl RecoveryService {
         };
 
         // Send via transport effects
-        let effects = self.effects.read().await;
-        effects
+        self.effects
             .send_envelope(envelope)
             .await
             .map_err(|e| AgentError::effects(format!("Failed to send invitation: {}", e)))?;
@@ -515,12 +503,11 @@ impl RecoveryService {
     pub async fn process_guardian_acceptances(&self) -> AgentResult<Vec<(String, String)>> {
         use aura_core::effects::TransportEffects;
 
-        let effects = self.effects.read().await;
         let mut acceptances = Vec::new();
 
         // Poll for incoming acceptance messages
         loop {
-            match effects.receive_envelope().await {
+            match self.effects.receive_envelope().await {
                 Ok(envelope) => {
                     // Check if this is a guardian acceptance response
                     if envelope.metadata.get("content-type")

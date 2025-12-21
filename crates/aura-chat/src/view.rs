@@ -22,6 +22,7 @@
 //! ```
 
 use aura_composition::{IntoViewDelta, ViewDelta, ViewDeltaReducer};
+use aura_core::identifiers::AuthorityId;
 use aura_journal::DomainFact;
 
 use crate::{ChatFact, CHAT_FACT_TYPE_ID};
@@ -145,7 +146,12 @@ impl ViewDeltaReducer for ChatViewReducer {
         CHAT_FACT_TYPE_ID
     }
 
-    fn reduce_fact(&self, binding_type: &str, binding_data: &[u8]) -> Vec<ViewDelta> {
+    fn reduce_fact(
+        &self,
+        binding_type: &str,
+        binding_data: &[u8],
+        _own_authority: Option<AuthorityId>,
+    ) -> Vec<ViewDelta> {
         if binding_type != CHAT_FACT_TYPE_ID {
             return vec![];
         }
@@ -260,7 +266,7 @@ mod tests {
         );
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &bytes, None);
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<ChatDelta>(&deltas[0]).unwrap();
@@ -297,7 +303,7 @@ mod tests {
         );
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &bytes, None);
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<ChatDelta>(&deltas[0]).unwrap();
@@ -319,14 +325,14 @@ mod tests {
     #[test]
     fn test_wrong_type_returns_empty() {
         let reducer = ChatViewReducer;
-        let deltas = reducer.reduce_fact("wrong_type", b"some data");
+        let deltas = reducer.reduce_fact("wrong_type", b"some data", None);
         assert!(deltas.is_empty());
     }
 
     #[test]
     fn test_invalid_data_returns_empty() {
         let reducer = ChatViewReducer;
-        let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, b"invalid json data");
+        let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, b"invalid json data", None);
         assert!(deltas.is_empty());
     }
 }

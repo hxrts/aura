@@ -12,7 +12,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::time::{OrderTime, TimeDomain, TimeStamp};
 use aura_core::{
-    effects::{CryptoEffects, RandomEffects},
+    effects::{storage::StorageEffects, CryptoEffects, RandomEffects},
     AccountId, AuraError, Ed25519VerifyingKey,
 };
 use serde::{Deserialize, Serialize};
@@ -180,6 +180,47 @@ impl Journal {
         Ok(())
     }
 
+    /// Add a relational fact directly to the journal
+    ///
+    /// This method allows adding pre-constructed relational facts (such as
+    /// `RelationalFact::Generic`, `RelationalFact::GuardianBinding`, etc.)
+    /// directly to the journal without going through the `JournalFact` wrapper.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use aura_journal::fact_journal::RelationalFact;
+    ///
+    /// let fact = RelationalFact::Generic {
+    ///     context_id: ContextId::new(),
+    ///     binding_type: "dkd_derivation".to_string(),
+    ///     binding_data: serde_json::to_vec(&metadata).unwrap(),
+    /// };
+    ///
+    /// journal.add_relational_fact(fact, &random).await?;
+    /// ```
+    pub async fn add_relational_fact(
+        &mut self,
+        relational_fact: crate::fact::RelationalFact,
+        random: &dyn RandomEffects,
+    ) -> Result<(), AuraError> {
+        // Generate order token using random bytes
+        let order = OrderTime(random.random_bytes_32().await);
+
+        // Create timestamp using order clock domain
+        let timestamp = TimeStamp::OrderClock(order.clone());
+
+        // Construct the fact with the relational content
+        let fact = crate::fact::Fact {
+            timestamp,
+            order,
+            content: FactContent::Relational(relational_fact),
+        };
+
+        self.fact_journal.add_fact(fact)?;
+        Ok(())
+    }
+
     /// Get account state summary
     pub fn account_summary(&self) -> AccountSummary {
         // Derive device count from authority facts in TreeState
@@ -219,6 +260,213 @@ impl Journal {
     pub fn fact_journal(&self) -> &FactJournal {
         &self.fact_journal
     }
+
+    /// Get the number of committed facts in the journal
+    pub fn committed_fact_count(&self) -> usize {
+        self.fact_journal.size()
+    }
+
+    /// Get committed facts as serializable CommittedFact records
+    ///
+    /// This method extracts all committed facts from the journal in a
+    /// format suitable for display or persistence.
+    pub fn committed_facts(&self) -> Vec<CommittedFact> {
+        self.fact_journal
+            .iter_facts()
+            .map(|fact| CommittedFact {
+                timestamp: fact.timestamp.clone(),
+                order: fact.order.clone(),
+                content_type: match &fact.content {
+                    FactContent::AttestedOp(_) => "AttestedOp".to_string(),
+                    FactContent::Relational(rel) => match rel {
+                        crate::fact::RelationalFact::GuardianBinding { .. } => {
+                            "GuardianBinding".to_string()
+                        }
+                        crate::fact::RelationalFact::RecoveryGrant { .. } => {
+                            "RecoveryGrant".to_string()
+                        }
+                        crate::fact::RelationalFact::Consensus { .. } => "Consensus".to_string(),
+                        crate::fact::RelationalFact::Generic { binding_type, .. } => {
+                            format!("Generic:{}", binding_type)
+                        }
+                        _ => "Relational".to_string(),
+                    },
+                    FactContent::Snapshot(_) => "Snapshot".to_string(),
+                    FactContent::RendezvousReceipt { .. } => "RendezvousReceipt".to_string(),
+                },
+                content_summary: match &fact.content {
+                    FactContent::AttestedOp(op) => {
+                        format!("{:?} -> {:?}", op.tree_op, op.new_commitment)
+                    }
+                    FactContent::Relational(rel) => match rel {
+                        crate::fact::RelationalFact::Generic { binding_data, .. } => {
+                            // Try to decode as JSON for readability
+                            String::from_utf8(binding_data.clone())
+                                .unwrap_or_else(|_| format!("{} bytes", binding_data.len()))
+                        }
+                        _ => format!("{:?}", rel),
+                    },
+                    FactContent::Snapshot(snap) => {
+                        format!(
+                            "seq={}, superseded={}",
+                            snap.sequence,
+                            snap.superseded_facts.len()
+                        )
+                    }
+                    FactContent::RendezvousReceipt { envelope_id, .. } => {
+                        format!("envelope={}", hex::encode(&envelope_id[..8]))
+                    }
+                },
+            })
+            .collect()
+    }
+
+    /// Get committed facts as JournalFact records for persistence
+    ///
+    /// This method extracts all committed facts from the journal and
+    /// converts them back to `JournalFact` format for storage and replay.
+    /// The source authority is derived from the journal's namespace.
+    pub fn journal_facts(&self) -> Vec<JournalFact> {
+        // Extract the authority from the journal namespace
+        let source_authority = match &self.fact_journal.namespace {
+            crate::fact::JournalNamespace::Authority(auth_id) => *auth_id,
+            crate::fact::JournalNamespace::Context(ctx_id) => {
+                // For context-scoped journals, derive an authority from the context
+                // Pad the 16-byte context ID to 32 bytes
+                let mut padded = [0u8; 32];
+                padded[..16].copy_from_slice(&ctx_id.to_bytes());
+                AuthorityId::new_from_entropy(padded)
+            }
+        };
+
+        self.fact_journal
+            .iter_facts()
+            .filter_map(|fact| {
+                // Only extract Generic relational facts that were added via add_fact
+                match &fact.content {
+                    FactContent::Relational(crate::fact::RelationalFact::Generic {
+                        binding_type,
+                        binding_data,
+                        ..
+                    }) => {
+                        // The binding_type contains the original JournalFact.content
+                        // Try binding_data first (UTF-8 encoded), fall back to binding_type
+                        let content = String::from_utf8(binding_data.clone())
+                            .unwrap_or_else(|_| binding_type.clone());
+
+                        Some(JournalFact {
+                            content,
+                            timestamp: fact.timestamp.clone(),
+                            source_authority,
+                        })
+                    }
+                    _ => None, // Skip non-Generic facts
+                }
+            })
+            .collect()
+    }
+
+    /// Sync the journal to persistent storage
+    ///
+    /// This method serializes the journal state and persists it using the
+    /// provided storage effects. The journal is stored under a key derived
+    /// from the account ID.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // After adding facts to the journal
+    /// journal.add_relational_fact(fact, &random).await?;
+    ///
+    /// // Sync to persistent storage
+    /// journal.sync(&storage).await?;
+    /// ```
+    pub async fn sync(&self, storage: &dyn StorageEffects) -> Result<(), AuraError> {
+        // Create storage key from account ID
+        let storage_key = format!("journal/{}", self.account_state.account_id.0);
+
+        // Serialize the journal state
+        // We serialize the fact journal, account state, and op_log together
+        let journal_state = JournalPersistState {
+            account_state: self.account_state.clone(),
+            op_log: self.op_log.clone(),
+            fact_journal: self.fact_journal.clone(),
+        };
+
+        let serialized = bincode::serialize(&journal_state)
+            .map_err(|e| AuraError::internal(format!("Failed to serialize journal: {}", e)))?;
+
+        // Persist to storage
+        storage
+            .store(&storage_key, serialized)
+            .await
+            .map_err(|e| AuraError::storage(format!("Failed to persist journal: {}", e)))?;
+
+        tracing::debug!(
+            account_id = ?self.account_state.account_id,
+            storage_key = %storage_key,
+            "Journal synced to storage"
+        );
+
+        Ok(())
+    }
+
+    /// Load a journal from persistent storage
+    ///
+    /// This method retrieves and deserializes a previously synced journal
+    /// from storage.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let journal = Journal::load(account_id, &storage).await?;
+    /// ```
+    pub async fn load(
+        account_id: AccountId,
+        storage: &dyn StorageEffects,
+    ) -> Result<Option<Self>, AuraError> {
+        let storage_key = format!("journal/{}", account_id.0);
+
+        match storage.retrieve(&storage_key).await {
+            Ok(Some(data)) => {
+                let state: JournalPersistState = bincode::deserialize(&data).map_err(|e| {
+                    AuraError::internal(format!("Failed to deserialize journal: {}", e))
+                })?;
+
+                Ok(Some(Self {
+                    account_state: state.account_state,
+                    op_log: state.op_log,
+                    fact_journal: state.fact_journal,
+                }))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(AuraError::storage(format!("Failed to load journal: {}", e))),
+        }
+    }
+}
+
+/// Internal state for journal persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JournalPersistState {
+    account_state: AccountState,
+    op_log: OpLog,
+    fact_journal: FactJournal,
+}
+
+/// A committed fact in the journal with serializable metadata
+///
+/// This provides a view of facts that have been committed to the journal
+/// in a format suitable for display and persistence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommittedFact {
+    /// Timestamp of the fact (unified time system)
+    pub timestamp: TimeStamp,
+    /// Order token for deterministic sorting
+    pub order: OrderTime,
+    /// Type of the fact content (e.g., "AttestedOp", "Generic:chat")
+    pub content_type: String,
+    /// Human-readable summary of the content
+    pub content_summary: String,
 }
 
 /// Fact to be added to the journal

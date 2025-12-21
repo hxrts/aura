@@ -42,6 +42,7 @@
 use aura_core::effects::reactive::Signal;
 use std::sync::LazyLock;
 
+use crate::errors::AppError;
 use crate::queries::{
     BlocksQuery, BoundSignal, ChatQuery, ContactsQuery, GuardiansQuery, InvitationsQuery,
     NeighborhoodQuery, RecoveryQuery,
@@ -193,37 +194,6 @@ pub enum SyncStatus {
         /// Error message
         message: String,
     },
-}
-
-/// Application error for error signal
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppError {
-    /// Error code for categorization
-    pub code: String,
-    /// Human-readable message
-    pub message: String,
-    /// Whether the error is recoverable
-    pub recoverable: bool,
-}
-
-impl AppError {
-    /// Create a new application error
-    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            message: message.into(),
-            recoverable: true,
-        }
-    }
-
-    /// Create a non-recoverable error
-    pub fn fatal(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            message: message.into(),
-            recoverable: false,
-        }
-    }
 }
 
 /// Discovered peer information
@@ -507,10 +477,12 @@ mod tests {
 
     #[test]
     fn test_app_error() {
-        let error = AppError::new("NETWORK_ERROR", "Connection failed");
-        assert!(error.recoverable);
+        use crate::errors::NetworkErrorCode;
 
-        let fatal = AppError::fatal("DATA_CORRUPTION", "Database corrupted");
-        assert!(!fatal.recoverable);
+        let error = AppError::network(NetworkErrorCode::ConnectionRefused, "Connection failed");
+        assert!(error.is_recoverable());
+
+        let fatal = AppError::internal("database", "Database corrupted");
+        assert!(!fatal.is_recoverable());
     }
 }

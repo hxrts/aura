@@ -292,8 +292,6 @@ async fn test_guardian_display_full_flow() {
             println!("    - {} (status: {:?})", g.id, g.status);
         }
     }
-
-    // Cleanup
     action_handle.abort();
     response_handle.abort();
     cleanup_test_dir("guardian-e2e");
@@ -306,6 +304,165 @@ async fn test_guardian_display_full_flow() {
     );
 
     println!("\n=== Guardian Display Full E2E Flow Test PASSED ===\n");
+}
+
+/// Regression test for the TUI guardian-setup flow (2-of-2) used by the queue-based modal.
+///
+/// This matches the real UI path:
+/// - user adds Alice + Carol as contacts
+/// - user starts guardian setup selecting both (k=2, n=2) (real key rotation ceremony)
+/// - demo agents auto-accept via transport polling
+/// - contacts must eventually show is_guardian=true for both
+#[tokio::test]
+async fn test_guardian_ceremony_two_of_two() {
+    println!(
+        "
+=== Guardian Ceremony 2-of-2 Display Test ===
+"
+    );
+
+    let seed = 2024u64;
+
+    // Start demo simulator FIRST (shared transport between Bob and Alice/Carol)
+    let mut simulator = DemoSimulator::new(seed)
+        .await
+        .expect("Failed to create simulator");
+    simulator.start().await.expect("Failed to start simulator");
+
+    let alice_authority = simulator.alice_authority().await;
+    let carol_authority = simulator.carol_authority().await;
+    println!("Alice authority: {}", alice_authority);
+    println!("Carol authority: {}", carol_authority);
+
+    // Set up Bob env wired to simulator bridge + shared inbox
+    let (ctx, app_core, _agent) = setup_test_env(
+        "guardian-ceremony-2of2",
+        seed,
+        &simulator.shared_transport_inbox,
+        Some(simulator.bridge()),
+    )
+    .await;
+
+    // Start signal coordinator (consumes simulator response channel)
+    let response_rx = simulator
+        .take_response_receiver()
+        .await
+        .expect("Response receiver should be available");
+
+    let bob_device_id_str = "demo:bob";
+    let bob_authority_entropy =
+        aura_core::hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
+    let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
+
+    let signal_coordinator = Arc::new(DemoSignalCoordinator::new(
+        app_core.clone(),
+        bob_authority,
+        simulator.bridge(),
+        response_rx,
+    ));
+    let (action_handle, response_handle) = signal_coordinator.start();
+
+    // Import both contacts
+    ctx.dispatch(EffectCommand::ImportInvitation {
+        code: generate_demo_invite_code("Alice", seed),
+    })
+    .await
+    .expect("Import Alice should succeed");
+
+    ctx.dispatch(EffectCommand::ImportInvitation {
+        code: generate_demo_invite_code("Carol", seed + 1),
+    })
+    .await
+    .expect("Import Carol should succeed");
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Start a real guardian ceremony (key rotation + invitations).
+    let guardian_ids = vec![alice_authority.to_string(), carol_authority.to_string()];
+    let ceremony_id = {
+        let core = app_core.read().await;
+        core.initiate_guardian_ceremony(2, 2, &guardian_ids)
+            .await
+            .expect("initiate_guardian_ceremony")
+    };
+    println!("Ceremony initiated: {}", ceremony_id);
+
+    // Mirror the TUI background task that polls for acceptances and commits the ceremony.
+    let ceremony_agent = _agent.clone();
+    let ceremony_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(200));
+        loop {
+            interval.tick().await;
+            let _ = ceremony_agent.process_ceremony_acceptances().await;
+        }
+    });
+
+    // Wait for both contacts to be marked guardian.
+    let mut alice_guardian = false;
+    let mut carol_guardian = false;
+
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let core = app_core.read().await;
+        let contacts = core.read(&*CONTACTS_SIGNAL).await.expect("Read contacts");
+
+        alice_guardian = contacts
+            .contacts
+            .iter()
+            .find(|c| c.id == alice_authority)
+            .map(|c| c.is_guardian)
+            .unwrap_or(false);
+        carol_guardian = contacts
+            .contacts
+            .iter()
+            .find(|c| c.id == carol_authority)
+            .map(|c| c.is_guardian)
+            .unwrap_or(false);
+
+        if alice_guardian && carol_guardian {
+            break;
+        }
+    }
+
+    // Ceremony should eventually complete (threshold reached + committed).
+    let mut is_complete = false;
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let core = app_core.read().await;
+        let status = core
+            .get_ceremony_status(&ceremony_id)
+            .await
+            .expect("get_ceremony_status");
+        if status.has_failed {
+            panic!("Ceremony failed: {:?}", status.error_message);
+        }
+        if status.is_complete {
+            is_complete = true;
+            break;
+        }
+    }
+    assert!(is_complete, "Ceremony should complete within timeout");
+
+    // Cleanup
+    ceremony_task.abort();
+    action_handle.abort();
+    response_handle.abort();
+    cleanup_test_dir("guardian-ceremony-2of2");
+
+    assert!(
+        alice_guardian,
+        "Alice should be marked is_guardian=true after ceremony acceptance"
+    );
+    assert!(
+        carol_guardian,
+        "Carol should be marked is_guardian=true after ceremony acceptance"
+    );
+
+    println!(
+        "
+=== Guardian Ceremony 2-of-2 Display Test PASSED ===
+"
+    );
 }
 
 /// Simpler test that just validates the AuthorityId derivation matches

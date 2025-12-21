@@ -68,7 +68,6 @@ impl SignalForwarder {
         }
     }
 
-
     fn spawn<F>(&mut self, fut: F)
     where
         F: std::future::Future<Output = ()> + Send + 'static,

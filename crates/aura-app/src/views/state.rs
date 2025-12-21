@@ -4,11 +4,12 @@
 
 use super::{
     BlockState, BlocksState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
-    RecoveryState,
+    RecoveryState, ResidentRole,
 };
 use crate::core::{StateSnapshot, ViewDelta};
 #[cfg(feature = "signals")]
 use aura_core::identifiers::ChannelId;
+use aura_core::identifiers::ContextId;
 use cfg_if::cfg_if;
 
 cfg_if! {
@@ -358,8 +359,51 @@ cfg_if! {
                     ViewDelta::NicknameSet { target, nickname } => {
                         self.contacts.lock_mut().set_nickname(target, nickname);
                     }
-                    ViewDelta::BlockNameSet { name, .. } => {
-                        self.block.lock_mut().set_name(name);
+                    ViewDelta::BlockNameSet { block_id, name } => {
+                        let name_for_blocks = name.clone();
+                        if let Some(block) = self.blocks.lock_mut().block_mut(&block_id) {
+                            block.set_name(name_for_blocks);
+                        }
+                        let mut legacy = self.block.lock_mut();
+                        if legacy.id == block_id {
+                            legacy.set_name(name);
+                        }
+                    }
+                    ViewDelta::StewardGranted { context_id, target_id } => {
+                        let mut blocks = self.blocks.lock_mut();
+                        for (_id, block) in blocks.blocks.iter_mut() {
+                            if block.context_id.parse::<ContextId>().ok() == Some(context_id) {
+                                if let Some(resident) = block.resident_mut(&target_id) {
+                                    resident.role = ResidentRole::Admin;
+                                }
+                                break;
+                            }
+                        }
+                        drop(blocks);
+                        let mut legacy = self.block.lock_mut();
+                        if legacy.context_id.parse::<ContextId>().ok() == Some(context_id) {
+                            if let Some(resident) = legacy.resident_mut(&target_id) {
+                                resident.role = ResidentRole::Admin;
+                            }
+                        }
+                    }
+                    ViewDelta::StewardRevoked { context_id, target_id } => {
+                        let mut blocks = self.blocks.lock_mut();
+                        for (_id, block) in blocks.blocks.iter_mut() {
+                            if block.context_id.parse::<ContextId>().ok() == Some(context_id) {
+                                if let Some(resident) = block.resident_mut(&target_id) {
+                                    resident.role = ResidentRole::Resident;
+                                }
+                                break;
+                            }
+                        }
+                        drop(blocks);
+                        let mut legacy = self.block.lock_mut();
+                        if legacy.context_id.parse::<ContextId>().ok() == Some(context_id) {
+                            if let Some(resident) = legacy.resident_mut(&target_id) {
+                                resident.role = ResidentRole::Resident;
+                            }
+                        }
                     }
                     ViewDelta::RecoveryRequested { session_id } => {
                         // Use default account_id and 0 as initiated_at since we don't have them in delta
@@ -407,9 +451,6 @@ cfg_if! {
                     ViewDelta::GuardianThresholdSet { threshold } => {
                         self.recovery.lock_mut().set_threshold(threshold);
                     }
-                    ViewDelta::Unknown { .. } => {
-                        // Unknown deltas are ignored
-                    }
                 }
             }
         }
@@ -443,8 +484,43 @@ cfg_if! {
                     ViewDelta::NicknameSet { target, nickname } => {
                         self.contacts.set_nickname(target, nickname);
                     }
-                    ViewDelta::BlockNameSet { name, .. } => {
-                        self.block.set_name(name);
+                    ViewDelta::BlockNameSet { block_id, name } => {
+                        if let Some(block) = self.blocks.block_mut(&block_id) {
+                            block.set_name(name.clone());
+                        }
+                        if self.block.id == block_id {
+                            self.block.set_name(name);
+                        }
+                    }
+                    ViewDelta::StewardGranted { context_id, target_id } => {
+                        for (_id, block) in self.blocks.blocks.iter_mut() {
+                            if block.context_id.parse::<ContextId>().ok() == Some(context_id) {
+                                if let Some(resident) = block.resident_mut(&target_id) {
+                                    resident.role = ResidentRole::Admin;
+                                }
+                                break;
+                            }
+                        }
+                        if self.block.context_id.parse::<ContextId>().ok() == Some(context_id) {
+                            if let Some(resident) = self.block.resident_mut(&target_id) {
+                                resident.role = ResidentRole::Admin;
+                            }
+                        }
+                    }
+                    ViewDelta::StewardRevoked { context_id, target_id } => {
+                        for (_id, block) in self.blocks.blocks.iter_mut() {
+                            if block.context_id.parse::<ContextId>().ok() == Some(context_id) {
+                                if let Some(resident) = block.resident_mut(&target_id) {
+                                    resident.role = ResidentRole::Resident;
+                                }
+                                break;
+                            }
+                        }
+                        if self.block.context_id.parse::<ContextId>().ok() == Some(context_id) {
+                            if let Some(resident) = self.block.resident_mut(&target_id) {
+                                resident.role = ResidentRole::Resident;
+                            }
+                        }
                     }
                     ViewDelta::RecoveryRequested { session_id } => {
                         // Use default account_id and 0 as initiated_at since we don't have them in delta
@@ -491,9 +567,6 @@ cfg_if! {
                     }
                     ViewDelta::GuardianThresholdSet { threshold } => {
                         self.recovery.set_threshold(threshold);
-                    }
-                    ViewDelta::Unknown { .. } => {
-                        // Unknown deltas are ignored
                     }
                 }
             }

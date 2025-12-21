@@ -64,6 +64,23 @@ pub enum SignableOperation {
         /// Message payload
         payload: Vec<u8>,
     },
+
+    /// OTA activation commitment
+    ///
+    /// Used when devices sign their commitment to a software upgrade activation.
+    /// Each device signs its readiness commitment with its authority's keys.
+    OTAActivation {
+        /// Unique ceremony identifier
+        ceremony_id: [u8; 32],
+        /// Hash of the upgrade package being activated
+        upgrade_hash: [u8; 32],
+        /// Hash of the device's prestate at commitment time
+        prestate_hash: [u8; 32],
+        /// Epoch at which activation will occur
+        activation_epoch: u64,
+        /// Whether the device is ready for activation
+        ready: bool,
+    },
 }
 
 /// Group action types for group proposals.
@@ -155,6 +172,49 @@ impl SigningContext {
             authority: group,
             operation: SignableOperation::GroupProposal { group, action },
             approval_context: ApprovalContext::GroupDecision { group, proposal_id },
+        }
+    }
+
+    /// Create a context for an OTA activation commitment
+    ///
+    /// Used when a device signs its commitment to a software upgrade activation.
+    /// The signing uses the device's authority keys (may be 1-of-1 Ed25519 or FROST).
+    pub fn ota_activation(
+        authority: AuthorityId,
+        ceremony_id: [u8; 32],
+        upgrade_hash: [u8; 32],
+        prestate_hash: [u8; 32],
+        activation_epoch: u64,
+        ready: bool,
+    ) -> Self {
+        Self {
+            authority,
+            operation: SignableOperation::OTAActivation {
+                ceremony_id,
+                upgrade_hash,
+                prestate_hash,
+                activation_epoch,
+                ready,
+            },
+            // OTA activation is an elevated operation - it's a hard fork commitment
+            approval_context: ApprovalContext::ElevatedOperation {
+                operation_type: "ota_activation".to_string(),
+                value_context: Some(format!(
+                    "Hard fork activation at epoch {}",
+                    activation_epoch
+                )),
+            },
+        }
+    }
+
+    /// Create a context for an arbitrary message signing
+    ///
+    /// Used for signing messages outside the tree/recovery/group/OTA contexts.
+    pub fn message(authority: AuthorityId, domain: String, payload: Vec<u8>) -> Self {
+        Self {
+            authority,
+            operation: SignableOperation::Message { domain, payload },
+            approval_context: ApprovalContext::SelfOperation,
         }
     }
 }

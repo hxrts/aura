@@ -6,7 +6,6 @@ use super::EffectContext;
 use crate::handlers::SessionService;
 use crate::runtime::AuraEffectSystem;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Lifecycle manager for coordinating system startup and shutdown
 pub struct LifecycleManager {
@@ -34,7 +33,7 @@ impl LifecycleManager {
     /// Performs startup tasks like cleaning up stale sessions.
     pub async fn initialize(
         &self,
-        effects: Arc<RwLock<AuraEffectSystem>>,
+        effects: Arc<AuraEffectSystem>,
         authority_context: crate::core::AuthorityContext,
     ) -> Result<(), String> {
         // Clean up any stale sessions from previous runs

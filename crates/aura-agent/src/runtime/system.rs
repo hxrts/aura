@@ -12,7 +12,6 @@ use super::{
 use crate::core::AgentConfig;
 use aura_core::identifiers::AuthorityId;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Main runtime system for the agent
 pub struct RuntimeSystem {
@@ -20,8 +19,8 @@ pub struct RuntimeSystem {
     #[allow(dead_code)] // Will be used for effect dispatch
     effect_executor: EffectExecutor,
 
-    /// Effect system (wrapped in RwLock for interior mutability)
-    effect_system: Arc<RwLock<AuraEffectSystem>>,
+    /// Effect system (immutable after construction, handlers have internal mutability)
+    effect_system: Arc<AuraEffectSystem>,
 
     /// Context manager
     context_manager: ContextManager,
@@ -64,7 +63,7 @@ impl RuntimeSystem {
     #[allow(dead_code)] // Factory retained for future runtime wiring
     pub(crate) fn new(
         effect_executor: EffectExecutor,
-        effect_system: Arc<RwLock<AuraEffectSystem>>,
+        effect_system: Arc<AuraEffectSystem>,
         context_manager: ContextManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
@@ -95,7 +94,7 @@ impl RuntimeSystem {
     #[allow(dead_code)] // Factory retained for future sync-enabled runtime
     pub(crate) fn new_with_sync(
         effect_executor: EffectExecutor,
-        effect_system: Arc<RwLock<AuraEffectSystem>>,
+        effect_system: Arc<AuraEffectSystem>,
         context_manager: ContextManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
@@ -127,7 +126,7 @@ impl RuntimeSystem {
     #[allow(dead_code)] // Factory retained for future rendezvous-enabled runtime
     pub(crate) fn new_with_rendezvous(
         effect_executor: EffectExecutor,
-        effect_system: Arc<RwLock<AuraEffectSystem>>,
+        effect_system: Arc<AuraEffectSystem>,
         context_manager: ContextManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
@@ -158,7 +157,7 @@ impl RuntimeSystem {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_services(
         effect_executor: EffectExecutor,
-        effect_system: Arc<RwLock<AuraEffectSystem>>,
+        effect_system: Arc<AuraEffectSystem>,
         context_manager: ContextManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
@@ -197,8 +196,12 @@ impl RuntimeSystem {
         self.authority_id
     }
 
-    /// Get the effect system (with interior mutability)
-    pub fn effects(&self) -> Arc<RwLock<AuraEffectSystem>> {
+    /// Get the effect system
+    ///
+    /// Returns a shared reference to the effect system. The effect system is
+    /// immutable after construction; individual handlers manage their own
+    /// internal state as needed.
+    pub fn effects(&self) -> Arc<AuraEffectSystem> {
         self.effect_system.clone()
     }
 

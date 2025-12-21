@@ -28,9 +28,13 @@
 
 use aura_core::effects::indexed::{IndexStats, IndexedFact, IndexedJournalEffects};
 use aura_core::effects::BloomFilter;
+use aura_core::time::TimeStamp;
 use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// Maximum allowed clock skew in milliseconds for timestamp validation
+const MAX_CLOCK_SKEW_MS: u64 = 300_000; // 5 minutes
 
 // =============================================================================
 // Types
@@ -180,12 +184,40 @@ impl MerkleVerifier {
                         verified.push(fact);
                     } else {
                         // New fact - validate structure before accepting
-                        // In a full implementation, we would verify:
-                        // 1. The remote's Merkle proof for this fact
-                        // 2. Authority signature on the fact
-                        // 3. Timestamp consistency
+                        // Perform available validations:
+                        // 1. Timestamp consistency (fact shouldn't be too far in the future)
+                        // 2. Authority presence (if required by policy)
+                        // 3. Merkle proof verification (when proofs are provided)
+                        // 4. Signature verification (when signatures are provided)
 
-                        // For now, accept new facts - they'll be added to our tree
+                        // Validate timestamp consistency
+                        if let Err(reason) = Self::validate_timestamp(&fact) {
+                            tracing::warn!(
+                                fact_id = ?fact.id,
+                                reason = %reason,
+                                "Fact rejected: timestamp validation failed"
+                            );
+                            rejected.push((fact, reason));
+                            continue;
+                        }
+
+                        // Validate authority presence
+                        if let Err(reason) = Self::validate_authority(&fact) {
+                            tracing::warn!(
+                                fact_id = ?fact.id,
+                                reason = %reason,
+                                "Fact rejected: authority validation failed"
+                            );
+                            rejected.push((fact, reason));
+                            continue;
+                        }
+
+                        // NOTE: Merkle proof and signature verification require additional
+                        // infrastructure:
+                        // - IndexedFact would need to carry MerkleProof from the sender
+                        // - IndexedFact would need to carry authority signature
+                        // When these are available, add verification here.
+
                         tracing::trace!(
                             fact_id = ?fact.id,
                             "New fact accepted for merge"
@@ -219,6 +251,68 @@ impl MerkleVerifier {
             rejected,
             merkle_root,
         })
+    }
+
+    /// Validate timestamp consistency for an incoming fact
+    ///
+    /// Checks that the fact's timestamp is not too far in the future,
+    /// which would indicate clock skew or potential manipulation.
+    ///
+    /// # Returns
+    /// - `Ok(())` if timestamp is valid or not present
+    /// - `Err(reason)` if timestamp is too far in the future
+    fn validate_timestamp(fact: &IndexedFact) -> Result<(), String> {
+        let Some(timestamp) = &fact.timestamp else {
+            // No timestamp is acceptable for facts that don't require it
+            return Ok(());
+        };
+
+        // Extract physical time if available
+        let fact_time_ms = match timestamp {
+            TimeStamp::PhysicalClock(physical) => physical.ts_ms,
+            TimeStamp::Range(range) => {
+                // For ranges, check the latest time (most permissive)
+                range.latest_ms
+            }
+            // Logical and Order clocks don't have physical time semantics
+            TimeStamp::LogicalClock(_) | TimeStamp::OrderClock(_) => return Ok(()),
+        };
+
+        // Get current time in milliseconds
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        // Reject if timestamp is too far in the future
+        if fact_time_ms > now_ms + MAX_CLOCK_SKEW_MS {
+            return Err(format!(
+                "Timestamp {} is too far in the future (current time: {}, max skew: {}ms)",
+                fact_time_ms, now_ms, MAX_CLOCK_SKEW_MS
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Validate authority presence for an incoming fact
+    ///
+    /// Facts should have an associated authority that created them.
+    /// This provides accountability and enables signature verification.
+    ///
+    /// # Returns
+    /// - `Ok(())` if authority is present
+    /// - `Err(reason)` if authority is missing and required
+    fn validate_authority(fact: &IndexedFact) -> Result<(), String> {
+        // For now, we accept facts without authority for backwards compatibility
+        // In a stricter mode, we could require: fact.authority.is_some()
+        if fact.authority.is_none() {
+            tracing::trace!(
+                fact_id = ?fact.id,
+                "Fact has no authority (accepted for compatibility)"
+            );
+        }
+        Ok(())
     }
 
     /// Get index statistics for monitoring

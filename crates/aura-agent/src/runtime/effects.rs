@@ -2,7 +2,7 @@
 //!
 //! Core effect system components per Layer-6 spec.
 
-use crate::core::{AgentConfig, AgentResult};
+use crate::core::AgentConfig;
 use crate::fact_registry::build_fact_registry;
 use async_trait::async_trait;
 use aura_composition::CompositeHandlerAdapter;
@@ -43,67 +43,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 const DEFAULT_WINDOW: u32 = 1024;
-
-/// Effect executor for dispatching effect calls
-///
-/// Note: This wraps aura-composition infrastructure for Layer 6 runtime concerns.
-#[allow(dead_code)] // Part of future effect system API
-pub struct EffectExecutor {
-    config: AgentConfig,
-    composite: CompositeHandlerAdapter,
-}
-
-impl EffectExecutor {
-    /// Create new effect executor
-    #[allow(dead_code)] // Part of future effect system API
-    pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = config.device_id();
-        let composite = CompositeHandlerAdapter::for_testing(device_id);
-        Ok(Self { config, composite })
-    }
-
-    /// Create production effect executor
-    #[allow(dead_code)] // Part of future effect system API
-    pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = config.device_id();
-        let composite = CompositeHandlerAdapter::for_production(device_id);
-        Ok(Self { config, composite })
-    }
-
-    /// Create testing effect executor
-    #[allow(dead_code)] // Part of future effect system API
-    pub fn testing(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = config.device_id();
-        let composite = CompositeHandlerAdapter::for_testing(device_id);
-        Ok(Self { config, composite })
-    }
-
-    /// Create simulation effect executor
-    #[allow(dead_code)] // Part of future effect system API
-    pub fn simulation(config: AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
-        let device_id = config.device_id();
-        let composite = CompositeHandlerAdapter::for_simulation(device_id, seed);
-        Ok(Self { config, composite })
-    }
-
-    /// Dispatch effect call
-    #[allow(dead_code)] // Part of future effect system API
-    pub async fn execute<T>(&self, effect_call: T) -> AgentResult<T::Output>
-    where
-        T: EffectCall,
-    {
-        effect_call.execute(&self.config).await
-    }
-}
-
-/// Trait for effect calls that can be executed
-#[async_trait]
-#[allow(dead_code)] // Part of future effect system API
-pub trait EffectCall: Send + Sync {
-    type Output;
-
-    async fn execute(&self, config: &AgentConfig) -> AgentResult<Self::Output>;
-}
 
 /// Concrete effect system combining all effects for runtime usage
 ///
@@ -180,8 +119,10 @@ impl AuraEffectSystem {
         test_mode: bool,
         crypto_seed: Option<[u8; 32]>,
         shared_transport_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
+        authority_override: Option<AuthorityId>,
     ) -> Self {
-        let authority = AuthorityId::from_uuid(config.device_id().0);
+        let authority =
+            authority_override.unwrap_or_else(|| AuthorityId::from_uuid(config.device_id().0));
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
         let crypto_handler = match crypto_seed {
             Some(seed) => RealCryptoHandler::seeded(seed),
@@ -251,6 +192,7 @@ impl AuraEffectSystem {
             true,
             Some(Self::TEST_CRYPTO_SEED),
             None, // No shared transport inbox
+            None, // Default authority derivation (legacy)
         ))
     }
 
@@ -258,7 +200,9 @@ impl AuraEffectSystem {
     pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_production(config.device_id());
         // Production uses OS entropy, no seed
-        Ok(Self::build_internal(config, composite, false, None, None))
+        Ok(Self::build_internal(
+            config, composite, false, None, None, None,
+        ))
     }
 
     /// Create effect system for testing with default configuration.
@@ -270,6 +214,7 @@ impl AuraEffectSystem {
             true,
             Some(Self::TEST_CRYPTO_SEED),
             None, // No shared transport inbox
+            None, // Default authority derivation (legacy)
         ))
     }
 
@@ -288,6 +233,7 @@ impl AuraEffectSystem {
             true,
             Some(Self::TEST_CRYPTO_SEED),
             Some(shared_inbox),
+            None, // Default authority derivation (legacy)
         ))
     }
 
@@ -303,6 +249,7 @@ impl AuraEffectSystem {
             true,
             Some(crypto_seed),
             None, // No shared transport inbox
+            None, // Default authority derivation (legacy)
         ))
     }
 
@@ -326,6 +273,78 @@ impl AuraEffectSystem {
             true,
             Some(crypto_seed),
             Some(shared_inbox),
+            None, // Default authority derivation (legacy)
+        ))
+    }
+
+    /// Create effect system for production, overriding the authority identity.
+    pub fn production_for_authority(
+        config: AgentConfig,
+        authority_id: AuthorityId,
+    ) -> Result<Self, crate::core::AgentError> {
+        let composite = CompositeHandlerAdapter::for_production(config.device_id());
+        Ok(Self::build_internal(
+            config,
+            composite,
+            false,
+            None,
+            None,
+            Some(authority_id),
+        ))
+    }
+
+    /// Create effect system for testing, overriding the authority identity.
+    pub fn testing_for_authority(
+        config: &AgentConfig,
+        authority_id: AuthorityId,
+    ) -> Result<Self, crate::core::AgentError> {
+        let composite = CompositeHandlerAdapter::for_testing(config.device_id());
+        Ok(Self::build_internal(
+            config.clone(),
+            composite,
+            true,
+            Some(Self::TEST_CRYPTO_SEED),
+            None,
+            Some(authority_id),
+        ))
+    }
+
+    /// Create effect system for simulation, overriding the authority identity.
+    pub fn simulation_for_authority(
+        config: &AgentConfig,
+        seed: u64,
+        authority_id: AuthorityId,
+    ) -> Result<Self, crate::core::AgentError> {
+        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
+        let mut crypto_seed = [0u8; 32];
+        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
+        Ok(Self::build_internal(
+            config.clone(),
+            composite,
+            true,
+            Some(crypto_seed),
+            None,
+            Some(authority_id),
+        ))
+    }
+
+    /// Create effect system for simulation with shared transport inbox, overriding authority.
+    pub fn simulation_with_shared_transport_for_authority(
+        config: &AgentConfig,
+        seed: u64,
+        authority_id: AuthorityId,
+        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> Result<Self, crate::core::AgentError> {
+        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
+        let mut crypto_seed = [0u8; 32];
+        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
+        Ok(Self::build_internal(
+            config.clone(),
+            composite,
+            true,
+            Some(crypto_seed),
+            Some(shared_inbox),
+            Some(authority_id),
         ))
     }
 
@@ -1194,6 +1213,16 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             .secure_store(&pub_location, &signing_keys.public_key_package, &caps)
             .await?;
 
+        // Store threshold metadata for epoch 0 (bootstrap case: 1-of-1 single signer)
+        self.store_threshold_metadata(
+            authority,
+            0,                           // epoch 0
+            1,                           // threshold
+            1,                           // total_participants
+            &[format!("{}", authority)], // guardian is self
+        )
+        .await?;
+
         Ok(signing_keys.public_key_package)
     }
 
@@ -1205,11 +1234,11 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         let message = serde_json::to_vec(&context.operation)
             .map_err(|e| AuraError::internal(format!("Failed to serialize operation: {}", e)))?;
 
-        // Load key package from secure storage
-        // Default to epoch 0 for now - proper epoch tracking would require additional state
+        // Load key package from secure storage using tracked epoch
+        let current_epoch = self.get_current_epoch(&context.authority).await;
         let location = SecureStorageLocation::with_sub_key(
             "frost_keys",
-            format!("{}/0", context.authority),
+            format!("{}/{}", context.authority, current_epoch),
             "1",
         );
         let caps = vec![SecureStorageCapability::Read];
@@ -1218,9 +1247,11 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             .secure_retrieve(&location, &caps)
             .await?;
 
-        // Load public key package
-        let pub_location =
-            SecureStorageLocation::new("frost_public_keys", format!("{}/0", context.authority));
+        // Load public key package for current epoch
+        let pub_location = SecureStorageLocation::new(
+            "frost_public_keys",
+            format!("{}/{}", context.authority, current_epoch),
+        );
         let public_key_package = self
             .secure_storage_handler
             .secure_retrieve(&pub_location, &caps)
@@ -1264,7 +1295,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         Ok(aura_core::threshold::ThresholdSignature::single_signer(
             signature,
             public_key_package,
-            0, // epoch
+            current_epoch,
         ))
     }
 
@@ -1272,16 +1303,30 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         &self,
         authority: &AuthorityId,
     ) -> Option<aura_core::threshold::ThresholdConfig> {
-        // Check if we have keys for this authority
-        let location =
-            SecureStorageLocation::with_sub_key("frost_keys", format!("{}/0", authority), "1");
+        // Get current epoch for this authority
+        let current_epoch = self.get_current_epoch(authority).await;
+
+        // Try to retrieve stored threshold metadata for this epoch
+        if let Some(metadata) = self.get_threshold_metadata(authority, current_epoch).await {
+            return Some(aura_core::threshold::ThresholdConfig {
+                threshold: metadata.threshold,
+                total_participants: metadata.total_participants,
+            });
+        }
+
+        // Fallback: check if we have keys but no metadata (legacy bootstrap case)
+        let location = SecureStorageLocation::with_sub_key(
+            "frost_keys",
+            format!("{}/{}", authority, current_epoch),
+            "1",
+        );
         if self
             .secure_storage_handler
             .secure_exists(&location)
             .await
             .unwrap_or(false)
         {
-            // Return default 1-of-1 config - proper config tracking would require state
+            // Legacy case: keys exist but no metadata - assume 1-of-1
             Some(aura_core::threshold::ThresholdConfig {
                 threshold: 1,
                 total_participants: 1,
@@ -1291,9 +1336,54 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         }
     }
 
+    async fn threshold_state(
+        &self,
+        authority: &AuthorityId,
+    ) -> Option<aura_core::threshold::ThresholdState> {
+        // Get current epoch for this authority
+        let current_epoch = self.get_current_epoch(authority).await;
+
+        // Try to retrieve stored threshold metadata for this epoch
+        if let Some(metadata) = self.get_threshold_metadata(authority, current_epoch).await {
+            return Some(aura_core::threshold::ThresholdState {
+                epoch: metadata.epoch,
+                threshold: metadata.threshold,
+                total_participants: metadata.total_participants,
+                guardian_ids: metadata.guardian_ids,
+            });
+        }
+
+        // Fallback: check if we have keys but no metadata (legacy bootstrap case)
+        let location = SecureStorageLocation::with_sub_key(
+            "frost_keys",
+            format!("{}/{}", authority, current_epoch),
+            "1",
+        );
+        if self
+            .secure_storage_handler
+            .secure_exists(&location)
+            .await
+            .unwrap_or(false)
+        {
+            // Legacy case: keys exist but no metadata - return minimal state
+            Some(aura_core::threshold::ThresholdState {
+                epoch: current_epoch,
+                threshold: 1,
+                total_participants: 1,
+                guardian_ids: vec![format!("{}", authority)],
+            })
+        } else {
+            None
+        }
+    }
+
     async fn has_signing_capability(&self, authority: &AuthorityId) -> bool {
-        let location =
-            SecureStorageLocation::with_sub_key("frost_keys", format!("{}/0", authority), "1");
+        let current_epoch = self.get_current_epoch(authority).await;
+        let location = SecureStorageLocation::with_sub_key(
+            "frost_keys",
+            format!("{}/{}", authority, current_epoch),
+            "1",
+        );
         self.secure_storage_handler
             .secure_exists(&location)
             .await
@@ -1333,9 +1423,17 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             )));
         }
 
-        // For now, use epoch 1 for rotated keys (epoch 0 is bootstrap)
-        // Proper epoch tracking would require persistent state
-        let new_epoch = 1u64;
+        // Get current epoch and calculate new epoch
+        let current_epoch = self.get_current_epoch(authority).await;
+        let new_epoch = current_epoch + 1;
+        tracing::debug!(
+            ?authority,
+            current_epoch,
+            new_epoch,
+            "Rotating keys from epoch {} to {}",
+            current_epoch,
+            new_epoch
+        );
 
         // Generate new threshold keys
         let key_result = if new_threshold >= 2 {
@@ -1379,6 +1477,16 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             .secure_store(&pub_location, &key_result.public_key_package, &caps)
             .await?;
 
+        // Store threshold metadata for the new epoch
+        self.store_threshold_metadata(
+            authority,
+            new_epoch,
+            new_threshold,
+            new_total_participants,
+            guardian_ids,
+        )
+        .await?;
+
         Ok((
             new_epoch,
             key_result.key_packages,
@@ -1396,8 +1504,13 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             new_epoch,
             "Committing key rotation via AuraEffectSystem"
         );
-        // In a full implementation, this would update epoch state
-        // For now, the rotation is already stored and usable
+        // Activate the new epoch by updating the current epoch state
+        self.set_current_epoch(authority, new_epoch).await?;
+        tracing::debug!(
+            ?authority,
+            new_epoch,
+            "Epoch state updated - new keys are now active"
+        );
         Ok(())
     }
 
@@ -1411,8 +1524,13 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             failed_epoch,
             "Rolling back key rotation via AuraEffectSystem"
         );
-        // In a full implementation, this would delete the failed epoch's keys
-        // For now, we just don't use them (they remain orphaned)
+        // Delete orphaned keys from the failed epoch to prevent storage leakage
+        self.delete_epoch_keys(authority, failed_epoch).await?;
+        tracing::info!(
+            ?authority,
+            failed_epoch,
+            "Successfully deleted orphaned keys from failed rotation"
+        );
         Ok(())
     }
 }
@@ -2222,6 +2340,190 @@ impl AuraEffectSystem {
             ExecutionMode::Production
         }
     }
+
+    /// Get the current active epoch for an authority's threshold keys
+    ///
+    /// Returns 0 if no epoch has been stored (bootstrap case).
+    async fn get_current_epoch(&self, authority: &AuthorityId) -> u64 {
+        let location = SecureStorageLocation::new("epoch_state", format!("{}", authority));
+        let caps = vec![SecureStorageCapability::Read];
+
+        match self
+            .secure_storage_handler
+            .secure_retrieve(&location, &caps)
+            .await
+        {
+            Ok(data) if data.len() >= 8 => {
+                let bytes: [u8; 8] = data[..8].try_into().unwrap_or([0u8; 8]);
+                u64::from_le_bytes(bytes)
+            }
+            _ => 0, // Default to epoch 0 for bootstrap
+        }
+    }
+
+    /// Set the current active epoch for an authority's threshold keys
+    async fn set_current_epoch(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+    ) -> Result<(), AuraError> {
+        let location = SecureStorageLocation::new("epoch_state", format!("{}", authority));
+        let caps = vec![
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+
+        let data = epoch.to_le_bytes().to_vec();
+        self.secure_storage_handler
+            .secure_store(&location, &data, &caps)
+            .await
+            .map_err(|e| AuraError::storage(format!("Failed to store epoch state: {}", e)))
+    }
+
+    /// Delete keys for a specific epoch (used during rollback)
+    async fn delete_epoch_keys(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+    ) -> Result<(), AuraError> {
+        let delete_caps = vec![SecureStorageCapability::Delete];
+
+        // Delete guardian shares for this epoch
+        let shares_location =
+            SecureStorageLocation::new("guardian_shares", format!("{}/{}", authority, epoch));
+        let _ = self
+            .secure_storage_handler
+            .secure_delete(&shares_location, &delete_caps)
+            .await;
+
+        // Delete public key for this epoch
+        let pubkey_location = SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority),
+            format!("{}", epoch),
+        );
+        let _ = self
+            .secure_storage_handler
+            .secure_delete(&pubkey_location, &delete_caps)
+            .await;
+
+        // Delete threshold metadata for this epoch
+        let metadata_location = SecureStorageLocation::with_sub_key(
+            "threshold_metadata",
+            format!("{}", authority),
+            format!("{}", epoch),
+        );
+        let _ = self
+            .secure_storage_handler
+            .secure_delete(&metadata_location, &delete_caps)
+            .await;
+
+        tracing::debug!(?authority, epoch, "Deleted keys for epoch");
+        Ok(())
+    }
+
+    /// Store threshold configuration metadata for an epoch
+    ///
+    /// This stores the threshold, total participants, and guardian IDs alongside
+    /// the actual cryptographic keys. This metadata is used by the recovery system
+    /// to understand the current guardian configuration.
+    async fn store_threshold_metadata(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        threshold: u16,
+        total_participants: u16,
+        guardian_ids: &[String],
+    ) -> Result<(), AuraError> {
+        let metadata = ThresholdMetadata {
+            epoch,
+            threshold,
+            total_participants,
+            guardian_ids: guardian_ids.to_vec(),
+        };
+
+        let location = SecureStorageLocation::with_sub_key(
+            "threshold_metadata",
+            format!("{}", authority),
+            format!("{}", epoch),
+        );
+        let caps = vec![
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+
+        let data = serde_json::to_vec(&metadata).map_err(|e| {
+            AuraError::storage(format!("Failed to serialize threshold metadata: {}", e))
+        })?;
+        self.secure_storage_handler
+            .secure_store(&location, &data, &caps)
+            .await
+            .map_err(|e| {
+                AuraError::storage(format!("Failed to store threshold metadata: {}", e))
+            })?;
+
+        tracing::debug!(
+            ?authority,
+            epoch,
+            threshold,
+            total_participants,
+            num_guardians = guardian_ids.len(),
+            "Stored threshold metadata"
+        );
+        Ok(())
+    }
+
+    /// Retrieve threshold configuration metadata for an epoch
+    ///
+    /// Returns None if no metadata exists for the epoch.
+    async fn get_threshold_metadata(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+    ) -> Option<ThresholdMetadata> {
+        let location = SecureStorageLocation::with_sub_key(
+            "threshold_metadata",
+            format!("{}", authority),
+            format!("{}", epoch),
+        );
+        let caps = vec![SecureStorageCapability::Read];
+
+        match self
+            .secure_storage_handler
+            .secure_retrieve(&location, &caps)
+            .await
+        {
+            Ok(data) => match serde_json::from_slice(&data) {
+                Ok(metadata) => Some(metadata),
+                Err(e) => {
+                    tracing::warn!(
+                        ?authority,
+                        epoch,
+                        error = %e,
+                        "Failed to deserialize threshold metadata"
+                    );
+                    None
+                }
+            },
+            Err(_) => None,
+        }
+    }
+}
+
+/// Threshold configuration metadata stored alongside keys
+///
+/// This structure captures the full threshold configuration for an epoch,
+/// including the guardian IDs which are needed for recovery operations.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ThresholdMetadata {
+    /// The epoch this configuration applies to
+    epoch: u64,
+    /// Minimum signers required (k in k-of-n)
+    threshold: u16,
+    /// Total number of participants (n in k-of-n)
+    total_participants: u16,
+    /// Authority IDs of all guardians (in participant order)
+    guardian_ids: Vec<String>,
 }
 
 fn map_amp_err(e: aura_core::AuraError) -> AmpChannelError {

@@ -92,15 +92,15 @@ mod tests {
     fn test_screen_context_default() {
         let ctx = ScreenContext::new();
         assert!(ctx.is_focused);
-        assert_eq!(ctx.width, 80);
-        assert_eq!(ctx.height, 25);
+        assert_eq!(ctx.width, dim::TOTAL_WIDTH);
+        assert_eq!(ctx.height, dim::MIDDLE_HEIGHT);
     }
 
     #[test]
     fn test_screen_context_unfocused() {
         let ctx = ScreenContext::unfocused();
         assert!(!ctx.is_focused);
-        assert_eq!(ctx.width, 80);
-        assert_eq!(ctx.height, 25);
+        assert_eq!(ctx.width, dim::TOTAL_WIDTH);
+        assert_eq!(ctx.height, dim::MIDDLE_HEIGHT);
     }
 }

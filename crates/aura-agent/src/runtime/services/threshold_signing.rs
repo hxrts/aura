@@ -28,6 +28,7 @@ use aura_core::effects::{
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{
     ApprovalContext, SignableOperation, SigningContext, ThresholdConfig, ThresholdSignature,
+    ThresholdState,
 };
 use aura_core::{effects::ThresholdSigningEffects, AuraError};
 use std::collections::HashMap;
@@ -47,6 +48,8 @@ pub struct SigningContextState {
     pub public_key_package: Vec<u8>,
     /// Signing mode (single-signer Ed25519 or FROST threshold)
     pub mode: SigningMode,
+    /// Guardian authority IDs (for threshold state queries)
+    pub guardian_ids: Vec<String>,
 }
 
 /// Unified service for all threshold signing operations
@@ -58,7 +61,7 @@ pub struct SigningContextState {
 /// - Hybrid schemes (device + guardian)
 pub struct ThresholdSigningService {
     /// Effect system for crypto and secure storage operations
-    effects: Arc<RwLock<AuraEffectSystem>>,
+    effects: Arc<AuraEffectSystem>,
 
     /// Known signing contexts (keyed by authority)
     contexts: RwLock<HashMap<AuthorityId, SigningContextState>>,
@@ -74,7 +77,7 @@ impl std::fmt::Debug for ThresholdSigningService {
 
 impl ThresholdSigningService {
     /// Create a new threshold signing service
-    pub fn new(effects: Arc<RwLock<AuraEffectSystem>>) -> Self {
+    pub fn new(effects: Arc<AuraEffectSystem>) -> Self {
         Self {
             effects,
             contexts: RwLock::new(HashMap::new()),
@@ -101,15 +104,20 @@ impl ThresholdSigningService {
             "1",
         );
 
-        let effects = self.effects.read().await;
 
-        let key_package = effects
-            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        let key_package = self.effects
+            .secure_retrieve(
+                &location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
             .await
             .map_err(|e| AuraError::internal(format!("Failed to load key package: {}", e)))?;
 
         // Direct Ed25519 signing (no FROST overhead)
-        let signature = effects
+        let signature = self.effects
             .sign_with_key(message, &key_package, SigningMode::SingleSigner)
             .await
             .map_err(|e| AuraError::internal(format!("Ed25519 signing failed: {}", e)))?;
@@ -143,22 +151,27 @@ impl ThresholdSigningService {
             format!("{}", state.my_signer_index.unwrap_or(1)),
         );
 
-        let effects = self.effects.read().await;
 
-        let key_package = effects
-            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        let key_package = self.effects
+            .secure_retrieve(
+                &location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
             .await
             .map_err(|e| AuraError::internal(format!("Failed to load key package: {}", e)))?;
 
         // Generate nonces
-        let nonces = effects
+        let nonces = self.effects
             .frost_generate_nonces(&key_package)
             .await
             .map_err(|e| AuraError::internal(format!("Nonce generation failed: {}", e)))?;
 
         // Create signing package (single participant)
         let participants = vec![state.my_signer_index.unwrap_or(1)];
-        let signing_package = effects
+        let signing_package = self.effects
             .frost_create_signing_package(
                 message,
                 std::slice::from_ref(&nonces),
@@ -169,13 +182,13 @@ impl ThresholdSigningService {
             .map_err(|e| AuraError::internal(format!("Signing package creation failed: {}", e)))?;
 
         // Sign
-        let share = effects
+        let share = self.effects
             .frost_sign_share(&signing_package, &key_package, &nonces)
             .await
             .map_err(|e| AuraError::internal(format!("Signature share creation failed: {}", e)))?;
 
         // Aggregate (trivial for single signer)
-        let signature = effects
+        let signature = self.effects
             .frost_aggregate_signatures(&signing_package, &[share])
             .await
             .map_err(|e| AuraError::internal(format!("Signature aggregation failed: {}", e)))?;
@@ -220,10 +233,9 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             "Bootstrapping authority with 1-of-1 Ed25519 keys"
         );
 
-        let effects = self.effects.read().await;
 
         // Generate 1-of-1 signing keys (will use Ed25519 single-signer mode)
-        let key_result = effects
+        let key_result = self.effects
             .generate_signing_keys(1, 1)
             .await
             .map_err(|e| AuraError::internal(format!("Key generation failed: {}", e)))?;
@@ -242,7 +254,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             "1",                        // signer index 1
         );
 
-        effects
+        self.effects
             .secure_store(
                 &location,
                 &key_result.key_packages[0],
@@ -255,7 +267,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             .map_err(|e| AuraError::internal(format!("Failed to store key package: {}", e)))?;
 
         // Drop the effects lock before acquiring the contexts lock
-        drop(effects);
+        drop(self.effects);
 
         // Create context state
         let config = ThresholdConfig::new(1, 1)?;
@@ -265,6 +277,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             epoch: 0,
             public_key_package: key_result.public_key_package.clone(),
             mode: key_result.mode,
+            guardian_ids: vec![format!("{}", authority)], // Bootstrap: self is the only guardian
         };
 
         // Store in memory cache
@@ -367,6 +380,19 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             .map(|s| s.config.clone())
     }
 
+    async fn threshold_state(&self, authority: &AuthorityId) -> Option<ThresholdState> {
+        self.contexts
+            .read()
+            .await
+            .get(authority)
+            .map(|state| ThresholdState {
+                epoch: state.epoch,
+                threshold: state.config.threshold,
+                total_participants: state.config.total_participants,
+                guardian_ids: state.guardian_ids.clone(),
+            })
+    }
+
     async fn has_signing_capability(&self, authority: &AuthorityId) -> bool {
         self.contexts
             .read()
@@ -419,7 +445,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
         let new_epoch = current_epoch + 1;
 
-        let effects = self.effects.read().await;
 
         // Generate new threshold keys using FROST
         // For threshold >= 2, this uses FROST DKG
@@ -428,13 +453,13 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             // Use frost_rotate_keys for threshold configurations
             // Note: The old_shares parameter is for potential future resharing;
             // currently we do a fresh DKG which produces a new group public key
-            effects
+            self.effects
                 .frost_rotate_keys(&[], 0, new_threshold, new_total_participants)
                 .await
                 .map_err(|e| AuraError::internal(format!("FROST key rotation failed: {}", e)))?
         } else {
             // Single-signer mode (shouldn't happen for guardian ceremony, but handle it)
-            let result = effects
+            let result = self.effects
                 .generate_signing_keys(new_threshold, new_total_participants)
                 .await
                 .map_err(|e| AuraError::internal(format!("Key generation failed: {}", e)))?;
@@ -463,7 +488,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 guardian_id,
             );
 
-            effects
+            self.effects
                 .secure_store(
                     &location,
                     key_package,
@@ -496,11 +521,14 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             format!("{}", new_epoch),
         );
 
-        effects
+        self.effects
             .secure_store(
                 &pubkey_location,
                 &key_result.public_key_package,
-                &[SecureStorageCapability::Read],
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
             )
             .await
             .map_err(|e| {
@@ -537,7 +565,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         );
 
         // Load the public key package for the new epoch
-        let effects = self.effects.read().await;
 
         let pubkey_location = SecureStorageLocation::with_sub_key(
             "threshold_pubkey",
@@ -545,8 +572,14 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             format!("{}", new_epoch),
         );
 
-        let public_key_package = effects
-            .secure_retrieve(&pubkey_location, &[SecureStorageCapability::Read])
+        let public_key_package = self.effects
+            .secure_retrieve(
+                &pubkey_location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
             .await
             .map_err(|e| {
                 AuraError::internal(format!(
@@ -557,6 +590,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
         // Count guardians to determine threshold config
         // We need to inspect the stored guardian shares
+        // TODO: Store threshold config metadata alongside keys to avoid caller needing to provide it
         // For now, we'll require the caller to provide this info via a different mechanism
         // or we can store metadata alongside the keys
 
@@ -569,6 +603,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             let old_epoch = state.epoch;
             state.epoch = new_epoch;
             state.public_key_package = public_key_package;
+            // TODO: Update threshold config from ceremony parameters
             // Note: threshold config should be updated based on ceremony parameters
             // For now, keep existing config - caller should update if needed
 
@@ -599,7 +634,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             "Rolling back key rotation after ceremony failure"
         );
 
-        let effects = self.effects.read().await;
 
         // Delete the public key package for the failed epoch
         let pubkey_location = SecureStorageLocation::with_sub_key(
@@ -608,6 +642,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             format!("{}", failed_epoch),
         );
 
+        // TODO: Add delete method to SecureStorageEffects for key cleanup
         // Note: SecureStorageEffects doesn't have a delete method currently
         // For now, we just don't commit the rotation - the old keys remain active
         // The failed epoch's keys will be orphaned but not used
@@ -627,7 +662,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         // so no in-memory rollback is needed
 
         // For now, just acknowledge - actual cleanup would require delete capability
-        let _ = (effects, pubkey_location); // silence unused warnings
+        let _ = (self.effects, pubkey_location); // silence unused warnings
 
         Ok(())
     }

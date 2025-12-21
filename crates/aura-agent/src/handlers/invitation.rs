@@ -436,7 +436,6 @@ mod tests {
         let handler = InvitationHandler::new(authority_context.clone()).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([92u8; 32]);
-        let effects_guard = effects.read().await;
 
         let invitation = handler
             .create_invitation(
@@ -466,7 +465,6 @@ mod tests {
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([94u8; 32]);
-        let effects_guard = effects.read().await;
 
         let invitation = handler
             .create_invitation(
@@ -498,7 +496,6 @@ mod tests {
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([97u8; 32]);
-        let effects_guard = effects.read().await;
 
         let invitation = handler
             .create_invitation(
@@ -530,7 +527,6 @@ mod tests {
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([99u8; 32]);
-        let effects_guard = effects.read().await;
 
         let invitation = handler
             .create_invitation(
@@ -563,7 +559,6 @@ mod tests {
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
         let handler = InvitationHandler::new(authority_context).unwrap();
 
-        let effects_guard = effects.read().await;
 
         // Create 3 invitations
         let inv1 = handler

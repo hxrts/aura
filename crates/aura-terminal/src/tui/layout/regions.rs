@@ -7,15 +7,15 @@ use std::marker::PhantomData;
 
 /// Phantom types for type-level region enforcement
 pub mod region {
-    /// Navigation bar region (top 3 rows)
+    /// Navigation bar region (top NAV_HEIGHT rows)
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct Nav;
 
-    /// Middle content region (screen-specific, 25 rows)
+    /// Middle content region (screen-specific, MIDDLE_HEIGHT rows)
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct Middle;
 
-    /// Footer region (bottom 3 rows)
+    /// Footer region (bottom FOOTER_HEIGHT rows)
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct Footer;
 }
@@ -85,16 +85,16 @@ mod tests {
     #[test]
     fn test_region_dimensions() {
         let nav = RegionMarker::<Nav>::new();
-        assert_eq!(nav.height(), 3);
-        assert_eq!(nav.width(), 80);
+        assert_eq!(nav.height(), super::super::dim::NAV_HEIGHT);
+        assert_eq!(nav.width(), super::super::dim::TOTAL_WIDTH);
 
         let middle = RegionMarker::<Middle>::new();
-        assert_eq!(middle.height(), 25);
-        assert_eq!(middle.width(), 80);
+        assert_eq!(middle.height(), super::super::dim::MIDDLE_HEIGHT);
+        assert_eq!(middle.width(), super::super::dim::TOTAL_WIDTH);
 
         let footer = RegionMarker::<Footer>::new();
-        assert_eq!(footer.height(), 3);
-        assert_eq!(footer.width(), 80);
+        assert_eq!(footer.height(), super::super::dim::FOOTER_HEIGHT);
+        assert_eq!(footer.width(), super::super::dim::TOTAL_WIDTH);
     }
 
     #[test]

@@ -27,7 +27,7 @@ async fn test_recovery_service_via_agent() -> Result<(), Box<dyn std::error::Err
         .build_testing_async(&ctx)
         .await?;
 
-    let recovery = agent.recovery().await?;
+    let recovery = agent.recovery()?;
 
     // Initially no active recoveries
     let active = recovery.list_active().await;
@@ -44,7 +44,7 @@ async fn test_add_device_recovery_via_agent() -> Result<(), Box<dyn std::error::
         .build_testing_async(&ctx)
         .await?;
 
-    let recovery = agent.recovery().await?;
+    let recovery = agent.recovery()?;
 
     let guardians = vec![
         AuthorityId::new_from_entropy([92u8; 32]),
@@ -75,7 +75,7 @@ async fn test_remove_device_recovery_via_agent() -> Result<(), Box<dyn std::erro
         .build_testing_async(&ctx)
         .await?;
 
-    let recovery = agent.recovery().await?;
+    let recovery = agent.recovery()?;
 
     let guardians = vec![AuthorityId::new_from_entropy([95u8; 32])];
 
@@ -96,7 +96,7 @@ async fn test_replace_tree_recovery_via_agent() -> Result<(), Box<dyn std::error
         .build_testing_async(&ctx)
         .await?;
 
-    let recovery = agent.recovery().await?;
+    let recovery = agent.recovery()?;
 
     let guardians = vec![
         AuthorityId::new_from_entropy([97u8; 32]),
@@ -128,7 +128,7 @@ async fn test_update_guardians_recovery_via_agent() -> Result<(), Box<dyn std::e
         .build_testing_async(&ctx)
         .await?;
 
-    let recovery = agent.recovery().await?;
+    let recovery = agent.recovery()?;
 
     let current_guardians = vec![AuthorityId::new_from_entropy([101u8; 32])];
     let new_guardians = vec![
@@ -160,7 +160,7 @@ async fn test_full_recovery_flow_via_agent() -> Result<(), Box<dyn std::error::E
         .build_testing_async(&ctx)
         .await?;
 
-    let recovery = agent.recovery().await?;
+    let recovery = agent.recovery()?;
 
     let guardians = vec![AuthorityId::new_from_entropy([105u8; 32])];
 
@@ -203,7 +203,7 @@ async fn test_cancel_recovery_via_agent() -> Result<(), Box<dyn std::error::Erro
         .build_testing_async(&ctx)
         .await?;
 
-    let recovery = agent.recovery().await?;
+    let recovery = agent.recovery()?;
 
     let guardians = vec![AuthorityId::new_from_entropy([107u8; 32])];
 
@@ -237,7 +237,7 @@ async fn test_list_active_via_agent() -> Result<(), Box<dyn std::error::Error>> 
         .build_testing_async(&ctx)
         .await?;
 
-    let recovery = agent.recovery().await?;
+    let recovery = agent.recovery()?;
 
     // Initially empty
     let active = recovery.list_active().await;
@@ -278,7 +278,7 @@ async fn test_get_state_via_agent() -> Result<(), Box<dyn std::error::Error>> {
         .build_testing_async(&ctx)
         .await?;
 
-    let recovery = agent.recovery().await?;
+    let recovery = agent.recovery()?;
 
     let guardians = vec![AuthorityId::new_from_entropy([112u8; 32])];
 

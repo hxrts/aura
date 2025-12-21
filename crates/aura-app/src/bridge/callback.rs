@@ -17,6 +17,7 @@
 //! ```
 
 use crate::core::IntentError;
+use crate::errors::AppError;
 use crate::views::{
     BlockState, ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
 };
@@ -48,13 +49,16 @@ pub trait StateObserver: Send + Sync {
     fn on_neighborhood_changed(&self, state: NeighborhoodState);
 
     /// Called when an error occurs
-    fn on_error(&self, error: AppError);
+    fn on_error(&self, error: CallbackError);
 }
 
-/// Error type for callback notifications
+/// Error type for callback notifications (FFI-compatible)
+///
+/// This is a simplified error struct for UniFFI bindings to mobile platforms.
+/// It provides a flat structure that can be easily represented in Swift/Kotlin.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct AppError {
+pub struct CallbackError {
     /// Error code
     pub code: String,
     /// Human-readable message
@@ -63,7 +67,7 @@ pub struct AppError {
     pub recoverable: bool,
 }
 
-impl From<IntentError> for AppError {
+impl From<IntentError> for CallbackError {
     fn from(err: IntentError) -> Self {
         Self {
             code: match &err {
@@ -85,6 +89,16 @@ impl From<IntentError> for AppError {
                     | IntentError::ValidationFailed { .. }
                     | IntentError::ServiceError { .. }
             ),
+        }
+    }
+}
+
+impl From<AppError> for CallbackError {
+    fn from(err: AppError) -> Self {
+        Self {
+            code: err.code().to_string(),
+            message: err.to_string(),
+            recoverable: err.is_recoverable(),
         }
     }
 }
@@ -158,7 +172,7 @@ impl ObserverRegistry {
     }
 
     /// Notify all observers of an error
-    pub fn notify_error(&self, error: AppError) {
+    pub fn notify_error(&self, error: CallbackError) {
         for (_, observer) in &self.observers {
             observer.on_error(error.clone());
         }

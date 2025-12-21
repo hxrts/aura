@@ -205,7 +205,12 @@ impl ViewDeltaReducer for RecoveryViewReducer {
         RECOVERY_FACT_TYPE_ID
     }
 
-    fn reduce_fact(&self, binding_type: &str, binding_data: &[u8]) -> Vec<ViewDelta> {
+    fn reduce_fact(
+        &self,
+        binding_type: &str,
+        binding_data: &[u8],
+        _own_authority: Option<AuthorityId>,
+    ) -> Vec<ViewDelta> {
         if binding_type != RECOVERY_FACT_TYPE_ID {
             return vec![];
         }
@@ -427,7 +432,7 @@ mod tests {
         };
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes, None);
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
@@ -456,7 +461,7 @@ mod tests {
         };
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes, None);
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
@@ -479,7 +484,7 @@ mod tests {
         };
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes, None);
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
@@ -503,7 +508,7 @@ mod tests {
         };
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes, None);
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
@@ -528,7 +533,7 @@ mod tests {
         };
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes, None);
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
@@ -546,14 +551,14 @@ mod tests {
     #[test]
     fn test_wrong_type_returns_empty() {
         let reducer = RecoveryViewReducer;
-        let deltas = reducer.reduce_fact("wrong_type", b"some data");
+        let deltas = reducer.reduce_fact("wrong_type", b"some data", None);
         assert!(deltas.is_empty());
     }
 
     #[test]
     fn test_invalid_data_returns_empty() {
         let reducer = RecoveryViewReducer;
-        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, b"invalid json data");
+        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, b"invalid json data", None);
         assert!(deltas.is_empty());
     }
 
@@ -569,7 +574,7 @@ mod tests {
         };
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes, None);
 
         // Invitation sent doesn't produce a separate delta
         assert!(deltas.is_empty());

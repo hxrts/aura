@@ -66,20 +66,17 @@ pub async fn force_sync(app_core: &Arc<RwLock<AppCore>>) -> Result<(), IntentErr
 
 /// Request state from a specific peer
 ///
-/// **What it does**: Triggers targeted sync from a peer
+/// **What it does**: Triggers targeted sync with the specified peer
 /// **Returns**: Unit result
 /// **Signal pattern**: Emits SYNC_STATUS_SIGNAL during and after operation
 ///
 /// This operation:
 /// 1. Emits SYNC_STATUS_SIGNAL with Syncing state
-/// 2. Triggers sync via RuntimeBridge (peer-targeted sync requires additional infrastructure)
+/// 2. Triggers peer-targeted sync via RuntimeBridge.sync_with_peer()
 /// 3. Emits SYNC_STATUS_SIGNAL with Synced or Failed state
-///
-/// **Note**: Currently triggers general sync; peer-targeted sync requires
-/// additional infrastructure in the sync engine.
 pub async fn request_state(
     app_core: &Arc<RwLock<AppCore>>,
-    _peer_id: &str,
+    peer_id: &str,
 ) -> Result<(), IntentError> {
     // Update sync status signal to show syncing
     {
@@ -91,12 +88,10 @@ pub async fn request_state(
             })?;
     }
 
-    // Trigger sync through RuntimeBridge
-    // For now, we trigger a general sync - peer-targeted sync requires
-    // additional infrastructure in the sync engine
+    // Trigger peer-targeted sync through RuntimeBridge
     let result = {
         let core = app_core.read().await;
-        core.trigger_sync().await
+        core.sync_with_peer(peer_id).await
     };
 
     // Update status based on result

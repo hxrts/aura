@@ -18,7 +18,10 @@ async fn refresh_settings_signal_from_runtime(core: &AppCore) -> Result<(), Aura
     };
 
     let settings = runtime.get_settings().await;
-    let mut state = core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default();
+    let mut state = core
+        .read(&*SETTINGS_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read settings signal: {}", e)))?;
     state.display_name = settings.display_name;
     state.mfa_policy = settings.mfa_policy;
     state.threshold_k = settings.threshold_k as u8;
@@ -119,10 +122,12 @@ pub async fn set_channel_mode(
 /// **What it does**: Reads settings from SETTINGS_SIGNAL
 /// **Returns**: Current settings state
 /// **Signal pattern**: Read-only operation (no emission)
-pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> SettingsState {
+pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> Result<SettingsState, AuraError> {
     let core = app_core.read().await;
 
-    core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default()
+    core.read(&*SETTINGS_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read settings signal: {}", e)))
 }
 
 #[cfg(test)]
@@ -135,7 +140,10 @@ mod tests {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
-        let settings = get_settings(&app_core).await;
+        // Workflows assume reactive signals are initialized.
+        app_core.write().await.init_signals().await.unwrap();
+
+        let settings = get_settings(&app_core).await.unwrap();
         assert_eq!(settings.threshold_k, 0);
         assert_eq!(settings.threshold_n, 0);
     }

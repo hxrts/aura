@@ -44,15 +44,10 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 
     // Show success/error result view
     if success || has_error {
-        let (status_icon, status_text, status_color, title) = if success {
-            (
-                "✓",
-                "Account created successfully!",
-                Theme::SUCCESS,
-                "Account Created",
-            )
+        let (status_icon, status_text, status_color) = if success {
+            ("✓", "Account Created", Theme::SUCCESS)
         } else {
-            ("✗", error.as_str(), Theme::ERROR, "Account Creation Failed")
+            ("✗", error.as_str(), Theme::ERROR)
         };
 
         return element! {
@@ -64,21 +59,13 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 align_items: Some(AlignItems::Center),
             ) {
                 View(
-                    width: Percent(70.0),
                     padding: 2,
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    border_style: BorderStyle::Round,
-                    border_color: status_color,
                 ) {
-                    Text(
-                        content: title,
-                        weight: Weight::Bold,
-                        color: status_color,
-                    )
-                    View(margin_top: 2, flex_direction: FlexDirection::Row, gap: 2) {
+                    View(flex_direction: FlexDirection::Row, gap: 2) {
                         Text(content: status_icon, color: status_color, weight: Weight::Bold)
-                        Text(content: status_text, color: status_color)
+                        Text(content: status_text, color: status_color, weight: Weight::Bold)
                     }
                     #(if success {
                         Some(element! {

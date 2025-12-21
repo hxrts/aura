@@ -22,7 +22,10 @@ use aura_terminal::tui::props::{
 };
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::screens::{BlockFocus, ChatFocus};
-use aura_terminal::tui::state_machine::{transition, ChatFocus as StateChatFocus, TuiState};
+use aura_terminal::tui::state_machine::{
+    transition, ChatFocus as StateChatFocus, ContactSelectModalState, DispatchCommand, QueuedModal,
+    TuiCommand, TuiState,
+};
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
 
 // ============================================================================
@@ -49,7 +52,19 @@ impl PropsTestHarness {
     }
 
     fn send(&mut self, event: TerminalEvent) {
-        let (new_state, _) = transition(&self.state, event);
+        let (mut new_state, commands) = transition(&self.state, event);
+
+        // Simulate a small subset of shell-driven UI effects so these tests can
+        // validate the full state→props pipeline.
+        for cmd in &commands {
+            if let TuiCommand::Dispatch(DispatchCommand::OpenBlockInvite) = cmd {
+                new_state.show_modal(QueuedModal::BlockInvite(ContactSelectModalState::single(
+                    "Invite to block",
+                    vec![("contact-1".to_string(), "Alice".to_string())],
+                )));
+            }
+        }
+
         self.state = new_state;
     }
 
@@ -73,8 +88,8 @@ impl PropsTestHarness {
             Screen::Chat => '2',
             Screen::Contacts => '3',
             Screen::Neighborhood => '4',
-            Screen::Settings => '5',
-            Screen::Recovery => '6',
+            Screen::Recovery => '5',
+            Screen::Settings => '6',
         };
         self.send_char(key);
         assert_eq!(

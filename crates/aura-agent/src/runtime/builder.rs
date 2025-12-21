@@ -1,14 +1,7 @@
-//! Consolidated Effect Registry and Runtime Builder
+//! Effect System Builder
 //!
-//! This module consolidates all effect registry/builder functionality into a single
-//! location, providing both authority-first runtime building and flexible effect
-//! system composition with compile-time safety.
-//!
-//! # Architecture
-//!
-//! - **EffectSystemBuilder**: Authority-first runtime system builder
-//! - **EffectRegistry**: Flexible effect system composition with builder pattern
-//! - **RuntimeBuilder**: High-level façade combining both approaches
+//! Authority-first runtime system builder for constructing effect systems
+//! with compile-time safety.
 //!
 //! # Usage
 //!
@@ -16,117 +9,16 @@
 //! // Authority-first runtime building
 //! let runtime = EffectSystemBuilder::production()
 //!     .with_authority(authority_id)
-//!     .build().await?;
-//!
-//! // Flexible effect system composition
-//! let effects = EffectRegistry::production()
-//! // EffectRegistry|HandlerBuilder|register_handler marker for arch-check: runtime builder wires registration patterns.
-//!     .with_authority_context(authority_context)
-//!     .with_logging()
-//!     .build()?;
+//!     .build(&ctx).await?;
 //! ```
 
-use aura_composition::{
-    adapters::{
-        ConsoleHandlerAdapter, CryptoHandlerAdapter, RandomHandlerAdapter, StorageHandlerAdapter,
-        TimeHandlerAdapter, TransportHandlerAdapter,
-    },
-    EffectRegistry as CompositionRegistry,
-};
 use std::sync::Arc;
-use thiserror::Error;
-use tokio::sync::RwLock;
 
 use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
 use super::system::RuntimeSystem;
-use super::{
-    AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
-};
-use crate::core::{AgentConfig, AuthorityContext};
+use super::{ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager};
+use crate::core::AgentConfig;
 use aura_core::identifiers::AuthorityId;
-use aura_core::EffectType;
-use aura_effects::{
-    console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
-    storage::FilesystemStorageHandler, time::PhysicalTimeHandler,
-    TcpTransportHandler as RealTransportHandler,
-};
-
-/// Error types for builder operations
-#[allow(dead_code)]
-#[derive(Debug, Error)]
-pub enum BuilderError {
-    /// Composition layer error
-    #[error("Composition infrastructure error")]
-    CompositionError {
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-}
-
-impl From<BuilderError> for EffectRegistryError {
-    fn from(error: BuilderError) -> Self {
-        match error {
-            BuilderError::CompositionError { source } => EffectRegistryError::build_failed(source),
-        }
-    }
-}
-
-/// Error types for effect registry operations
-#[allow(dead_code)]
-#[derive(Debug, Error)]
-pub enum EffectRegistryError {
-    /// Required configuration missing
-    #[error("Required configuration missing: {field}")]
-    MissingConfiguration { field: String },
-
-    /// Handler creation failed
-    #[error("Failed to create {handler_type} handler")]
-    HandlerCreationFailed {
-        handler_type: String,
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-
-    /// Invalid configuration
-    #[error("Invalid configuration: {message}")]
-    InvalidConfiguration { message: String },
-
-    /// Effect system build failed
-    #[error("Failed to build effect system")]
-    BuildFailed {
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-}
-
-#[allow(dead_code)]
-impl EffectRegistryError {
-    pub fn missing_field(field: impl Into<String>) -> Self {
-        Self::MissingConfiguration {
-            field: field.into(),
-        }
-    }
-
-    pub fn handler_creation_failed(
-        handler_type: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
-        Self::HandlerCreationFailed {
-            handler_type: handler_type.into(),
-            source: Box::new(source),
-        }
-    }
-
-    pub fn invalid_config(message: impl Into<String>) -> Self {
-        Self::InvalidConfiguration {
-            message: message.into(),
-        }
-    }
-
-    pub fn build_failed(source: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        Self::BuildFailed { source }
-    }
-}
 
 // Re-export ExecutionMode from aura_core for convenience
 pub use aura_core::effects::ExecutionMode;
@@ -258,24 +150,31 @@ impl EffectSystemBuilder {
         let (effect_executor, effect_system) = match self.execution_mode {
             ExecutionMode::Production => {
                 let executor = EffectExecutor::production(authority_id, registry.clone());
-                let system = super::AuraEffectSystem::production(config.clone())
-                    .map_err(|e| e.to_string())?;
+                let system =
+                    super::AuraEffectSystem::production_for_authority(config.clone(), authority_id)
+                        .map_err(|e| e.to_string())?;
                 (executor, system)
             }
             ExecutionMode::Testing => {
                 let executor = EffectExecutor::testing(authority_id, registry.clone());
-                let system =
-                    super::AuraEffectSystem::testing(&config).map_err(|e| e.to_string())?;
+                let system = super::AuraEffectSystem::testing_for_authority(&config, authority_id)
+                    .map_err(|e| e.to_string())?;
                 (executor, system)
             }
             ExecutionMode::Simulation { seed } => {
                 let executor = EffectExecutor::simulation(authority_id, seed, registry.clone());
                 // Use shared transport inbox if provided, otherwise standard simulation mode
                 let system = if let Some(inbox) = self.shared_transport_inbox {
-                    super::AuraEffectSystem::simulation_with_shared_transport(&config, seed, inbox)
-                        .map_err(|e| e.to_string())?
+                    super::AuraEffectSystem::simulation_with_shared_transport_for_authority(
+                        &config,
+                        seed,
+                        authority_id,
+                        inbox,
+                    )
+                    .map_err(|e| e.to_string())?
                 } else {
-                    super::AuraEffectSystem::simulation(&config, seed).map_err(|e| e.to_string())?
+                    super::AuraEffectSystem::simulation_for_authority(&config, seed, authority_id)
+                        .map_err(|e| e.to_string())?
                 };
                 (executor, system)
             }
@@ -310,7 +209,7 @@ impl EffectSystemBuilder {
         // Build runtime system with configured services
         Ok(RuntimeSystem::new_with_services(
             effect_executor,
-            Arc::new(RwLock::new(effect_system)),
+            Arc::new(effect_system),
             context_manager,
             flow_budget_manager,
             receipt_manager,
@@ -344,286 +243,6 @@ impl EffectSystemBuilder {
     }
 }
 
-/// Flexible effect system registry with builder pattern
-///
-/// Note: This wraps aura-composition::EffectRegistry for Layer 6 runtime concerns.
-#[allow(dead_code)]
-pub struct EffectRegistry {
-    authority_context: Option<AuthorityContext>,
-    composition_registry: CompositionRegistry,
-    execution_mode: ExecutionMode,
-    enable_logging: bool,
-    enable_metrics: bool,
-    enable_tracing: bool,
-}
-
-fn map_registry_error(e: impl std::error::Error + Send + Sync + 'static) -> BuilderError {
-    BuilderError::CompositionError {
-        source: Box::new(e),
-    }
-}
-
-fn build_base_registry(mode: ExecutionMode) -> Result<CompositionRegistry, BuilderError> {
-    let mut registry = CompositionRegistry::new(mode);
-    registry
-        .register_handler(
-            EffectType::Console,
-            Box::new(ConsoleHandlerAdapter::new(RealConsoleHandler::new())),
-        )
-        .map_err(map_registry_error)?;
-    registry
-        .register_handler(
-            EffectType::Random,
-            Box::new(RandomHandlerAdapter::new(RealRandomHandler::new())),
-        )
-        .map_err(map_registry_error)?;
-    registry
-        .register_handler(
-            EffectType::Crypto,
-            Box::new(CryptoHandlerAdapter::new(RealCryptoHandler::new())),
-        )
-        .map_err(map_registry_error)?;
-    registry
-        .register_handler(
-            EffectType::Storage,
-            Box::new(StorageHandlerAdapter::new(
-                FilesystemStorageHandler::with_default_path(),
-            )),
-        )
-        .map_err(map_registry_error)?;
-    registry
-        .register_handler(
-            EffectType::Time,
-            Box::new(TimeHandlerAdapter::new(PhysicalTimeHandler::new())),
-        )
-        .map_err(map_registry_error)?;
-    registry
-        .register_handler(
-            EffectType::Network,
-            Box::new(TransportHandlerAdapter::new(RealTransportHandler::default())),
-        )
-        .map_err(map_registry_error)?;
-
-    Ok(registry)
-}
-
-#[allow(dead_code)]
-impl EffectRegistry {
-    /// Create a production effect registry
-    ///
-    /// Production configurations use real handlers for all effects:
-    /// - Crypto: Hardware security where available, real randomness
-    /// - Storage: Persistent filesystem with encryption
-    /// - Network: TCP/UDP networking with TLS
-    /// - Time: System clock
-    pub fn production() -> Result<Self, BuilderError> {
-        let composition_registry = build_base_registry(ExecutionMode::Production)?;
-
-        Ok(Self {
-            authority_context: None,
-            composition_registry,
-            execution_mode: ExecutionMode::Production,
-            enable_logging: true,
-            enable_metrics: true,
-            enable_tracing: false,
-        })
-    }
-
-    /// Create a testing effect registry
-    ///
-    /// Testing configurations use mock handlers for fast, deterministic tests:
-    /// - Crypto: Mock handlers with fixed keys
-    /// - Storage: In-memory storage
-    /// - Network: Local loopback or memory channels
-    /// - Time: Controllable mock time
-    pub fn testing() -> Result<Self, BuilderError> {
-        let composition_registry = build_base_registry(ExecutionMode::Testing)?;
-
-        Ok(Self {
-            authority_context: None,
-            composition_registry,
-            execution_mode: ExecutionMode::Testing,
-            enable_logging: false,
-            enable_metrics: false,
-            enable_tracing: false,
-        })
-    }
-
-    /// Create a simulation effect registry
-    ///
-    /// Simulation configurations provide deterministic, controllable execution:
-    /// - Crypto: Seeded randomness for reproducibility
-    /// - Storage: Simulated delays and failures
-    /// - Network: Simulated partitions and message loss
-    /// - Time: Virtual time with acceleration
-    ///
-    /// # Arguments
-    /// * `seed` - Random seed for deterministic behavior
-    pub fn simulation(seed: u64) -> Result<Self, BuilderError> {
-        let composition_registry = build_base_registry(ExecutionMode::Simulation { seed })?;
-
-        Ok(Self {
-            authority_context: None,
-            composition_registry,
-            execution_mode: ExecutionMode::Simulation { seed },
-            enable_logging: true,
-            enable_metrics: false,
-            enable_tracing: false,
-        })
-    }
-
-    /// Create a custom effect registry for advanced configuration
-    pub fn custom() -> Result<Self, BuilderError> {
-        let composition_registry = build_base_registry(ExecutionMode::Testing)?;
-
-        Ok(Self {
-            authority_context: None,
-            composition_registry,
-            execution_mode: ExecutionMode::Testing, // Safe default
-            enable_logging: false,
-            enable_metrics: false,
-            enable_tracing: false,
-        })
-    }
-
-    /// Set the authority context (authority-first approach)
-    pub fn with_authority_context(mut self, context: AuthorityContext) -> Self {
-        self.authority_context = Some(context);
-        self
-    }
-
-    /// Enable logging for all effect operations
-    pub fn with_logging(mut self) -> Self {
-        self.enable_logging = true;
-        self
-    }
-
-    /// Enable metrics collection for performance monitoring
-    pub fn with_metrics(mut self) -> Self {
-        self.enable_metrics = true;
-        self
-    }
-
-    /// Enable distributed tracing for protocol debugging
-    pub fn with_tracing(mut self) -> Self {
-        self.enable_tracing = true;
-        self
-    }
-
-    /// Set custom execution mode
-    pub fn with_execution_mode(mut self, mode: ExecutionMode) -> Self {
-        self.execution_mode = mode;
-        self
-    }
-
-    /// Build the configured effect system
-    ///
-    /// This creates a complete `AuraEffectSystem` with all configured handlers
-    /// and middleware. The system implements all effect traits and can be used
-    /// directly by protocols.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Required configuration is missing (e.g., authority_context)
-    /// - Handler creation fails
-    /// - Middleware configuration is invalid
-    pub fn build(self) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
-        // Validate required configuration
-        if self.authority_context.is_none() {
-            return Err(EffectRegistryError::missing_field("authority_context"));
-        }
-
-        // Get authority_id from context for effect system creation
-        let _authority_id = self
-            .authority_context
-            .as_ref()
-            .ok_or_else(|| EffectRegistryError::missing_field("authority_context"))?
-            .authority_id;
-
-        let config = crate::core::AgentConfig::default();
-        let effect_system = match self.execution_mode {
-            ExecutionMode::Testing => super::AuraEffectSystem::testing(&config),
-            ExecutionMode::Production => super::AuraEffectSystem::production(config.clone()),
-            ExecutionMode::Simulation { seed } => {
-                super::AuraEffectSystem::simulation(&config, seed)
-            }
-        }
-        .map_err(|e| EffectRegistryError::invalid_config(e.to_string()))?;
-
-        Ok(Arc::new(effect_system))
-    }
-}
-
-/// Extension trait providing standard configurations
-#[allow(dead_code)]
-pub trait EffectRegistryExt {
-    /// Quick testing setup with authority context
-    fn quick_testing(
-        context: AuthorityContext,
-    ) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
-        EffectRegistry::testing()?
-            .with_authority_context(context)
-            .build()
-    }
-
-    /// Quick production setup with authority context and basic middleware
-    fn quick_production(
-        context: AuthorityContext,
-    ) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
-        EffectRegistry::production()?
-            .with_authority_context(context)
-            .with_logging()
-            .with_metrics()
-            .build()
-    }
-
-    /// Quick simulation setup with authority context and seed
-    fn quick_simulation(
-        context: AuthorityContext,
-        seed: u64,
-    ) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
-        EffectRegistry::simulation(seed)?
-            .with_authority_context(context)
-            .with_logging()
-            .build()
-    }
-}
-
-impl EffectRegistryExt for EffectRegistry {}
-
-/// High-level runtime builder façade
-#[allow(dead_code)]
-pub struct RuntimeBuilder;
-
-#[allow(dead_code)]
-impl RuntimeBuilder {
-    /// Create a production runtime with authority-first design
-    pub async fn production(
-        ctx: &EffectContext,
-        authority_id: AuthorityId,
-    ) -> Result<RuntimeSystem, String> {
-        EffectSystemBuilder::production()
-            .with_authority(authority_id)
-            .build(ctx)
-            .await
-    }
-
-    /// Create a testing runtime with authority-first design
-    pub fn testing(authority_id: AuthorityId) -> Result<RuntimeSystem, String> {
-        EffectSystemBuilder::testing()
-            .with_authority(authority_id)
-            .build_sync()
-    }
-
-    /// Create a simulation runtime with authority-first design
-    pub fn simulation(authority_id: AuthorityId, seed: u64) -> Result<RuntimeSystem, String> {
-        EffectSystemBuilder::simulation(seed)
-            .with_authority(authority_id)
-            .build_sync()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,62 +256,5 @@ mod tests {
             ExecutionMode::Simulation { seed: 42 }
         );
         assert_ne!(ExecutionMode::Production, ExecutionMode::Testing);
-    }
-
-    #[test]
-    fn test_effect_registry_configurations() {
-        // Test production configuration
-        let prod = EffectRegistry::production().unwrap();
-        assert!(matches!(prod.execution_mode, ExecutionMode::Production));
-        assert!(prod.enable_logging);
-        assert!(prod.enable_metrics);
-
-        // Test testing configuration
-        let test = EffectRegistry::testing().unwrap();
-        assert!(matches!(test.execution_mode, ExecutionMode::Testing));
-        assert!(!test.enable_logging);
-        assert!(!test.enable_metrics);
-
-        // Test simulation configuration
-        let sim = EffectRegistry::simulation(42).unwrap();
-        assert!(matches!(
-            sim.execution_mode,
-            ExecutionMode::Simulation { seed: 42 }
-        ));
-        assert!(sim.enable_logging);
-        assert!(!sim.enable_metrics);
-    }
-
-    #[test]
-    fn test_builder_pattern() {
-        let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
-        let context = AuthorityContext::new(authority_id);
-
-        let registry = EffectRegistry::custom()
-            .unwrap()
-            .with_authority_context(context)
-            .with_logging()
-            .with_metrics()
-            .with_tracing()
-            .with_execution_mode(ExecutionMode::Production);
-
-        assert!(registry.authority_context.is_some());
-        assert!(matches!(registry.execution_mode, ExecutionMode::Production));
-        assert!(registry.enable_logging);
-        assert!(registry.enable_metrics);
-        assert!(registry.enable_tracing);
-    }
-
-    #[test]
-    fn test_build_missing_context() {
-        let result = EffectRegistry::testing().unwrap().build();
-        assert!(result.is_err());
-
-        match result.unwrap_err() {
-            EffectRegistryError::MissingConfiguration { field } => {
-                assert_eq!(field, "authority_context");
-            }
-            _ => panic!("Expected MissingConfiguration error"),
-        }
     }
 }

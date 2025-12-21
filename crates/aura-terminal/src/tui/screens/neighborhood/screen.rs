@@ -324,12 +324,16 @@ pub fn NeighborhoodScreen(
                         (neighborhood_state.home_block_name.clone(), blocks, depth)
                     };
 
-                subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood_state| {
-                    let (name, blocks, depth) = convert_neighborhood_state(&neighborhood_state);
-                    reactive_neighborhood_name.set(name);
-                    reactive_blocks.set(blocks);
-                    reactive_depth.set(depth);
-                })
+                subscribe_signal_with_retry(
+                    app_core,
+                    &*NEIGHBORHOOD_SIGNAL,
+                    move |neighborhood_state| {
+                        let (name, blocks, depth) = convert_neighborhood_state(&neighborhood_state);
+                        reactive_neighborhood_name.set(name);
+                        reactive_blocks.set(blocks);
+                        reactive_depth.set(depth);
+                    },
+                )
                 .await;
             }
         });

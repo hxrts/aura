@@ -23,6 +23,7 @@ pub fn configure_background_refresh() {
 ///
 /// Returns the path to the app's Documents directory
 pub fn documents_directory() -> String {
+    // TODO: Implement with actual iOS NSFileManager API via FFI
     // This would be implemented with actual iOS APIs
     // For now, return a placeholder
     "./Documents".to_string()

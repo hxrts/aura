@@ -20,7 +20,7 @@
 //!
 //! The same implementation handles all scenarios; only the `SigningContext` differs.
 
-use crate::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
+use crate::threshold::{SigningContext, ThresholdConfig, ThresholdSignature, ThresholdState};
 use crate::{AuraError, AuthorityId};
 use async_trait::async_trait;
 
@@ -100,6 +100,16 @@ pub trait ThresholdSigningEffects: Send + Sync {
     /// Returns `None` if this service doesn't have signing capability for
     /// the authority.
     async fn threshold_config(&self, authority: &AuthorityId) -> Option<ThresholdConfig>;
+
+    /// Get the full threshold state for an authority
+    ///
+    /// Returns the complete threshold state including epoch number and guardian IDs.
+    /// This is used by the recovery system to understand the current guardian
+    /// configuration for prestate computation.
+    ///
+    /// Returns `None` if this service doesn't have signing capability for
+    /// the authority.
+    async fn threshold_state(&self, authority: &AuthorityId) -> Option<ThresholdState>;
 
     /// Check if this service can sign for an authority
     ///

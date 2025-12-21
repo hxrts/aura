@@ -33,8 +33,10 @@ pub use signal_coordinator::DemoSignalCoordinator;
 pub use simulator::DemoSimulator;
 
 use crate::error::TerminalResult;
+use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
+use aura_recovery::guardian_setup::GuardianAcceptance;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
@@ -267,15 +269,29 @@ impl SimulatedAgent {
         let authority_id = ids::authority_id(&format!("demo:{}:{}:authority", config.seed, name));
 
         // Create simulation environment with optional shared transport
+        // IMPORTANT: the simulator transport inbox is addressed by AuthorityId (not DeviceId).
+        // Wire the effect system to the simulated agent's AuthorityId so transport routing works.
         let environment = if let Some(inbox) = shared_inbox {
-            SimulationEffectComposer::for_simulation_async_with_shared_transport(
-                device_id,
-                config.seed,
-                inbox,
-            )
-            .await?
+            SimulationEffectComposer::new(device_id)
+                .with_authority(authority_id)
+                .with_seed(config.seed)
+                .with_shared_transport_inbox(inbox)
+                .with_effect_system_async()
+                .await?
+                .with_time_control()
+                .with_fault_injection()
+                .with_scenario_management()
+                .build()?
         } else {
-            SimulationEffectComposer::for_simulation_async(device_id, config.seed).await?
+            SimulationEffectComposer::new(device_id)
+                .with_authority(authority_id)
+                .with_seed(config.seed)
+                .with_effect_system_async()
+                .await?
+                .with_time_control()
+                .with_fault_injection()
+                .with_scenario_management()
+                .build()?
         };
 
         tracing::info!(
@@ -400,11 +416,29 @@ impl SimulatedAgent {
                             response_metadata
                                 .insert("guardian-id".to_string(), self.authority_id.to_string());
 
+                            // Create ceremony acceptance data with guardian's commitment
+                            // In a real implementation, this would include a FROST key share contribution
+                            let acceptance = GuardianAcceptance {
+                                guardian_id: self.authority_id,
+                                setup_id: ceremony_id.clone(),
+                                accepted: true,
+                                // Placeholder public key - in production this would be the guardian's
+                                // actual public key for threshold key share encryption
+                                public_key: self.authority_id.to_bytes().to_vec(),
+                                timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                                    ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
+                                    uncertainty: None,
+                                }),
+                            };
+
+                            // Serialize ceremony acceptance data for transport
+                            let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
+
                             let response_envelope = aura_core::effects::TransportEnvelope {
                                 destination: envelope.source, // Send back to initiator (Bob)
                                 source: self.authority_id,
                                 context: envelope.context,
-                                payload: vec![], // Empty payload for now
+                                payload,
                                 metadata: response_metadata,
                                 receipt: None,
                             };

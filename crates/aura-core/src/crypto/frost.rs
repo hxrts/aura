@@ -44,6 +44,43 @@ impl ThresholdConfig {
     }
 }
 
+/// Full threshold state including epoch and guardian information
+///
+/// This extends `ThresholdConfig` with the epoch number and list of guardian
+/// authority IDs. Used by the recovery system to understand the current
+/// guardian configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThresholdState {
+    /// Current epoch for this configuration
+    pub epoch: u64,
+    /// Minimum number of participants required (k in k-of-n)
+    pub threshold: u16,
+    /// Total number of participants (n in k-of-n)
+    pub total_participants: u16,
+    /// Authority IDs of all guardians (in participant order)
+    pub guardian_ids: Vec<String>,
+}
+
+impl ThresholdState {
+    /// Create an empty state for when no guardians are configured
+    pub fn empty() -> Self {
+        ThresholdState {
+            epoch: 0,
+            threshold: 0,
+            total_participants: 0,
+            guardian_ids: Vec::new(),
+        }
+    }
+
+    /// Extract just the threshold configuration
+    pub fn config(&self) -> ThresholdConfig {
+        ThresholdConfig {
+            threshold: self.threshold,
+            total_participants: self.total_participants,
+        }
+    }
+}
+
 /// Unique identifier for a participant in the threshold signing protocol
 ///
 /// FrostParticipantId must be non-zero for FROST compatibility.

@@ -736,6 +736,7 @@ mod tests {
             valid_from: 0,
             valid_until: 2000,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         service.cache_descriptor(descriptor);
@@ -757,6 +758,7 @@ mod tests {
             valid_from: 0,
             valid_until: 1000,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         service.cache_descriptor(descriptor);
@@ -869,6 +871,7 @@ mod tests {
             valid_from: 0,
             valid_until: 1000,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         service.cache_descriptor(descriptor);

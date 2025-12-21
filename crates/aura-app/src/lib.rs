@@ -123,6 +123,7 @@ uniffi::custom_type!(ContextId, String);
 
 pub mod bridge;
 pub mod core;
+pub mod errors;
 pub mod queries;
 pub mod runtime_bridge;
 pub mod signal_defs;
@@ -166,11 +167,14 @@ pub use crate::workflows::budget::{
     MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION, RESIDENT_ALLOCATION,
 };
 
+// Re-export error types
+pub use crate::errors::{AppError, AuthFailure, NetworkErrorCode, SyncStage, ToastSeverity};
+
 // Re-export signal definitions for convenience
 // Note: SyncStatus and ConnectionStatus are signal-specific types in signal_defs module.
 // The runtime_bridge::SyncStatus is different (runtime status).
 pub use crate::signal_defs::{
-    register_app_signals, AppError, BLOCKS_SIGNAL, BLOCK_SIGNAL, BUDGET_SIGNAL, CHAT_SIGNAL,
+    register_app_signals, BLOCKS_SIGNAL, BLOCK_SIGNAL, BUDGET_SIGNAL, CHAT_SIGNAL,
     CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
     NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL, SYNC_STATUS_SIGNAL, UNREAD_COUNT_SIGNAL,
 };

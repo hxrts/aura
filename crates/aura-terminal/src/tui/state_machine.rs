@@ -39,7 +39,7 @@
 use crate::tui::navigation::{navigate_list, GridNav, NavKey};
 use crate::tui::screens::{Router, Screen};
 use crate::tui::types::{InvitationFilter, MfaPolicy, RecoveryTab, SettingsSection};
-use aura_core::effects::terminal::{KeyCode, KeyEvent, TerminalEvent};
+use aura_core::effects::terminal::{KeyCode, KeyEvent, MouseEvent, MouseEventKind, TerminalEvent};
 use std::collections::VecDeque;
 
 // ============================================================================
@@ -598,12 +598,6 @@ pub struct BlockViewState {
     pub message_count: usize,
     /// Whether showing resident panel
     pub show_residents: bool,
-    /// Whether invite modal is open
-    pub invite_modal_open: bool,
-    /// Selected contact index in invite modal
-    pub invite_selection: usize,
-    /// Total contacts available to invite (for wrap-around navigation)
-    pub invite_contact_count: usize,
 }
 
 /// Chat screen state
@@ -765,8 +759,6 @@ pub struct ContactsViewState {
     pub create_modal: CreateInvitationModalState,
     /// Invitation code display modal state (show generated code)
     pub code_modal: InvitationCodeModalState,
-    /// Guardian setup modal state (multi-select guardians + threshold)
-    pub guardian_setup_modal: GuardianSetupModalState,
     /// Demo mode: Alice's invitation code (for Ctrl+a shortcut)
     pub demo_alice_code: String,
     /// Demo mode: Carol's invitation code (for Ctrl+l shortcut)
@@ -1022,12 +1014,15 @@ pub struct GuardianSetupModalState {
     pub threshold_k: u8,
     /// Ceremony ID (set when ceremony starts)
     pub ceremony_id: Option<String>,
+    /// Pending epoch created for key rotation (set when ceremony starts)
+    ///
+    /// When the ceremony is canceled, this epoch's keys are rolled back.
+    /// When the ceremony succeeds, this becomes the active epoch.
+    pub pending_epoch: Option<u64>,
     /// Responses from guardians during ceremony (contact_id -> response)
     pub ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>, // (id, name, response)
     /// Error message if any
     pub error: Option<String>,
-    /// Whether there's already a pending ceremony (prevents starting another)
-    pub has_pending_ceremony: bool,
 }
 
 impl GuardianSetupModalState {
@@ -1056,9 +1051,9 @@ impl GuardianSetupModalState {
             focused_index: 0,
             threshold_k,
             ceremony_id: None,
+            pending_epoch: None,
             ceremony_responses: Vec::new(),
             error: None,
-            has_pending_ceremony: false,
         }
     }
 
@@ -1070,6 +1065,7 @@ impl GuardianSetupModalState {
         self.focused_index = 0;
         self.threshold_k = 1;
         self.ceremony_id = None;
+        self.pending_epoch = None;
         self.ceremony_responses.clear();
         self.error = None;
     }
@@ -1120,14 +1116,22 @@ impl GuardianSetupModalState {
     /// Check if can start ceremony
     pub fn can_start_ceremony(&self) -> bool {
         let n = self.threshold_n();
-        self.threshold_k >= 1 && self.threshold_k <= n && n >= 2 && !self.has_pending_ceremony
+        self.threshold_k >= 1
+            && self.threshold_k <= n
+            && n >= 2
+            && !matches!(self.step, GuardianSetupStep::CeremonyInProgress)
+            && self.ceremony_id.is_none()
     }
 
-    /// Start the ceremony (called when user confirms)
-    pub fn start_ceremony(&mut self, ceremony_id: String) {
+    /// Transition into the in-progress ceremony step and initialize responses.
+    ///
+    /// Note: `ceremony_id` is filled asynchronously by the shell once the ceremony is initiated.
+    pub fn begin_ceremony(&mut self) {
         self.step = GuardianSetupStep::CeremonyInProgress;
-        self.ceremony_id = Some(ceremony_id);
-        self.has_pending_ceremony = true;
+        self.error = None;
+        self.ceremony_id = None;
+        self.pending_epoch = None;
+
         // Initialize responses for all selected contacts
         self.ceremony_responses.clear();
         for &idx in &self.selected_indices {
@@ -1139,6 +1143,11 @@ impl GuardianSetupModalState {
                 ));
             }
         }
+    }
+
+    /// Set the ceremony ID once available.
+    pub fn set_ceremony_id(&mut self, ceremony_id: String) {
+        self.ceremony_id = Some(ceremony_id);
     }
 
     /// Record a guardian's response
@@ -1181,13 +1190,11 @@ impl GuardianSetupModalState {
 
     /// Complete the ceremony successfully
     pub fn complete_ceremony(&mut self) {
-        self.has_pending_ceremony = false;
         self.reset();
     }
 
     /// Fail/cancel the ceremony
     pub fn fail_ceremony(&mut self, reason: &str) {
-        self.has_pending_ceremony = false;
         self.error = Some(reason.to_string());
         self.step = GuardianSetupStep::SelectContacts;
         self.ceremony_id = None;
@@ -1465,6 +1472,10 @@ pub struct TuiState {
 
     /// Whether the TUI should exit
     pub should_exit: bool,
+
+    /// Whether the terminal window has focus
+    /// Used to pause animations and show visual indicator when unfocused
+    pub window_focused: bool,
 }
 
 /// Toast notification
@@ -1797,24 +1808,21 @@ pub enum DispatchCommand {
     InviteToBlock {
         contact_id: String,
     },
-    GrantSteward {
-        resident_id: String,
-    },
-    RevokeSteward {
-        resident_id: String,
-    },
+    /// Open block invite modal (shell will populate contacts)
+    OpenBlockInvite,
+    GrantStewardSelected,
+    RevokeStewardSelected,
 
     // Chat screen
     SelectChannel {
         channel_id: String,
     },
     SendChatMessage {
-        channel_id: String,
         content: String,
     },
-    RetryMessage {
-        message_id: String,
-    },
+    RetryMessage,
+    OpenChatTopicModal,
+    OpenChatInfoModal,
     CreateChannel {
         name: String,
     },
@@ -1831,9 +1839,7 @@ pub enum DispatchCommand {
         contact_id: String,
         nickname: String,
     },
-    StartChat {
-        contact_id: String,
-    },
+    StartChat,
     RemoveContact {
         contact_id: String,
     },
@@ -1851,15 +1857,13 @@ pub enum DispatchCommand {
         threshold_k: u8,
     },
     /// Cancel an in-progress guardian ceremony
-    CancelGuardianCeremony,
+    CancelGuardianCeremony {
+        ceremony_id: String,
+    },
 
     // Invitations screen
-    AcceptInvitation {
-        invitation_id: String,
-    },
-    DeclineInvitation {
-        invitation_id: String,
-    },
+    AcceptInvitation,
+    DeclineInvitation,
     CreateInvitation {
         invitation_type: String,
         message: Option<String>,
@@ -1867,9 +1871,7 @@ pub enum DispatchCommand {
     ImportInvitation {
         code: String,
     },
-    ExportInvitation {
-        invitation_id: String,
-    },
+    ExportInvitation,
     RevokeInvitation {
         invitation_id: String,
     },
@@ -1879,9 +1881,7 @@ pub enum DispatchCommand {
     AddGuardian {
         contact_id: String,
     },
-    ApproveRecovery {
-        request_id: String,
-    },
+    ApproveRecovery,
 
     // Settings screen
     UpdateDisplayName {
@@ -1902,9 +1902,7 @@ pub enum DispatchCommand {
     },
 
     // Neighborhood screen
-    EnterBlock {
-        block_id: String,
-    },
+    EnterBlock,
     GoHome,
     BackToStreet,
 
@@ -1946,12 +1944,174 @@ pub fn transition(state: &TuiState, event: TerminalEvent) -> (TuiState, Vec<TuiC
             // Time-based updates: tick the toast queue (handles decrement and auto-dismiss)
             new_state.toast_queue.tick();
         }
-        _ => {
-            // Ignore other events for now (mouse, focus, paste)
+        TerminalEvent::Mouse(mouse) => {
+            handle_mouse_event(&mut new_state, &mut commands, mouse);
+        }
+        TerminalEvent::FocusGained => {
+            new_state.window_focused = true;
+        }
+        TerminalEvent::FocusLost => {
+            new_state.window_focused = false;
+        }
+        TerminalEvent::Paste(text) => {
+            handle_paste_event(&mut new_state, &mut commands, text);
         }
     }
 
     (new_state, commands)
+}
+
+/// Handle a mouse event
+///
+/// Primarily handles scroll events for navigation in lists and message views.
+fn handle_mouse_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>, mouse: MouseEvent) {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            // Scroll up in the current list/view
+            match state.screen() {
+                Screen::Block => {
+                    // Scroll messages up (show older messages)
+                    if state.block.focus == BlockFocus::Messages && state.block.message_scroll > 0 {
+                        state.block.message_scroll = state.block.message_scroll.saturating_sub(3);
+                    }
+                }
+                Screen::Chat => {
+                    // Scroll messages up (show older messages)
+                    if state.chat.focus == ChatFocus::Messages && state.chat.message_scroll > 0 {
+                        state.chat.message_scroll = state.chat.message_scroll.saturating_sub(3);
+                    }
+                }
+                Screen::Contacts => {
+                    // Navigate up in contacts list
+                    if state.contacts.selected_index > 0 {
+                        state.contacts.selected_index =
+                            state.contacts.selected_index.saturating_sub(1);
+                    }
+                }
+                Screen::Settings => {
+                    // Navigate up in settings list
+                    if state.settings.selected_index > 0 {
+                        state.settings.selected_index =
+                            state.settings.selected_index.saturating_sub(1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            // Scroll down in the current list/view
+            match state.screen() {
+                Screen::Block => {
+                    // Scroll messages down (show newer messages)
+                    if state.block.focus == BlockFocus::Messages {
+                        state.block.message_scroll = state.block.message_scroll.saturating_add(3);
+                    }
+                }
+                Screen::Chat => {
+                    // Scroll messages down (show newer messages)
+                    if state.chat.focus == ChatFocus::Messages {
+                        state.chat.message_scroll = state.chat.message_scroll.saturating_add(3);
+                    }
+                }
+                Screen::Contacts => {
+                    // Navigate down in contacts list
+                    state.contacts.selected_index = state.contacts.selected_index.saturating_add(1);
+                }
+                Screen::Settings => {
+                    // Navigate down in settings list
+                    state.settings.selected_index = state.settings.selected_index.saturating_add(1);
+                }
+                _ => {}
+            }
+        }
+        // Mouse clicks and drags are not handled in this TUI
+        // as keyboard navigation is the primary interaction mode
+        _ => {}
+    }
+}
+
+/// Handle a paste event
+///
+/// Inserts pasted text into the current input buffer if in insert mode.
+fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>, text: String) {
+    // Only handle paste if we're in insert mode
+    if !state.is_insert_mode() {
+        return;
+    }
+
+    // Handle modal input fields first
+    if let Some(modal) = state.modal_queue.current_mut() {
+        match modal {
+            // Invitation import modals (both contacts and invitations screens)
+            QueuedModal::InvitationsImport(modal_state) => {
+                modal_state.code.push_str(&text);
+                return;
+            }
+            QueuedModal::ContactsImport(modal_state) => {
+                modal_state.code.push_str(&text);
+                return;
+            }
+
+            // Chat modals with text input
+            QueuedModal::ChatCreate(modal_state) => {
+                // Paste into active field (name or topic)
+                if modal_state.active_field == 0 {
+                    modal_state.name.push_str(&text);
+                } else {
+                    modal_state.topic.push_str(&text);
+                }
+                return;
+            }
+            QueuedModal::ChatTopic(modal_state) => {
+                modal_state.value.push_str(&text);
+                return;
+            }
+
+            // Contact nickname modal
+            QueuedModal::ContactsNickname(modal_state) => {
+                modal_state.value.push_str(&text);
+                return;
+            }
+
+            // Settings display name modal
+            QueuedModal::SettingsDisplayName(modal_state) => {
+                modal_state.value.push_str(&text);
+                return;
+            }
+
+            // These modals don't have direct text input
+            QueuedModal::AccountSetup(_)
+            | QueuedModal::Help { .. }
+            | QueuedModal::Confirm { .. }
+            | QueuedModal::GuardianSelect(_)
+            | QueuedModal::ContactSelect(_)
+            | QueuedModal::ChatInfo(_)
+            | QueuedModal::ContactsCreate(_)
+            | QueuedModal::ContactsCode(_)
+            | QueuedModal::GuardianSetup(_)
+            | QueuedModal::InvitationsCreate(_)
+            | QueuedModal::InvitationsCode(_)
+            | QueuedModal::SettingsThreshold(_)
+            | QueuedModal::SettingsAddDevice(_)
+            | QueuedModal::SettingsRemoveDevice(_)
+            | QueuedModal::BlockInvite(_) => {}
+        }
+    }
+
+    // Handle screen-level input buffers
+    match state.screen() {
+        Screen::Block => {
+            if state.block.focus == BlockFocus::Input {
+                state.block.input_buffer.push_str(&text);
+            }
+        }
+        Screen::Chat => {
+            if state.chat.focus == ChatFocus::Input {
+                state.chat.input_buffer.push_str(&text);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Handle a key event
@@ -2136,7 +2296,6 @@ fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, 
                         let content = state.chat.input_buffer.clone();
                         state.chat.input_buffer.clear();
                         commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
-                            channel_id: String::new(), // Will be filled by runtime
                             content,
                         }));
                         // Exit insert mode after sending
@@ -2469,42 +2628,42 @@ fn handle_contact_select_key_queue(
 
 /// Handle block invite modal keys (queue-based)
 ///
-/// Note: Navigation uses `state.block.invite_contact_count` and `state.block.invite_selection`
-/// because actual contact data is populated by the shell at render time. The modal state
-/// just tracks the title and selection mode.
+
+/// This modal is fully driven by the queued modal state. The contacts list is snapshotted
+/// when the modal is opened.
 fn handle_block_invite_key_queue(
     state: &mut TuiState,
     commands: &mut Vec<TuiCommand>,
     key: KeyEvent,
-    _modal_state: ContactSelectModalState,
+    modal_state: ContactSelectModalState,
 ) {
     match key.code {
         KeyCode::Esc => {
             state.modal_queue.dismiss();
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            // Use block.invite_selection and block.invite_contact_count (like legacy handler)
-            state.block.invite_selection = navigate_list(
-                state.block.invite_selection,
-                state.block.invite_contact_count,
-                NavKey::Up,
-            );
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::BlockInvite(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
+                }
+            });
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            // Use block.invite_selection and block.invite_contact_count (like legacy handler)
-            state.block.invite_selection = navigate_list(
-                state.block.invite_selection,
-                state.block.invite_contact_count,
-                NavKey::Down,
-            );
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::BlockInvite(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
+                }
+            });
         }
         KeyCode::Enter => {
-            // Shell maps index to contact_id - no need to check for contacts here
-            let index = state.block.invite_selection;
-            commands.push(TuiCommand::Dispatch(DispatchCommand::InviteToBlock {
-                contact_id: format!("__index:{}", index),
-            }));
-            state.modal_queue.dismiss();
+            if let Some(contact_id) = modal_state.focused_contact_id() {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::InviteToBlock {
+                    contact_id: contact_id.to_string(),
+                }));
+                state.modal_queue.dismiss();
+            }
         }
         _ => {}
     }
@@ -2940,16 +3099,35 @@ fn handle_guardian_setup_key_queue(
                                 threshold_k: modal_state.threshold_k,
                             },
                         ));
-                        state.modal_queue.dismiss();
+
+                        // Keep the modal queued and transition into the in-progress step.
+                        // `ceremony_id` is filled asynchronously by the shell.
+                        state.modal_queue.update_active(|modal| {
+                            if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                                s.begin_ceremony();
+                            }
+                        });
                     }
                 }
                 _ => {}
             }
         }
         GuardianSetupStep::CeremonyInProgress => {
-            // During ceremony, only allow escape to cancel
+            // During ceremony, allow escape to cancel once the ceremony has started.
             if key.code == KeyCode::Esc {
-                state.modal_queue.dismiss();
+                if let Some(ceremony_id) = modal_state.ceremony_id.clone() {
+                    commands.push(TuiCommand::Dispatch(
+                        DispatchCommand::CancelGuardianCeremony { ceremony_id },
+                    ));
+                    state.modal_queue.dismiss();
+                } else {
+                    // Ceremony is still starting; keep the modal open and show a hint.
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                            s.error = Some("Starting guardian ceremony…".to_string());
+                        }
+                    });
+                }
             }
         }
     }
@@ -3182,25 +3360,16 @@ fn handle_block_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: K
             BlockFocus::Input => {}
         },
         KeyCode::Char('v') => {
-            // Open invite modal via queue (contacts populated by shell)
-            state
-                .modal_queue
-                .enqueue(QueuedModal::BlockInvite(ContactSelectModalState::single(
-                    "Invite to Block",
-                    Vec::new(),
-                )));
+            // Request block invite modal open (shell populates contacts snapshot)
+            commands.push(TuiCommand::Dispatch(DispatchCommand::OpenBlockInvite));
         }
         KeyCode::Char('g') => {
             // Grant steward to selected resident
-            commands.push(TuiCommand::Dispatch(DispatchCommand::GrantSteward {
-                resident_id: String::new(), // Will be filled by runtime based on selected_resident
-            }));
+            commands.push(TuiCommand::Dispatch(DispatchCommand::GrantStewardSelected));
         }
         KeyCode::Char('R') => {
             // Revoke steward from selected resident (uppercase R to not conflict with toggle residents)
-            commands.push(TuiCommand::Dispatch(DispatchCommand::RevokeSteward {
-                resident_id: String::new(), // Will be filled by runtime based on selected_resident
-            }));
+            commands.push(TuiCommand::Dispatch(DispatchCommand::RevokeStewardSelected));
         }
         KeyCode::Char('r') => {
             state.block.show_residents = !state.block.show_residents;
@@ -3279,28 +3448,17 @@ fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: Ke
                 .enqueue(QueuedModal::ChatCreate(modal_state));
         }
         KeyCode::Char('t') => {
-            // Open topic edit modal via queue
-            // Channel ID will be set based on currently selected channel
-            // TODO: Pass actual channel_id from selected channel
-            let modal_state = TopicModalState::for_channel("", "");
-            state
-                .modal_queue
-                .enqueue(QueuedModal::ChatTopic(modal_state));
+            // Open topic edit modal via dispatch (shell populates selected channel details)
+            commands.push(TuiCommand::Dispatch(DispatchCommand::OpenChatTopicModal));
         }
         KeyCode::Char('o') => {
-            // Open channel info modal via queue
-            // TODO: Pass actual channel info from selected channel
-            let modal_state = ChannelInfoModalState::for_channel("", "", None);
-            state
-                .modal_queue
-                .enqueue(QueuedModal::ChatInfo(modal_state));
+            // Open channel info modal via dispatch (shell populates selected channel details)
+            commands.push(TuiCommand::Dispatch(DispatchCommand::OpenChatInfoModal));
         }
         KeyCode::Char('r') => {
             // Retry message (when focused on messages)
             if state.chat.focus == ChatFocus::Messages {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::RetryMessage {
-                    message_id: String::new(), // Will be filled by runtime based on selection
-                }));
+                commands.push(TuiCommand::Dispatch(DispatchCommand::RetryMessage));
             }
         }
         _ => {}
@@ -3331,20 +3489,18 @@ fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
         }
         KeyCode::Char('g') => {
             // Open guardian setup modal via dispatch (shell will populate contacts)
-            if !state.contacts.guardian_setup_modal.has_pending_ceremony {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenGuardianSetup));
-            } else {
+            if state.is_guardian_setup_modal_active() {
                 commands.push(TuiCommand::ShowToast {
-                    message: "A guardian ceremony is already in progress".to_string(),
-                    level: ToastLevel::Warning,
+                    message: "Guardian setup is already open".to_string(),
+                    level: ToastLevel::Info,
                 });
+            } else {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenGuardianSetup));
             }
         }
         KeyCode::Char('c') => {
             // Start chat with selected contact
-            commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat {
-                contact_id: String::new(), // Will be filled by runtime
-            }));
+            commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat));
         }
         KeyCode::Char('i') => {
             // Open import invitation modal via queue (accept an invitation code)
@@ -3359,9 +3515,7 @@ fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
             ));
         }
         KeyCode::Enter => {
-            commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat {
-                contact_id: String::new(), // Will be filled by runtime
-            }));
+            commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat));
         }
         _ => {}
     }
@@ -3382,9 +3536,7 @@ fn handle_neighborhood_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             state.neighborhood.grid.navigate(NavKey::Right);
         }
         KeyCode::Enter => {
-            commands.push(TuiCommand::Dispatch(DispatchCommand::EnterBlock {
-                block_id: String::new(), // Will be filled by runtime
-            }));
+            commands.push(TuiCommand::Dispatch(DispatchCommand::EnterBlock));
         }
         KeyCode::Char('g') | KeyCode::Char('H') => {
             // Go home
@@ -3420,14 +3572,10 @@ fn handle_invitations_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, 
         }
         KeyCode::Char('a') | KeyCode::Enter => {
             // Accept invitation
-            commands.push(TuiCommand::Dispatch(DispatchCommand::AcceptInvitation {
-                invitation_id: String::new(), // Will be filled by runtime
-            }));
+            commands.push(TuiCommand::Dispatch(DispatchCommand::AcceptInvitation));
         }
         KeyCode::Char('d') => {
-            commands.push(TuiCommand::Dispatch(DispatchCommand::DeclineInvitation {
-                invitation_id: String::new(), // Will be filled by runtime
-            }));
+            commands.push(TuiCommand::Dispatch(DispatchCommand::DeclineInvitation));
         }
         KeyCode::Char('n') => {
             // Open create invitation modal via queue
@@ -3443,9 +3591,7 @@ fn handle_invitations_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, 
         }
         KeyCode::Char('e') => {
             // Export invitation
-            commands.push(TuiCommand::Dispatch(DispatchCommand::ExportInvitation {
-                invitation_id: String::new(), // Will be filled by runtime
-            }));
+            commands.push(TuiCommand::Dispatch(DispatchCommand::ExportInvitation));
         }
         _ => {}
     }
@@ -3554,9 +3700,7 @@ fn handle_recovery_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
         KeyCode::Enter => {
             // Enter approves request on Requests tab
             if state.recovery.tab == RecoveryTab::Requests {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::ApproveRecovery {
-                    request_id: String::new(), // Will be filled by runtime
-                }));
+                commands.push(TuiCommand::Dispatch(DispatchCommand::ApproveRecovery));
             }
         }
         KeyCode::Char('s') | KeyCode::Char('r') => {

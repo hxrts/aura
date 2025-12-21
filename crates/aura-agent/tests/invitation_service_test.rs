@@ -27,7 +27,7 @@ async fn test_invitation_service_via_agent() -> Result<(), Box<dyn std::error::E
         .build_testing_async(&ctx)
         .await?;
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     // Initially no pending invitations
     let pending = invitations.list_pending().await;
@@ -44,7 +44,7 @@ async fn test_invite_as_contact_via_agent() -> Result<(), Box<dyn std::error::Er
         .build_testing_async(&ctx)
         .await?;
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([72u8; 32]);
     let invitation = invitations
@@ -73,7 +73,7 @@ async fn test_invite_as_guardian_via_agent() -> Result<(), Box<dyn std::error::E
         .build_testing_async(&ctx)
         .await?;
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([74u8; 32]);
     let invitation = invitations
@@ -105,7 +105,7 @@ async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Er
         .build_testing_async(&ctx)
         .await?;
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([76u8; 32]);
     let invitation = invitations
@@ -131,7 +131,7 @@ async fn test_accept_invitation_via_agent() -> Result<(), Box<dyn std::error::Er
         .build_testing_async(&ctx)
         .await?;
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([78u8; 32]);
     let invitation = invitations
@@ -154,7 +154,7 @@ async fn test_decline_invitation_via_agent() -> Result<(), Box<dyn std::error::E
         .build_testing_async(&ctx)
         .await?;
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([80u8; 32]);
     let invitation = invitations
@@ -177,7 +177,7 @@ async fn test_cancel_invitation_via_agent() -> Result<(), Box<dyn std::error::Er
         .build_testing_async(&ctx)
         .await?;
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([82u8; 32]);
     let invitation = invitations
@@ -206,7 +206,7 @@ async fn test_list_pending_via_agent() -> Result<(), Box<dyn std::error::Error>>
         .build_testing_async(&ctx)
         .await?;
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     // Create 3 invitations
     let inv1 = invitations
@@ -246,7 +246,7 @@ async fn test_get_invitation_via_agent() -> Result<(), Box<dyn std::error::Error
         .build_testing_async(&ctx)
         .await?;
 
-    let invitations = agent.invitations().await?;
+    let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([88u8; 32]);
     let invitation = invitations

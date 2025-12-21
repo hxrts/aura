@@ -215,6 +215,26 @@ pub enum UiUpdate {
         step: String,
     },
 
+    /// Guardian ceremony status update (for in-progress ceremony UI)
+    GuardianCeremonyStatus {
+        /// Ceremony identifier
+        ceremony_id: String,
+        /// List of guardian IDs who have accepted
+        accepted_guardians: Vec<String>,
+        /// Total number of guardians
+        total_count: u16,
+        /// Threshold required for completion
+        threshold: u16,
+        /// Whether the ceremony is complete
+        is_complete: bool,
+        /// Whether the ceremony has failed
+        has_failed: bool,
+        /// Optional error message if failed
+        error_message: Option<String>,
+        /// Pending epoch for key rotation (if created)
+        pending_epoch: Option<u64>,
+    },
+
     // =========================================================================
     // Contacts
     // =========================================================================

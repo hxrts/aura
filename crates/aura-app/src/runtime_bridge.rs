@@ -94,6 +94,12 @@ pub struct CeremonyStatus {
     pub accepted_guardians: Vec<String>,
     /// Optional error message if failed
     pub error_message: Option<String>,
+    /// Pending epoch for key rotation
+    ///
+    /// This is the epoch that was created when the ceremony started.
+    /// If the ceremony is canceled, this epoch's keys should be rolled back.
+    /// If the ceremony succeeds, this becomes the active epoch.
+    pub pending_epoch: Option<u64>,
 }
 
 /// Information about a peer discovered via LAN (mDNS/UDP broadcast)
@@ -234,6 +240,12 @@ pub trait RuntimeBridge: Send + Sync {
 
     /// Trigger sync with peers (if sync service is available)
     async fn trigger_sync(&self) -> Result<(), IntentError>;
+
+    /// Sync with a specific peer by ID
+    ///
+    /// Initiates targeted synchronization with the specified peer.
+    /// This is useful for requesting state updates from a known good peer.
+    async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError>;
 
     // =========================================================================
     // Peer Discovery
@@ -576,6 +588,12 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
         Err(IntentError::no_agent("Sync not available in offline mode"))
+    }
+
+    async fn sync_with_peer(&self, _peer_id: &str) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Peer-targeted sync not available in offline mode",
+        ))
     }
 
     async fn get_discovered_peers(&self) -> Vec<AuthorityId> {

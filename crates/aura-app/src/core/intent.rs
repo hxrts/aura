@@ -350,6 +350,22 @@ pub enum Intent {
         message_id: String,
     },
 
+    /// Grant steward (admin) privileges to a resident
+    GrantSteward {
+        /// Block ID
+        block_id: ContextId,
+        /// Target authority ID to grant steward status
+        target_id: String,
+    },
+
+    /// Revoke steward (admin) privileges from a resident
+    RevokeSteward {
+        /// Block ID
+        block_id: ContextId,
+        /// Target authority ID to revoke steward status
+        target_id: String,
+    },
+
     // =========================================================================
     // Navigation Intents
     // =========================================================================
@@ -597,6 +613,8 @@ impl Intent {
             Self::KickUser { block_id, .. } => Some(*block_id),
             Self::PinMessage { block_id, .. } => Some(*block_id),
             Self::UnpinMessage { block_id, .. } => Some(*block_id),
+            Self::GrantSteward { block_id, .. } => Some(*block_id),
+            Self::RevokeSteward { block_id, .. } => Some(*block_id),
             _ => None,
         }
     }
@@ -638,6 +656,8 @@ impl Intent {
             Self::KickUser { .. } => "kick user",
             Self::PinMessage { .. } => "pin message",
             Self::UnpinMessage { .. } => "unpin message",
+            Self::GrantSteward { .. } => "grant steward",
+            Self::RevokeSteward { .. } => "revoke steward",
             Self::NavigateTo { .. } => "navigate",
             Self::GoBack => "go back",
             // Admin/Maintenance
@@ -957,6 +977,24 @@ impl Intent {
                     block_id, message_id
                 )
             }
+            Self::GrantSteward {
+                block_id,
+                target_id,
+            } => {
+                format!(
+                    "GrantSteward::block_id={}&target_id={}",
+                    block_id, target_id
+                )
+            }
+            Self::RevokeSteward {
+                block_id,
+                target_id,
+            } => {
+                format!(
+                    "RevokeSteward::block_id={}&target_id={}",
+                    block_id, target_id
+                )
+            }
 
             // Navigation intents (typically not journaled, but included for completeness)
             Self::NavigateTo { screen } => format!("NavigateTo::screen={:?}", screen),
@@ -1202,7 +1240,9 @@ impl Intent {
             | Self::OptInUpgrade { .. }
             | Self::StartNode { .. }
             | Self::RunThreshold { .. }
-            | Self::InitAccount { .. } => AuthorizationLevel::Admin,
+            | Self::InitAccount { .. }
+            | Self::GrantSteward { .. }
+            | Self::RevokeSteward { .. } => AuthorizationLevel::Admin,
         }
     }
 }

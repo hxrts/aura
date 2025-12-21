@@ -96,6 +96,7 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            width: 100pct,
             flex_grow: 1.0,
             gap: 0,
         ) {
@@ -104,6 +105,7 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER_FOCUS,
+                width: 100pct,
                 flex_grow: 1.0,
             ) {
                 View(padding_left: Spacing::PANEL_PADDING) {
@@ -144,6 +146,7 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
             View(
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
+                width: 100pct,
                 padding: Spacing::PANEL_PADDING,
             ) {
                 KeyValue(label: "Threshold".to_string(), value: threshold_text)
@@ -182,6 +185,7 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            width: 100pct,
             flex_grow: 1.0,
             gap: 0,
         ) {
@@ -189,6 +193,7 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
             View(
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
+                width: 100pct,
                 padding: Spacing::PANEL_PADDING,
             ) {
                 View(flex_direction: FlexDirection::Row) {
@@ -201,6 +206,7 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
             View(
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
+                width: 100pct,
                 padding: Spacing::PANEL_PADDING,
             ) {
                 KeyValue(label: "Progress".to_string(), value: progress_text)
@@ -211,6 +217,7 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
+                width: 100pct,
                 flex_grow: 1.0,
             ) {
                 View(padding_left: Spacing::PANEL_PADDING) {
@@ -260,6 +267,7 @@ pub fn PendingRequestsPanel(props: &PendingRequestsPanelProps) -> impl Into<AnyE
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            width: 100pct,
             flex_grow: 1.0,
             gap: 0,
         ) {
@@ -268,6 +276,7 @@ pub fn PendingRequestsPanel(props: &PendingRequestsPanelProps) -> impl Into<AnyE
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER_FOCUS,
+                width: 100pct,
                 flex_grow: 1.0,
             ) {
                 View(padding_left: Spacing::PANEL_PADDING) {
@@ -312,6 +321,7 @@ pub fn PendingRequestsPanel(props: &PendingRequestsPanelProps) -> impl Into<AnyE
             View(
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
+                width: 100pct,
                 padding: Spacing::PANEL_PADDING,
             ) {
                 Text(content: "Press Enter to approve selected request", color: Theme::TEXT_MUTED)
@@ -533,10 +543,10 @@ pub fn RecoveryScreen(
             }
 
             // Content based on active tab (23 rows)
-            View(height: 23, overflow: Overflow::Hidden) {
+            View(height: 23, width: 100pct, overflow: Overflow::Hidden) {
                 #(match current_tab {
                     RecoveryTab::Guardians => vec![element! {
-                        View(height: 23) {
+                        View(height: 23, width: 100pct) {
                             GuardiansPanel(
                                 guardians: guardians.clone(),
                                 selected_index: current_guardian_index,
@@ -546,12 +556,12 @@ pub fn RecoveryScreen(
                         }
                     }],
                     RecoveryTab::Recovery => vec![element! {
-                        View(height: 23) {
+                        View(height: 23, width: 100pct) {
                             RecoveryPanel(status: recovery_status.clone())
                         }
                     }],
                     RecoveryTab::Requests => vec![element! {
-                        View(height: 23) {
+                        View(height: 23, width: 100pct) {
                             PendingRequestsPanel(
                                 requests: pending_requests.clone(),
                                 selected_index: current_request_index,

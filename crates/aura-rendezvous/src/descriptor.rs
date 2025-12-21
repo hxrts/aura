@@ -194,6 +194,7 @@ impl DescriptorBuilder {
             valid_from: now_ms,
             valid_until: now_ms + self.validity_ms,
             nonce,
+            display_name: None,
         }
     }
 
@@ -399,6 +400,7 @@ mod tests {
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         let result = selector.select(&descriptor).unwrap();
@@ -425,6 +427,7 @@ mod tests {
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         let result = selector.select(&descriptor).unwrap();
@@ -444,6 +447,7 @@ mod tests {
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         let result = selector.select(&descriptor);
@@ -548,6 +552,7 @@ mod tests {
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         let results = prober.probe_descriptor(&descriptor).await;

@@ -11,14 +11,14 @@ pub mod dim {
     /// Total terminal height (rows)
     pub const TOTAL_HEIGHT: u16 = 31;
 
-    /// Navigation bar height (top)
-    pub const NAV_HEIGHT: u16 = 3;
+    /// Navigation bar height (top) - 2 rows: tabs + border
+    pub const NAV_HEIGHT: u16 = 2;
 
     /// Footer height (bottom)
     pub const FOOTER_HEIGHT: u16 = 3;
 
     /// Middle content area height (computed)
-    pub const MIDDLE_HEIGHT: u16 = TOTAL_HEIGHT - NAV_HEIGHT - FOOTER_HEIGHT; // 25
+    pub const MIDDLE_HEIGHT: u16 = TOTAL_HEIGHT - NAV_HEIGHT - FOOTER_HEIGHT; // 26
 
     /// Key hints bar height (fixed, within footer)
     pub const KEY_HINTS_HEIGHT: u16 = 2;
@@ -30,7 +30,7 @@ pub mod dim {
     const _: () = assert!(NAV_HEIGHT + MIDDLE_HEIGHT + FOOTER_HEIGHT == TOTAL_HEIGHT);
     const _: () = assert!(MIDDLE_HEIGHT > 0);
     const _: () = assert!(TOTAL_WIDTH >= 40); // Minimum usable width
-    const _: () = assert!(MIDDLE_HEIGHT == 25); // Explicit check for expected value
+    const _: () = assert!(MIDDLE_HEIGHT == 26); // Explicit check for expected value
     const _: () = assert!(KEY_HINTS_HEIGHT + FOOTER_BORDER_HEIGHT == FOOTER_HEIGHT);
 }
 
@@ -53,8 +53,8 @@ mod tests {
 
     #[test]
     fn test_region_heights() {
-        assert_eq!(NAV_HEIGHT, 3);
-        assert_eq!(MIDDLE_HEIGHT, 25);
+        assert_eq!(NAV_HEIGHT, 2);
+        assert_eq!(MIDDLE_HEIGHT, 26);
         assert_eq!(FOOTER_HEIGHT, 3);
     }
 

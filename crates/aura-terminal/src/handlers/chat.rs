@@ -315,7 +315,7 @@ pub async fn handle_chat(
             format: _,
             include_system: _,
         } => {
-            // Export is more complex - for now just acknowledge
+            // TODO: Export is more complex - for now just acknowledge
             ConsoleEffects::log_info(
                 ctx.effects(),
                 &format!(

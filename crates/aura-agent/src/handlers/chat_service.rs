@@ -14,7 +14,6 @@ use aura_core::identifiers::AuthorityId;
 use aura_core::time::TimeStamp;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Chat service for the agent layer
 ///
@@ -22,12 +21,12 @@ use tokio::sync::RwLock;
 /// Wraps the domain-layer `ChatHandler` with RwLock management.
 pub struct ChatService {
     handler: ChatHandler,
-    effects: Arc<RwLock<AuraEffectSystem>>,
+    effects: Arc<AuraEffectSystem>,
 }
 
 impl ChatService {
     /// Create a new chat service
-    pub fn new(effects: Arc<RwLock<AuraEffectSystem>>) -> Self {
+    pub fn new(effects: Arc<AuraEffectSystem>) -> Self {
         Self {
             handler: ChatHandler::new(),
             effects,
@@ -49,9 +48,8 @@ impl ChatService {
         creator_id: AuthorityId,
         initial_members: Vec<AuthorityId>,
     ) -> AgentResult<ChatGroup> {
-        let effects = self.effects.read().await;
         self.handler
-            .create_group(&*effects, name, creator_id, initial_members)
+            .create_group(&*self.effects, name, creator_id, initial_members)
             .await
             .map_err(AgentError::from)
     }
@@ -71,9 +69,8 @@ impl ChatService {
         sender_id: AuthorityId,
         content: String,
     ) -> AgentResult<ChatMessage> {
-        let effects = self.effects.read().await;
         self.handler
-            .send_message(&*effects, group_id, sender_id, content)
+            .send_message(&*self.effects, group_id, sender_id, content)
             .await
             .map_err(AgentError::from)
     }
@@ -93,9 +90,8 @@ impl ChatService {
         limit: Option<usize>,
         before: Option<TimeStamp>,
     ) -> AgentResult<Vec<ChatMessage>> {
-        let effects = self.effects.read().await;
         self.handler
-            .get_history(&*effects, group_id, limit, before)
+            .get_history(&*self.effects, group_id, limit, before)
             .await
             .map_err(AgentError::from)
     }
@@ -108,8 +104,7 @@ impl ChatService {
     /// # Returns
     /// Option<ChatGroup> if found, None if group doesn't exist
     pub async fn get_group(&self, group_id: &ChatGroupId) -> AgentResult<Option<ChatGroup>> {
-        let effects = self.effects.read().await;
-        ChatHandler::get_group(&*effects, group_id)
+        ChatHandler::get_group(&*self.effects, group_id)
             .await
             .map_err(AgentError::from)
     }
@@ -125,9 +120,8 @@ impl ChatService {
         &self,
         authority_id: &AuthorityId,
     ) -> AgentResult<Vec<ChatGroup>> {
-        let effects = self.effects.read().await;
         self.handler
-            .list_user_groups(&*effects, authority_id)
+            .list_user_groups(&*self.effects, authority_id)
             .await
             .map_err(AgentError::from)
     }
@@ -144,9 +138,8 @@ impl ChatService {
         authority_id: AuthorityId,
         new_member: AuthorityId,
     ) -> AgentResult<()> {
-        let effects = self.effects.read().await;
         self.handler
-            .add_member(&*effects, group_id, authority_id, new_member)
+            .add_member(&*self.effects, group_id, authority_id, new_member)
             .await
             .map_err(AgentError::from)
     }
@@ -163,9 +156,8 @@ impl ChatService {
         authority_id: AuthorityId,
         member_to_remove: AuthorityId,
     ) -> AgentResult<()> {
-        let effects = self.effects.read().await;
         self.handler
-            .remove_member(&*effects, group_id, authority_id, member_to_remove)
+            .remove_member(&*self.effects, group_id, authority_id, member_to_remove)
             .await
             .map_err(AgentError::from)
     }
@@ -181,8 +173,7 @@ impl ChatService {
         &self,
         message_id: &ChatMessageId,
     ) -> AgentResult<Option<ChatMessage>> {
-        let effects = self.effects.read().await;
-        ChatHandler::get_message(&*effects, message_id)
+        ChatHandler::get_message(&*self.effects, message_id)
             .await
             .map_err(AgentError::from)
     }
@@ -201,9 +192,8 @@ impl ChatService {
         message_id: &ChatMessageId,
         new_content: &str,
     ) -> AgentResult<ChatMessage> {
-        let effects = self.effects.read().await;
         self.handler
-            .edit_message(&*effects, group_id, editor, message_id, new_content)
+            .edit_message(&*self.effects, group_id, editor, message_id, new_content)
             .await
             .map_err(AgentError::from)
     }
@@ -220,9 +210,8 @@ impl ChatService {
         requester: AuthorityId,
         message_id: &ChatMessageId,
     ) -> AgentResult<()> {
-        let effects = self.effects.read().await;
         self.handler
-            .delete_message(&*effects, group_id, requester, message_id)
+            .delete_message(&*self.effects, group_id, requester, message_id)
             .await
             .map_err(AgentError::from)
     }
@@ -241,9 +230,8 @@ impl ChatService {
         limit: usize,
         sender: Option<&AuthorityId>,
     ) -> AgentResult<Vec<ChatMessage>> {
-        let effects = self.effects.read().await;
         self.handler
-            .search_messages(&*effects, group_id, query, limit, sender)
+            .search_messages(&*self.effects, group_id, query, limit, sender)
             .await
             .map_err(AgentError::from)
     }
@@ -264,9 +252,8 @@ impl ChatService {
         description: Option<String>,
         metadata: Option<HashMap<String, String>>,
     ) -> AgentResult<ChatGroup> {
-        let effects = self.effects.read().await;
         self.handler
-            .update_group_details(&*effects, group_id, requester, name, description, metadata)
+            .update_group_details(&*self.effects, group_id, requester, name, description, metadata)
             .await
             .map_err(AgentError::from)
     }

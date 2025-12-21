@@ -164,6 +164,7 @@ impl FooterBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::layout::dim;
 
     fn dummy_element(height: u16) -> AnyElement<'static> {
         element! {
@@ -179,17 +180,18 @@ mod tests {
             .add(dummy_element(10), 10);
 
         assert_eq!(builder.height_used(), 15);
-        assert_eq!(builder.remaining(), 10); // 25 - 15
+        assert_eq!(builder.remaining(), MiddleBuilder::max_height() - 15);
         assert!(builder.has_remaining());
     }
 
     #[test]
     fn test_builder_full() {
-        let builder = MiddleBuilder::new()
-            .add(dummy_element(10), 10)
-            .add(dummy_element(15), 15);
+        let builder = MiddleBuilder::new().add(dummy_element(10), 10).add(
+            dummy_element(MiddleBuilder::max_height() - 10),
+            MiddleBuilder::max_height() - 10,
+        );
 
-        assert_eq!(builder.height_used(), 25);
+        assert_eq!(builder.height_used(), MiddleBuilder::max_height());
         assert_eq!(builder.remaining(), 0);
         assert!(!builder.has_remaining());
     }
@@ -199,8 +201,11 @@ mod tests {
         let builder = NavBuilder::nav().add(dummy_element(2), 2);
 
         assert_eq!(builder.height_used(), 2);
-        assert_eq!(builder.remaining(), 1);
-        assert_eq!(NavBuilder::max_height(), 3);
+        assert_eq!(
+            builder.remaining(),
+            NavBuilder::max_height().saturating_sub(2)
+        );
+        assert_eq!(NavBuilder::max_height(), dim::NAV_HEIGHT);
     }
 
     #[test]
@@ -208,8 +213,11 @@ mod tests {
         let builder = FooterBuilder::footer().add(dummy_element(1), 1);
 
         assert_eq!(builder.height_used(), 1);
-        assert_eq!(builder.remaining(), 2);
-        assert_eq!(FooterBuilder::max_height(), 3);
+        assert_eq!(
+            builder.remaining(),
+            FooterBuilder::max_height().saturating_sub(1)
+        );
+        assert_eq!(FooterBuilder::max_height(), dim::FOOTER_HEIGHT);
     }
 
     #[test]
@@ -220,7 +228,7 @@ mod tests {
             .build();
 
         assert_eq!(content.height_used(), 15);
-        assert_eq!(content.remaining_height(), 10);
+        assert_eq!(content.remaining_height(), MiddleBuilder::max_height() - 15);
     }
 
     #[test]
@@ -229,6 +237,6 @@ mod tests {
     fn test_overflow_panics_in_debug() {
         MiddleBuilder::new()
             .add(dummy_element(20), 20)
-            .add(dummy_element(10), 10); // This should panic: 20 + 10 > 25
+            .add(dummy_element(10), 10); // This should panic: 20 + 10 > max height
     }
 }

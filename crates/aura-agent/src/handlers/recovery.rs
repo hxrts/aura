@@ -551,7 +551,6 @@ mod tests {
             AuthorityId::new_from_entropy([133u8; 32]),
         ];
 
-        let effects_guard = effects.read().await;
         let request = handler
             .initiate(
                 &effects_guard,
@@ -583,7 +582,6 @@ mod tests {
             AuthorityId::new_from_entropy([136u8; 32]),
         ];
 
-        let effects_guard = effects.read().await;
         let request = handler
             .initiate(
                 &effects_guard,
@@ -646,7 +644,6 @@ mod tests {
 
         let guardians = vec![AuthorityId::new_from_entropy([138u8; 32])];
 
-        let effects_guard = effects.read().await;
         let request = handler
             .initiate(
                 &effects_guard,
@@ -699,7 +696,6 @@ mod tests {
             AuthorityId::new_from_entropy([141u8; 32]),
         ];
 
-        let effects_guard = effects.read().await;
         let request = handler
             .initiate(
                 &effects_guard,
@@ -742,7 +738,6 @@ mod tests {
 
         let guardians = vec![AuthorityId::new_from_entropy([143u8; 32])];
 
-        let effects_guard = effects.read().await;
         let result = handler
             .initiate(
                 &effects_guard,

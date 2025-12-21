@@ -47,9 +47,9 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::signal_defs::{
-    AppError, ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, ERROR_SIGNAL,
-    SYNC_STATUS_SIGNAL,
+    ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, ERROR_SIGNAL, SYNC_STATUS_SIGNAL,
 };
+use aura_app::{AppError, AuthFailure, NetworkErrorCode};
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
 
@@ -225,13 +225,13 @@ impl OperationalHandler {
 /// Map terminal-facing errors onto AppError for signal emission.
 fn map_terminal_error(err: &TerminalError) -> AppError {
     match err {
-        TerminalError::Input(msg) => AppError::new("INPUT_ERROR", msg),
-        TerminalError::Config(msg) => AppError::new("CONFIG_ERROR", msg),
-        TerminalError::Capability(msg) => AppError::new("CAPABILITY_DENIED", msg),
-        TerminalError::NotFound(msg) => AppError::new("NOT_FOUND", msg),
-        TerminalError::Network(msg) => AppError::new("NETWORK_ERROR", msg),
-        TerminalError::NotImplemented(msg) => AppError::new("NOT_IMPLEMENTED", msg),
-        TerminalError::Operation(msg) => AppError::new("OPERATION_FAILED", msg),
+        TerminalError::Input(msg) => AppError::user_action("Invalid input", msg),
+        TerminalError::Config(msg) => AppError::internal("config", msg),
+        TerminalError::Capability(msg) => AppError::auth(AuthFailure::CapabilityDenied, msg),
+        TerminalError::NotFound(msg) => AppError::user_action("Not found", msg),
+        TerminalError::Network(msg) => AppError::network(NetworkErrorCode::Other, msg),
+        TerminalError::NotImplemented(msg) => AppError::internal("not_implemented", msg),
+        TerminalError::Operation(msg) => AppError::internal("operation", msg),
     }
 }
 

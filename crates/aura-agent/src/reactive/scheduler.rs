@@ -727,7 +727,8 @@ impl ViewReduction<ChatDelta> for ChatReduction {
                     ..
                 }) if binding_type == CHAT_FACT_TYPE_ID => {
                     // Use the domain reducer and downcast back to ChatDelta
-                    let view_deltas = reducer.reduce_fact(binding_type, binding_data);
+                    // TODO: Pass actual own_authority when ViewReduction trait is updated
+                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, None);
                     view_deltas
                         .into_iter()
                         .filter_map(|vd| downcast_delta::<ChatDelta>(&vd).cloned())
@@ -816,7 +817,8 @@ impl ViewReduction<RecoveryDelta> for RecoveryReduction {
                     ..
                 }) if binding_type == RECOVERY_FACT_TYPE_ID => {
                     // Use the domain reducer and downcast back to RecoveryDelta
-                    let view_deltas = reducer.reduce_fact(binding_type, binding_data);
+                    // TODO: Pass actual own_authority when ViewReduction trait is updated
+                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, None);
                     view_deltas
                         .into_iter()
                         .filter_map(|vd| downcast_delta::<RecoveryDelta>(&vd).cloned())
@@ -846,7 +848,8 @@ impl ViewReduction<InvitationDelta> for InvitationReduction {
                     ..
                 }) if binding_type == INVITATION_FACT_TYPE_ID => {
                     // Use the domain reducer and downcast back to InvitationDelta
-                    let view_deltas = reducer.reduce_fact(binding_type, binding_data);
+                    // TODO: Pass actual own_authority when ViewReduction trait is updated
+                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, None);
                     view_deltas
                         .into_iter()
                         .filter_map(|vd| downcast_delta::<InvitationDelta>(&vd).cloned())
@@ -897,6 +900,7 @@ impl ViewReduction<BlockDelta> for BlockReduction {
                     binding_data: _,
                     ..
                 }) => {
+                    // TODO: Define structured block fact types instead of Generic
                     // Block facts would be stored as Generic for now
                     if binding_type == "block_created" {
                         Some(BlockDelta::BlockCreated {

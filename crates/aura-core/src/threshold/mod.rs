@@ -29,5 +29,5 @@ pub use context::{ApprovalContext, GroupAction, SignableOperation, SigningContex
 pub use participant::{ParticipantEndpoint, ParticipantIdentity, SigningParticipant};
 pub use signature::ThresholdSignature;
 
-// Re-export ThresholdConfig from crypto::frost for convenience
-pub use crate::crypto::frost::ThresholdConfig;
+// Re-export ThresholdConfig and ThresholdState from crypto::frost for convenience
+pub use crate::crypto::frost::{ThresholdConfig, ThresholdState};

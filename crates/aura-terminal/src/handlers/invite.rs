@@ -51,7 +51,7 @@ pub async fn handle_invitation(
         }
         InvitationAction::Accept { invitation_id } => {
             let mut output = CliOutput::new();
-            let service = agent.invitations().await?;
+            let service = agent.invitations()?;
             let result = service.accept(invitation_id).await?;
             if result.success {
                 output.println(format!("Invitation {} accepted", invitation_id));
@@ -62,7 +62,7 @@ pub async fn handle_invitation(
         }
         InvitationAction::Decline { invitation_id } => {
             let mut output = CliOutput::new();
-            let service = agent.invitations().await?;
+            let service = agent.invitations()?;
             let result = service.decline(invitation_id).await?;
             if result.success {
                 output.println(format!("Invitation {} declined", invitation_id));
@@ -76,7 +76,7 @@ pub async fn handle_invitation(
         }
         InvitationAction::Cancel { invitation_id } => {
             let mut output = CliOutput::new();
-            let service = agent.invitations().await?;
+            let service = agent.invitations()?;
             let result = service.cancel(invitation_id).await?;
             if result.success {
                 output.println(format!("Invitation {} canceled", invitation_id));
@@ -90,7 +90,7 @@ pub async fn handle_invitation(
         }
         InvitationAction::List => {
             let mut output = CliOutput::new();
-            let service = agent.invitations().await?;
+            let service = agent.invitations()?;
             let pending = service.list_pending().await;
             if pending.is_empty() {
                 output.println("No pending invitations.");
@@ -111,7 +111,7 @@ pub async fn handle_invitation(
         }
         InvitationAction::Export { invitation_id } => {
             let mut output = CliOutput::new();
-            let service = agent.invitations().await?;
+            let service = agent.invitations()?;
             let code = service.export_code(invitation_id).await?;
             output.section("Shareable Invitation Code");
             output.println(&code);
@@ -191,7 +191,7 @@ async fn create_invitation(
         uuid::Uuid::from_str(account)
             .map_err(|e| TerminalError::Input(format!("invalid account authority: {}", e)))?,
     );
-    let service = agent.invitations().await?;
+    let service = agent.invitations()?;
     let expires_ms = ttl_secs.map(|s| s * 1000);
 
     if role.eq_ignore_ascii_case("guardian") {

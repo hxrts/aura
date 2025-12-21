@@ -1,12 +1,12 @@
 //! # Modal Components
 //!
-//! Modal dialog overlays that exactly fill the middle panel region (80×25).
+//! Modal dialog overlays that exactly fill the middle panel region (80×MIDDLE_HEIGHT).
 //! All modals use fixed dimensions matching the middle screen panel.
 //!
 //! ## ModalFrame
 //!
 //! ALL modals MUST use ModalFrame to ensure consistent positioning.
-//! The frame positions the modal to exactly fill the middle panel region (80×25).
+//! The frame positions the modal to exactly fill the middle panel region (80×MIDDLE_HEIGHT).
 //!
 //! Modals should be rendered at ROOT level in app.rs, wrapped in ModalFrame:
 //!
@@ -380,8 +380,8 @@ mod tests {
     #[test]
     fn test_modal_frame_dimensions() {
         // Modal frame should position at nav height and fill middle region
-        assert_eq!(dim::NAV_HEIGHT, 3);
+        assert_eq!(dim::NAV_HEIGHT, 2);
         assert_eq!(dim::TOTAL_WIDTH, 80);
-        assert_eq!(dim::MIDDLE_HEIGHT, 25);
+        assert_eq!(dim::MIDDLE_HEIGHT, 26);
     }
 }

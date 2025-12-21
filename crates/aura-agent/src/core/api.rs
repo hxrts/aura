@@ -9,35 +9,19 @@ use crate::handlers::{
 use crate::runtime::services::ThresholdSigningService;
 use crate::runtime::system::RuntimeSystem;
 use crate::runtime::{EffectContext, EffectSystemBuilder};
-use aura_core::{
-    hash::hash,
-    identifiers::{AccountId, AuthorityId, ContextId},
-};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use aura_core::hash::hash;
+use aura_core::identifiers::{AuthorityId, ContextId};
 
 /// Main agent interface - thin facade delegating to runtime
+///
+/// Services are created on-demand as lightweight wrappers around effects.
+/// No lazy initialization needed since services are stateless.
 pub struct AuraAgent {
     /// The runtime system handling all operations
     runtime: RuntimeSystem,
 
-    /// Authority context for this agent
+    /// Authority context for this agent (includes cached account_id)
     context: AuthorityContext,
-
-    /// Session management service (lazily initialized)
-    session_service: Arc<RwLock<Option<SessionService>>>,
-
-    /// Authentication service (lazily initialized)
-    auth_service: Arc<RwLock<Option<AuthService>>>,
-
-    /// Invitation service (lazily initialized)
-    invitation_service: Arc<RwLock<Option<InvitationService>>>,
-
-    /// Recovery service (lazily initialized)
-    recovery_service: Arc<RwLock<Option<RecoveryService>>>,
-
-    /// Threshold signing service (lazily initialized)
-    threshold_signing_service: Arc<RwLock<Option<ThresholdSigningService>>>,
 }
 
 impl AuraAgent {
@@ -46,11 +30,6 @@ impl AuraAgent {
         Self {
             runtime,
             context: AuthorityContext::new(authority_id),
-            session_service: Arc::new(RwLock::new(None)),
-            auth_service: Arc::new(RwLock::new(None)),
-            invitation_service: Arc::new(RwLock::new(None)),
-            recovery_service: Arc::new(RwLock::new(None)),
-            threshold_signing_service: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -72,74 +51,26 @@ impl AuraAgent {
     /// Get the session management service
     ///
     /// Provides access to session creation, management, and lifecycle operations.
-    pub async fn sessions(&self) -> SessionService {
-        // Check if already initialized
-        {
-            let guard = self.session_service.read().await;
-            if guard.is_some() {
-                return SessionService::new(
-                    self.runtime.effects(),
-                    self.context.clone(),
-                    AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
-                );
-            }
-        }
-
-        // Initialize lazily
-        let service = SessionService::new(
+    /// Returns a new lightweight service instance (services are stateless wrappers).
+    pub fn sessions(&self) -> SessionService {
+        SessionService::new(
             self.runtime.effects(),
             self.context.clone(),
-            AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
-        );
-
-        // Store for future use (though we return a new instance each time for simplicity)
-        {
-            let mut guard = self.session_service.write().await;
-            *guard = Some(SessionService::new(
-                self.runtime.effects(),
-                self.context.clone(),
-                AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
-            ));
-        }
-
-        service
+            self.context.account_id,
+        )
     }
 
     /// Get the authentication service
     ///
     /// Provides access to authentication operations including challenge-response
     /// flows and device key verification.
-    pub async fn auth(&self) -> AgentResult<AuthService> {
-        // Check if already initialized
-        {
-            let guard = self.auth_service.read().await;
-            if guard.is_some() {
-                return AuthService::new(
-                    self.runtime.effects(),
-                    self.context.clone(),
-                    AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
-                );
-            }
-        }
-
-        // Initialize lazily
-        let service = AuthService::new(
+    /// Returns a new lightweight service instance (services are stateless wrappers).
+    pub fn auth(&self) -> AgentResult<AuthService> {
+        AuthService::new(
             self.runtime.effects(),
             self.context.clone(),
-            AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
-        )?;
-
-        // Store for future use
-        {
-            let mut guard = self.auth_service.write().await;
-            *guard = Some(AuthService::new(
-                self.runtime.effects(),
-                self.context.clone(),
-                AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
-            )?);
-        }
-
-        Ok(service)
+            self.context.account_id,
+        )
     }
 
     /// Get the chat service
@@ -147,8 +78,6 @@ impl AuraAgent {
     /// Provides access to chat operations including group creation, messaging,
     /// and message history retrieval.
     pub fn chat(&self) -> ChatService {
-        // ChatService is simple - just wraps the effects with the handler
-        // No lazy initialization needed since it's stateless
         ChatService::new(self.runtime.effects())
     }
 
@@ -156,56 +85,18 @@ impl AuraAgent {
     ///
     /// Provides access to invitation operations including creating, accepting,
     /// and declining invitations for channels, guardians, and contacts.
-    pub async fn invitations(&self) -> AgentResult<InvitationService> {
-        // Check if already initialized
-        {
-            let guard = self.invitation_service.read().await;
-            if guard.is_some() {
-                return InvitationService::new(self.runtime.effects(), self.context.clone());
-            }
-        }
-
-        // Initialize lazily
-        let service = InvitationService::new(self.runtime.effects(), self.context.clone())?;
-
-        // Store for future use
-        {
-            let mut guard = self.invitation_service.write().await;
-            *guard = Some(InvitationService::new(
-                self.runtime.effects(),
-                self.context.clone(),
-            )?);
-        }
-
-        Ok(service)
+    /// Returns a new lightweight service instance (services are stateless wrappers).
+    pub fn invitations(&self) -> AgentResult<InvitationService> {
+        InvitationService::new(self.runtime.effects(), self.context.clone())
     }
 
     /// Get the recovery service
     ///
     /// Provides access to guardian-based recovery operations including device
     /// addition/removal, tree replacement, and guardian set updates.
-    pub async fn recovery(&self) -> AgentResult<RecoveryService> {
-        // Check if already initialized
-        {
-            let guard = self.recovery_service.read().await;
-            if guard.is_some() {
-                return RecoveryService::new(self.runtime.effects(), self.context.clone());
-            }
-        }
-
-        // Initialize lazily
-        let service = RecoveryService::new(self.runtime.effects(), self.context.clone())?;
-
-        // Store for future use
-        {
-            let mut guard = self.recovery_service.write().await;
-            *guard = Some(RecoveryService::new(
-                self.runtime.effects(),
-                self.context.clone(),
-            )?);
-        }
-
-        Ok(service)
+    /// Returns a new lightweight service instance (services are stateless wrappers).
+    pub fn recovery(&self) -> AgentResult<RecoveryService> {
+        RecoveryService::new(self.runtime.effects(), self.context.clone())
     }
 
     /// Get the threshold signing service
@@ -214,26 +105,9 @@ impl AuraAgent {
     /// - Multi-device signing (your devices)
     /// - Guardian recovery approvals (cross-authority)
     /// - Group operation approvals (shared authority)
-    pub async fn threshold_signing(&self) -> ThresholdSigningService {
-        // Check if already initialized (note: we return a new instance each time
-        // since the service maintains state via Arc internally)
-        {
-            let guard = self.threshold_signing_service.read().await;
-            if guard.is_some() {
-                return ThresholdSigningService::new(self.runtime.effects());
-            }
-        }
-
-        // Initialize lazily
-        let service = ThresholdSigningService::new(self.runtime.effects());
-
-        // Store for future use (though we return a new instance each time for simplicity)
-        {
-            let mut guard = self.threshold_signing_service.write().await;
-            *guard = Some(ThresholdSigningService::new(self.runtime.effects()));
-        }
-
-        service
+    /// Returns a new lightweight service instance (services are stateless wrappers).
+    pub fn threshold_signing(&self) -> ThresholdSigningService {
+        ThresholdSigningService::new(self.runtime.effects())
     }
 
     /// Get the ceremony tracker for guardian ceremony coordination
@@ -259,7 +133,7 @@ impl AuraAgent {
     /// Number of acceptances processed and number of ceremonies completed
     pub async fn process_ceremony_acceptances(&self) -> AgentResult<(usize, usize)> {
         // Get recovery service and ceremony tracker
-        let recovery_service = self.recovery().await?;
+        let recovery_service = self.recovery()?;
         let ceremony_tracker = self.ceremony_tracker().await;
 
         // Process incoming acceptances from transport
@@ -286,6 +160,10 @@ impl AuraAgent {
                         // Get ceremony state to retrieve new epoch
                         match ceremony_tracker.get(&ceremony_id).await {
                             Ok(ceremony_state) => {
+                                if ceremony_state.is_committed {
+                                    continue;
+                                }
+
                                 let new_epoch = ceremony_state.new_epoch;
                                 let authority_id = self.authority_id();
 
@@ -298,10 +176,9 @@ impl AuraAgent {
                                 // Commit the key rotation to activate the new epoch
                                 let commit_result = {
                                     let effects = self.runtime.effects();
-                                    let effects_guard = effects.read().await;
 
                                     use aura_core::effects::ThresholdSigningEffects;
-                                    effects_guard
+                                    effects
                                         .commit_key_rotation(&authority_id, new_epoch)
                                         .await
                                 };
@@ -313,6 +190,8 @@ impl AuraAgent {
                                             new_epoch,
                                             "Guardian ceremony committed successfully"
                                         );
+
+                                        let _ = ceremony_tracker.mark_committed(&ceremony_id).await;
                                         completed_count += 1;
                                     }
                                     Err(e) => {

@@ -293,40 +293,40 @@ fn test_g_key_produces_open_guardian_setup_command() {
 
 /// Test: Ceremony in progress blocks new guardian setup.
 #[test]
-fn test_guardian_ceremony_in_progress_blocks_new_setup() {
+fn test_guardian_ceremony_in_progress_escape_cancels() {
     let mut state = TuiState::new();
 
     // Navigate to Contacts
     let (new_state, _) = transition(&state, events::char('3'));
     state = new_state;
 
-    // Mark ceremony as in progress
-    state.contacts.guardian_setup_modal.has_pending_ceremony = true;
+    // Enqueue an in-progress guardian ceremony modal
+    let mut modal = aura_terminal::tui::state_machine::GuardianSetupModalState::default();
+    modal.step = aura_terminal::tui::state_machine::GuardianSetupStep::CeremonyInProgress;
+    modal.ceremony_id = Some("ceremony-123".to_string());
+    state
+        .modal_queue
+        .enqueue(aura_terminal::tui::state_machine::QueuedModal::GuardianSetup(modal));
 
-    // Press 'g' - should show toast, not open modal
-    let (_, commands) = transition(&state, events::char('g'));
+    // Escape should cancel (not silently dismiss)
+    let (new_state, commands) = transition(&state, events::escape());
 
-    // Should NOT have OpenGuardianSetup command
-    let has_open_guardian = commands.iter().any(|cmd| {
+    let has_cancel = commands.iter().any(|cmd| {
         matches!(
             cmd,
-            TuiCommand::Dispatch(DispatchCommand::OpenGuardianSetup)
+            TuiCommand::Dispatch(DispatchCommand::CancelGuardianCeremony { ceremony_id })
+                if ceremony_id == "ceremony-123"
         )
     });
 
     assert!(
-        !has_open_guardian,
-        "Should not open guardian setup when ceremony is in progress"
+        has_cancel,
+        "Escape on in-progress guardian ceremony should dispatch CancelGuardianCeremony"
     );
 
-    // Should have warning toast
-    let has_toast = commands.iter().any(|cmd| {
-        matches!(cmd, TuiCommand::ShowToast { level, .. } if *level == aura_terminal::tui::state_machine::ToastLevel::Warning)
-    });
-
     assert!(
-        has_toast,
-        "Should show warning toast about ceremony in progress"
+        new_state.modal_queue.current().is_none(),
+        "Cancel should dismiss the active guardian setup modal"
     );
 }
 

@@ -32,7 +32,12 @@
 //! impl ViewDeltaReducer for ChatViewReducer {
 //!     fn handles_type(&self) -> &'static str { "chat" }
 //!
-//!     fn reduce_fact(&self, binding_type: &str, binding_data: &[u8]) -> Vec<ViewDelta> {
+//!     fn reduce_fact(
+//!         &self,
+//!         binding_type: &str,
+//!         binding_data: &[u8],
+//!         _own_authority: Option<AuthorityId>,
+//!     ) -> Vec<ViewDelta> {
 //!         if binding_type != "chat" { return vec![]; }
 //!         ChatFact::from_bytes(binding_data)
 //!             .map(|fact| ChatDelta::from(fact).into())
@@ -46,6 +51,7 @@
 //! registry.register("chat", Box::new(ChatViewReducer));
 //! ```
 
+use aura_core::identifiers::AuthorityId;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -70,11 +76,18 @@ pub trait ViewDeltaReducer: Send + Sync {
     /// # Arguments
     /// * `binding_type` - The type identifier from `RelationalFact::Generic`
     /// * `binding_data` - The serialized fact data
+    /// * `own_authority` - The current user's authority ID for contextual reduction
+    ///                     (e.g., determining inbound vs outbound invitations)
     ///
     /// # Returns
     /// A vector of view deltas. Returns empty if the binding type doesn't match
     /// or if reduction fails.
-    fn reduce_fact(&self, binding_type: &str, binding_data: &[u8]) -> Vec<ViewDelta>;
+    fn reduce_fact(
+        &self,
+        binding_type: &str,
+        binding_data: &[u8],
+        own_authority: Option<AuthorityId>,
+    ) -> Vec<ViewDelta>;
 }
 
 /// Registry for domain view reducers.
@@ -113,10 +126,20 @@ impl ViewDeltaRegistry {
 
     /// Reduce a fact using the appropriate registered reducer.
     ///
+    /// # Arguments
+    /// * `binding_type` - The fact type identifier
+    /// * `binding_data` - The serialized fact data
+    /// * `own_authority` - The current user's authority for contextual reduction
+    ///
     /// If no reducer is registered for the binding_type, returns empty.
-    pub fn reduce(&self, binding_type: &str, binding_data: &[u8]) -> Vec<ViewDelta> {
+    pub fn reduce(
+        &self,
+        binding_type: &str,
+        binding_data: &[u8],
+        own_authority: Option<AuthorityId>,
+    ) -> Vec<ViewDelta> {
         if let Some(reducer) = self.reducers.get(binding_type) {
-            reducer.reduce_fact(binding_type, binding_data)
+            reducer.reduce_fact(binding_type, binding_data, own_authority)
         } else {
             Vec::new()
         }
@@ -189,7 +212,12 @@ mod tests {
             "test"
         }
 
-        fn reduce_fact(&self, binding_type: &str, binding_data: &[u8]) -> Vec<ViewDelta> {
+        fn reduce_fact(
+            &self,
+            binding_type: &str,
+            binding_data: &[u8],
+            _own_authority: Option<AuthorityId>,
+        ) -> Vec<ViewDelta> {
             if binding_type != "test" {
                 return vec![];
             }
@@ -217,7 +245,7 @@ mod tests {
         let mut registry = ViewDeltaRegistry::new();
         registry.register("test", Box::new(TestReducer));
 
-        let deltas = registry.reduce("test", b"item123");
+        let deltas = registry.reduce("test", b"item123", None);
         assert_eq!(deltas.len(), 1);
 
         let delta = downcast_delta::<TestDelta>(&deltas[0]).unwrap();
@@ -232,7 +260,7 @@ mod tests {
     #[test]
     fn test_registry_reduce_unknown_type() {
         let registry = ViewDeltaRegistry::new();
-        let deltas = registry.reduce("unknown", b"data");
+        let deltas = registry.reduce("unknown", b"data", None);
         assert!(deltas.is_empty());
     }
 

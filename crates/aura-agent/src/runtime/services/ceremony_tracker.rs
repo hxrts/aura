@@ -53,6 +53,9 @@ pub struct CeremonyState {
     /// Whether the ceremony has failed
     pub has_failed: bool,
 
+    /// Whether the ceremony has been committed (key rotation activated)
+    pub is_committed: bool,
+
     /// Optional error message if failed
     pub error_message: Option<String>,
 
@@ -101,6 +104,7 @@ impl CeremonyTracker {
             new_epoch,
             started_at: Instant::now(),
             has_failed: false,
+            is_committed: false,
             error_message: None,
             timeout: Duration::from_secs(30),
         };
@@ -186,7 +190,33 @@ impl CeremonyTracker {
         Ok(threshold_reached)
     }
 
-    /// Check if ceremony is complete (threshold reached)
+    /// Mark a ceremony as committed (key rotation activated).
+    ///
+    /// This is only called after threshold is reached and `commit_key_rotation` succeeds.
+    pub async fn mark_committed(&self, ceremony_id: &str) -> Result<(), IntentError> {
+        let mut ceremonies = self.ceremonies.write().await;
+
+        let state = ceremonies.get_mut(ceremony_id).ok_or_else(|| {
+            IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+        })?;
+
+        if state.is_committed {
+            return Ok(());
+        }
+
+        state.is_committed = true;
+
+        tracing::info!(
+            ceremony_id = %ceremony_id,
+            accepted = state.accepted_guardians.len(),
+            threshold = state.threshold_k,
+            "Ceremony committed"
+        );
+
+        Ok(())
+    }
+
+    /// Check if ceremony is complete (committed)
     ///
     /// # Arguments
     /// * `ceremony_id` - The ceremony identifier
@@ -195,7 +225,7 @@ impl CeremonyTracker {
     /// True if threshold is reached
     pub async fn is_complete(&self, ceremony_id: &str) -> Result<bool, IntentError> {
         let state = self.get(ceremony_id).await?;
-        Ok(state.accepted_guardians.len() >= state.threshold_k as usize)
+        Ok(state.is_committed)
     }
 
     /// Check if ceremony has timed out

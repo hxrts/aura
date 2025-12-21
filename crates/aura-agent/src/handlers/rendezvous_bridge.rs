@@ -211,7 +211,6 @@ mod tests {
         let context_id = ContextId::new_from_entropy([180u8; 32]);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let effects_guard = effects.read().await;
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Allow,
@@ -228,7 +227,6 @@ mod tests {
         let context_id = ContextId::new_from_entropy([181u8; 32]);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let effects_guard = effects.read().await;
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Deny {
@@ -247,7 +245,6 @@ mod tests {
         let context_id = ContextId::new_from_entropy([182u8; 32]);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let effects_guard = effects.read().await;
 
         let descriptor = RendezvousDescriptor {
             authority_id: authority.authority_id,
@@ -259,6 +256,7 @@ mod tests {
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         let outcome = GuardOutcome {
@@ -279,7 +277,6 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([84u8; 32]);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let effects_guard = effects.read().await;
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Allow,
@@ -300,7 +297,6 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([86u8; 32]);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let effects_guard = effects.read().await;
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Allow,

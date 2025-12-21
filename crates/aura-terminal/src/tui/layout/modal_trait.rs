@@ -1,7 +1,7 @@
 //! Modal layout trait for TUI modals.
 //!
 //! All modals implement this trait to produce content that fits
-//! within the fixed middle region (80×25), overlaying the screen content.
+//! within the fixed middle region (80×MIDDLE_HEIGHT), overlaying the screen content.
 
 use super::content::ModalContent;
 use super::dim;
@@ -34,11 +34,11 @@ impl ModalContext {
 
 /// Trait for modal content.
 ///
-/// Modals overlay the middle region exactly (80 × 25).
+/// Modals overlay the middle region exactly (80 × MIDDLE_HEIGHT).
 pub trait ModalLayout {
     /// Render the modal content.
     ///
-    /// Return type guarantees content fits within 80 × 25.
+    /// Return type guarantees content fits within 80 × MIDDLE_HEIGHT.
     fn render(&self, ctx: &ModalContext) -> ModalContent;
 
     /// Whether this modal can be dismissed with Esc
@@ -62,8 +62,8 @@ mod tests {
     #[test]
     fn test_modal_context_dimensions() {
         let ctx = ModalContext::new();
-        assert_eq!(ctx.width, 80);
-        assert_eq!(ctx.height, 25);
+        assert_eq!(ctx.width, dim::TOTAL_WIDTH);
+        assert_eq!(ctx.height, dim::MIDDLE_HEIGHT);
         assert!(ctx.is_focused);
         assert!(!ctx.screen.is_focused);
     }

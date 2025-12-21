@@ -551,6 +551,114 @@ impl AppCore {
                     return Err(IntentError::validation_failed("Block name is empty"));
                 }
             }
+            Intent::GrantSteward {
+                block_id,
+                target_id,
+            } => {
+                use aura_core::identifiers::{AuthorityId, ContextId};
+
+                let snapshot = self.snapshot();
+                let target = target_id.parse::<AuthorityId>().map_err(|_| {
+                    IntentError::validation_failed(format!("Invalid authority ID: {}", target_id))
+                })?;
+
+                let legacy_block = if snapshot
+                    .block
+                    .context_id
+                    .parse::<ContextId>()
+                    .ok()
+                    .is_some_and(|id| id == *block_id)
+                {
+                    Some(&snapshot.block)
+                } else {
+                    None
+                };
+
+                let block = snapshot
+                    .blocks
+                    .blocks
+                    .values()
+                    .find(|b| {
+                        b.context_id
+                            .parse::<ContextId>()
+                            .ok()
+                            .is_some_and(|id| id == *block_id)
+                    })
+                    .or(legacy_block)
+                    .ok_or_else(|| IntentError::validation_failed("Block not found"))?;
+
+                if !block.is_admin() {
+                    return Err(IntentError::unauthorized(
+                        "Only stewards can grant steward role",
+                    ));
+                }
+
+                let Some(resident) = block.resident(&target) else {
+                    return Err(IntentError::validation_failed(format!(
+                        "Resident not found: {}",
+                        target_id
+                    )));
+                };
+
+                if matches!(resident.role, crate::views::ResidentRole::Owner) {
+                    return Err(IntentError::validation_failed("Cannot modify Owner role"));
+                }
+            }
+            Intent::RevokeSteward {
+                block_id,
+                target_id,
+            } => {
+                use aura_core::identifiers::{AuthorityId, ContextId};
+
+                let snapshot = self.snapshot();
+                let target = target_id.parse::<AuthorityId>().map_err(|_| {
+                    IntentError::validation_failed(format!("Invalid authority ID: {}", target_id))
+                })?;
+
+                let legacy_block = if snapshot
+                    .block
+                    .context_id
+                    .parse::<ContextId>()
+                    .ok()
+                    .is_some_and(|id| id == *block_id)
+                {
+                    Some(&snapshot.block)
+                } else {
+                    None
+                };
+
+                let block = snapshot
+                    .blocks
+                    .blocks
+                    .values()
+                    .find(|b| {
+                        b.context_id
+                            .parse::<ContextId>()
+                            .ok()
+                            .is_some_and(|id| id == *block_id)
+                    })
+                    .or(legacy_block)
+                    .ok_or_else(|| IntentError::validation_failed("Block not found"))?;
+
+                if !block.is_admin() {
+                    return Err(IntentError::unauthorized(
+                        "Only stewards can revoke steward role",
+                    ));
+                }
+
+                let Some(resident) = block.resident(&target) else {
+                    return Err(IntentError::validation_failed(format!(
+                        "Resident not found: {}",
+                        target_id
+                    )));
+                };
+
+                if !matches!(resident.role, crate::views::ResidentRole::Admin) {
+                    return Err(IntentError::validation_failed(
+                        "Can only revoke Admin role, not Owner or Resident",
+                    ));
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -589,33 +697,41 @@ impl AppCore {
     /// for async signal emission to reactive subscribers.
     ///
     /// Returns the number of facts committed.
-    pub fn commit_pending_facts(&mut self) -> usize {
+    pub fn commit_pending_facts(&mut self) -> Result<usize, IntentError> {
         use crate::core::reducer::reduce_fact;
 
-        let facts: Vec<_> = self.pending_facts.drain(..).collect();
+        let facts = std::mem::take(&mut self.pending_facts);
         let count = facts.len();
 
-        // Get the authority for delta application
-        // Use deterministic placeholder when no authority is set
+        if count == 0 {
+            return Ok(0);
+        }
+
+        // Get the authority for delta application.
+        // Use deterministic placeholder when no authority is set.
         let own_authority = self
             .authority
             .unwrap_or_else(|| AuthorityId::new_from_entropy([0u8; 32]));
 
-        // Reduce and apply each fact
-        for fact in facts {
-            let delta = reduce_fact(&fact, &own_authority);
-
-            // Apply delta to views
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "signals")] {
-                    self.views.apply_delta(delta);
-                } else {
-                    self.views.apply_delta(delta);
+        // First reduce all facts so we never partially apply a batch.
+        let mut deltas = Vec::new();
+        for fact in &facts {
+            match reduce_fact(fact, &own_authority) {
+                Ok(Some(delta)) => deltas.push(delta),
+                Ok(None) => {}
+                Err(e) => {
+                    self.pending_facts = facts;
+                    return Err(IntentError::internal_error(format!("Reduce failed: {}", e)));
                 }
             }
         }
 
-        count
+        // Apply deltas to views.
+        for delta in deltas {
+            self.views.apply_delta(delta);
+        }
+
+        Ok(count)
     }
 
     /// Commit pending facts, apply to ViewState.
@@ -629,9 +745,25 @@ impl AppCore {
     ///
     /// Returns the number of facts committed.
     pub async fn commit_pending_facts_and_emit(&mut self) -> Result<usize, IntentError> {
-        // Commit facts synchronously - ViewState updates auto-forward to signals
-        let count = self.commit_pending_facts();
-        Ok(count)
+        // Commit facts synchronously; ViewState updates auto-forward to signals.
+        match self.commit_pending_facts() {
+            Ok(count) => Ok(count),
+            Err(e) => {
+                // Best-effort surface to the UI (signals may not be initialized yet).
+                #[cfg(feature = "signals")]
+                {
+                    use crate::errors::AppError;
+                    use crate::signal_defs::ERROR_SIGNAL;
+                    let _ = self
+                        .emit(
+                            &*ERROR_SIGNAL,
+                            Some(AppError::internal("reducer", e.to_string())),
+                        )
+                        .await;
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Commit pending facts and persist to storage.
@@ -647,36 +779,42 @@ impl AppCore {
     pub fn commit_and_persist(&mut self) -> Result<usize, IntentError> {
         use crate::core::reducer::reduce_fact;
 
-        let facts: Vec<_> = self.pending_facts.drain(..).collect();
+        let facts = std::mem::take(&mut self.pending_facts);
         let count = facts.len();
 
         if count == 0 {
             return Ok(0);
         }
 
-        // Get the authority for delta application
-        // Use deterministic placeholder when no authority is set
+        // Get the authority for delta application.
+        // Use deterministic placeholder when no authority is set.
         let own_authority = self
             .authority
             .unwrap_or_else(|| AuthorityId::new_from_entropy([0u8; 32]));
 
-        // Reduce and apply each fact to views
+        let mut deltas = Vec::new();
         for fact in &facts {
-            let delta = reduce_fact(fact, &own_authority);
-
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "signals")] {
-                    self.views.apply_delta(delta);
-                } else {
-                    self.views.apply_delta(delta);
+            match reduce_fact(fact, &own_authority) {
+                Ok(Some(delta)) => deltas.push(delta),
+                Ok(None) => {}
+                Err(e) => {
+                    self.pending_facts = facts;
+                    return Err(IntentError::internal_error(format!("Reduce failed: {}", e)));
                 }
             }
         }
 
-        // Persist to storage if journal path is set (native platforms only)
+        for delta in deltas {
+            self.views.apply_delta(delta);
+        }
+
+        // Persist to storage if journal path is set (native platforms only).
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref path) = self.journal_path {
-            self.append_facts_to_storage(path, &facts)?;
+            if let Err(e) = self.append_facts_to_storage(path, &facts) {
+                self.pending_facts = facts;
+                return Err(e);
+            }
         }
 
         Ok(count)
@@ -725,15 +863,18 @@ impl AppCore {
             .authority
             .unwrap_or_else(|| AuthorityId::new_from_entropy([0u8; 32]));
 
-        // Reduce and apply each fact
+        // Reduce and apply each fact.
         for fact in facts {
-            let delta = crate::core::reducer::reduce_fact(&fact, &own_authority);
-
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "signals")] {
+            match crate::core::reducer::reduce_fact(&fact, &own_authority) {
+                Ok(Some(delta)) => {
                     self.views.apply_delta(delta);
-                } else {
-                    self.views.apply_delta(delta);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return Err(IntentError::internal_error(format!(
+                        "Reduce failed while loading from storage: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -756,10 +897,10 @@ impl AppCore {
             })?;
         }
 
-        // Collect facts from the internal journal
-        // For now, we use pending_facts since actual journal facts would require
-        // getting them from the Journal struct
-        let facts: Vec<&JournalFact> = self.pending_facts.iter().collect();
+        // Collect facts from both the journal and pending buffer
+        // Journal contains committed facts, pending_facts contains those awaiting commit
+        let mut facts: Vec<JournalFact> = self.journal.journal_facts();
+        facts.extend(self.pending_facts.iter().cloned());
 
         // Serialize and write
         let file = File::create(path).map_err(|e| {
@@ -1041,10 +1182,18 @@ impl AppCore {
     /// This is called after facts are committed to update the view state.
     /// In signals mode, uses interior mutability; in non-signals mode, needs mutable self.
     #[cfg(feature = "signals")]
-    fn reduce_and_apply(&self, fact: &aura_journal::JournalFact) {
-        if let Some(authority) = &self.authority {
-            let delta = super::reduce_fact(fact, authority);
-            self.views.apply_delta(delta);
+    fn reduce_and_apply(&self, fact: &aura_journal::JournalFact) -> Result<(), IntentError> {
+        let own_authority = self
+            .authority
+            .unwrap_or_else(|| AuthorityId::new_from_entropy([0u8; 32]));
+
+        match super::reduce_fact(fact, &own_authority) {
+            Ok(Some(delta)) => {
+                self.views.apply_delta(delta);
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(e) => Err(IntentError::internal_error(format!("Reduce failed: {}", e))),
         }
     }
 
@@ -1052,10 +1201,18 @@ impl AppCore {
     ///
     /// This is called after facts are committed to update the view state.
     #[cfg(not(feature = "signals"))]
-    fn reduce_and_apply(&mut self, fact: &aura_journal::JournalFact) {
-        if let Some(authority) = &self.authority {
-            let delta = super::reduce_fact(fact, authority);
-            self.views.apply_delta(delta);
+    fn reduce_and_apply(&mut self, fact: &aura_journal::JournalFact) -> Result<(), IntentError> {
+        let own_authority = self
+            .authority
+            .unwrap_or_else(|| AuthorityId::new_from_entropy([0u8; 32]));
+
+        match super::reduce_fact(fact, &own_authority) {
+            Ok(Some(delta)) => {
+                self.views.apply_delta(delta);
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(e) => Err(IntentError::internal_error(format!("Reduce failed: {}", e))),
         }
     }
 
@@ -1144,17 +1301,31 @@ impl AppCore {
 
         let deterministic_random = SeededDeterministicRandom::new();
 
-        // Commit each pending fact and reduce to views
-        let facts: Vec<_> = self.pending_facts.drain(..).collect();
-        for fact in facts {
+        // Commit each pending fact and reduce to views.
+        let mut iter = std::mem::take(&mut self.pending_facts).into_iter();
+        while let Some(fact) = iter.next() {
             // Reduce and apply to views before committing
             // (so views are updated even if journal commit fails)
-            self.reduce_and_apply(&fact);
+            if let Err(e) = self.reduce_and_apply(&fact) {
+                let mut remaining = Vec::new();
+                remaining.push(fact);
+                remaining.extend(iter);
+                self.pending_facts = remaining;
+                return Err(e);
+            }
 
-            self.journal
-                .add_fact(fact, &deterministic_random)
+            let fact_for_journal = fact.clone();
+            if let Err(e) = self
+                .journal
+                .add_fact(fact_for_journal, &deterministic_random)
                 .await
-                .map_err(|e| IntentError::journal_error(e.to_string()))?;
+            {
+                let mut remaining = Vec::new();
+                remaining.push(fact);
+                remaining.extend(iter);
+                self.pending_facts = remaining;
+                return Err(IntentError::journal_error(e.to_string()));
+            }
         }
 
         Ok(())
@@ -1252,6 +1423,23 @@ impl AppCore {
             .ok_or_else(|| IntentError::no_agent("trigger_sync requires a runtime"))?;
 
         runtime.trigger_sync().await
+    }
+
+    /// Sync with a specific peer by ID
+    ///
+    /// Initiates targeted synchronization with the specified peer.
+    /// This is useful for requesting state updates from a known good peer.
+    ///
+    /// # Errors
+    ///
+    /// Returns `IntentError::NoAgent` if no runtime is configured.
+    pub async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| IntentError::no_agent("sync_with_peer requires a runtime"))?;
+
+        runtime.sync_with_peer(peer_id).await
     }
 
     /// Export an invitation code for sharing
@@ -1568,7 +1756,7 @@ mod tests {
         );
 
         // Step 2: Commit pending facts and apply to ViewState
-        let committed = app.commit_pending_facts();
+        let committed = app.commit_pending_facts().unwrap();
         assert_eq!(committed, 1, "Expected 1 fact to be committed");
 
         // Step 3: Verify channel appeared in ViewState
@@ -1591,7 +1779,7 @@ mod tests {
         assert!(result.is_ok(), "SendMessage dispatch failed: {:?}", result);
 
         // Step 6: Commit the message fact
-        let committed = app.commit_pending_facts();
+        let committed = app.commit_pending_facts().unwrap();
         assert_eq!(committed, 1, "Expected 1 message fact to be committed");
 
         // Step 7: Verify channel metadata was updated
@@ -1637,7 +1825,7 @@ mod tests {
         assert_eq!(app.pending_facts().len(), 2, "Should have 2 pending facts");
 
         // Commit all
-        let committed = app.commit_pending_facts();
+        let committed = app.commit_pending_facts().unwrap();
         assert_eq!(committed, 2, "Should commit 2 facts");
         assert!(app.pending_facts().is_empty(), "Pending should be cleared");
 
@@ -1662,8 +1850,9 @@ mod tests {
         app.set_authority(authority);
 
         // Dispatch SetNickname intent
+        let contact_id = AuthorityId::new_from_entropy([7u8; 32]).to_string();
         let result = app.dispatch(Intent::SetNickname {
-            contact_id: "contact123".to_string(),
+            contact_id,
             nickname: "Alice".to_string(),
         });
         assert!(result.is_ok(), "SetNickname dispatch failed: {:?}", result);
@@ -1672,7 +1861,7 @@ mod tests {
         assert_eq!(app.pending_facts().len(), 1);
 
         // Commit and apply
-        let committed = app.commit_pending_facts();
+        let committed = app.commit_pending_facts().unwrap();
         assert_eq!(committed, 1);
     }
 
@@ -1694,7 +1883,7 @@ mod tests {
             result
         );
 
-        let committed = app.commit_pending_facts();
+        let committed = app.commit_pending_facts().unwrap();
         assert_eq!(committed, 1, "Expected 1 recovery initiation fact");
 
         // Verify recovery state changed

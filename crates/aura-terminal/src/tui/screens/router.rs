@@ -16,10 +16,10 @@ pub enum Screen {
     Contacts,
     /// Neighborhood navigation
     Neighborhood,
-    /// Settings and preferences
-    Settings,
     /// Recovery and guardians
     Recovery,
+    /// Settings and preferences (rightmost in nav bar)
+    Settings,
 }
 
 impl Screen {
@@ -30,8 +30,8 @@ impl Screen {
             Screen::Chat => 2,
             Screen::Contacts => 3,
             Screen::Neighborhood => 4,
-            Screen::Settings => 5,
-            Screen::Recovery => 6,
+            Screen::Recovery => 5,
+            Screen::Settings => 6,
         }
     }
 
@@ -42,8 +42,8 @@ impl Screen {
             2 => Some(Screen::Chat),
             3 => Some(Screen::Contacts),
             4 => Some(Screen::Neighborhood),
-            5 => Some(Screen::Settings),
-            6 => Some(Screen::Recovery),
+            5 => Some(Screen::Recovery),
+            6 => Some(Screen::Settings),
             _ => None,
         }
     }
@@ -55,8 +55,8 @@ impl Screen {
             Screen::Chat => "Chat",
             Screen::Contacts => "Contacts",
             Screen::Neighborhood => "Neighborhood",
-            Screen::Settings => "Settings",
             Screen::Recovery => "Recovery",
+            Screen::Settings => "Settings",
         }
     }
 
@@ -67,8 +67,8 @@ impl Screen {
             Screen::Chat => "◊",
             Screen::Contacts => "∑",
             Screen::Neighborhood => "⊞",
-            Screen::Settings => "⚙",
             Screen::Recovery => "⊗",
+            Screen::Settings => "⚙",
         }
     }
 
@@ -79,8 +79,8 @@ impl Screen {
             Screen::Chat,
             Screen::Contacts,
             Screen::Neighborhood,
-            Screen::Settings,
             Screen::Recovery,
+            Screen::Settings,
         ]
     }
 
@@ -90,21 +90,21 @@ impl Screen {
             Screen::Block => Screen::Chat,
             Screen::Chat => Screen::Contacts,
             Screen::Contacts => Screen::Neighborhood,
-            Screen::Neighborhood => Screen::Settings,
-            Screen::Settings => Screen::Recovery,
-            Screen::Recovery => Screen::Block,
+            Screen::Neighborhood => Screen::Recovery,
+            Screen::Recovery => Screen::Settings,
+            Screen::Settings => Screen::Block,
         }
     }
 
     /// Get previous screen in tab order
     pub fn prev(&self) -> Screen {
         match self {
-            Screen::Block => Screen::Recovery,
+            Screen::Block => Screen::Settings,
             Screen::Chat => Screen::Block,
             Screen::Contacts => Screen::Chat,
             Screen::Neighborhood => Screen::Contacts,
-            Screen::Settings => Screen::Neighborhood,
-            Screen::Recovery => Screen::Settings,
+            Screen::Recovery => Screen::Neighborhood,
+            Screen::Settings => Screen::Recovery,
         }
     }
 }
@@ -296,7 +296,7 @@ mod tests {
         // Go all the way back (wraps to Recovery)
         let mut r2 = Router::new(Screen::Block);
         r2.prev_tab();
-        assert_eq!(r2.current(), Screen::Recovery);
+        assert_eq!(r2.current(), Screen::Settings);
     }
 
     #[test]

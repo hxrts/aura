@@ -22,6 +22,7 @@
 //! ```
 
 use aura_composition::{IntoViewDelta, ViewDelta, ViewDeltaReducer};
+use aura_core::identifiers::AuthorityId;
 use aura_journal::DomainFact;
 
 use crate::{InvitationFact, INVITATION_FACT_TYPE_ID};
@@ -78,7 +79,12 @@ impl ViewDeltaReducer for InvitationViewReducer {
         INVITATION_FACT_TYPE_ID
     }
 
-    fn reduce_fact(&self, binding_type: &str, binding_data: &[u8]) -> Vec<ViewDelta> {
+    fn reduce_fact(
+        &self,
+        binding_type: &str,
+        binding_data: &[u8],
+        own_authority: Option<AuthorityId>,
+    ) -> Vec<ViewDelta> {
         if binding_type != INVITATION_FACT_TYPE_ID {
             return vec![];
         }
@@ -90,7 +96,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
         let delta = match inv_fact {
             InvitationFact::Sent {
                 invitation_id,
-                sender_id: _,
+                sender_id,
                 receiver_id,
                 invitation_type,
                 sent_at,
@@ -98,12 +104,25 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 message,
                 ..
             } => {
-                // Note: Direction would need current authority context to determine
-                // For now, we assume outbound since we're reducing a Sent fact
+                // Determine direction based on whether we sent or received the invitation
+                let (direction, other_party_id) = if let Some(own) = own_authority {
+                    if sender_id == own {
+                        ("outbound".to_string(), format!("{:?}", receiver_id))
+                    } else if receiver_id == own {
+                        ("inbound".to_string(), format!("{:?}", sender_id))
+                    } else {
+                        // Neither sender nor receiver - this is a third-party observation
+                        ("observed".to_string(), format!("{:?}", receiver_id))
+                    }
+                } else {
+                    // No authority context - default to outbound for Sent facts
+                    ("outbound".to_string(), format!("{:?}", receiver_id))
+                };
+
                 Some(InvitationDelta::InvitationAdded {
                     invitation_id,
-                    direction: "outbound".to_string(), // Would need current authority context
-                    other_party_id: format!("{:?}", receiver_id),
+                    direction,
+                    other_party_id,
                     other_party_name: "Unknown".to_string(), // Would come from contact facts
                     invitation_type,
                     created_at: sent_at.ts_ms,
@@ -199,14 +218,16 @@ mod tests {
     }
 
     #[test]
-    fn test_invitation_sent_reduction() {
+    fn test_invitation_sent_reduction_as_sender() {
         let reducer = InvitationViewReducer;
+        let sender = test_authority_id(1);
+        let receiver = test_authority_id(2);
 
         let fact = InvitationFact::sent_ms(
             test_context_id(),
             "inv-123".to_string(),
-            test_authority_id(1),
-            test_authority_id(2),
+            sender,
+            receiver,
             "guardian".to_string(),
             1234567890,
             Some(1234567890 + 86400000),
@@ -214,7 +235,8 @@ mod tests {
         );
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes);
+        // Reduce as the sender - should be outbound
+        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, Some(sender));
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
@@ -236,6 +258,42 @@ mod tests {
     }
 
     #[test]
+    fn test_invitation_sent_reduction_as_receiver() {
+        let reducer = InvitationViewReducer;
+        let sender = test_authority_id(1);
+        let receiver = test_authority_id(2);
+
+        let fact = InvitationFact::sent_ms(
+            test_context_id(),
+            "inv-124".to_string(),
+            sender,
+            receiver,
+            "guardian".to_string(),
+            1234567890,
+            Some(1234567890 + 86400000),
+            Some("Please be my guardian".to_string()),
+        );
+
+        let bytes = fact.to_bytes();
+        // Reduce as the receiver - should be inbound
+        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, Some(receiver));
+
+        assert_eq!(deltas.len(), 1);
+        let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
+        match delta {
+            InvitationDelta::InvitationAdded {
+                invitation_id,
+                direction,
+                ..
+            } => {
+                assert_eq!(invitation_id, "inv-124");
+                assert_eq!(direction, "inbound");
+            }
+            _ => panic!("Expected InvitationAdded delta"),
+        }
+    }
+
+    #[test]
     fn test_invitation_accepted_reduction() {
         let reducer = InvitationViewReducer;
 
@@ -243,7 +301,7 @@ mod tests {
             InvitationFact::accepted_ms("inv-456".to_string(), test_authority_id(3), 1234567899);
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, None);
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
@@ -270,7 +328,7 @@ mod tests {
             InvitationFact::cancelled_ms("inv-789".to_string(), test_authority_id(4), 1234567900);
 
         let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes);
+        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, None);
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
@@ -285,14 +343,14 @@ mod tests {
     #[test]
     fn test_wrong_type_returns_empty() {
         let reducer = InvitationViewReducer;
-        let deltas = reducer.reduce_fact("wrong_type", b"some data");
+        let deltas = reducer.reduce_fact("wrong_type", b"some data", None);
         assert!(deltas.is_empty());
     }
 
     #[test]
     fn test_invalid_data_returns_empty() {
         let reducer = InvitationViewReducer;
-        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, b"invalid json data");
+        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, b"invalid json data", None);
         assert!(deltas.is_empty());
     }
 }

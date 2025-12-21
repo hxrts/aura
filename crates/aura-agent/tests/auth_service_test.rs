@@ -25,7 +25,7 @@ async fn test_auth_service_via_agent() -> Result<(), Box<dyn std::error::Error>>
         .build_testing_async(&ctx)
         .await?;
 
-    let auth = agent.auth().await?;
+    let auth = agent.auth()?;
 
     // Check device ID is set
     assert!(!auth.device_id().0.is_nil());
@@ -41,7 +41,7 @@ async fn test_is_authenticated_via_agent() -> Result<(), Box<dyn std::error::Err
         .build_testing_async(&ctx)
         .await?;
 
-    let auth = agent.auth().await?;
+    let auth = agent.auth()?;
 
     // In test mode, is_authenticated should return true
     assert!(auth.is_authenticated().await);
@@ -57,7 +57,7 @@ async fn test_create_challenge_via_agent() -> Result<(), Box<dyn std::error::Err
         .build_testing_async(&ctx)
         .await?;
 
-    let auth = agent.auth().await?;
+    let auth = agent.auth()?;
 
     let challenge = auth.create_challenge().await?;
 
@@ -77,7 +77,7 @@ async fn test_supported_methods_via_agent() -> Result<(), Box<dyn std::error::Er
         .build_testing_async(&ctx)
         .await?;
 
-    let auth = agent.auth().await?;
+    let auth = agent.auth()?;
 
     let methods = auth.supported_methods();
     assert!(methods.contains(&AuthMethod::DeviceKey));
@@ -95,7 +95,7 @@ async fn test_device_key_auth_flow_via_agent() -> Result<(), Box<dyn std::error:
         .build_testing_async(&ctx)
         .await?;
 
-    let auth = agent.auth().await?;
+    let auth = agent.auth()?;
 
     // Test the full device key authentication flow
     let result = auth.authenticate_with_device_key().await?;
@@ -116,7 +116,7 @@ async fn test_challenge_response_flow_via_agent() -> Result<(), Box<dyn std::err
         .build_testing_async(&ctx)
         .await?;
 
-    let auth = agent.auth().await?;
+    let auth = agent.auth()?;
 
     // Create a challenge
     let challenge = auth.create_challenge().await?;
@@ -136,7 +136,7 @@ async fn test_invalid_challenge_rejected() -> Result<(), Box<dyn std::error::Err
         .build_testing_async(&ctx)
         .await?;
 
-    let auth = agent.auth().await?;
+    let auth = agent.auth()?;
 
     // Try to verify a response with an invalid challenge ID
     let invalid_response = aura_agent::AuthResponse {

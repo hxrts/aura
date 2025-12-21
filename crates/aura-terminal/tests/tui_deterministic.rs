@@ -133,13 +133,13 @@ fn test_screen_navigation_deterministic() {
     tui.send_char('4');
     tui.assert_screen(Screen::Neighborhood);
 
-    // Navigate to Settings screen (5)
+    // Navigate to Recovery screen (5)
     tui.send_char('5');
-    tui.assert_screen(Screen::Settings);
-
-    // Navigate to Recovery screen (6)
-    tui.send_char('6');
     tui.assert_screen(Screen::Recovery);
+
+    // Navigate to Settings screen (6)
+    tui.send_char('6');
+    tui.assert_screen(Screen::Settings);
 
     // Navigate back to Block screen (1)
     tui.send_char('1');
@@ -194,8 +194,8 @@ fn test_tab_navigation_deterministic() {
         Screen::Chat,
         Screen::Contacts,
         Screen::Neighborhood,
-        Screen::Settings,
         Screen::Recovery,
+        Screen::Settings,
         Screen::Block, // Wraps around
     ];
 
@@ -389,8 +389,8 @@ fn test_modal_blocks_navigation_deterministic() {
 fn test_recovery_tabs_deterministic() {
     let mut tui = TestTui::new();
 
-    // Go to Recovery screen (key '6' after Invitations merged into Contacts)
-    tui.send_char('6');
+    // Go to Recovery screen (key '5')
+    tui.send_char('5');
     tui.assert_screen(Screen::Recovery);
 
     // Default tab is Guardians
@@ -418,8 +418,9 @@ fn test_recovery_tabs_deterministic() {
 fn test_recovery_guardian_list_deterministic() {
     let mut tui = TestTui::new();
 
-    // Go to Recovery, Guardians tab (key '6' after Invitations merged into Contacts)
-    tui.send_char('6');
+    // Go to Recovery, Guardians tab (key '5')
+    tui.send_char('5');
+    tui.assert_screen(Screen::Recovery);
     assert_eq!(tui.state.recovery.tab, RecoveryTab::Guardians);
 
     // Set up item count for navigation to work
@@ -445,8 +446,8 @@ fn test_recovery_guardian_list_deterministic() {
 fn test_settings_sections_deterministic() {
     let mut tui = TestTui::new();
 
-    // Go to Settings (key '5' after Invitations merged into Contacts)
-    tui.send_char('5');
+    // Go to Settings (key '6')
+    tui.send_char('6');
     tui.assert_screen(Screen::Settings);
 
     // Default section is Profile
@@ -682,8 +683,8 @@ proptest! {
             '2' => Screen::Chat,
             '3' => Screen::Contacts,
             '4' => Screen::Neighborhood,
-            '5' => Screen::Settings,
-            '6' => Screen::Recovery,
+            '5' => Screen::Recovery,
+            '6' => Screen::Settings,
             _ => unreachable!(),
         };
 

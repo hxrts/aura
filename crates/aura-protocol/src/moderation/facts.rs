@@ -11,6 +11,8 @@ pub const BLOCK_UNMUTE_FACT_TYPE_ID: &str = "moderation:block-unmute";
 pub const BLOCK_BAN_FACT_TYPE_ID: &str = "moderation:block-ban";
 pub const BLOCK_UNBAN_FACT_TYPE_ID: &str = "moderation:block-unban";
 pub const BLOCK_KICK_FACT_TYPE_ID: &str = "moderation:block-kick";
+pub const BLOCK_GRANT_STEWARD_FACT_TYPE_ID: &str = "moderation:block-grant-steward";
+pub const BLOCK_REVOKE_STEWARD_FACT_TYPE_ID: &str = "moderation:block-revoke-steward";
 
 /// Fact representing a block-wide mute or channel-specific mute.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +313,118 @@ impl DomainFact for BlockKickFact {
 
     fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).expect("serialize block kick fact")
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        serde_json::from_slice(bytes).ok()
+    }
+}
+
+/// Fact representing granting steward (admin) privileges to a user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockGrantStewardFact {
+    /// Block context where steward is being granted
+    pub context_id: ContextId,
+    /// Authority being granted steward status
+    pub target_authority: AuthorityId,
+    /// Authority performing the grant (must be existing steward or owner)
+    pub actor_authority: AuthorityId,
+    /// When steward was granted
+    pub granted_at: PhysicalTime,
+}
+
+impl BlockGrantStewardFact {
+    /// Accessor for granted_at timestamp in milliseconds.
+    pub fn granted_at_ms(&self) -> u64 {
+        self.granted_at.ts_ms
+    }
+
+    /// Constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        target_authority: AuthorityId,
+        actor_authority: AuthorityId,
+        granted_at_ms: u64,
+    ) -> Self {
+        Self {
+            context_id,
+            target_authority,
+            actor_authority,
+            granted_at: PhysicalTime {
+                ts_ms: granted_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+}
+
+impl DomainFact for BlockGrantStewardFact {
+    fn type_id(&self) -> &'static str {
+        BLOCK_GRANT_STEWARD_FACT_TYPE_ID
+    }
+
+    fn context_id(&self) -> ContextId {
+        self.context_id
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("serialize block grant steward fact")
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        serde_json::from_slice(bytes).ok()
+    }
+}
+
+/// Fact representing revoking steward (admin) privileges from a user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockRevokeStewardFact {
+    /// Block context where steward is being revoked
+    pub context_id: ContextId,
+    /// Authority having steward status revoked
+    pub target_authority: AuthorityId,
+    /// Authority performing the revocation (must be existing steward or owner)
+    pub actor_authority: AuthorityId,
+    /// When steward was revoked
+    pub revoked_at: PhysicalTime,
+}
+
+impl BlockRevokeStewardFact {
+    /// Accessor for revoked_at timestamp in milliseconds.
+    pub fn revoked_at_ms(&self) -> u64 {
+        self.revoked_at.ts_ms
+    }
+
+    /// Constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        target_authority: AuthorityId,
+        actor_authority: AuthorityId,
+        revoked_at_ms: u64,
+    ) -> Self {
+        Self {
+            context_id,
+            target_authority,
+            actor_authority,
+            revoked_at: PhysicalTime {
+                ts_ms: revoked_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+}
+
+impl DomainFact for BlockRevokeStewardFact {
+    fn type_id(&self) -> &'static str {
+        BLOCK_REVOKE_STEWARD_FACT_TYPE_ID
+    }
+
+    fn context_id(&self) -> ContextId {
+        self.context_id
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("serialize block revoke steward fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {

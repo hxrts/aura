@@ -122,17 +122,18 @@ pub fn footer_content(element: AnyElement<'static>, height: u16) -> FooterConten
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::layout::dim;
 
     #[test]
     fn test_max_dimensions() {
-        assert_eq!(NavContent::max_width(), 80);
-        assert_eq!(NavContent::max_height(), 3);
+        assert_eq!(NavContent::max_width(), dim::TOTAL_WIDTH);
+        assert_eq!(NavContent::max_height(), dim::NAV_HEIGHT);
 
-        assert_eq!(MiddleContent::max_width(), 80);
-        assert_eq!(MiddleContent::max_height(), 25);
+        assert_eq!(MiddleContent::max_width(), dim::TOTAL_WIDTH);
+        assert_eq!(MiddleContent::max_height(), dim::MIDDLE_HEIGHT);
 
-        assert_eq!(FooterContent::max_width(), 80);
-        assert_eq!(FooterContent::max_height(), 3);
+        assert_eq!(FooterContent::max_width(), dim::TOTAL_WIDTH);
+        assert_eq!(FooterContent::max_height(), dim::FOOTER_HEIGHT);
     }
 
     #[test]
@@ -141,15 +142,15 @@ mod tests {
         let content = MiddleContent::new(element, 10);
 
         assert_eq!(content.height_used(), 10);
-        assert_eq!(content.remaining_height(), 15); // 25 - 10
+        assert_eq!(content.remaining_height(), dim::MIDDLE_HEIGHT - 10);
     }
 
     #[test]
     fn test_full_content() {
-        let element = element! { View(width: 80, height: 25) }.into_any();
+        let element = element! { View(width: 80, height: dim::MIDDLE_HEIGHT) }.into_any();
         let content = MiddleContent::full(element);
 
-        assert_eq!(content.height_used(), 25);
+        assert_eq!(content.height_used(), dim::MIDDLE_HEIGHT);
         assert_eq!(content.remaining_height(), 0);
     }
 
@@ -158,7 +159,7 @@ mod tests {
     #[cfg(debug_assertions)]
     fn test_overflow_detection() {
         let element = element! { View(width: 80, height: 30) }.into_any();
-        // This should panic in debug mode - height 30 > MIDDLE_HEIGHT 25
+        // This should panic in debug mode - height 30 > MIDDLE_HEIGHT
         let _ = MiddleContent::new(element, 30);
     }
 }

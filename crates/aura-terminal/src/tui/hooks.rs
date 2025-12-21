@@ -60,7 +60,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aura_app::signal_defs::{AppError, ERROR_SIGNAL};
+use aura_app::signal_defs::ERROR_SIGNAL;
+use aura_app::AppError;
 use aura_app::{ReactiveState, ReactiveVec};
 use aura_core::effects::reactive::{ReactiveEffects, ReactiveError, Signal};
 use aura_effects::ReactiveHandler;
@@ -168,7 +169,6 @@ impl AppCoreContext {
         self.io_context.add_info_toast(id, message).await;
     }
 }
-
 
 // =============================================================================
 // Signal Subscription Helpers
@@ -280,7 +280,7 @@ async fn maybe_emit_reactive_error(
 
     *last_emitted = Some(message.clone());
     let _ = reactive
-        .emit(&*ERROR_SIGNAL, Some(AppError::new("tui:reactive", message)))
+        .emit(&*ERROR_SIGNAL, Some(AppError::internal("tui:reactive", message)))
         .await;
 }
 
@@ -291,7 +291,10 @@ fn format_reactive_error(err: &ReactiveError) -> String {
             id,
             expected,
             actual,
-        } => format!("type mismatch ({}): expected {}, got {}", id, expected, actual),
+        } => format!(
+            "type mismatch ({}): expected {}, got {}",
+            id, expected, actual
+        ),
         ReactiveError::SubscriptionClosed { id } => format!("subscription closed: {}", id),
         ReactiveError::EmissionFailed { id, reason } => {
             format!("emission failed ({}): {}", id, reason)

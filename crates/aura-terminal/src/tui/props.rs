@@ -60,7 +60,10 @@ pub fn extract_block_view_props(state: &TuiState) -> BlockViewProps {
         input_buffer: state.block.input_buffer.clone(),
         // Modal visibility from queue, selection from view state (used for navigation)
         invite_modal_open: state.is_block_invite_modal_active(),
-        invite_selection: state.block.invite_selection,
+        invite_selection: match state.modal_queue.current() {
+            Some(QueuedModal::BlockInvite(s)) => s.selected_index,
+            _ => 0,
+        },
     }
 }
 
@@ -601,10 +604,11 @@ mod tests {
         state.block.input_buffer = "hello".to_string();
         state.block.selected_resident = 3;
         // Use queue for modal visibility
-        state
-            .modal_queue
-            .enqueue(QueuedModal::BlockInvite(ContactSelectModalState::default()));
-        state.block.invite_selection = 2;
+        state.modal_queue.enqueue(QueuedModal::BlockInvite({
+            let mut m = ContactSelectModalState::default();
+            m.selected_index = 2;
+            m
+        }));
 
         let props = extract_block_view_props(&state);
 

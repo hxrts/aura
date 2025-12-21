@@ -60,10 +60,9 @@ impl AgentRuntimeBridge {
         &self,
     ) -> Result<Option<(String, StoredAccountConfig)>, IntentError> {
         let effects = self.agent.runtime().effects();
-        let effects_guard = effects.read().await;
 
         for key in ACCOUNT_CONFIG_KEYS {
-            let bytes = effects_guard
+            let bytes = effects
                 .retrieve(key)
                 .await
                 .map_err(|e| IntentError::storage_error(format!("Failed to read {key}: {e}")))?;
@@ -99,8 +98,7 @@ impl AgentRuntimeBridge {
             .map_err(|e| IntentError::internal_error(format!("Failed to serialize {key}: {e}")))?;
 
         let effects = self.agent.runtime().effects();
-        let effects_guard = effects.read().await;
-        effects_guard
+        effects
             .store(key, content.into_bytes())
             .await
             .map_err(|e| IntentError::storage_error(format!("Failed to write {key}: {e}")))?;
@@ -130,10 +128,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Get the effect system
         let effects = self.agent.runtime().effects();
-        let effects_guard = effects.read().await;
 
         // Get the current journal
-        let mut journal = effects_guard
+        let mut journal = effects
             .get_journal()
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to get journal: {}", e)))?;
@@ -154,7 +151,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         // Persist the updated journal
-        effects_guard.persist_journal(&journal).await.map_err(|e| {
+        effects.persist_journal(&journal).await.map_err(|e| {
             IntentError::internal_error(format!("Failed to persist journal: {}", e))
         })?;
 
@@ -191,6 +188,26 @@ impl RuntimeBridge for AgentRuntimeBridge {
             // The sync service runs continuously in the background
             // Triggering a manual sync would be a new feature
             Ok(())
+        } else {
+            Err(IntentError::no_agent("Sync service not available"))
+        }
+    }
+
+    async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
+        if let Some(sync) = self.agent.runtime().sync() {
+            // Parse peer_id into DeviceId
+            let device_id: DeviceId = peer_id.into();
+
+            // Create a single-element vector for the target peer
+            let peers = vec![device_id];
+
+            // Get the effects from agent runtime
+            let effects = self.agent.runtime().effects();
+
+            // Sync with the specific peer
+            sync.sync_with_peers(&*effects, peers)
+                .await
+                .map_err(|e| IntentError::internal_error(format!("Sync failed: {}", e)))
         } else {
             Err(IntentError::no_agent("Sync service not available"))
         }
@@ -244,8 +261,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     authority_id: peer.authority_id,
                     address: peer.source_addr.to_string(),
                     discovered_at_ms: peer.discovered_at_ms,
-                    // RendezvousDescriptor doesn't have display_name; use None for now
-                    display_name: None,
+                    display_name: peer.descriptor.display_name.clone(),
                 })
                 .collect()
         } else {
@@ -271,7 +287,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn sign_tree_op(&self, op: &TreeOp) -> Result<AttestedOp, IntentError> {
         let authority = self.agent.authority_id();
-        let signing_service = self.agent.threshold_signing().await;
+        let signing_service = self.agent.threshold_signing();
 
         // Create signing context for self-operation
         let context = SigningContext::self_tree_op(authority, op.clone());
@@ -292,7 +308,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn bootstrap_signing_keys(&self) -> Result<Vec<u8>, IntentError> {
         let authority = self.agent.authority_id();
-        let signing_service = self.agent.threshold_signing().await;
+        let signing_service = self.agent.threshold_signing();
 
         // Bootstrap 1-of-1 keys for single-device operation
         let public_key_package = signing_service
@@ -307,19 +323,19 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn get_threshold_config(&self) -> Option<ThresholdConfig> {
         let authority = self.agent.authority_id();
-        let signing_service = self.agent.threshold_signing().await;
+        let signing_service = self.agent.threshold_signing();
         signing_service.threshold_config(&authority).await
     }
 
     async fn has_signing_capability(&self) -> bool {
         let authority = self.agent.authority_id();
-        let signing_service = self.agent.threshold_signing().await;
+        let signing_service = self.agent.threshold_signing();
         signing_service.has_signing_capability(&authority).await
     }
 
     async fn get_public_key_package(&self) -> Option<Vec<u8>> {
         let authority = self.agent.authority_id();
-        let signing_service = self.agent.threshold_signing().await;
+        let signing_service = self.agent.threshold_signing();
         signing_service.public_key_package(&authority).await
     }
 
@@ -327,7 +343,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         context: SigningContext,
     ) -> Result<ThresholdSignature, IntentError> {
-        let signing_service = self.agent.threshold_signing().await;
+        let signing_service = self.agent.threshold_signing();
         signing_service
             .sign(context)
             .await
@@ -341,7 +357,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         guardian_ids: &[String],
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
         let authority = self.agent.authority_id();
-        let signing_service = self.agent.threshold_signing().await;
+        let signing_service = self.agent.threshold_signing();
 
         // Rotate keys to a new threshold configuration
         // The service returns (new_epoch, key_packages, public_key_bytes)
@@ -356,7 +372,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn commit_guardian_key_rotation(&self, new_epoch: u64) -> Result<(), IntentError> {
         let authority = self.agent.authority_id();
-        let signing_service = self.agent.threshold_signing().await;
+        let signing_service = self.agent.threshold_signing();
 
         signing_service
             .commit_key_rotation(&authority, new_epoch)
@@ -368,7 +384,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn rollback_guardian_key_rotation(&self, failed_epoch: u64) -> Result<(), IntentError> {
         let authority = self.agent.authority_id();
-        let signing_service = self.agent.threshold_signing().await;
+        let signing_service = self.agent.threshold_signing();
 
         signing_service
             .rollback_key_rotation(&authority, failed_epoch)
@@ -422,7 +438,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Step 4: Send guardian invitations with key packages
         // This routes through the proper aura-recovery protocol
-        let recovery_service = self.agent.recovery().await.map_err(|e| {
+        let recovery_service = self.agent.recovery().map_err(|e| {
             IntentError::service_error(format!("Recovery service unavailable: {}", e))
         })?;
 
@@ -478,10 +494,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
             accepted_count: state.accepted_guardians.len() as u16,
             total_count: state.total_n,
             threshold: state.threshold_k,
-            is_complete: state.accepted_guardians.len() >= state.threshold_k as usize,
+            is_complete: state.is_committed,
             has_failed: state.has_failed,
             accepted_guardians: state.accepted_guardians.clone(),
             error_message: state.error_message.clone(),
+            pending_epoch: Some(state.new_epoch),
         })
     }
 
@@ -491,7 +508,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn export_invitation(&self, invitation_id: &str) -> Result<String, IntentError> {
         // Get the invitation service from the agent
-        let invitation_service = self.agent.invitations().await.map_err(|e| {
+        let invitation_service = self.agent.invitations().map_err(|e| {
             IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
@@ -509,7 +526,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
-        let invitation_service = self.agent.invitations().await.map_err(|e| {
+        let invitation_service = self.agent.invitations().map_err(|e| {
             IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
@@ -530,7 +547,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
-        let invitation_service = self.agent.invitations().await.map_err(|e| {
+        let invitation_service = self.agent.invitations().map_err(|e| {
             IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
@@ -551,7 +568,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
-        let invitation_service = self.agent.invitations().await.map_err(|e| {
+        let invitation_service = self.agent.invitations().map_err(|e| {
             IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
@@ -566,7 +583,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn accept_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
-        let invitation_service = self.agent.invitations().await.map_err(|e| {
+        let invitation_service = self.agent.invitations().map_err(|e| {
             IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
@@ -587,7 +604,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
-        let invitation_service = self.agent.invitations().await.map_err(|e| {
+        let invitation_service = self.agent.invitations().map_err(|e| {
             IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
@@ -608,7 +625,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
-        let invitation_service = self.agent.invitations().await.map_err(|e| {
+        let invitation_service = self.agent.invitations().map_err(|e| {
             IntentError::service_error(format!("Invitation service unavailable: {}", e))
         })?;
 
@@ -629,7 +646,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn list_pending_invitations(&self) -> Vec<InvitationInfo> {
-        if let Ok(invitation_service) = self.agent.invitations().await {
+        if let Ok(invitation_service) = self.agent.invitations() {
             invitation_service
                 .list_pending()
                 .await
@@ -662,7 +679,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn get_invited_peer_ids(&self) -> Vec<String> {
         // Get pending invitations where we are the sender
-        if let Ok(invitation_service) = self.agent.invitations().await {
+        if let Ok(invitation_service) = self.agent.invitations() {
             let our_authority = self.agent.authority_id();
             invitation_service
                 .list_pending()
@@ -689,7 +706,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
 
         // Get contact count from invitations (accepted contact invitations)
-        let contact_count = if let Ok(service) = self.agent.invitations().await {
+        let contact_count = if let Ok(service) = self.agent.invitations() {
             service
                 .list_pending()
                 .await
@@ -803,7 +820,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn is_authenticated(&self) -> bool {
-        if let Ok(auth_service) = self.agent.auth().await {
+        if let Ok(auth_service) = self.agent.auth() {
             auth_service.is_authenticated().await
         } else {
             false

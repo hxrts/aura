@@ -459,8 +459,8 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         &self,
         authority_id: &AuthorityId,
     ) -> RecoveryResult<GuardianState> {
-        // Get current configuration from threshold signing service
-        if let Some(config) = self.effects.threshold_config(authority_id).await {
+        // Get full threshold state from the signing service
+        if let Some(state) = self.effects.threshold_state(authority_id).await {
             let public_key = self
                 .effects
                 .public_key_package(authority_id)
@@ -468,13 +468,17 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
                 .unwrap_or_default();
             let public_key_hash = Hash32(hash::hash(&public_key));
 
-            // Note: ThresholdConfig only contains threshold and total_participants
-            // The epoch and guardian IDs come from elsewhere (signing context)
-            // For now, we use the public key hash to detect state changes
+            // Parse guardian ID strings back to AuthorityIds
+            let guardian_ids: Vec<AuthorityId> = state
+                .guardian_ids
+                .iter()
+                .filter_map(|s| s.parse::<AuthorityId>().ok())
+                .collect();
+
             Ok(GuardianState {
-                epoch: 0, // Will be updated when signing context is available
-                threshold_k: config.threshold,
-                guardian_ids: Vec::new(), // Will be populated from signing context
+                epoch: state.epoch,
+                threshold_k: state.threshold,
+                guardian_ids,
                 public_key_hash,
             })
         } else {

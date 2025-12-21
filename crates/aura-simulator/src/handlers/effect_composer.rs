@@ -12,10 +12,9 @@ use super::{
     SimulationTimeHandler,
 };
 use crate::quint::itf_fuzzer::{ITFBasedFuzzer, ITFFuzzConfig, ITFTrace};
-use aura_agent::{AgentBuilder, AuraEffectSystem, EffectContext};
-use aura_core::effects::{ChaosEffects, ExecutionMode, TestingEffects, TransportEnvelope};
-use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_agent::AuraEffectSystem;
+use aura_core::effects::{ChaosEffects, TestingEffects, TransportEnvelope};
+use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -28,6 +27,7 @@ use tracing::info;
 /// simulation effects while respecting the 8-layer architecture.
 pub struct SimulationEffectComposer {
     device_id: DeviceId,
+    authority_id: Option<AuthorityId>,
     effect_system: Option<Arc<AuraEffectSystem>>,
     time_handler: Option<Arc<SimulationTimeHandler>>,
     fault_handler: Option<Arc<SimulationFaultHandler>>,
@@ -43,6 +43,7 @@ impl SimulationEffectComposer {
     pub fn new(device_id: DeviceId) -> Self {
         Self {
             device_id,
+            authority_id: None,
             effect_system: None,
             time_handler: None,
             fault_handler: None,
@@ -59,6 +60,12 @@ impl SimulationEffectComposer {
         self
     }
 
+    /// Set the authority ID used for routing and authority-scoped effects
+    pub fn with_authority(mut self, authority_id: AuthorityId) -> Self {
+        self.authority_id = Some(authority_id);
+        self
+    }
+
     /// Set the shared transport inbox for multi-agent communication
     pub fn with_shared_transport_inbox(
         mut self,
@@ -67,48 +74,47 @@ impl SimulationEffectComposer {
         self.shared_transport_inbox = Some(inbox);
         self
     }
-
     /// Add core effect system using agent runtime (async version for use within tokio runtime)
     pub async fn with_effect_system_async(mut self) -> Result<Self, SimulationComposerError> {
-        let seed_bytes = self.seed.to_le_bytes();
-        let authority_id = AuthorityId::new_from_entropy(hash(&seed_bytes));
-        let context_seed = [seed_bytes.as_ref(), b"ctx".as_ref()].concat();
-        let context_id = ContextId::new_from_entropy(hash(&context_seed));
-        let ctx = EffectContext::new(
-            authority_id,
-            context_id,
-            ExecutionMode::Simulation { seed: self.seed },
-        );
-        let _agent = AgentBuilder::new()
-            .with_authority(authority_id)
-            .build_simulation_async(self.seed, &ctx)
-            .await
-            .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
-        let config = aura_agent::core::AgentConfig::default();
+        let authority_id = self
+            .authority_id
+            .unwrap_or_else(|| AuthorityId::from_uuid(self.device_id.0));
 
-        // Use shared transport inbox if provided, otherwise use standard testing mode
+        let config = aura_agent::core::AgentConfig {
+            device_id: self.device_id,
+            ..aura_agent::core::AgentConfig::default()
+        };
+
         let effect_system = if let Some(inbox) = self.shared_transport_inbox.clone() {
-            AuraEffectSystem::simulation_with_shared_transport(&config, self.seed, inbox)
-                .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?
+            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+                &config,
+                self.seed,
+                authority_id,
+                inbox,
+            )
+            .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?
         } else {
-            AuraEffectSystem::testing(&config)
+            AuraEffectSystem::simulation_for_authority(&config, self.seed, authority_id)
                 .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?
         };
 
         self.effect_system = Some(Arc::new(effect_system));
         Ok(self)
     }
-
     /// Add core effect system using agent runtime (sync version - only use outside tokio runtime)
     pub fn with_effect_system(mut self) -> Result<Self, SimulationComposerError> {
-        let authority_id = AuthorityId::new_from_entropy(hash(&self.seed.to_le_bytes()));
-        let _agent = AgentBuilder::new()
-            .with_authority(authority_id)
-            .build_testing()
-            .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
-        let config = aura_agent::core::AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config)
-            .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
+        let authority_id = self
+            .authority_id
+            .unwrap_or_else(|| AuthorityId::from_uuid(self.device_id.0));
+
+        let config = aura_agent::core::AgentConfig {
+            device_id: self.device_id,
+            ..aura_agent::core::AgentConfig::default()
+        };
+
+        let effect_system =
+            AuraEffectSystem::simulation_for_authority(&config, self.seed, authority_id)
+                .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
         self.effect_system = Some(Arc::new(effect_system));
         Ok(self)
     }

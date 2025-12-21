@@ -82,8 +82,8 @@ impl TestAgent {
         let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
         let initialized_app_core = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("Failed to init signals");
+            .await
+            .expect("Failed to init signals");
 
         let ctx = IoContext::with_account_status(
             initialized_app_core.clone(),
@@ -104,8 +104,7 @@ impl TestAgent {
     /// Create account for this agent and set authority on AppCore
     async fn create_account_with_authority(&self) -> Result<AuthorityId, String> {
         // Create the account
-        self
-            .ctx
+        self.ctx
             .create_account(&self.name)
             .await
             .map_err(|e| format!("Failed to create account for {}: {:?}", self.name, e))?;
@@ -132,8 +131,7 @@ impl TestAgent {
 
     /// Create account for this agent (legacy method without authority)
     async fn create_account(&self) -> Result<(), String> {
-        self
-            .ctx
+        self.ctx
             .create_account(&self.name)
             .await
             .map_err(|e| format!("Failed to create account for {}: {:?}", self.name, e))

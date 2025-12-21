@@ -1,7 +1,7 @@
 //! Modal overlay that renders in the middle region.
 //!
 //! Modals are rendered with absolute positioning to overlay the screen content.
-//! They occupy exactly the middle region (80×25).
+//! They occupy exactly the middle region (80×MIDDLE_HEIGHT).
 
 use super::compositor::Rect;
 use super::dim;
@@ -24,9 +24,9 @@ pub struct SimpleModalProps<'a> {
 /// Layout:
 /// - Title bar (1 row)
 /// - Separator (1 row)
-/// - Content area (23 rows)
+/// - Content area (MIDDLE_HEIGHT - 2 rows)
 ///
-/// Total: 25 rows = MIDDLE_HEIGHT
+/// Total: MIDDLE_HEIGHT rows
 #[component]
 pub fn SimpleModal<'a>(props: &SimpleModalProps<'a>) -> impl Into<AnyElement<'a>> {
     let close_hint = if props.show_close_hint {
@@ -158,16 +158,16 @@ mod tests {
     #[test]
     fn test_modal_dimensions() {
         // Modal should be exactly 25 rows (MIDDLE_HEIGHT)
-        assert_eq!(dim::MIDDLE_HEIGHT, 25);
+        assert_eq!(dim::MIDDLE_HEIGHT, super::dim::MIDDLE_HEIGHT);
     }
 
     #[test]
     fn test_modal_rect() {
-        let middle = Rect::new(10, 5, 80, 25);
+        let middle = Rect::new(10, 5, dim::TOTAL_WIDTH, dim::MIDDLE_HEIGHT);
         let modal = modal_rect(&middle);
         assert_eq!(modal.x, 10);
         assert_eq!(modal.y, 5);
-        assert_eq!(modal.width, 80);
-        assert_eq!(modal.height, 25);
+        assert_eq!(modal.width, dim::TOTAL_WIDTH);
+        assert_eq!(modal.height, dim::MIDDLE_HEIGHT);
     }
 }

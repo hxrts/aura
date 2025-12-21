@@ -4,7 +4,8 @@
 //! while keeping device-local details derived internally.
 
 use aura_core::effects::PhysicalTimeEffects;
-use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+use aura_core::hash::hash;
+use aura_core::identifiers::{AccountId, AuthorityId, ContextId, SessionId};
 use std::collections::HashMap;
 
 /// Authority-first context for agent operations
@@ -15,6 +16,9 @@ use std::collections::HashMap;
 pub struct AuthorityContext {
     /// The authority this agent represents
     pub authority_id: AuthorityId,
+
+    /// Cached account ID derived from authority (computed once at construction)
+    pub account_id: AccountId,
 
     /// Active relational contexts for this authority
     pub active_contexts: HashMap<ContextId, RelationalContext>,
@@ -59,8 +63,12 @@ impl AuthorityContext {
         // Derive device_id internally from authority (1:1 mapping for single-device authorities)
         let device_id = aura_core::identifiers::DeviceId(authority_id.0);
 
+        // Compute account_id once at construction (cached for all service calls)
+        let account_id = AccountId::new_from_entropy(hash(&authority_id.to_bytes()));
+
         Self {
             authority_id,
+            account_id,
             active_contexts: HashMap::new(),
             session_id: None,
             device_id,

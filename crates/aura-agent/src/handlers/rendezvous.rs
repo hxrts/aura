@@ -450,7 +450,6 @@ mod tests {
 
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let effects_guard = effects.read().await;
 
         let context_id = ContextId::new_from_entropy([151u8; 32]);
         let result = handler
@@ -488,6 +487,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
+            display_name: None,
         };
 
         handler.cache_peer_descriptor(descriptor.clone()).await;
@@ -504,7 +504,6 @@ mod tests {
 
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let effects_guard = effects.read().await;
 
         let context_id = ContextId::new_from_entropy([154u8; 32]);
         let peer = AuthorityId::new_from_entropy([55u8; 32]);
@@ -520,6 +519,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
+            display_name: None,
         };
         handler.cache_peer_descriptor(descriptor).await;
 
@@ -541,7 +541,6 @@ mod tests {
 
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let effects_guard = effects.read().await;
 
         let context_id = ContextId::new_from_entropy([156u8; 32]);
         let peer = AuthorityId::new_from_entropy([57u8; 32]);

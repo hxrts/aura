@@ -8,20 +8,19 @@ use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::{AccountId, DeviceId};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Authentication service
 ///
 /// Provides authentication operations through a clean public API.
 pub struct AuthService {
     handler: AuthHandler,
-    effects: Arc<RwLock<AuraEffectSystem>>,
+    effects: Arc<AuraEffectSystem>,
 }
 
 impl AuthService {
     /// Create a new authentication service
     pub fn new(
-        effects: Arc<RwLock<AuraEffectSystem>>,
+        effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         _account_id: AccountId,
     ) -> AgentResult<Self> {
@@ -34,8 +33,7 @@ impl AuthService {
     /// # Returns
     /// An `AuthChallenge` that must be signed by the authenticating party
     pub async fn create_challenge(&self) -> AgentResult<AuthChallenge> {
-        let effects = self.effects.read().await;
-        self.handler.create_challenge(&effects).await
+        self.handler.create_challenge(&self.effects).await
     }
 
     /// Verify an authentication response
@@ -46,8 +44,7 @@ impl AuthService {
     /// # Returns
     /// An `AuthResult` indicating whether authentication succeeded
     pub async fn verify(&self, response: &AuthResponse) -> AgentResult<AuthResult> {
-        let effects = self.effects.read().await;
-        self.handler.verify_response(&effects, response).await
+        self.handler.verify_response(&self.effects, response).await
     }
 
     /// Authenticate using device key (convenience method)
@@ -58,16 +55,15 @@ impl AuthService {
     /// # Returns
     /// An `AuthResult` indicating whether authentication succeeded
     pub async fn authenticate_with_device_key(&self) -> AgentResult<AuthResult> {
-        let effects = self.effects.read().await;
 
         // Create challenge
-        let challenge = self.handler.create_challenge(&effects).await?;
+        let challenge = self.handler.create_challenge(&self.effects).await?;
 
         // Sign with device key
-        let response = self.handler.sign_challenge(&effects, &challenge).await?;
+        let response = self.handler.sign_challenge(&self.effects, &challenge).await?;
 
         // Verify the response
-        self.handler.verify_response(&effects, &response).await
+        self.handler.verify_response(&self.effects, &response).await
     }
 
     /// Check if the agent is authenticated
@@ -77,8 +73,7 @@ impl AuthService {
     /// # Returns
     /// `true` if authentication passes, `false` otherwise
     pub async fn is_authenticated(&self) -> bool {
-        let effects = self.effects.read().await;
-        self.handler.authenticate(&effects).await.is_ok()
+        self.handler.authenticate(&self.effects).await.is_ok()
     }
 
     /// Get the device ID for this authentication service

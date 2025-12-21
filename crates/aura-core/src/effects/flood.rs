@@ -441,8 +441,17 @@ pub trait RendezvousFlooder: Send + Sync {
     /// The action to take (Accept, Forward, or Drop)
     async fn receive(&self, packet: RendezvousPacket, from: AuthorityId) -> FloodAction;
 
-    /// Get the current flood budget.
-    fn budget(&self) -> &FloodBudget;
+    /// Get a snapshot of the current flood budget.
+    ///
+    /// Returns an owned copy of the budget for async-safe access.
+    /// This is designed for use with async locks where returning a reference
+    /// would require holding a lock across await points.
+    async fn budget(&self) -> FloodBudget;
+
+    /// Update the flood budget.
+    ///
+    /// Used to record operations (originate/forward) or to reset budget on epoch rotation.
+    async fn update_budget(&self, budget: FloodBudget);
 }
 
 /// Blanket implementation for Arc<T> where T: RendezvousFlooder
@@ -456,8 +465,12 @@ impl<T: RendezvousFlooder + ?Sized> RendezvousFlooder for std::sync::Arc<T> {
         (**self).receive(packet, from).await
     }
 
-    fn budget(&self) -> &FloodBudget {
-        (**self).budget()
+    async fn budget(&self) -> FloodBudget {
+        (**self).budget().await
+    }
+
+    async fn update_budget(&self, budget: FloodBudget) {
+        (**self).update_budget(budget).await
     }
 }
 

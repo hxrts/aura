@@ -93,7 +93,7 @@ pub use reduction::{
     reduce_authority, reduce_context, ChannelEpochState, ReductionNamespaceError, RelationalState,
 };
 // Primary Journal API (STABLE)
-pub use journal_api::{AccountSummary, Journal, JournalFact};
+pub use journal_api::{AccountSummary, CommittedFact, Journal, JournalFact};
 
 // CRDT Implementation Details (INTERNAL - subject to change without notice)
 #[doc(hidden)]

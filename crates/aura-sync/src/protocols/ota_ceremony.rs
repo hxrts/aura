@@ -42,8 +42,8 @@ use aura_core::domain::FactValue;
 use aura_core::effects::{
     JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects, TimeEffects,
 };
-use aura_core::threshold::ThresholdSignature;
-use aura_core::{AuraError, AuraResult, DeviceId, Epoch, Hash32, SemanticVersion};
+use aura_core::threshold::{SigningContext, ThresholdSignature};
+use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Epoch, Hash32, SemanticVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -158,13 +158,22 @@ pub struct ReadinessCommitment {
     pub ceremony_id: OTACeremonyId,
     /// Device making the commitment
     pub device: DeviceId,
+    /// Authority whose keys signed this commitment
+    ///
+    /// This is the device's authority - used for threshold signing.
+    /// A device with 1-of-1 authority uses single-signer Ed25519.
+    /// A device with m-of-n authority uses FROST threshold signing.
+    pub authority: AuthorityId,
     /// Prestate hash at time of commitment
     pub prestate_hash: Hash32,
     /// Whether device is ready
     pub ready: bool,
     /// Reason if not ready
     pub reason: Option<String>,
-    /// Signature over the commitment
+    /// Threshold signature over the commitment
+    ///
+    /// Created via `ThresholdSigningEffects::sign()` with `SigningContext::ota_activation()`.
+    /// This provides cryptographic proof that the device's authority approved the activation.
     pub signature: ThresholdSignature,
     /// Timestamp of commitment
     pub committed_at_ms: u64,
@@ -576,7 +585,12 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             ceremony.status = OTACeremonyStatus::Committed;
         }
 
-        // Create threshold signature (placeholder for now)
+        // NOTE: True FROST threshold signing requires architectural changes:
+        // - OTA ceremony currently tracks DeviceId, but signing requires AuthorityId
+        // - Each device would need to create a FROST signature share, not just agree
+        // - A coordinator would aggregate shares into a single FROST signature
+        // For now, we bundle individual device signatures as proof of M-of-N agreement.
+        // This provides cryptographic proof that each device approved, just not aggregated.
         let threshold_signature = self.create_activation_signature(ceremony_id).await?;
 
         // Emit committed fact
@@ -628,10 +642,15 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     // =========================================================================
 
     /// Create a readiness commitment for a ceremony.
+    ///
+    /// This creates a cryptographically signed commitment using the device's authority keys.
+    /// For 1-of-1 authorities, this uses single-signer Ed25519.
+    /// For m-of-n authorities, this uses FROST threshold signing.
     pub async fn create_readiness_commitment(
         &self,
         ceremony_id: OTACeremonyId,
         device: DeviceId,
+        authority: AuthorityId,
         ready: bool,
         reason: Option<String>,
     ) -> AuraResult<ReadinessCommitment> {
@@ -639,16 +658,32 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         let prestate_hash = self.compute_prestate_hash().await?;
         let committed_at_ms = self.effects.current_timestamp_ms().await;
 
-        // Create signature (placeholder)
-        let signature = ThresholdSignature::single_signer(
-            vec![0u8; 64], // Placeholder signature
-            vec![0u8; 32], // Placeholder public key
-            0,             // Epoch 0
+        // Get the upgrade hash from the ceremony
+        let ceremony = self
+            .ceremonies
+            .get(&ceremony_id)
+            .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
+
+        let upgrade_hash = ceremony.proposal.compute_hash();
+
+        // Create signing context for OTA activation
+        let signing_context = SigningContext::ota_activation(
+            authority.clone(),
+            ceremony_id.0 .0, // [u8; 32] from OTACeremonyId
+            upgrade_hash.0,   // [u8; 32] from Hash32
+            prestate_hash.0,  // [u8; 32] from Hash32
+            ceremony.proposal.activation_epoch,
+            ready,
         );
+
+        // Sign using threshold signing effects
+        // This automatically uses FROST for m-of-n or Ed25519 for 1-of-1
+        let signature = self.effects.sign(signing_context).await?;
 
         Ok(ReadinessCommitment {
             ceremony_id,
             device,
+            authority,
             prestate_hash,
             ready,
             reason,
@@ -669,39 +704,63 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         Ok(Hash32::from_bytes(&journal_bytes))
     }
 
-    /// Create threshold signature for activation by aggregating ready device signatures.
+    /// Create aggregated signature bundle for activation.
     ///
-    /// The activation signature aggregates the threshold signatures from all ready
-    /// devices in the ceremony, representing M-of-N consensus for the hard fork
-    /// activation.
+    /// This bundles the threshold signatures from all ready devices, providing
+    /// cryptographic proof of M-of-N device consensus for the hard fork activation.
+    ///
+    /// ## Signature Structure
+    ///
+    /// Each device's `ReadinessCommitment` contains a `ThresholdSignature` created via
+    /// `ThresholdSigningEffects::sign()` with `SigningContext::ota_activation()`.
+    ///
+    /// - For 1-of-1 authorities: Single Ed25519 signature over the commitment
+    /// - For m-of-n authorities: FROST aggregated signature from device's threshold setup
+    ///
+    /// The activation bundle aggregates these individual authority signatures into a
+    /// single verifiable proof that M-of-N devices approved the hard fork.
+    ///
+    /// ## Bundle Format
+    ///
+    /// ```text
+    /// ceremony_id (32 bytes) || device_count (2 bytes) || [
+    ///     authority_id (32 bytes) || signature_len (2 bytes) || signature_bytes...
+    /// ] for each ready device
+    /// ```
     async fn create_activation_signature(&self, ceremony_id: OTACeremonyId) -> AuraResult<Vec<u8>> {
         let ceremony = self
             .ceremonies
             .get(&ceremony_id)
             .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
 
-        // Collect signatures from ready commitments
-        let ready_signatures: Vec<&ThresholdSignature> = ceremony
-            .commitments
-            .values()
-            .filter(|c| c.ready)
-            .map(|c| &c.signature)
-            .collect();
+        // Collect ready commitments with their signatures
+        let ready_commitments: Vec<&ReadinessCommitment> =
+            ceremony.commitments.values().filter(|c| c.ready).collect();
 
-        if ready_signatures.is_empty() {
+        if ready_commitments.is_empty() {
             return Err(AuraError::invalid(
                 "No ready device signatures to aggregate",
             ));
         }
 
-        // Serialize the aggregated signature bundle:
-        // - ceremony_id (32 bytes) || count (2 bytes) || [signature bytes...]
-        // This provides proof that M-of-N devices committed to this activation.
-        let mut aggregated = Vec::with_capacity(34 + ready_signatures.len() * 64);
+        // Serialize the aggregated signature bundle with authority info for verification:
+        // - ceremony_id (32 bytes)
+        // - device_count (2 bytes)
+        // - For each device:
+        //   - authority_id (32 bytes)
+        //   - signature_len (2 bytes)
+        //   - signature_bytes
+        let mut aggregated = Vec::new();
         aggregated.extend_from_slice(ceremony_id.0.as_bytes());
-        aggregated.extend_from_slice(&(ready_signatures.len() as u16).to_le_bytes());
-        for sig in ready_signatures {
-            aggregated.extend_from_slice(&sig.signature);
+        aggregated.extend_from_slice(&(ready_commitments.len() as u16).to_le_bytes());
+
+        for commitment in ready_commitments {
+            // Include authority ID so verifiers know which public key to use
+            aggregated.extend_from_slice(&commitment.authority.to_bytes());
+            // Include signature with length prefix
+            let sig_len = commitment.signature.signature.len() as u16;
+            aggregated.extend_from_slice(&sig_len.to_le_bytes());
+            aggregated.extend_from_slice(&commitment.signature.signature);
         }
 
         Ok(aggregated)
@@ -894,6 +953,10 @@ mod tests {
         Hash32([2u8; 32])
     }
 
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
     #[test]
     fn test_ceremony_id_determinism() {
         let id1 = OTACeremonyId::new(&test_prestate(), &test_upgrade_hash(), 12345);
@@ -965,6 +1028,7 @@ mod tests {
             ReadinessCommitment {
                 ceremony_id: state.ceremony_id,
                 device: DeviceId::from_bytes([2; 32]),
+                authority: test_authority(2),
                 prestate_hash: test_prestate(),
                 ready: true,
                 reason: None,
@@ -981,6 +1045,7 @@ mod tests {
             ReadinessCommitment {
                 ceremony_id: state.ceremony_id,
                 device: DeviceId::from_bytes([3; 32]),
+                authority: test_authority(3),
                 prestate_hash: test_prestate(),
                 ready: true,
                 reason: None,
@@ -1001,6 +1066,7 @@ mod tests {
         let commitment = ReadinessCommitment {
             ceremony_id: OTACeremonyId::new(&test_prestate(), &test_upgrade_hash(), 1),
             device: DeviceId::from_bytes([42u8; 32]),
+            authority: test_authority(42),
             prestate_hash: Hash32([0u8; 32]),
             ready: true,
             reason: None,
@@ -1013,6 +1079,7 @@ mod tests {
 
         assert!(restored.ready);
         assert_eq!(restored.committed_at_ms, 12345);
+        assert_eq!(restored.authority, test_authority(42));
     }
 
     #[test]
