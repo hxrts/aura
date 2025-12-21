@@ -64,19 +64,23 @@ fn format_relative_time(ts_ms: u64) -> String {
 /// ```
 #[component]
 pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
-    // Format screen-specific hints (top row)
-    let screen_hints_text: Vec<String> = props
+    // Format screen-specific hints (top row), padded to 5 columns
+    let mut screen_hints_text: Vec<String> = props
         .hints
         .iter()
+        .take(5)
         .map(|h| format!("[{}] {}", h.key, h.description))
         .collect();
+    screen_hints_text.resize(5, String::new());
 
-    // Format global hints (bottom row)
-    let global_hints_text: Vec<String> = props
+    // Format global hints (bottom row), padded to 5 columns
+    let mut global_hints_text: Vec<String> = props
         .global_hints
         .iter()
+        .take(5)
         .map(|h| format!("[{}] {}", h.key, h.description))
         .collect();
+    global_hints_text.resize(5, String::new());
 
     // Use darker colors when disabled (insert mode active)
     let border_color = if props.disabled {
