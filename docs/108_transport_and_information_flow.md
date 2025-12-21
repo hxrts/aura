@@ -29,17 +29,20 @@ Flow budgets limit the amount of data that an authority may send within a contex
 An authority must reserve budget before sending. A reservation locks a portion of the available budget. The actual charge occurs during the guard chain. If the guard chain succeeds, a receipt is created.
 
 ```rust
+/// From aura-core/src/types/flow.rs
 pub struct Receipt {
-    pub context: ContextId,
-    pub from: AuthorityId,
-    pub to: AuthorityId,
-    pub epoch: u64,
+    pub ctx: ContextId,
+    pub src: AuthorityId,
+    pub dst: AuthorityId,
+    pub epoch: Epoch,
     pub cost: u32,
-    pub signature: Vec<u8>,
+    pub nonce: u64,
+    pub prev: Hash32,
+    pub sig: Vec<u8>,
 }
 ```
 
-This structure defines a receipt. A receipt binds a cost to a specific context and epoch. The sender signs the receipt. The recipient verifies it. Receipts support accountability in multi-hop routing.
+This structure defines a receipt. A receipt binds a cost to a specific context and epoch. The sender signs the receipt. The `nonce` ensures uniqueness and the `prev` field chains receipts for auditing. The recipient verifies the signature. Receipts support accountability in multi-hop routing.
 
 ## 4. Information Flow Budgets
 

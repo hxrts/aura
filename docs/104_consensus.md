@@ -99,24 +99,37 @@ Equivocation occurs when the same witness signs two different `rid` values under
 Consensus instances use identifiers for operations and results.
 
 ```rust
-pub struct ConsensusId(Uuid);
-pub struct ResultId(Hash32);
-```
+/// Consensus instance identifier (derived from prestate and operation)
+pub struct ConsensusId(pub Hash32);
 
-These structures identify consensus instances and their results.
-
-A commit fact contains the consensus identifier, result identifier, threshold signature, and the attester set. Attesters are recorded as `AuthorityId` values to preserve device privacy.
-
-```rust
-pub struct CommitFact {
-    cid: ConsensusId,
-    rid: ResultId,                 // H(Op, prestate)
-    threshold_signature: ThresholdSignature,
-    attester_set: BTreeSet<AuthorityId>,
+impl ConsensusId {
+    pub fn new(prestate_hash: Hash32, operation_hash: Hash32, nonce: u64) -> Self {
+        // Hash of domain separator, prestate, operation, and nonce
+    }
 }
 ```
 
-The commit fact is the output of consensus. Every peer merges `CommitFact` into its journal CRDT. A peer finalizes `(cid, rid)` when it accepts a valid threshold signature and inserts the corresponding `CommitFact`.
+This structure identifies consensus instances. The result is identified by `H(Op, prestate)` computed inline.
+
+A commit fact contains full consensus evidence including the operation, threshold signature, and participant list. Participants are recorded as `AuthorityId` values to preserve device privacy.
+
+```rust
+/// From aura-protocol/src/consensus/types.rs
+pub struct CommitFact {
+    pub consensus_id: ConsensusId,
+    pub prestate_hash: Hash32,
+    pub operation_hash: Hash32,
+    pub operation_bytes: Vec<u8>,
+    pub threshold_signature: ThresholdSignature,
+    pub group_public_key: Option<PublicKeyPackage>,
+    pub participants: Vec<AuthorityId>,
+    pub threshold: u16,
+    pub timestamp: ProvenancedTime,
+    pub fast_path: bool,
+}
+```
+
+The commit fact is the output of consensus. Every peer merges `CommitFact` into its journal CRDT. A peer finalizes when it accepts a valid threshold signature and inserts the corresponding `CommitFact`.
 
 The commit fact is inserted into the appropriate journal namespace. This includes account journals for account updates and relational context journals for cross-authority operations.
 
@@ -377,15 +390,21 @@ Consensus is also used for relational context operations. Guardian bindings use 
 Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key stored in the commitment tree. See [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) for details on the `TreeState` structure.
 
 ```rust
-pub struct WitnessShare {
-    pub cid: ConsensusId,
-    pub rid: ResultId,
-    pub share: Vec<u8>,
-    pub prestate_hash: Hash32,
+/// From aura-protocol/src/consensus/messages.rs
+pub enum ConsensusMessage {
+    SignShare {
+        consensus_id: ConsensusId,
+        share: PartialSignature,
+        /// Optional commitment for the next consensus round (pipelining optimization)
+        next_commitment: Option<NonceCommitment>,
+        /// Epoch for commitment validation
+        epoch: Epoch,
+    },
+    // ... other message variants
 }
 ```
 
-Witness shares validate only for the current consensus instance. They cannot be replayed. Witnesses generate only one share per `(cid, prestate_hash)`.
+Witness shares validate only for the current consensus instance. They cannot be replayed. Witnesses generate only one share per `(consensus_id, prestate_hash)`.
 
 The attester set in the commit fact contains only devices that contributed signing shares. This provides cryptographic proof of participation.
 
@@ -428,7 +447,7 @@ The FROST pipelining optimization improves consensus performance by bundling nex
 
 ### 12.2 Core Components
 
-**WitnessState** (`consensus/witness_state.rs`) manages persistent nonce state for each witness:
+**WitnessState** (`consensus/witness.rs`) manages persistent nonce state for each witness:
 
 ```rust
 pub struct WitnessState {
@@ -462,7 +481,7 @@ SignShare {
 }
 ```
 
-**PipelinedConsensusOrchestrator** (`consensus/frost_pipelining.rs`) orchestrates the optimization:
+**PipelinedConsensusOrchestrator** (integrated in `consensus/protocol.rs`) orchestrates the optimization:
 
 ```rust
 pub struct PipelinedConsensusOrchestrator {

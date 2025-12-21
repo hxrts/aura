@@ -305,15 +305,16 @@ This identifier enables proposal tracking during tree operations.
 `Receipt` is the accountability record emitted by `FlowGuard`. Each receipt contains `ContextId`, source `AuthorityId`, destination `AuthorityId`, epoch, cost, nonce, and chained hash plus signature.
 
 ```rust
+/// From aura-core/src/types/flow.rs
 pub struct Receipt {
-    pub context: ContextId,
+    pub ctx: ContextId,
     pub src: AuthorityId,
     pub dst: AuthorityId,
     pub epoch: Epoch,
     pub cost: u32,
     pub nonce: u64,
     pub prev: Hash32,
-    pub sig: Signature,
+    pub sig: Vec<u8>,  // Transport-level signature or MAC
 }
 ```
 

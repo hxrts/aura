@@ -19,16 +19,23 @@ This identifier selects the journal namespace for a relational context. It does 
 A relational context has a defined set of participating authorities. This set is not encoded in the `ContextId`. Participation is expressed by writing relational facts to the context journal. Each fact references the commitments of the participating authorities.
 
 ```rust
+/// Domain types in aura-core/src/relational/fact.rs
 pub enum RelationalFact {
-    GuardianBinding { account_commitment: Hash32, guardian_commitment: Hash32, parameters: Vec<u8> },
-    RecoveryGrant { account_commitment_old: Hash32, account_commitment_new: Hash32, guardian_commitment: Hash32, operation: Vec<u8> },
-    Generic { payload: Vec<u8>, bindings: Vec<Hash32> },
+    GuardianBinding(GuardianBinding),
+    RecoveryGrant(RecoveryGrant),
+    Generic(GenericBinding),
+}
+
+pub struct GenericBinding {
+    pub binding_type: String,
+    pub binding_data: Vec<u8>,
+    pub consensus_proof: Option<ConsensusProof>,
 }
 ```
 
-This fact model covers guardian configuration, recovery, and general relational operations. Each fact is self contained. Each fact carries enough information for reduction to produce relational state.
+The domain-level `RelationalFact` uses wrapper types for type safety. For protocol-level storage in journals, `aura-journal/src/fact.rs` defines a more detailed version with additional variants for AMP channel management, consensus results, and explicit authority IDs.
 
-The `Generic` variant is the extensible pattern for new fact types. Applications should use `Generic` to define context specific bindings. Do not add new enum variants to `RelationalFact` for each use case. Instead encode the operation type and schema information in the `payload` field. This design supports unbounded application extensibility without modifying the core fact model.
+The `Generic` variant is the extensible pattern for new fact types. Applications should use `Generic` to define context specific bindings. Do not add new enum variants to `RelationalFact` for each use case. Instead encode the operation type and schema information in the `binding_data` field. This design supports unbounded application extensibility without modifying the core fact model.
 
 ## 3. Prestate Model
 
@@ -114,12 +121,24 @@ Relational facts express specific cross-authority operations. A `GuardianBinding
 Reduction applies all relational facts to produce relational state. Reduction verifies that authority commitments in each fact match the current reduced state of each authority.
 
 ```rust
+/// Reduced relational state from aura-journal/src/reduction.rs
 pub struct RelationalState {
-    pub bindings: Vec<RelationalFact>,
+    /// Active relational bindings
+    pub bindings: Vec<RelationalBinding>,
+    /// Flow budget state by context
+    pub flow_budgets: BTreeMap<(AuthorityId, AuthorityId, u64), u64>,
+    /// AMP channel epoch state keyed by channel id
+    pub channel_epochs: BTreeMap<ChannelId, ChannelEpochState>,
+}
+
+pub struct RelationalBinding {
+    pub binding_type: RelationalBindingType,
+    pub context_id: ContextId,
+    pub data: Vec<u8>,
 }
 ```
 
-This structure represents the reduced relational state. It contains the relational facts relevant to the context. Reduction removes superseded relational facts when necessary.
+This structure represents the reduced relational state. It contains relational bindings, flow budget tracking between authorities, and AMP channel epoch state for message ratcheting. Reduction processes all facts in the context journal to derive this state deterministically.
 
 ## 6. Aura Consensus in Relational Contexts
 
@@ -517,9 +536,11 @@ The implementation provides concrete types (`RelationalContext`, `GuardianBindin
 ## 12. Implementation References
 
 - **Core Types**: `aura-core/src/relational/` - RelationalFact, GuardianBinding, RecoveryGrant, ConsensusProof domain types
+- **Journal Facts**: `aura-journal/src/fact.rs` - Protocol-level RelationalFact with AMP variants
+- **Reduction**: `aura-journal/src/reduction.rs` - RelationalState, reduce_context()
 - **Context Management**: `aura-relational/src/lib.rs` - RelationalContext, RelationalJournal protocols
-- **Consensus Integration**: `aura-protocol/src/consensus/relational_consensus.rs` - consensus implementation
+- **Consensus Integration**: `aura-protocol/src/consensus/relational.rs` - consensus implementation
 - **Consensus Adapter**: `aura-relational/src/consensus_adapter.rs` - thin consensus delegation layer
-- **Prestate Computation**: `aura-core/src/lib.rs` - Prestate struct and methods
+- **Prestate Computation**: `aura-core/src/domain/consensus.rs` - Prestate struct and methods
 - **Protocol Usage**: `aura-authenticate/src/guardian_auth_relational.rs` - Guardian authentication
 - **Recovery Flows**: `aura-recovery/src/` - Guardian recovery choreographies

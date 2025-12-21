@@ -141,16 +141,21 @@ The handler registration system enables clean composition across crate boundarie
 #### 3.3.1 Split Layer 3 Architecture
 
 **`aura-effects`** - Stateless Effect Implementations:
-- Production handlers: `RealCryptoHandler`, `TcpNetworkHandler`, `FilesystemStorageHandler`
+- Production handlers: `RealCryptoHandler`, `TcpTransportHandler`, `FilesystemStorageHandler`, `PhysicalTimeHandler`
 - Each implements exactly one effect trait independently
 - Pure input→output transformations with no internal state
 - Reusable across any context (unit tests, integration tests, production)
 
 **`aura-composition`** - Handler Assembly Infrastructure:
-- `EffectRegistry` and builder patterns for handler composition
+- `HandlerContext` and `Handler` trait for handler execution
+- Builder patterns for handler composition
 - Handler lifecycle management (start/stop/configure)
 - Bridges individual handlers into cohesive effect systems
 - Focuses on "How do I assemble handlers?" not "How do I coordinate protocols?"
+
+**`aura-agent`** - Runtime Effect Registry:
+- `EffectRegistry` for dynamic handler lookup and registration
+- Final runtime assembly point for effect system composition
 
 #### 3.3.2 Registration Flow Across Layers
 
@@ -208,30 +213,28 @@ Effect handlers expose time through domain-specific traits; no direct `SystemTim
 The effect system propagates `EffectContext` through async tasks. The context carries authority identification, optional session context, and metadata without ambient state.
 
 ```rust
-// Located in aura-agent/src/runtime/context.rs
+// Located in aura-core/src/context.rs (re-exported from aura-agent/src/runtime/context.rs)
 pub struct EffectContext {
     authority_id: AuthorityId,
     context_id: ContextId,
     session_id: SessionId,
     execution_mode: ExecutionMode,
-    flow_budget: FlowBudgetContext,
-    leakage_budget: LeakageBudgetContext,
     metadata: HashMap<String, String>,
 }
 
 impl EffectContext {
     pub fn authority_id(&self) -> AuthorityId { ... }
     pub fn context_id(&self) -> ContextId { ... }
-    pub fn flow_budget(&self) -> &FlowBudgetContext { ... }
-    // ... other accessors
+    pub fn session_id(&self) -> SessionId { ... }
+    pub fn execution_mode(&self) -> ExecutionMode { ... }
 }
 ```
 
-Context flows through all effect calls to enable authority identification, session tracking, and guard chain integration. The flow and leakage budget contexts enable the guard chain to enforce rate limits and privacy constraints. The guard chain uses context values to enforce authorization and flow constraints before network operations.
+Context flows through all effect calls to enable authority identification, session tracking, and guard chain integration. Budget enforcement (flow and leakage) happens separately through the guard chain infrastructure rather than being embedded in the context. The guard chain uses context values to enforce authorization and flow constraints before network operations.
 
 The effect runtime prepares a `GuardSnapshot` asynchronously, evaluates the guard chain synchronously to produce `EffectCommand` items, then interprets those commands asynchronously. Each choreography message expands to snapshot preparation, pure guard evaluation, command interpretation (charge, leak, journal), and transport sending. This ensures no observable behavior occurs without proper authorization and accounting.
 
-### 3.5 Impure Function Control
+### 3.6 Impure Function Control
 
 Aura ensures fully deterministic simulation by requiring all impure operations to flow through effect traits. Direct system calls are forbidden except in effect implementations, runtime assembly, and pure functions in `aura-core`.
 
@@ -388,7 +391,7 @@ Layer 4 Orchestration contains `aura-protocol` for multi-party coordination and 
 
 Single-party operations belong in `aura-effects`. These are stateless, context-free implementations like `sign(key, msg)` or `store_chunk(id, data)`. Each handler implements one effect trait independently. Operations are reusable in any context.
 
-Handler composition belongs in `aura-composition`. This includes assembling individual handlers into cohesive systems through registries and builders. The focus is on handler assembly rather than protocol coordination.
+Handler composition belongs in `aura-composition`. This includes assembling individual handlers into cohesive systems through `Handler` trait implementations and builders. The `EffectRegistry` for dynamic handler lookup resides in `aura-agent`. The focus is on handler assembly rather than protocol coordination.
 
 Multi-party coordination belongs in `aura-protocol`. These are stateful, context-specific orchestrations like `execute_anti_entropy` or `CrdtCoordinator`. Operations manage multiple handlers working together across network boundaries.
 
@@ -511,15 +514,18 @@ Query subscriptions use existing journal and CRDT infrastructure. Conditional co
 
 ### 10.2 Reactive System
 
-The `Dynamic<T>` type represents observable values. Subscribers receive updates when values change. Query types generate Biscuit Datalog strings for execution.
+The reactive system has two layers. The `ReactiveScheduler` in `aura-agent/src/reactive/` orchestrates fact ingestion and view updates with 5ms batching windows for efficiency. Signal views (`ChatSignalView`, `ContactsSignalView`, `InvitationsSignalView`) process journal facts and emit state snapshots to domain signals (`CHAT_SIGNAL`, `CONTACTS_SIGNAL`, etc.).
+
+The `Dynamic<T>` type represents observable values for FRP-style composition. Subscribers receive updates when values change. Query types generate Biscuit Datalog strings for execution.
 
 ```rust
 pub struct Dynamic<T> {
-    inner: Arc<DynamicInner<T>>,
+    state: Arc<RwLock<T>>,
+    updates: broadcast::Sender<T>,
 }
 ```
 
-View types aggregate reactive state for screens. Views subscribe to journal facts via database effects. Delta streaming provides efficient updates for lists.
+View types aggregate reactive state for screens. Views subscribe to domain signals emitted by the scheduler. Delta streaming provides efficient updates for lists.
 
 ### 10.3 Effect Bridge
 

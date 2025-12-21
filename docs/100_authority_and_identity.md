@@ -23,13 +23,26 @@ An account authority is an authority with long term state. An account maintains 
 An account authority uses a [commitment tree](101_accounts_and_commitment_tree.md) to define its internal threshold structure. The commitment tree stores device leaves and branch policies. The commitment tree determines which devices can sign operations under the account root. The account root commitment identifies the current state of the commitment tree.
 
 ```rust
-pub struct AccountAuthority {
-    pub id: AuthorityId,
-    pub root_commitment: Hash32,
+/// Authority trait representing an opaque cryptographic actor
+pub trait Authority: Send + Sync {
+    fn authority_id(&self) -> AuthorityId;
+    fn public_key(&self) -> Ed25519VerifyingKey;
+    fn root_commitment(&self) -> Hash32;
+    async fn sign_operation(&self, operation: &[u8]) -> Result<Signature>;
+    fn get_threshold(&self) -> u16;
+    fn active_device_count(&self) -> usize;
+}
+
+/// Summary view of commitment tree state for external consumers
+pub struct TreeStateSummary {
+    epoch: Epoch,
+    commitment: Hash32,
+    threshold: u16,
+    device_count: u32,
 }
 ```
 
-This structure references the account authority. The reduction function computes the current `root_commitment` from the account journal. The account authority does not reveal device structure to external parties.
+The `Authority` trait provides the external interface for authority operations. The `TreeStateSummary` provides a public view of tree state without exposing internal device structure. The reduction function computes the current state from the account journal. The account authority does not reveal device structure to external parties.
 
 An account authority derives context specific keys using deterministic key derivation. These derived authorities represent application scoped identities. See [Core Systems Guide](802_core_systems_guide.md) for implementation examples. A derived authority does not expose any structure of the account authority.
 
@@ -42,12 +55,14 @@ The commitment tree manages device membership. The `AddLeaf` and `RemoveLeaf` op
 ```rust
 pub struct LeafNode {
     pub leaf_id: LeafId,
+    pub device_id: DeviceId,
+    pub role: LeafRole,  // Device or Guardian
     pub public_key: Vec<u8>,
     pub meta: Vec<u8>,
 }
 ```
 
-This leaf type is internal to the commitment tree. It is not visible outside the account authority. Leaf nodes support threshold signing but do not identify operators.
+This leaf type is internal to the commitment tree. It is not visible outside the account authority. Leaf nodes support threshold signing but do not identify operators. The `role` field distinguishes between device leaves and guardian leaves for recovery purposes.
 
 ## 4. Relational Identity Model
 

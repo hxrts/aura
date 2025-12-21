@@ -111,18 +111,20 @@ This code block defines a stateless handler. It uses synchronous hashing from `a
 
 ## 3. Context Model
 
-The effect system propagates an `EffectContext` through async tasks. The context carries tracing data, flow budget, metadata, and deadlines. The context is explicit. No ambient state exists.
+The effect system propagates an `EffectContext` through async tasks. The context carries authority identity, context scope, session identification, execution mode, and metadata. The context is explicit. No ambient state exists.
 
 ```rust
+/// From aura-core/src/context.rs
 pub struct EffectContext {
-    pub request_id: Uuid,
-    pub flow_budget: FlowBudget,
-    pub deadline: Option<Instant>,
-    pub metadata: HashMap<String, String>,
+    authority_id: AuthorityId,
+    context_id: ContextId,
+    session_id: SessionId,
+    execution_mode: ExecutionMode,
+    metadata: HashMap<String, String>,
 }
 ```
 
-This structure defines the effect context. The context flows through all effect calls. Tracing integrates with this structure. Flow budget enforcement uses the context values.
+This structure defines the operation-scoped effect context. The context flows through all effect calls. It identifies which authority, context, and session the operation belongs to. The `execution_mode` controls handler selection (Production vs Test). Metadata supports diagnostics and telemetry.
 
 Context propagation uses scoped execution. A task local stores the current context. Nested tasks inherit the context. This ensures consistent behavior across async boundaries.
 

@@ -642,6 +642,6 @@ Is this operation establishing new cryptographic relationships?
 | Blocking on message send | Eventual consistency is fine | Category A - optimistic |
 | Immediate permission change | Affects others' access | Category B - deferred |
 
-See [Operation Categories](115_operation_categories.md) for comprehensive documentation.
+See [Operation Categories](117_operation_categories.md) for comprehensive documentation.
 
 Continue with [Advanced Choreography Guide](804_advanced_coordination_guide.md) for sophisticated protocol development. Learn comprehensive testing in [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md).

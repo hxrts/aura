@@ -23,7 +23,7 @@
 - [Database Architecture](113_database.md)
 - [Social Architecture](114_social_architecture.md)
 - [CLI and Terminal User Interface](115_cli_tui.md)
-- [Operation Categories](115_operation_categories.md)
+- [Operation Categories](117_operation_categories.md)
 - [Cryptographic Architecture](116_crypto.md)
 - [Hello World Guide](801_hello_world_guide.md)
 - [Core Systems Guide: Time Domain Selection](802_core_systems_guide.md)
