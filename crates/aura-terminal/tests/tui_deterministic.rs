@@ -121,17 +121,17 @@ fn test_screen_navigation_deterministic() {
     // Start at Block screen
     tui.assert_screen(Screen::Block);
 
-    // Navigate to Chat screen (2)
+    // Navigate to Neighborhood screen (2)
     tui.send_char('2');
+    tui.assert_screen(Screen::Neighborhood);
+
+    // Navigate to Chat screen (3)
+    tui.send_char('3');
     tui.assert_screen(Screen::Chat);
 
-    // Navigate to Contacts screen (3)
-    tui.send_char('3');
-    tui.assert_screen(Screen::Contacts);
-
-    // Navigate to Neighborhood screen (4)
+    // Navigate to Contacts screen (4)
     tui.send_char('4');
-    tui.assert_screen(Screen::Neighborhood);
+    tui.assert_screen(Screen::Contacts);
 
     // Navigate to Recovery screen (5)
     tui.send_char('5');
@@ -153,7 +153,7 @@ fn test_demo_shortcuts_fill_contacts_import_modal() {
     tui.state.contacts.demo_carol_code = "CAROLCODE".to_string();
 
     // Go to Contacts screen
-    tui.send_char('3');
+    tui.send_char('4');
     tui.assert_screen(Screen::Contacts);
 
     // Open Contacts import modal
@@ -191,9 +191,9 @@ fn test_tab_navigation_deterministic() {
 
     // Tab through all screens (6 screens total, Invitations merged into Contacts)
     let expected_order = [
+        Screen::Neighborhood,
         Screen::Chat,
         Screen::Contacts,
-        Screen::Neighborhood,
         Screen::Recovery,
         Screen::Settings,
         Screen::Block, // Wraps around
@@ -217,7 +217,7 @@ fn test_chat_keyboard_shortcuts_deterministic() {
     let mut tui = TestTui::new();
 
     // Go to Chat screen
-    tui.send_char('2');
+    tui.send_char('3');
     tui.assert_screen(Screen::Chat);
 
     // Set up item counts for navigation to work
@@ -265,7 +265,7 @@ fn test_chat_channel_selection_deterministic() {
     let mut tui = TestTui::new();
 
     // Go to Chat - starts at Channels by default
-    tui.send_char('2');
+    tui.send_char('3');
     assert_eq!(tui.state.chat.focus, ChatFocus::Channels);
 
     // Set up item counts for navigation to work
@@ -291,7 +291,7 @@ fn test_insert_mode_text_entry_deterministic() {
     let mut tui = TestTui::new();
 
     // Go to Chat and enter insert mode
-    tui.send_char('2');
+    tui.send_char('3');
     tui.send_char('i');
     assert!(tui.is_insert_mode());
 
@@ -373,7 +373,7 @@ fn test_modal_blocks_navigation_deterministic() {
 
     // Try to navigate - should be blocked
     let screen_before = tui.screen();
-    tui.send_char('2');
+    tui.send_char('3');
     assert_eq!(tui.screen(), screen_before);
     assert!(tui.has_modal()); // Modal still open
 }
@@ -514,7 +514,7 @@ fn test_contacts_navigation_deterministic() {
     let mut tui = TestTui::new();
 
     // Go to Contacts
-    tui.send_char('3');
+    tui.send_char('4');
     tui.assert_screen(Screen::Contacts);
 
     // Set up item count for navigation to work
@@ -570,8 +570,8 @@ fn test_rapid_screen_switching_deterministic() {
         tui.send_char(char::from_digit(screen_num as u32, 10).unwrap());
     }
 
-    // Last iteration: i=999, 999 % 6 = 3, 3 + 1 = 4 (Neighborhood)
-    tui.assert_screen(Screen::Neighborhood);
+    // Last iteration: i=999, 999 % 6 = 3, 3 + 1 = 4 (Contacts)
+    tui.assert_screen(Screen::Contacts);
 }
 
 /// Stress test: rapid insert mode toggling
@@ -672,7 +672,7 @@ proptest! {
         let mut tui = TestTui::new();
 
         // Navigate to various screens first
-        tui.send_char('3');
+        tui.send_char('4');
         tui.send_char('5');
 
         // Should be able to navigate with number key
@@ -680,9 +680,9 @@ proptest! {
 
         let expected_screen = match screen_key {
             '1' => Screen::Block,
-            '2' => Screen::Chat,
-            '3' => Screen::Contacts,
-            '4' => Screen::Neighborhood,
+            '2' => Screen::Neighborhood,
+            '3' => Screen::Chat,
+            '4' => Screen::Contacts,
             '5' => Screen::Recovery,
             '6' => Screen::Settings,
             _ => unreachable!(),
@@ -809,7 +809,7 @@ proptest! {
         let mut tui = TestTui::new();
 
         // Go to Contacts screen
-        tui.send_char('3');
+        tui.send_char('4');
 
         // Press 'k' (up) many times
         for _ in 0..k_presses {

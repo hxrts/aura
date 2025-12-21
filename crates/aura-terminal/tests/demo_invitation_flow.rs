@@ -345,10 +345,9 @@ async fn test_import_invitation_command_with_demo_codes() {
 
 /// Test complete demo flow: import invitations, accept them, create channel, send message
 ///
-/// NOTE: This test exercises multiple runtime-backed protocols and is kept ignored
-/// until the channel/chat flow is fully wired end-to-end in the demo harness.
+/// NOTE: Messaging is currently UI-local (signal-backed) in the terminal runtime; this test
+/// verifies the user-visible behavior (signals) rather than network delivery.
 #[tokio::test]
-#[ignore = "Full flow is still being stabilized"]
 async fn test_complete_demo_invitation_flow() {
     println!("\n=== Complete Demo Invitation Flow Test ===\n");
 
@@ -372,6 +371,7 @@ async fn test_complete_demo_invitation_flow() {
     .await
     .expect("Alice import should succeed");
     println!("  Alice's invitation imported successfully");
+    wait_for_contact(&env.app_core, alice_invitation.sender_id).await;
 
     env.ctx
         .dispatch(EffectCommand::ImportInvitation {
@@ -380,28 +380,29 @@ async fn test_complete_demo_invitation_flow() {
     .await
     .expect("Carol import should succeed");
     println!("  Carol's invitation imported successfully");
+    wait_for_contact(&env.app_core, carol_invitation.sender_id).await;
 
     // Phase 2: Accept the invitations
     println!("\nPhase 2: Accept invitations to create contacts");
 
-    let accept_alice = env.ctx
+    env.ctx
         .dispatch(EffectCommand::AcceptInvitation {
             invitation_id: alice_invitation.invitation_id.clone(),
         })
-        .await;
-    println!("  Accept Alice result: {:?}", accept_alice);
+        .await
+        .expect("Accept Alice should succeed (idempotent)");
 
-    let accept_carol = env.ctx
+    env.ctx
         .dispatch(EffectCommand::AcceptInvitation {
             invitation_id: carol_invitation.invitation_id.clone(),
         })
-        .await;
-    println!("  Accept Carol result: {:?}", accept_carol);
+        .await
+        .expect("Accept Carol should succeed (idempotent)");
 
     // Phase 3: Create a group channel with Alice and Carol
     println!("\nPhase 3: Create group channel with Alice and Carol");
 
-    let channel_result = env.ctx
+    env.ctx
         .dispatch(EffectCommand::CreateChannel {
             name: "Guardians".to_string(),
             topic: Some("Guardian coordination channel".to_string()),
@@ -410,41 +411,64 @@ async fn test_complete_demo_invitation_flow() {
                 carol_invitation.sender_id.to_string(),
             ],
         })
-        .await;
-    println!("  CreateChannel result: {:?}", channel_result);
+        .await
+        .expect("CreateChannel should succeed");
 
     // Phase 4: Send a message to the channel
     println!("\nPhase 4: Send message to guardians");
 
-    let send_result = env.ctx
+    env.ctx
         .dispatch(EffectCommand::SendMessage {
             channel: "guardians".to_string(),
             content: "Hello Alice and Carol! Thanks for being my guardians.".to_string(),
         })
-        .await;
-    println!("  SendMessage result: {:?}", send_result);
+        .await
+        .expect("SendMessage should succeed");
 
     // Phase 5: Verify state via signals
     println!("\nPhase 5: Verify state via signals");
 
     let core = env.app_core.read().await;
 
-    // Check chat state
-    if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
-        println!("  Chat channels: {}", chat_state.channels.len());
-        println!("  Messages: {}", chat_state.messages.len());
-        for channel in &chat_state.channels {
-            println!("    - {} ({})", channel.name, channel.id);
-        }
-    }
+    // Contacts should be visible to the user after import/accept.
+    let contacts_state = core
+        .read(&*CONTACTS_SIGNAL)
+        .await
+        .expect("Read CONTACTS_SIGNAL");
+    assert!(
+        contacts_state
+            .contacts
+            .iter()
+            .any(|c| c.id == alice_invitation.sender_id),
+        "Alice should appear in contacts"
+    );
+    assert!(
+        contacts_state
+            .contacts
+            .iter()
+            .any(|c| c.id == carol_invitation.sender_id),
+        "Carol should appear in contacts"
+    );
 
-    // Check contacts state
-    if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-        println!("  Contacts: {}", contacts_state.contacts.len());
-        for contact in &contacts_state.contacts {
-            println!("    - {} ({})", contact.nickname, contact.id);
-        }
-    }
+    // Chat channel + message should show up in CHAT_SIGNAL.
+    let chat_state = core.read(&*CHAT_SIGNAL).await.expect("Read CHAT_SIGNAL");
+    let guardians = chat_state
+        .channels
+        .iter()
+        .find(|c| c.name == "Guardians")
+        .expect("Guardians channel should exist");
+    assert_eq!(
+        guardians.member_count, 3,
+        "Guardians should include self + 2 contacts"
+    );
+    assert!(
+        chat_state
+            .messages
+            .iter()
+            .any(|m| m.channel_id == guardians.id
+                && m.content.contains("Hello Alice and Carol!")),
+        "Expected the greeting message to appear in the selected channel messages"
+    );
 
     // Check invitations state
     if let Ok(inv_state) = core.read(&*INVITATIONS_SIGNAL).await {

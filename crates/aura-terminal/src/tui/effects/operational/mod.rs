@@ -293,18 +293,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_intent_commands_return_none() {
+    async fn test_chat_commands_update_chat_signal() {
         let app_core = test_app_core().await;
         let handler = OperationalHandler::new(app_core);
 
-        // SendMessage should return None (handled by intent dispatch)
         let result = handler
             .execute(&EffectCommand::SendMessage {
                 channel: "general".to_string(),
                 content: "Hello".to_string(),
             })
             .await;
-        assert!(result.is_none());
+        assert!(
+            matches!(result, Some(Ok(OpResponse::Data(_)))),
+            "Expected SendMessage to be handled, got: {:?}",
+            result
+        );
+
+        let result = handler
+            .execute(&EffectCommand::CreateChannel {
+                name: "Guardians".to_string(),
+                topic: Some("Guardian coordination".to_string()),
+                members: vec!["authority-00000000-0000-0000-0000-000000000000".to_string()],
+            })
+            .await;
+        assert!(
+            matches!(result, Some(Ok(OpResponse::Data(_)))),
+            "Expected CreateChannel to be handled, got: {:?}",
+            result
+        );
     }
 
     #[tokio::test]

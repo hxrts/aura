@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 794493fd6ec8c1c793952ceaa5d02ae0de965a23f62b1cb279a95c29f2aa9241 # shrinks to key = '5'
+cc 6c1b2972ae4bacb622c37552f3a8e560e446bd39b2c5584a57575cb237c947dc # shrinks to key = '2'

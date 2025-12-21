@@ -83,14 +83,8 @@ impl PropsTestHarness {
 
     /// Navigate directly to a screen using number keys
     fn go_to_screen(&mut self, screen: Screen) {
-        let key = match screen {
-            Screen::Block => '1',
-            Screen::Chat => '2',
-            Screen::Contacts => '3',
-            Screen::Neighborhood => '4',
-            Screen::Recovery => '5',
-            Screen::Settings => '6',
-        };
+        let key = char::from_digit(screen.key_number() as u32, 10)
+            .unwrap_or_else(|| unreachable!("Screen::key_number returns 1..=6"));
         self.send_char(key);
         assert_eq!(
             self.current_screen(),

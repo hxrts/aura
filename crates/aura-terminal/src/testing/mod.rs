@@ -406,17 +406,21 @@ mod tests {
         tui.assert_normal_mode();
         tui.assert_no_modal();
 
-        // Navigate to Chat
+        // Navigate to Neighborhood
         tui.send_event(events::char('2'));
+        tui.assert_screen(Screen::Neighborhood);
+
+        // Navigate to Chat
+        tui.send_event(events::char('3'));
         tui.assert_screen(Screen::Chat);
 
         // Navigate to Contacts
-        tui.send_event(events::char('3'));
+        tui.send_event(events::char('4'));
         tui.assert_screen(Screen::Contacts);
 
         // Use Tab to cycle
         tui.send_event(events::tab());
-        tui.assert_screen(Screen::Neighborhood);
+        tui.assert_screen(Screen::Recovery);
     }
 
     #[test]
@@ -465,7 +469,7 @@ mod tests {
     #[tokio::test]
     async fn test_runtime_with_test_terminal() {
         let terminal = TestTerminal::new(vec![
-            events::char('2'), // Navigate to Chat
+            events::char('3'), // Navigate to Chat
             events::char('q'), // Quit
         ]);
 

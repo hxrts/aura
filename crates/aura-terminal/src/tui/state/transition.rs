@@ -76,8 +76,8 @@ mod tests {
     fn test_screen_navigation() {
         let state = TuiState::new();
 
-        // Press '2' to go to Chat
-        let (new_state, _) = transition(&state, events::char('2'));
+        // Press '3' to go to Chat (see Screen::from_key mapping)
+        let (new_state, _) = transition(&state, events::char('3'));
         assert_eq!(new_state.screen(), Screen::Chat);
 
         // Press Tab to go to next screen

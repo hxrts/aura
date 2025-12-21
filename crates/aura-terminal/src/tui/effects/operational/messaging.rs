@@ -8,7 +8,7 @@
 //! - **Business Logic**: `aura_app::workflows::messaging` (portable)
 //! - **TUI Integration**: This module (operational layer)
 //!
-//! Handlers for SendDirectMessage, StartDirectChat, SendAction, InviteUser.
+//! Handlers for SendMessage, CreateChannel, SendDirectMessage, StartDirectChat, SendAction, InviteUser.
 
 use std::sync::Arc;
 
@@ -20,7 +20,8 @@ use super::EffectCommand;
 
 // Re-export workflow functions for convenience
 pub use aura_app::workflows::messaging::{
-    invite_user_to_channel, send_action, send_direct_message, start_direct_chat,
+    create_channel, invite_user_to_channel, send_action, send_direct_message, send_message,
+    start_direct_chat,
 };
 
 /// Get current time in milliseconds since Unix epoch
@@ -42,6 +43,38 @@ pub async fn handle_messaging(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Option<OpResult> {
     match command {
+        EffectCommand::CreateChannel {
+            name,
+            topic,
+            members,
+        } => {
+            let timestamp = current_time_ms();
+            match create_channel(app_core, name, topic.clone(), members, timestamp).await {
+                Ok(channel_id) => Some(Ok(OpResponse::Data(format!(
+                    "Channel created: {}",
+                    channel_id
+                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to create channel: {}",
+                    e
+                )))),
+            }
+        }
+
+        EffectCommand::SendMessage { channel, content } => {
+            let timestamp = current_time_ms();
+            match send_message(app_core, channel, content, timestamp).await {
+                Ok(message_id) => Some(Ok(OpResponse::Data(format!(
+                    "Message sent: {}",
+                    message_id
+                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to send message: {}",
+                    e
+                )))),
+            }
+        }
+
         EffectCommand::SendDirectMessage { target, content } => {
             // Use workflow for business logic
             let timestamp = current_time_ms();

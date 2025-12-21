@@ -383,7 +383,7 @@ mod tests {
     #[tokio::test]
     async fn test_runtime_screen_navigation() {
         let terminal = SimpleMockTerminal::new(vec![
-            events::char('2'), // Navigate to Chat
+            events::char('3'), // Navigate to Chat
             events::char('q'), // Quit
         ]);
 
@@ -414,8 +414,8 @@ mod tests {
     #[tokio::test]
     async fn test_runtime_step_by_step() {
         let terminal = SimpleMockTerminal::new(vec![
-            events::char('2'), // Navigate to Chat
-            events::char('3'), // Navigate to Contacts
+            events::char('3'), // Navigate to Chat
+            events::char('4'), // Navigate to Contacts
         ]);
 
         let mut runtime = TuiRuntime::new(terminal);

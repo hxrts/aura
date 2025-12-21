@@ -1435,22 +1435,25 @@ fn test_screen_enum() {
 
     // Test key mappings
     assert_eq!(Screen::Block.key_number(), 1);
-    assert_eq!(Screen::Chat.key_number(), 2);
-    assert_eq!(Screen::Contacts.key_number(), 3);
-    assert_eq!(Screen::Neighborhood.key_number(), 4);
-    assert_eq!(Screen::Settings.key_number(), 6);
     assert_eq!(Screen::Recovery.key_number(), 5);
+    assert_eq!(Screen::Neighborhood.key_number(), 2);
+    assert_eq!(Screen::Chat.key_number(), 3);
+    assert_eq!(Screen::Contacts.key_number(), 4);
+    assert_eq!(Screen::Settings.key_number(), 6);
 
     // Test from_key
     assert_eq!(Screen::from_key(1), Some(Screen::Block));
+    assert_eq!(Screen::from_key(2), Some(Screen::Neighborhood));
+    assert_eq!(Screen::from_key(3), Some(Screen::Chat));
+    assert_eq!(Screen::from_key(4), Some(Screen::Contacts));
     assert_eq!(Screen::from_key(5), Some(Screen::Recovery));
     assert_eq!(Screen::from_key(6), Some(Screen::Settings));
     assert_eq!(Screen::from_key(7), None); // Only 6 screens
     assert_eq!(Screen::from_key(0), None);
 
     // Test next/prev
-    assert_eq!(Screen::Block.next(), Screen::Chat);
-    assert_eq!(Screen::Chat.prev(), Screen::Block);
+    assert_eq!(Screen::Block.next(), Screen::Neighborhood);
+    assert_eq!(Screen::Chat.prev(), Screen::Neighborhood);
     assert_eq!(Screen::Settings.next(), Screen::Block);
     assert_eq!(Screen::Recovery.next(), Screen::Settings);
 

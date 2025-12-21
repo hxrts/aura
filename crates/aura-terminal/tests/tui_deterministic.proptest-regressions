@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 5b544182a287838aa48d76b8693325582f4e739a12a267d69bde18213186e603 # shrinks to screen_key = '5'
+cc 7f2bf7ae23100cdeea8e63fd25f1949a82273137001252e4cff4a138affb1801 # shrinks to screen_key = '2'

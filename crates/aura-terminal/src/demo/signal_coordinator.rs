@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::signal_defs::{CHAT_SIGNAL, RECOVERY_SIGNAL};
+use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::views::chat::Message as ChatMessage;
 use aura_app::views::recovery::{Guardian, GuardianStatus, RecoveryProcessStatus};
 use aura_app::views::{ChatState, RecoveryState};
@@ -268,12 +268,21 @@ impl DemoSignalCoordinator {
                     context_id
                 );
 
-                // Update ViewState to mark contact as guardian
-                // Signal forwarding automatically propagates to CONTACTS_SIGNAL
+                // Read contacts from CONTACTS_SIGNAL (populated by ReactiveScheduler)
+                // rather than from ViewState (which is not synced from the signal)
                 let core = self.app_core.read().await;
-                // Check if contact exists first
-                let contacts = core.views().snapshot().contacts;
-                if contacts.contacts.iter().any(|c| c.id == authority_id) {
+                let contacts_state = core
+                    .read(&*CONTACTS_SIGNAL)
+                    .await
+                    .unwrap_or_default();
+
+                if let Some(contact) = contacts_state.contacts.iter().find(|c| c.id == authority_id) {
+                    // First, ensure the contact exists in ViewState (sync from signal)
+                    // This is needed because contacts added via ReactiveScheduler only update
+                    // the signal, not ViewState directly
+                    core.add_contact(contact.clone());
+
+                    // Now update ViewState to mark contact as guardian
                     core.set_contact_guardian_status(&authority_id, true);
                     tracing::info!("Demo: Updated contact {} is_guardian=true", authority_id);
 
@@ -294,9 +303,9 @@ impl DemoSignalCoordinator {
                     tracing::info!("Demo: Added {} to guardians list", authority_id);
                 } else {
                     tracing::warn!(
-                        "Demo: Contact {} not found ({} contacts present)",
+                        "Demo: Contact {} not found in CONTACTS_SIGNAL ({} contacts present)",
                         authority_id,
-                        contacts.contacts.len()
+                        contacts_state.contacts.len()
                     );
                 }
             }

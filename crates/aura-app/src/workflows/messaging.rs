@@ -23,6 +23,17 @@ fn dm_channel_id(target: &str) -> ChannelId {
     ChannelId::from_bytes(hash(descriptor.as_bytes()))
 }
 
+/// Parse a channel string into a ChannelId.
+///
+/// Accepts either:
+/// - `channel:<hex>` (canonical `ChannelId` display format)
+/// - a human-friendly name (hashed deterministically, case-insensitive)
+fn parse_channel_id(channel: &str) -> ChannelId {
+    channel
+        .parse::<ChannelId>()
+        .unwrap_or_else(|_| ChannelId::from_bytes(hash(channel.to_lowercase().as_bytes())))
+}
+
 /// Send a direct message to a contact
 ///
 /// **What it does**: Sends a message in a DM channel with the contact
@@ -100,6 +111,119 @@ pub async fn send_direct_message(
         .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
 
     Ok(channel_id.to_string())
+}
+
+/// Create a group channel (block channel) in chat state.
+///
+/// **What it does**: Creates a chat channel and selects it
+/// **Returns**: Channel ID
+/// **Signal pattern**: Updates `CHAT_SIGNAL` directly
+///
+/// **Note**: This is currently UI-local state only; persistence will be provided by
+/// runtime-backed AMP/Chat facts when fully wired.
+pub async fn create_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    name: &str,
+    topic: Option<String>,
+    members: &[String],
+    timestamp_ms: u64,
+) -> Result<String, AuraError> {
+    let channel_id = parse_channel_id(name);
+    let now = timestamp_ms;
+
+    let core = app_core.read().await;
+    let mut chat_state = core
+        .read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+
+    if !chat_state.channels.iter().any(|c| c.id == channel_id) {
+        let channel = Channel {
+            id: channel_id,
+            name: name.to_string(),
+            topic,
+            channel_type: ChannelType::Block,
+            unread_count: 0,
+            is_dm: false,
+            member_count: (members.len() as u32).saturating_add(1),
+            last_message: None,
+            last_message_time: None,
+            last_activity: now,
+        };
+        chat_state.add_channel(channel);
+    }
+
+    chat_state.selected_channel_id = Some(channel_id);
+
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
+
+    Ok(channel_id.to_string())
+}
+
+/// Send a message to a group/channel.
+///
+/// **What it does**: Appends a message to the selected channel's message list
+/// **Returns**: Message ID
+/// **Signal pattern**: Updates `CHAT_SIGNAL` directly
+///
+/// **Note**: This is currently UI-local state only; persistence will be provided by
+/// runtime-backed AMP/Chat facts when fully wired.
+pub async fn send_message(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel: &str,
+    content: &str,
+    timestamp_ms: u64,
+) -> Result<String, AuraError> {
+    let channel_id = parse_channel_id(channel);
+    let now = timestamp_ms;
+
+    let core = app_core.read().await;
+    let mut chat_state = core
+        .read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+
+    if !chat_state.channels.iter().any(|c| c.id == channel_id) {
+        let channel = Channel {
+            id: channel_id,
+            name: channel.to_string(),
+            topic: None,
+            channel_type: ChannelType::Block,
+            unread_count: 0,
+            is_dm: false,
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: now,
+        };
+        chat_state.add_channel(channel);
+    }
+
+    // Select the channel so messages are visible in `chat_state.messages`.
+    chat_state.selected_channel_id = Some(channel_id);
+
+    let message_id = format!("msg-{}-{}", channel_id, now);
+    let message = Message {
+        id: message_id.clone(),
+        channel_id,
+        sender_id: AuthorityId::default(),
+        sender_name: "You".to_string(),
+        content: content.to_string(),
+        timestamp: now,
+        reply_to: None,
+        is_own: true,
+        is_read: true,
+    };
+
+    chat_state.apply_message(channel_id, message);
+
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
+
+    Ok(message_id)
 }
 
 /// Start a direct chat with a contact

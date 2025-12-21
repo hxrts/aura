@@ -159,14 +159,8 @@ impl TestTui {
     }
 
     fn go_to_screen(&mut self, screen: Screen) {
-        let key = match screen {
-            Screen::Block => '1',
-            Screen::Chat => '2',
-            Screen::Contacts => '3',
-            Screen::Neighborhood => '4',
-            Screen::Recovery => '5',
-            Screen::Settings => '6',
-        };
+        let key = char::from_digit(screen.key_number() as u32, 10)
+            .unwrap_or_else(|| unreachable!("Screen::key_number returns 1..=6"));
         self.send_char(key);
         self.assert_screen(screen);
     }
@@ -1366,7 +1360,7 @@ mod stress {
 // ============================================================================
 
 fn screen_key_strategy() -> impl Strategy<Value = char> {
-    // 6 screens: Block(1), Chat(2), Contacts(3), Neighborhood(4), Settings(5), Recovery(6)
+    // 6 screens: Block(1), Neighborhood(2), Chat(3), Contacts(4), Recovery(5), Settings(6)
     prop_oneof![
         Just('1'),
         Just('2'),
@@ -1437,9 +1431,9 @@ proptest! {
 
         let expected = match key {
             '1' => Screen::Block,
-            '2' => Screen::Chat,
-            '3' => Screen::Contacts,
-            '4' => Screen::Neighborhood,
+            '2' => Screen::Neighborhood,
+            '3' => Screen::Chat,
+            '4' => Screen::Contacts,
             '5' => Screen::Recovery,
             '6' => Screen::Settings,
             _ => unreachable!(),
