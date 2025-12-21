@@ -4,6 +4,8 @@
 
 The Aura TUI uses `futures-signals` for fine-grained reactive state management. This provides automatic change propagation without manual lock management or explicit notification code.
 
+**Note on Architecture**: This guide covers TUI-internal reactive state using `futures-signals`. This is distinct from the `ReactiveScheduler` in `aura-agent/src/reactive/` which processes journal facts and emits application signals (CHAT_SIGNAL, CONTACTS_SIGNAL, etc.). The scheduler drives signals from persisted facts; the TUI consumes these signals and may use `futures-signals` internally for derived UI state.
+
 ## Core Concepts
 
 ### Signal Types

@@ -91,7 +91,6 @@ impl SessionOperations {
         if let Some(participants) = participant_registry.get_mut(_session_id) {
             participants.retain(|id| id != &_device_id);
             self.persist_participants(_session_id, participants).await?;
-            let effects = self.effects().clone();
             HandlerUtilities::append_relational_fact(
                 &self.authority_context,
                 &*self.effects(),
@@ -116,7 +115,6 @@ mod tests {
     use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
     use aura_protocol::effects::SessionType;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
 
     #[tokio::test]
     async fn test_session_metadata_update() {

@@ -40,6 +40,10 @@ pub mod effects;
 
 pub mod system;
 
+// Simulation factory (feature-gated)
+#[cfg(feature = "simulation")]
+pub mod simulation_factory;
+
 // Cross-cutting concerns
 pub mod migration;
 pub mod reliability;
@@ -66,3 +70,7 @@ pub use services::{
     ReceiptManager, SharedAuthorityManager, SyncManagerConfig, SyncManagerState,
     SyncServiceManager,
 };
+
+// Simulation factory re-export
+#[cfg(feature = "simulation")]
+pub use simulation_factory::EffectSystemFactory;

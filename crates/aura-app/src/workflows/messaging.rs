@@ -1,15 +1,17 @@
 //! Messaging Workflow - Portable Business Logic
 //!
 //! This module contains messaging operations that are portable across all frontends.
-//! Uses ViewState as single source of truth; signal forwarding handles CHAT_SIGNAL updates.
+//! Uses typed reactive signals for state reads/writes.
 
 use crate::{
+    signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL},
     views::chat::{Channel, ChannelType, ChatState, Message},
     AppCore,
 };
 use async_lock::RwLock;
 use aura_core::{
     crypto::hash::hash,
+    effects::reactive::ReactiveEffects,
     identifiers::{AuthorityId, ChannelId},
     AuraError,
 };
@@ -49,7 +51,10 @@ pub async fn send_direct_message(
     let channel_id = dm_channel_id(target);
 
     let core = app_core.read().await;
-    let mut chat_state = core.views().snapshot().chat;
+    let mut chat_state = core
+        .read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
 
     let now = timestamp_ms;
 
@@ -90,8 +95,9 @@ pub async fn send_direct_message(
     // Apply message to state
     chat_state.apply_message(channel_id, message);
 
-    // Update ViewState - signal forwarding auto-propagates to CHAT_SIGNAL
-    core.views().set_chat(chat_state);
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
 
     Ok(channel_id.to_string())
 }
@@ -125,11 +131,13 @@ pub async fn start_direct_chat(
         .unwrap_or_else(|_| AuthorityId::default());
 
     let core = app_core.read().await;
-    let snapshot = core.views().snapshot();
+    let contacts = core
+        .read(&*CONTACTS_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CONTACTS_SIGNAL: {}", e)))?;
 
     // Get contact name from ViewState for the channel name
-    let contact_name = snapshot
-        .contacts
+    let contact_name = contacts
         .contacts
         .iter()
         .find(|c| c.id == authority_id)
@@ -152,8 +160,10 @@ pub async fn start_direct_chat(
         last_activity: now,
     };
 
-    // Get current chat state and update it
-    let mut chat_state = snapshot.chat;
+    let mut chat_state = core
+        .read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
 
     // Add the DM channel (add_channel avoids duplicates)
     chat_state.add_channel(dm_channel);
@@ -161,8 +171,9 @@ pub async fn start_direct_chat(
     // Select this channel (don't clear messages - retain history)
     chat_state.selected_channel_id = Some(channel_id);
 
-    // Update ViewState - signal forwarding auto-propagates to CHAT_SIGNAL
-    core.views().set_chat(chat_state);
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
 
     Ok(channel_id.to_string())
 }
@@ -172,10 +183,12 @@ pub async fn start_direct_chat(
 /// **What it does**: Reads chat state from ViewState
 /// **Returns**: Current chat state with channels and messages
 /// **Signal pattern**: Read-only operation (no emission)
-pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> ChatState {
+pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> Result<ChatState, AuraError> {
     let core = app_core.read().await;
 
-    core.views().snapshot().chat
+    core.read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))
 }
 
 /// Send an action/emote message to a channel
@@ -204,7 +217,10 @@ pub async fn send_action(
         .map_err(|_| AuraError::agent(format!("Invalid channel ID: {}", channel_id_str)))?;
 
     let core = app_core.read().await;
-    let mut chat_state = core.views().snapshot().chat;
+    let mut chat_state = core
+        .read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
 
     // Verify channel exists
     if chat_state.channel(&channel_id).is_none() {
@@ -235,8 +251,9 @@ pub async fn send_action(
     // Apply message to state
     chat_state.apply_message(channel_id, message);
 
-    // Update ViewState - signal forwarding auto-propagates to CHAT_SIGNAL
-    core.views().set_chat(chat_state);
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
 
     Ok(message_id)
 }
@@ -267,7 +284,7 @@ pub async fn invite_user_to_channel(
     let channel = match channel_id {
         Some(id) => id.to_string(),
         None => {
-            let chat_state = get_chat_state(app_core).await;
+            let chat_state = get_chat_state(app_core).await?;
             chat_state
                 .selected_channel_id
                 .map(|id| id.to_string())
@@ -303,9 +320,11 @@ mod tests {
     #[tokio::test]
     async fn test_get_chat_state_default() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let mut core = AppCore::new(config).unwrap();
+        core.init_signals().await.unwrap();
+        let app_core = Arc::new(RwLock::new(core));
 
-        let state = get_chat_state(&app_core).await;
+        let state = get_chat_state(&app_core).await.unwrap();
         assert!(state.channels.is_empty());
         assert!(state.messages.is_empty());
     }

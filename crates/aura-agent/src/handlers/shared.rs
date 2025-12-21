@@ -4,7 +4,6 @@
 
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::{AuraEffectSystem, EffectContext};
-use aura_core::effects::{OrderClockEffects, StorageEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 use serde::Serialize;
@@ -83,28 +82,19 @@ impl HandlerUtilities {
     pub async fn append_relational_fact<T: Serialize>(
         authority: &AuthorityContext,
         effects: &AuraEffectSystem,
-        _context_id: ContextId,
+        context_id: ContextId,
         binding_type: &str,
         payload: &T,
     ) -> AgentResult<()> {
-        let order = effects
-            .order_time()
-            .await
-            .map_err(|e| crate::core::AgentError::effects(format!("order_time: {e}")))?;
+        let _ = authority; // Authority is implied by the effect system's configured identity.
         let binding_data = serde_json::to_vec(payload).map_err(|e| {
             crate::core::AgentError::effects(format!("serialize fact payload: {e}"))
         })?;
-
-        // Persist deterministic fact record; journal wiring can migrate from storage.
-        let suffix: String = order.0.iter().map(|b| format!("{:02x}", b)).collect();
-        let key = format!(
-            "journal/{}/{}:{}",
-            authority.authority_id, binding_type, suffix
-        );
         effects
-            .store(&key, binding_data)
+            .commit_generic_fact_bytes(context_id, binding_type, binding_data)
             .await
-            .map_err(|e| crate::core::AgentError::effects(format!("persist fact: {e}")))
+            .map(|_| ())
+            .map_err(|e| crate::core::AgentError::effects(format!("commit fact: {e}")))
     }
 
     /// Append a generic fact (raw bytes) into the authority-scoped journal.
@@ -114,25 +104,16 @@ impl HandlerUtilities {
     pub async fn append_generic_fact(
         authority: &AuthorityContext,
         effects: &AuraEffectSystem,
-        _context_id: ContextId,
+        context_id: ContextId,
         binding_type: &str,
         binding_data: &[u8],
     ) -> AgentResult<()> {
-        let order = effects
-            .order_time()
-            .await
-            .map_err(|e| crate::core::AgentError::effects(format!("order_time: {e}")))?;
-
-        // Persist deterministic fact record; journal wiring can migrate from storage.
-        let suffix: String = order.0.iter().map(|b| format!("{:02x}", b)).collect();
-        let key = format!(
-            "journal/{}/{}:{}",
-            authority.authority_id, binding_type, suffix
-        );
+        let _ = authority; // Authority is implied by the effect system's configured identity.
         effects
-            .store(&key, binding_data.to_vec())
+            .commit_generic_fact_bytes(context_id, binding_type, binding_data.to_vec())
             .await
-            .map_err(|e| crate::core::AgentError::effects(format!("persist fact: {e}")))
+            .map(|_| ())
+            .map_err(|e| crate::core::AgentError::effects(format!("commit fact: {e}")))
     }
 
     /// Create effect context from authority

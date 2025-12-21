@@ -192,7 +192,6 @@ mod tests {
     use crate::core::AgentConfig;
     use aura_rendezvous::{GuardDecision, RendezvousDescriptor, TransportHint};
     use std::sync::Arc;
-    use tokio::sync::RwLock;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);

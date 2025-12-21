@@ -65,6 +65,9 @@ pub mod types;
 /// Utility modules (serialization, conversions, context derivation, test utilities)
 pub mod util;
 
+/// Operation-scoped execution context for effectful calls
+pub mod context;
+
 /// Cryptographic primitives and utilities (hash, signing, FROST, merkle trees)
 pub mod crypto;
 /// Pure effect interfaces (no implementations)
@@ -115,6 +118,7 @@ pub use semilattice::{
 };
 
 // Identifiers and contexts
+pub use context::EffectContext;
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{
     AccountId, AuthorityId, ChannelId, ContextId, DataId, DeviceId, DkdContextId, EventId,

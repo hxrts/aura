@@ -5,10 +5,9 @@
 //! - `HandlerResult`: Standardized return type for reactive view integration
 //!
 //! Handlers use `HandlerContext` for consistent signatures and return
-//! `Result<HandlerResult, CliError>` to drive view deltas.
+//! `Result<HandlerResult, CliError>` to drive structured output.
 
-// Import types from aura-app (pure app types) and aura-agent (runtime types)
-use aura_app::core::ViewDelta;
+// Import types from aura-agent (runtime layer)
 use aura_core::identifiers::{ContextId, DeviceId};
 
 // Import agent types from aura-agent (runtime layer)
@@ -87,8 +86,6 @@ impl<'a> HandlerContext<'a> {
 ///
 /// - `Success`: Handler completed with a message to display
 /// - `Silent`: Handler completed with no output needed
-/// - `ViewUpdate`: Handler triggered a view delta for reactive updates
-/// - `Multiple`: Handler produced multiple view deltas
 #[derive(Debug, Clone)]
 pub enum HandlerResult {
     /// Handler completed successfully with a message to display
@@ -98,16 +95,6 @@ pub enum HandlerResult {
     },
     /// Handler completed with no output needed
     Silent,
-    /// Handler triggered a single view delta for reactive updates
-    ViewUpdate {
-        /// The view delta to apply
-        delta: ViewDelta,
-    },
-    /// Handler triggered multiple view deltas
-    Multiple {
-        /// All view deltas to apply in order
-        deltas: Vec<ViewDelta>,
-    },
 }
 
 impl HandlerResult {
@@ -121,15 +108,5 @@ impl HandlerResult {
     /// Create a silent result
     pub fn silent() -> Self {
         Self::Silent
-    }
-
-    /// Create a view update result with a single delta
-    pub fn view_update(delta: ViewDelta) -> Self {
-        Self::ViewUpdate { delta }
-    }
-
-    /// Create a result with multiple deltas
-    pub fn multiple(deltas: Vec<ViewDelta>) -> Self {
-        Self::Multiple { deltas }
     }
 }

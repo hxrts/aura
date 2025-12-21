@@ -145,9 +145,9 @@ async fn test_chat_signal_state_updates() {
     });
 
     // Emit updated state
-    core.views().set_chat(updated_state);
+    core.emit(&*CHAT_SIGNAL, updated_state).await.unwrap();
 
-    // Read and verify (signal is forwarded from ViewState)
+    // Read and verify
     drop(core);
     let read_state = wait_for_chat_signal(&app_core, |chat| chat.messages.len() == 1).await;
     assert_eq!(read_state.messages.len(), 1);
@@ -179,9 +179,9 @@ async fn test_recovery_signal_state_updates() {
     });
 
     // Emit updated state
-    core.views().set_recovery(updated_state);
+    core.emit(&*RECOVERY_SIGNAL, updated_state).await.unwrap();
 
-    // Read and verify (signal is forwarded from ViewState)
+    // Read and verify
     drop(core);
     let read_state = wait_for_recovery_signal(&app_core, |r| r.active_recovery.is_some()).await;
     assert!(read_state.active_recovery.is_some());
@@ -259,7 +259,7 @@ async fn test_chat_message_accumulation() {
 
     // Add multiple messages
     for i in 0..5 {
-        let mut state = core.snapshot().chat;
+        let mut state = core.read(&*CHAT_SIGNAL).await.unwrap();
         state.messages.push(Message {
             id: format!("msg-{}", i),
             channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
@@ -273,10 +273,10 @@ async fn test_chat_message_accumulation() {
             is_read: true,
             reply_to: None,
         });
-        core.views().set_chat(state);
+        core.emit(&*CHAT_SIGNAL, state).await.unwrap();
     }
 
-    // Verify all messages were accumulated (signal is forwarded from ViewState)
+    // Verify all messages were accumulated
     drop(core);
     let final_state = wait_for_chat_signal(&app_core, |chat| chat.messages.len() == 5).await;
     assert_eq!(final_state.messages.len(), 5);

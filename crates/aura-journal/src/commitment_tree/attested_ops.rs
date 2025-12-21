@@ -36,7 +36,6 @@ impl TreeOp {
     pub async fn to_fact(
         self,
         random: &dyn RandomEffects,
-        _ctx: &crate::fact::EffectContext,
     ) -> Result<Fact> {
         let attested = AttestedOp {
             tree_op: self.kind,

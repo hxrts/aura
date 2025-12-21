@@ -99,6 +99,10 @@ dev-console = [
 ]
 real-android-keystore = []  # Enable real Android Keystore implementation
 
+# Simulation feature: enables SimulationEnvironmentFactory and related abstractions
+# for decoupling the simulator from agent internals
+simulation = ["aura-core/simulation"]
+
 # Platform-specific presets
 # These enable the build() method for platform-specific builders.
 # The builder types are always available for API discoverability.

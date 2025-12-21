@@ -48,7 +48,6 @@ impl ContextPropagator {
         self.get_context(context_id).map(|ctx| ContextSnapshot {
             authority_id: ctx.authority_id(),
             context_id: ctx.context_id(),
-            flow_budget_remaining: ctx.flow_budget().remaining(),
             metadata: ctx.metadata().clone(),
         })
     }
@@ -83,7 +82,6 @@ impl Default for ContextPropagator {
 pub struct ContextSnapshot {
     pub authority_id: AuthorityId,
     pub context_id: ContextId,
-    pub flow_budget_remaining: u64,
     pub metadata: HashMap<String, String>,
 }
 

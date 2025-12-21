@@ -11,7 +11,7 @@ use super::{
 };
 use crate::core::AgentConfig;
 use crate::fact_registry::build_fact_registry;
-use crate::reactive::{ReactivePipeline, SchedulerConfig};
+use crate::reactive::{FactSource, ReactivePipeline, SchedulerConfig};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
 use std::sync::Arc;
@@ -221,19 +221,41 @@ impl RuntimeSystem {
     ///
     /// This is a best-effort wiring step; the pipeline becomes fully useful once
     /// the runtime publishes typed facts into it (work/002.md C2).
-    pub fn start_reactive_pipeline(&mut self) {
+    pub async fn start_reactive_pipeline(&mut self) -> Result<(), String> {
         if self.reactive_pipeline.is_some() {
-            return;
+            return Ok(());
         }
 
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(self.effect_system.time_effects().clone());
 
-        self.reactive_pipeline = Some(ReactivePipeline::start(
+        let pipeline = ReactivePipeline::start(
             SchedulerConfig::default(),
             build_fact_registry(),
             time_effects,
-        ));
+            self.authority_id,
+            self.effect_system.reactive_handler(),
+        );
+
+        // Attach the scheduler ingestion channel to the effect system so all journal commits
+        // go through the single typed-fact pipeline (work/002.md C2).
+        self.effect_system.attach_fact_sink(pipeline.fact_sender());
+
+        // Replay existing persisted facts to seed scheduler-driven UI signals.
+        let existing = self
+            .effect_system
+            .load_committed_facts(self.authority_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        if !existing.is_empty() {
+            let _ = pipeline
+                .fact_sender()
+                .send(FactSource::Journal(existing))
+                .await;
+        }
+
+        self.reactive_pipeline = Some(pipeline);
+        Ok(())
     }
 
     /// Access the running reactive pipeline (if started).
@@ -298,20 +320,33 @@ impl RuntimeSystem {
 
     /// Shutdown the runtime system
     pub async fn shutdown(self, ctx: &EffectContext) -> Result<(), String> {
+        let RuntimeSystem {
+            lifecycle_manager,
+            sync_manager,
+            rendezvous_manager,
+            reactive_pipeline,
+            ..
+        } = self;
+
+        // Stop reactive pipeline (scheduler task) if running.
+        if let Some(pipeline) = reactive_pipeline {
+            pipeline.shutdown().await;
+        }
+
         // Stop rendezvous service if running
-        if let Some(rendezvous_manager) = &self.rendezvous_manager {
+        if let Some(rendezvous_manager) = &rendezvous_manager {
             if let Err(e) = rendezvous_manager.stop().await {
                 tracing::warn!("Failed to stop rendezvous service during shutdown: {}", e);
             }
         }
 
         // Stop sync service if running
-        if let Some(sync_manager) = &self.sync_manager {
+        if let Some(sync_manager) = &sync_manager {
             if let Err(e) = sync_manager.stop().await {
                 tracing::warn!("Failed to stop sync service during shutdown: {}", e);
             }
         }
 
-        self.lifecycle_manager.shutdown(ctx).await
+        lifecycle_manager.shutdown(ctx).await
     }
 }

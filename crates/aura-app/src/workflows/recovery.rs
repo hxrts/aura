@@ -1,16 +1,16 @@
 //! Recovery Workflow - Portable Business Logic
 //!
 //! This module contains guardian recovery operations that are portable
-//! across all frontends. Uses ViewState as single source of truth;
-//! signal forwarding handles RECOVERY_SIGNAL updates.
+//! across all frontends. Uses typed reactive signals for state reads/writes.
 
 use crate::{
     runtime_bridge::CeremonyStatus,
+    signal_defs::RECOVERY_SIGNAL,
     views::recovery::{RecoveryProcess, RecoveryProcessStatus, RecoveryState},
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::{identifiers::AuthorityId, AuraError};
+use aura_core::{effects::reactive::ReactiveEffects, identifiers::AuthorityId, AuraError};
 use std::sync::Arc;
 
 /// Start a guardian recovery ceremony
@@ -68,7 +68,7 @@ pub async fn start_recovery(
     };
 
     // Update ViewState - signal forwarding auto-propagates to RECOVERY_SIGNAL
-    set_recovery_state(app_core, state).await;
+    set_recovery_state(app_core, state).await?;
 
     Ok(ceremony_id)
 }
@@ -123,10 +123,14 @@ pub async fn dispute_recovery(
 /// **What it does**: Reads recovery state from ViewState
 /// **Returns**: Current recovery state
 /// **Signal pattern**: Read-only operation (no emission)
-pub async fn get_recovery_status(app_core: &Arc<RwLock<AppCore>>) -> RecoveryState {
+pub async fn get_recovery_status(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<RecoveryState, AuraError> {
     let core = app_core.read().await;
 
-    core.views().snapshot().recovery
+    core.read(&*RECOVERY_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read RECOVERY_SIGNAL: {}", e)))
 }
 
 /// Get ceremony status from runtime
@@ -157,9 +161,14 @@ pub async fn get_ceremony_status(
 /// Set recovery state in ViewState
 ///
 /// Signal forwarding automatically propagates to RECOVERY_SIGNAL.
-async fn set_recovery_state(app_core: &Arc<RwLock<AppCore>>, state: RecoveryState) {
+async fn set_recovery_state(
+    app_core: &Arc<RwLock<AppCore>>,
+    state: RecoveryState,
+) -> Result<(), AuraError> {
     let core = app_core.read().await;
-    core.views().set_recovery(state);
+    core.emit(&*RECOVERY_SIGNAL, state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit RECOVERY_SIGNAL: {}", e)))
 }
 
 #[cfg(test)]
@@ -174,9 +183,11 @@ mod tests {
     #[tokio::test]
     async fn test_get_recovery_status_default() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let mut core = AppCore::new(config).unwrap();
+        core.init_signals().await.unwrap();
+        let app_core = Arc::new(RwLock::new(core));
 
-        let status = get_recovery_status(&app_core).await;
+        let status = get_recovery_status(&app_core).await.unwrap();
         assert!(status.active_recovery.is_none());
         assert!(status.guardians.is_empty());
     }
@@ -184,9 +195,11 @@ mod tests {
     #[tokio::test]
     async fn test_set_recovery_state() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let mut core = AppCore::new(config).unwrap();
+        core.init_signals().await.unwrap();
+        let app_core = Arc::new(RwLock::new(core));
 
-        // Set recovery state with active recovery process via ViewState
+        // Set recovery state with active recovery process
         let state = RecoveryState {
             guardians: vec![Guardian {
                 id: AuthorityId::default(),
@@ -213,10 +226,10 @@ mod tests {
         };
 
         // Update ViewState directly
-        set_recovery_state(&app_core, state.clone()).await;
+        set_recovery_state(&app_core, state.clone()).await.unwrap();
 
         // Verify state was set
-        let retrieved = get_recovery_status(&app_core).await;
+        let retrieved = get_recovery_status(&app_core).await.unwrap();
         assert!(retrieved.active_recovery.is_some());
         assert_eq!(
             retrieved.active_recovery.as_ref().unwrap().id,

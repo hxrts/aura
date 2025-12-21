@@ -578,7 +578,7 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
 
                 /// Runtime context for effect command generation
                 #[derive(Clone)]
-                pub struct EffectContext {
+                pub struct EffectBridgeContext {
                     /// Current context ID
                     pub context: ContextId,
                     /// Local authority ID
@@ -594,7 +594,7 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                 /// Takes: (role_name, annotation_type, value, flow_cost)
                 /// Returns: Vec of EffectCommand for the interpreter
                 pub fn annotation_to_commands(
-                    ctx: &EffectContext,
+                    ctx: &EffectBridgeContext,
                     annotation: (String, String, String, u64),
                 ) -> Vec<EffectCommand> {
                     let (_role_name, annotation_type, value, flow_cost) = annotation;
@@ -659,7 +659,7 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
 
                 /// Convert a batch of annotations to effect commands
                 pub fn annotations_to_commands(
-                    ctx: &EffectContext,
+                    ctx: &EffectBridgeContext,
                     annotations: Vec<(String, String, String, u64)>,
                 ) -> Vec<EffectCommand> {
                     annotations
@@ -674,8 +674,8 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                     authority: AuthorityId,
                     peer: AuthorityId,
                     timestamp: TimeStamp,
-                ) -> EffectContext {
-                    EffectContext {
+                ) -> EffectBridgeContext {
+                    EffectBridgeContext {
                         context,
                         authority,
                         peer,
@@ -689,7 +689,7 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                 /// It converts annotations to commands and executes them asynchronously.
                 pub async fn execute_commands<I: aura_core::effects::guard::EffectInterpreter>(
                     interpreter: &I,
-                    ctx: &EffectContext,
+                    ctx: &EffectBridgeContext,
                     annotations: Vec<(String, String, String, u64)>,
                 ) -> Result<Vec<aura_core::effects::guard::EffectResult>, String> {
                     use aura_core::effects::guard::EffectResult;

@@ -4,12 +4,11 @@
 
 use super::{
     BlockState, BlocksState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
-    RecoveryState, ResidentRole,
+    RecoveryState,
 };
-use crate::core::{StateSnapshot, ViewDelta};
+use crate::core::StateSnapshot;
 #[cfg(feature = "signals")]
 use aura_core::identifiers::ChannelId;
-use aura_core::identifiers::ContextId;
 use cfg_if::cfg_if;
 
 cfg_if! {
@@ -325,6 +324,7 @@ cfg_if! {
 // View Delta Application
 // =============================================================================
 
+#[cfg(any())]
 cfg_if! {
     if #[cfg(feature = "signals")] {
         impl ViewState {

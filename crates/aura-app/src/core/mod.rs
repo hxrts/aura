@@ -7,20 +7,16 @@
 //! - [`StateSnapshot`]: FFI-safe state snapshot
 //! - [`AppConfig`]: Application configuration
 //! - [`IntentError`]: Error types for intent dispatch
-//! - [`ViewDelta`]: Changes to apply to view state
-//! - [`reduce_fact`]: Convert journal facts to view deltas
+//!
+//! Note: The legacy "string fact" reducer pipeline has been removed. Journal facts are committed
+//! by the runtime and delivered to UIs via typed reactive signals.
 
 mod app;
 mod error;
 mod intent;
-mod reducer;
 mod snapshot;
-
-#[cfg(feature = "signals")]
-mod signal_sync;
 
 pub use app::{AppConfig, AppCore};
 pub use error::IntentError;
 pub use intent::{ChannelType as IntentChannelType, Intent, InvitationType, Screen};
-pub use reducer::{reduce_fact, ViewDelta};
 pub use snapshot::StateSnapshot;

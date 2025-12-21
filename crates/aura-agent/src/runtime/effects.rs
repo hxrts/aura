@@ -21,10 +21,12 @@ use aura_core::{
 use aura_effects::{
     crypto::RealCryptoHandler,
     database::IndexedJournalHandler,
+    ReactiveHandler,
     secure::RealSecureStorageHandler,
     storage::FilesystemStorageHandler,
     time::{LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler},
 };
+use aura_journal::fact::{Fact as TypedFact, FactContent, RelationalFact};
 use aura_journal::commitment_tree::state::TreeState as JournalTreeState;
 use aura_journal::extensibility::{DomainFact, FactRegistry};
 use aura_protocol::amp::{AmpJournalEffects, ChannelMembershipFact, ChannelParticipantEvent};
@@ -41,8 +43,10 @@ use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use tokio::sync::mpsc;
 
 const DEFAULT_WINDOW: u32 = 1024;
+const TYPED_FACT_STORAGE_PREFIX: &str = "journal/facts";
 
 /// Concrete effect system combining all effects for runtime usage
 ///
@@ -68,12 +72,22 @@ pub struct AuraEffectSystem {
     transport_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     transport_stats: Arc<RwLock<TransportStats>>,
     fact_registry: Arc<FactRegistry>,
+    /// Reactive signal graph for UI-facing state.
+    ///
+    /// This is the canonical ReactiveEffects surface for frontends when running
+    /// with a full runtime. It is driven by the ReactiveScheduler pipeline.
+    reactive_handler: ReactiveHandler,
     /// Secure storage for cryptographic key material (FROST keys, device keys)
     secure_storage_handler: RealSecureStorageHandler,
     /// Indexed journal handler for efficient fact lookups (B-tree, Bloom, Merkle)
     indexed_journal: Arc<IndexedJournalHandler>,
     /// Test mode flag to bypass authorization guards
     test_mode: bool,
+    /// Optional fact publication sink for the reactive scheduler.
+    ///
+    /// When configured, committed typed facts are sent to the reactive scheduler
+    /// so UI signals can be updated via the canonical scheduler pipeline.
+    fact_publish_tx: parking_lot::Mutex<Option<mpsc::Sender<crate::reactive::FactSource>>>,
 }
 
 #[derive(Clone, Default)]
@@ -168,15 +182,143 @@ impl AuraEffectSystem {
             transport_inbox,
             transport_stats,
             fact_registry: Arc::new(build_fact_registry()),
+            reactive_handler: ReactiveHandler::new(),
             secure_storage_handler,
             indexed_journal,
             test_mode,
+            fact_publish_tx: parking_lot::Mutex::new(None),
         }
     }
 
     /// Check if the effect system is in test mode (bypasses authorization guards)
     pub fn is_testing(&self) -> bool {
         self.test_mode
+    }
+
+    /// Get the shared reactive handler (signal graph) for this runtime.
+    pub fn reactive_handler(&self) -> ReactiveHandler {
+        self.reactive_handler.clone()
+    }
+
+    /// Attach a fact sink for reactive scheduling (facts → scheduler ingestion).
+    ///
+    /// This is called during runtime startup when the ReactivePipeline is started.
+    pub fn attach_fact_sink(&self, tx: mpsc::Sender<crate::reactive::FactSource>) {
+        *self.fact_publish_tx.lock() = Some(tx);
+    }
+
+    async fn publish_typed_facts(&self, facts: Vec<TypedFact>) -> Result<(), AuraError> {
+        let tx = self.fact_publish_tx.lock().clone();
+        let Some(tx) = tx else {
+            return Ok(());
+        };
+
+        tx.send(crate::reactive::FactSource::Journal(facts))
+            .await
+            .map_err(|_| AuraError::internal("Reactive fact sink dropped"))?;
+
+        Ok(())
+    }
+
+    fn typed_fact_storage_prefix(authority_id: AuthorityId) -> String {
+        format!("{}/{}/", TYPED_FACT_STORAGE_PREFIX, authority_id)
+    }
+
+    fn typed_fact_storage_key(authority_id: AuthorityId, order: &aura_core::time::OrderTime) -> String {
+        format!(
+            "{}{}",
+            Self::typed_fact_storage_prefix(authority_id),
+            hex::encode(order.0)
+        )
+    }
+
+    /// Commit a batch of typed relational facts into the canonical fact store and publish them.
+    ///
+    /// This is the single write path for UI-facing facts in the runtime.
+    pub async fn commit_relational_facts(
+        &self,
+        facts: Vec<RelationalFact>,
+    ) -> Result<Vec<TypedFact>, AuraError> {
+        if facts.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut committed: Vec<TypedFact> = Vec::with_capacity(facts.len());
+        for rel in facts {
+            let order = self
+                .order_time()
+                .await
+                .map_err(|e| AuraError::internal(format!("order_time: {e}")))?;
+
+            let fact = TypedFact {
+                order: order.clone(),
+                timestamp: aura_core::time::TimeStamp::OrderClock(order.clone()),
+                content: FactContent::Relational(rel),
+            };
+
+            let key = Self::typed_fact_storage_key(self.authority_id, &order);
+            let bytes = bincode::serialize(&fact)
+                .map_err(|e| AuraError::internal(format!("serialize fact: {e}")))?;
+            self.store(&key, bytes)
+                .await
+                .map_err(|e| AuraError::storage(format!("persist fact: {e}")))?;
+
+            committed.push(fact);
+        }
+
+        // Publish after persistence so subscribers can always recover from storage.
+        self.publish_typed_facts(committed.clone()).await?;
+
+        Ok(committed)
+    }
+
+    /// Commit a single generic domain fact (binding_type + bytes) into the canonical fact store.
+    pub async fn commit_generic_fact_bytes(
+        &self,
+        context_id: ContextId,
+        binding_type: &str,
+        binding_data: Vec<u8>,
+    ) -> Result<TypedFact, AuraError> {
+        let rel = RelationalFact::Generic {
+            context_id,
+            binding_type: binding_type.to_string(),
+            binding_data,
+        };
+        let mut committed = self.commit_relational_facts(vec![rel]).await?;
+        Ok(committed
+            .pop()
+            .unwrap_or_else(|| unreachable!("commit_relational_facts committed exactly one")))
+    }
+
+    /// Load all committed typed facts for the given authority from storage.
+    pub async fn load_committed_facts(
+        &self,
+        authority_id: AuthorityId,
+    ) -> Result<Vec<TypedFact>, AuraError> {
+        let prefix = Self::typed_fact_storage_prefix(authority_id);
+        let mut keys = self
+            .list_keys(Some(&prefix))
+            .await
+            .map_err(|e| AuraError::storage(format!("list_keys: {e}")))?;
+        keys.sort();
+
+        let mut facts = Vec::new();
+        for key in keys {
+            let Some(bytes) = self
+                .retrieve(&key)
+                .await
+                .map_err(|e| AuraError::storage(format!("retrieve: {e}")))?
+            else {
+                continue;
+            };
+
+            let fact: TypedFact = bincode::deserialize(&bytes)
+                .map_err(|e| AuraError::internal(format!("deserialize fact: {e}")))?;
+            facts.push(fact);
+        }
+
+        facts.sort();
+        Ok(facts)
     }
 
     /// Default crypto seed for deterministic testing.
@@ -2221,6 +2363,23 @@ impl LeakageEffects for AuraEffectSystem {
         self.leakage_handler
             .get_leakage_history(context_id, since_timestamp)
             .await
+    }
+}
+
+// ============================================================================
+// RuntimeEffectsBundle Implementation (for simulator decoupling)
+// ============================================================================
+
+#[cfg(feature = "simulation")]
+impl aura_core::effects::RuntimeEffectsBundle for AuraEffectSystem {
+    fn is_simulation_mode(&self) -> bool {
+        self.test_mode
+    }
+
+    fn simulation_seed(&self) -> Option<u64> {
+        // The seed is not stored after construction, so we return None
+        // In practice, determinism is achieved through seeded RNG at construction time
+        None
     }
 }
 

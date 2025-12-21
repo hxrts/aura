@@ -153,6 +153,10 @@ pub use aura_core::effects::ExecutionMode;
 // Effect system types
 pub use runtime::AuraEffectSystem;
 
+// Simulation factory (feature-gated)
+#[cfg(feature = "simulation")]
+pub use runtime::EffectSystemFactory;
+
 // Re-export core types for convenience (authority-first)
 pub use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 

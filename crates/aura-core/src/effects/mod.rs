@@ -187,9 +187,11 @@ pub use secure::{
 #[cfg(feature = "simulation")]
 pub use simulation::{
     ByzantineFault, CheckpointId, ComputationFault, ExportFormat, FaultInjectionConfig,
-    FaultInjectionEffects, FaultType, NetworkFault, OperationStats, ScenarioId, ScenarioState,
-    SimulationCheckpoint, SimulationControlEffects, SimulationEffects, SimulationMetrics,
-    SimulationObservationEffects, SimulationScenario, SimulationTime, StorageFault, TimeFault,
+    FaultInjectionEffects, FaultType, NetworkFault, OperationStats, RuntimeEffectsBundle,
+    ScenarioId, ScenarioState, SimulationCheckpoint, SimulationControlEffects, SimulationEffects,
+    SimulationEnvironmentConfig, SimulationEnvironmentError, SimulationEnvironmentFactory,
+    SimulationMetrics, SimulationObservationEffects, SimulationScenario, SimulationTime,
+    StorageFault, TimeFault,
 };
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
 pub use supertraits::{

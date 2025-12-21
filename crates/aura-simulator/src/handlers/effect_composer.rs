@@ -6,14 +6,26 @@
 //! This composer uses the aura-agent runtime (Layer 6) to properly compose simulation
 //! environments, unlike the deprecated stateless pattern which incorrectly used Layer 3
 //! handlers directly.
+//!
+//! ## Decoupling via Factory Abstraction
+//!
+//! The composer uses `SimulationEnvironmentFactory` trait from aura-core to create
+//! effect systems. This decouples the simulator from `AuraEffectSystem` internals:
+//!
+//! - Changes to `AuraEffectSystem` factory methods only require updating `EffectSystemFactory`
+//! - The simulator remains stable as long as the trait contract is maintained
+//! - Tests can provide mock factories if needed
 
 use super::{
     stateless_simulator::SimulationTickResult, SimulationFaultHandler, SimulationScenarioHandler,
     SimulationTimeHandler,
 };
 use crate::quint::itf_fuzzer::{ITFBasedFuzzer, ITFFuzzConfig, ITFTrace};
-use aura_agent::AuraEffectSystem;
-use aura_core::effects::{ChaosEffects, TestingEffects, TransportEnvelope};
+use aura_agent::{AuraEffectSystem, EffectSystemFactory};
+use aura_core::effects::{
+    ChaosEffects, SimulationEnvironmentConfig, SimulationEnvironmentFactory, TestingEffects,
+    TransportEnvelope,
+};
 use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use std::path::Path;
@@ -75,48 +87,53 @@ impl SimulationEffectComposer {
         self
     }
     /// Add core effect system using agent runtime (async version for use within tokio runtime)
+    ///
+    /// Uses `SimulationEnvironmentFactory` trait for decoupled effect system creation.
     pub async fn with_effect_system_async(mut self) -> Result<Self, SimulationComposerError> {
-        let authority_id = self
-            .authority_id
-            .unwrap_or_else(|| AuthorityId::from_uuid(self.device_id.0));
-
-        let config = aura_agent::core::AgentConfig {
-            device_id: self.device_id,
-            ..aura_agent::core::AgentConfig::default()
-        };
+        let factory = EffectSystemFactory::new();
+        let sim_config = self.build_simulation_config();
 
         let effect_system = if let Some(inbox) = self.shared_transport_inbox.clone() {
-            AuraEffectSystem::simulation_with_shared_transport_for_authority(
-                &config,
-                self.seed,
-                authority_id,
-                inbox,
-            )
-            .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?
+            factory
+                .create_simulation_environment_with_shared_transport(sim_config, inbox)
+                .await
+                .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?
         } else {
-            AuraEffectSystem::simulation_for_authority(&config, self.seed, authority_id)
+            factory
+                .create_simulation_environment(sim_config)
+                .await
                 .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?
         };
 
-        self.effect_system = Some(Arc::new(effect_system));
+        self.effect_system = Some(effect_system);
         Ok(self)
     }
+
     /// Add core effect system using agent runtime (sync version - only use outside tokio runtime)
+    ///
+    /// Uses `SimulationEnvironmentFactory` trait for decoupled effect system creation.
+    /// Note: This method blocks on async factory creation using `futures::executor::block_on`.
     pub fn with_effect_system(mut self) -> Result<Self, SimulationComposerError> {
-        let authority_id = self
-            .authority_id
-            .unwrap_or_else(|| AuthorityId::from_uuid(self.device_id.0));
+        let factory = EffectSystemFactory::new();
+        let sim_config = self.build_simulation_config();
 
-        let config = aura_agent::core::AgentConfig {
-            device_id: self.device_id,
-            ..aura_agent::core::AgentConfig::default()
-        };
+        // Block on async factory - only safe outside tokio runtime
+        let effect_system = futures::executor::block_on(
+            factory.create_simulation_environment(sim_config),
+        )
+        .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
 
-        let effect_system =
-            AuraEffectSystem::simulation_for_authority(&config, self.seed, authority_id)
-                .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
-        self.effect_system = Some(Arc::new(effect_system));
+        self.effect_system = Some(effect_system);
         Ok(self)
+    }
+
+    /// Build a SimulationEnvironmentConfig from the composer's current state
+    fn build_simulation_config(&self) -> SimulationEnvironmentConfig {
+        let mut config = SimulationEnvironmentConfig::new(self.seed, self.device_id);
+        if let Some(authority_id) = self.authority_id {
+            config = config.with_authority(authority_id);
+        }
+        config
     }
 
     /// Add simulation-specific time control

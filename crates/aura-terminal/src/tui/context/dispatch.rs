@@ -2,7 +2,7 @@
 //!
 //! Focused helpers for:
 //! - Account file operations (create/restore/backup import/export)
-//! - Command dispatch (Intent via AppCore, Operational via OperationalHandler)
+//! - Command dispatch (Operational via OperationalHandler)
 //! - Emitting `ERROR_SIGNAL` on all error paths
 
 use aura_core::{AuthorityId, ContextId};
@@ -18,7 +18,7 @@ use aura_app::AppCore;
 use super::{SnapshotHelper, ToastHelper};
 use crate::error::TerminalError;
 use crate::handlers::tui::TuiMode;
-use crate::tui::effects::{command_to_intent, EffectCommand, OpResponse, OperationalHandler};
+use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
 
 /// File-based account operations used by the TUI.
@@ -225,37 +225,17 @@ impl DispatchHelper {
             _ => {}
         }
 
-        // Build intent context from current state for proper ID resolution.
-        let intent_ctx = self.snapshots.intent_context();
-
-        // Intent path (journaled).
-        if let Some(intent) = command_to_intent(&command, &intent_ctx) {
-            let mut core = self.app_core.write().await;
-            match core.dispatch(intent) {
-                Ok(_fact_id) => {
-                    if let Err(e) = core.commit_pending_facts_and_emit().await {
-                        tracing::warn!("Failed to commit facts or emit signals: {}", e);
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    let msg = format!("Intent dispatch failed: {}", e);
-                    self.operational
-                        .emit_error(TerminalError::Operation(msg.clone()))
-                        .await;
-                    Err(msg)
-                }
-            }
-        } else if let Some(result) = self.operational.execute_with_errors(&command).await {
+        // Operational path (runtime-backed).
+        if let Some(result) = self.operational.execute_with_errors(&command).await {
             // Operational path.
             match result {
                 Ok(response) => self.handle_op_response(response).await,
                 Err(e) => Err(e.to_string()),
             }
         } else {
-            // Unknown command (neither intent nor operational).
+            // Unknown command.
             tracing::warn!(
-                "Unknown command not handled by Intent or Operational: {:?}",
+                "Unknown command not handled by Operational: {:?}",
                 command
             );
             let msg = format!("Unknown command: {:?}", command);

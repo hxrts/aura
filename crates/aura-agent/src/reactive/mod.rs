@@ -32,15 +32,15 @@
 //! - Type-safe: leverages Rust's type system for correctness guarantees
 //! - Deterministic: reproducible behavior for testing and simulation
 
-pub mod fact_stream;
 pub mod frp;
+pub mod app_signal_views;
 pub mod pipeline;
 pub mod scheduler;
 
 // Re-export main types for convenience
-pub use fact_stream::{FactStreamAdapter, FactStreamConfig, FactStreamStats};
 pub use frp::Dynamic;
 pub use pipeline::ReactivePipeline;
+pub use app_signal_views::{ChatSignalView, ContactsSignalView, InvitationsSignalView};
 pub use scheduler::{
     topological_sort_dag, AnyView, BlockDelta, BlockReduction, ChatReduction, FactSource,
     GuardianDelta, GuardianReduction, InvitationReduction, ReactiveScheduler, ReactiveView,

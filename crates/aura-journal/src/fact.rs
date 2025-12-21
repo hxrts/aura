@@ -15,32 +15,6 @@ use aura_core::{
     time::{OrderTime, TimeStamp},
     Hash32, Result,
 };
-// Import EffectContext for proper context propagation
-// Note: In practice, this would import from wherever EffectContext is defined in aura-core
-use std::collections::HashMap;
-
-/// Effect context for API operations (kept local to avoid circular imports)
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
-pub struct EffectContext {
-    /// Authority performing the operation
-    authority_id: AuthorityId,
-    /// Session context (if any)
-    session_id: Option<u32>, // Simplified for this context
-    /// Additional metadata
-    metadata: HashMap<String, String>,
-}
-
-impl EffectContext {
-    /// Create a context bound to a specific authority
-    pub fn with_authority(authority_id: AuthorityId) -> Self {
-        Self {
-            authority_id,
-            session_id: None,
-            metadata: HashMap::new(),
-        }
-    }
-}
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 

@@ -12,14 +12,13 @@ use aura_app::runtime_bridge::{
     RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::IntentError;
-use aura_core::domain::FactValue;
-use aura_core::effects::{JournalEffects, StorageEffects, ThresholdSigningEffects};
+use aura_effects::ReactiveHandler;
+use aura_core::effects::{StorageEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
-use aura_core::time::TimeStamp;
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::DeviceId;
-use aura_journal::JournalFact;
+use aura_journal::fact::RelationalFact;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -117,43 +116,24 @@ impl RuntimeBridge for AgentRuntimeBridge {
         self.agent.authority_id()
     }
 
+    fn reactive_handler(&self) -> ReactiveHandler {
+        self.agent.runtime().effects().reactive_handler()
+    }
+
     // =========================================================================
     // Fact Persistence
     // =========================================================================
 
-    async fn persist_facts(&self, facts: &[JournalFact]) -> Result<(), IntentError> {
+    async fn commit_relational_facts(&self, facts: &[RelationalFact]) -> Result<(), IntentError> {
         if facts.is_empty() {
             return Ok(());
         }
 
-        // Get the effect system
         let effects = self.agent.runtime().effects();
-
-        // Get the current journal
-        let mut journal = effects
-            .get_journal()
+        effects
+            .commit_relational_facts(facts.to_vec())
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to get journal: {}", e)))?;
-
-        // Add each fact to the journal
-        for fact in facts {
-            let timestamp_ms = extract_timestamp_ms(&fact.timestamp);
-            let actor_id = fact.source_authority.to_string();
-            let key = format!("fact:{}:{}", actor_id, timestamp_ms);
-
-            journal.facts.insert_with_context(
-                key,
-                FactValue::String(fact.content.clone()),
-                actor_id,
-                timestamp_ms,
-                None,
-            );
-        }
-
-        // Persist the updated journal
-        effects.persist_journal(&journal).await.map_err(|e| {
-            IntentError::internal_error(format!("Failed to persist journal: {}", e))
-        })?;
+            .map_err(|e| IntentError::internal_error(format!("Failed to commit facts: {e}")))?;
 
         Ok(())
     }
@@ -856,25 +836,6 @@ impl AuraAgent {
 // ============================================================================
 // Helper functions
 // ============================================================================
-
-/// Extract a millisecond timestamp from a TimeStamp enum.
-///
-/// Different TimeStamp variants are handled as follows:
-/// - PhysicalClock: Uses the ts_ms field directly
-/// - LogicalClock: Uses the lamport clock value
-/// - OrderClock: Uses 0 (opaque ordering, no temporal meaning)
-/// - Range: Uses the earliest bound if available
-fn extract_timestamp_ms(ts: &TimeStamp) -> u64 {
-    match ts {
-        TimeStamp::PhysicalClock(physical) => physical.ts_ms,
-        TimeStamp::LogicalClock(logical) => logical.lamport,
-        TimeStamp::OrderClock(_) => 0, // OrderClock is opaque, no timestamp extraction
-        TimeStamp::Range(range) => {
-            // Use earliest bound from range
-            range.earliest_ms
-        }
-    }
-}
 
 /// Convert domain Invitation to bridge InvitationInfo
 fn convert_invitation_to_bridge_info(

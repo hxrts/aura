@@ -5,9 +5,15 @@
 //! simulation orchestration.
 //!
 //! Designed for the stateless effect system architecture (work/021.md).
+//!
+//! ## Decoupling via Factory Abstraction
+//!
+//! Uses `SimulationEnvironmentFactory` trait from aura-core to create effect systems,
+//! decoupling the simulator from `AuraEffectSystem` internals.
 
 use crate::types::{Result as SimResult, SimulatorConfig, SimulatorContext, SimulatorError};
-use aura_agent::{AgentBuilder, AuraEffectSystem};
+use aura_agent::{AuraEffectSystem, EffectSystemFactory};
+use aura_core::effects::{SimulationEnvironmentConfig, SimulationEnvironmentFactory};
 use aura_core::hash::hash;
 use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
@@ -23,33 +29,36 @@ impl TestkitSimulatorBridge {
     ///
     /// This method creates multiple effect systems configured for simulation,
     /// using the device fixtures as the foundation for multi-device scenarios.
+    ///
+    /// Uses `SimulationEnvironmentFactory` trait for decoupled effect system creation.
     pub fn create_simulation_effects(
         fixtures: &[DeviceTestFixture],
-        _seed: u64,
+        seed: u64,
     ) -> SimResult<Vec<(DeviceId, Arc<AuraEffectSystem>)>> {
+        let factory = EffectSystemFactory::new();
         let mut effect_systems = Vec::new();
 
         for fixture in fixtures {
             let device_id = fixture.device_id();
 
-            // Create real effect system configured for simulation
+            // Create simulation config with authority derived from device ID
             let authority_id = AuthorityId::new_from_entropy(hash(&device_id.to_bytes().expect(
                 "device ids from fixtures should always convert to bytes deterministically",
             )));
-            let _agent = AgentBuilder::new()
-                .with_authority(authority_id)
-                .build_testing()
-                .map_err(|e| {
-                    SimulatorError::OperationFailed(format!(
-                        "Effect system creation failed for device {}: {}",
-                        device_id, e
-                    ))
-                })?;
-            let config = aura_agent::core::AgentConfig::default();
-            let effect_system = AuraEffectSystem::testing(&config)
-                .map_err(|e| SimulatorError::OperationFailed(e.to_string()))?;
+            let sim_config =
+                SimulationEnvironmentConfig::new(seed, device_id).with_authority(authority_id);
 
-            effect_systems.push((device_id, Arc::new(effect_system)));
+            // Use factory to create effect system
+            let effect_system =
+                futures::executor::block_on(factory.create_simulation_environment(sim_config))
+                    .map_err(|e| {
+                        SimulatorError::OperationFailed(format!(
+                            "Effect system creation failed for device {}: {}",
+                            device_id, e
+                        ))
+                    })?;
+
+            effect_systems.push((device_id, effect_system));
         }
 
         Ok(effect_systems)
@@ -100,23 +109,24 @@ impl TestkitSimulatorBridge {
     }
 
     /// Convert harness to effect system
+    ///
+    /// Uses `SimulationEnvironmentFactory` trait for decoupled effect system creation.
     pub fn harness_to_effects<H>(
         _harness: H,
-        _device_id: DeviceId,
-        _seed: u64,
+        device_id: DeviceId,
+        seed: u64,
     ) -> SimResult<Arc<AuraEffectSystem>> {
-        // Convert test harness to effect system instead of middleware stack
-        let authority_id = AuthorityId::new_from_entropy(hash(&_seed.to_le_bytes()));
-        let _agent = AgentBuilder::new()
-            .with_authority(authority_id)
-            .build_testing()
-            .map_err(|e| {
-                SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
-            })?;
-        let config = aura_agent::core::AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config)
-            .map_err(|e| SimulatorError::OperationFailed(e.to_string()))?;
-        Ok(Arc::new(effect_system))
+        let factory = EffectSystemFactory::new();
+
+        // Create simulation config with authority derived from seed
+        let authority_id = AuthorityId::new_from_entropy(hash(&seed.to_le_bytes()));
+        let sim_config =
+            SimulationEnvironmentConfig::new(seed, device_id).with_authority(authority_id);
+
+        // Use factory to create effect system
+        futures::executor::block_on(factory.create_simulation_environment(sim_config)).map_err(
+            |e| SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e)),
+        )
     }
 }
 

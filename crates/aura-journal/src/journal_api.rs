@@ -124,7 +124,6 @@ impl Journal {
         logical_clock: Option<&dyn LogicalClockEffects>,
     ) -> Result<(), AuraError> {
         // Thread through effect context using the fact's source authority
-        let _ctx = crate::fact::EffectContext::with_authority(journal_fact.source_authority);
         let ts = match domain {
             TimeDomain::OrderClock => {
                 let id = order_clock
@@ -203,7 +202,7 @@ impl Journal {
         &mut self,
         relational_fact: crate::fact::RelationalFact,
         random: &dyn RandomEffects,
-    ) -> Result<(), AuraError> {
+    ) -> Result<Fact, AuraError> {
         // Generate order token using random bytes
         let order = OrderTime(random.random_bytes_32().await);
 
@@ -217,8 +216,8 @@ impl Journal {
             content: FactContent::Relational(relational_fact),
         };
 
-        self.fact_journal.add_fact(fact)?;
-        Ok(())
+        self.fact_journal.add_fact(fact.clone())?;
+        Ok(fact)
     }
 
     /// Get account state summary

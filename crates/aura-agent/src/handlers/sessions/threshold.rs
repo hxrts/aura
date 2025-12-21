@@ -77,7 +77,6 @@ mod tests {
     use crate::core::AuthorityContext;
     use aura_core::identifiers::{AccountId, AuthorityId, DeviceId};
     use std::sync::Arc;
-    use tokio::sync::RwLock;
 
     #[tokio::test]
     async fn test_threshold_session() {

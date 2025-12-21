@@ -34,8 +34,6 @@ use super::EffectCommand;
 // Deprecated re-exports for backwards compatibility
 #[deprecated(since = "0.1.0", note = "Use IntentContext instead")]
 pub use super::intent_context::IntentContext as CommandContext;
-#[deprecated(since = "0.1.0", note = "Use parse_context_id instead")]
-pub use super::intent_context::parse_context_id as parse_channel_id;
 
 /// Map a TUI EffectCommand to a domain Intent.
 ///

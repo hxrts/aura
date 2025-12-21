@@ -459,3 +459,130 @@ impl<T> SimulationEffects for T where
     T: SimulationControlEffects + FaultInjectionEffects + SimulationObservationEffects
 {
 }
+
+// ============================================================================
+// Simulation Environment Factory Abstraction
+// ============================================================================
+
+use crate::effects::transport::TransportEnvelope;
+use crate::identifiers::AuthorityId;
+use crate::DeviceId;
+use std::sync::{Arc, RwLock};
+
+/// Configuration for creating a simulation environment
+///
+/// This structure contains all parameters needed to create an effect system
+/// suitable for simulation purposes.
+#[derive(Debug, Clone)]
+pub struct SimulationEnvironmentConfig {
+    /// Random seed for deterministic simulation
+    pub seed: u64,
+    /// Device ID for this simulated agent
+    pub device_id: DeviceId,
+    /// Optional authority ID override (derived from device_id if not provided)
+    pub authority_id: Option<AuthorityId>,
+}
+
+impl SimulationEnvironmentConfig {
+    /// Create a new configuration with the given seed and device ID
+    pub fn new(seed: u64, device_id: DeviceId) -> Self {
+        Self {
+            seed,
+            device_id,
+            authority_id: None,
+        }
+    }
+
+    /// Set an explicit authority ID
+    pub fn with_authority(mut self, authority_id: AuthorityId) -> Self {
+        self.authority_id = Some(authority_id);
+        self
+    }
+}
+
+/// Error type for simulation environment creation failures
+#[derive(Debug, thiserror::Error)]
+pub enum SimulationEnvironmentError {
+    /// Configuration error
+    #[error("Invalid configuration: {0}")]
+    Configuration(String),
+
+    /// Effect system creation failed
+    #[error("Effect system creation failed: {0}")]
+    CreationFailed(String),
+
+    /// Required component missing
+    #[error("Required component missing: {0}")]
+    MissingComponent(String),
+}
+
+/// Factory trait for creating effect systems suitable for simulation
+///
+/// This trait abstracts the creation of effect systems, allowing the simulator
+/// to work with any implementation without directly depending on concrete types.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use aura_core::effects::simulation::{SimulationEnvironmentFactory, SimulationEnvironmentConfig};
+///
+/// async fn run_simulation<F>(factory: &F, config: SimulationEnvironmentConfig)
+/// where
+///     F: SimulationEnvironmentFactory,
+/// {
+///     let effects = factory.create_simulation_environment(config).await?;
+///     // Use effects for simulation...
+/// }
+/// ```
+#[async_trait::async_trait]
+pub trait SimulationEnvironmentFactory: Send + Sync {
+    /// The effect system type produced by this factory
+    type EffectSystem: RuntimeEffectsBundle + Send + Sync + 'static;
+
+    /// Create an effect system for simulation with the given configuration
+    async fn create_simulation_environment(
+        &self,
+        config: SimulationEnvironmentConfig,
+    ) -> std::result::Result<Arc<Self::EffectSystem>, SimulationEnvironmentError>;
+
+    /// Create an effect system with shared transport for multi-agent simulations
+    ///
+    /// The shared inbox enables message routing between multiple simulated agents
+    /// (e.g., Bob, Alice, Carol) in demo mode.
+    async fn create_simulation_environment_with_shared_transport(
+        &self,
+        config: SimulationEnvironmentConfig,
+        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> std::result::Result<Arc<Self::EffectSystem>, SimulationEnvironmentError>;
+}
+
+/// Bundle of all effect traits needed for runtime operation
+///
+/// This supertrait combines all the effect traits that a simulation environment
+/// must provide. Effect systems that implement this trait can be used with the
+/// simulator without knowing their concrete type.
+///
+/// Note: This is designed to be object-safe where possible, but the primary
+/// usage pattern is through generics with the `SimulationEnvironmentFactory` trait.
+pub trait RuntimeEffectsBundle:
+    crate::effects::PhysicalTimeEffects
+    + crate::effects::LogicalClockEffects
+    + crate::effects::OrderClockEffects
+    + crate::effects::CryptoEffects
+    + crate::effects::StorageEffects
+    + crate::effects::RandomEffects
+    + crate::effects::TransportEffects
+    + crate::effects::JournalEffects
+    + crate::effects::ConsoleEffects
+    + crate::effects::SystemEffects
+{
+    /// Check if this effect system is in test/simulation mode
+    fn is_simulation_mode(&self) -> bool;
+
+    /// Get the seed used for deterministic simulation (if applicable)
+    fn simulation_seed(&self) -> Option<u64>;
+}
+
+// Note: Blanket implementation is not provided here because RuntimeEffectsBundle
+// requires methods beyond the supertrait bounds. Implementors must explicitly
+// implement RuntimeEffectsBundle.

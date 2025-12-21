@@ -675,34 +675,16 @@ async fn handle_tui_launch(
         }
     };
 
-    // Create AppCore with runtime bridge - the portable application core from aura-app
-    // This provides intent-based state management with reactive ViewState
-    // The agent implements RuntimeBridge, enabling the dependency inversion
-    let journal_path = base_path.join(journal_filename(mode));
+    // Create AppCore with runtime bridge - the portable application core from aura-app.
+    // The runtime is responsible for committing facts and driving reactive signals.
     let app_config = AppConfig {
         data_dir: base_path.to_string_lossy().to_string(),
         debug: false,
-        journal_path: Some(journal_path.to_string_lossy().to_string()),
+        journal_path: None,
     };
     let agent = Arc::new(agent);
-    let mut app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
+    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
         .map_err(|e| AuraError::internal(format!("Failed to create AppCore: {}", e)))?;
-
-    // Load existing journal facts from storage to rebuild ViewState
-    match app_core.load_from_storage(&journal_path) {
-        Ok(count) if count > 0 => {
-            stdio.println(format_args!("Loaded {} facts from journal", count));
-        }
-        Ok(_) => {
-            stdio.println(format_args!("No existing journal found, starting fresh"));
-        }
-        Err(e) => {
-            stdio.eprintln(format_args!(
-                "Warning: Failed to load journal: {} - starting fresh",
-                e
-            ));
-        }
-    }
 
     let app_core = Arc::new(RwLock::new(app_core));
 

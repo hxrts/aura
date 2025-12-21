@@ -196,7 +196,7 @@ while let Ok(state) = stream.recv().await {
 }
 ```
 
-**Important**: Domain signals (CHAT_SIGNAL, CONTACTS_SIGNAL, etc.) should not be emitted to directly. All state updates go through ViewState, and the SignalForwarder in `aura-app/src/core/signal_sync.rs` automatically propagates changes to ReactiveEffects signals.
+**Important**: Domain signals (CHAT_SIGNAL, CONTACTS_SIGNAL, etc.) are driven by the `ReactiveScheduler` in `aura-agent/src/reactive/`. Journal facts committed to the runtime are published to the scheduler, which batches them and updates registered signal views. The signal views (`ChatSignalView`, `ContactsSignalView`, `InvitationsSignalView`) process facts and emit full state snapshots to their respective signals.
 
 ### 4.4 Implementation
 
@@ -389,19 +389,18 @@ pub async fn register_app_signals_with_queries<R: ReactiveEffects>(
 }
 ```
 
-When facts are committed, ViewState is updated and signals auto-forward:
+When facts are committed, they flow through the reactive scheduler:
 
 ```rust
-// In AppCore
-pub async fn commit_pending_facts_and_emit(&mut self) -> Result<usize, IntentError> {
-    // Commit facts synchronously - each fact updates ViewState
-    // SignalForwarder automatically propagates ViewState changes to signals
-    let count = self.commit_pending_facts();
-    Ok(count)
-}
+// In RuntimeSystem (aura-agent)
+// Facts are published to the scheduler via attach_fact_sink()
+effect_system.attach_fact_sink(pipeline.fact_sender());
+
+// The scheduler processes facts and updates signal views
+// Each view emits full state snapshots to its signal
 ```
 
-The SignalForwarder subscribes to ViewState's `Mutable<T>` signals and forwards changes to ReactiveEffects signals automatically. This eliminates the dual-write bug class where ViewState and signals could desync.
+The `ReactiveScheduler` processes facts in batches (5ms window) and drives all signal updates. This eliminates the dual-write bug class where different signal sources could desync.
 
 This enables TUI screens to subscribe and automatically receive updates:
 
@@ -770,16 +769,15 @@ if app.has_agent() {
     // Get agent reference
     let agent = app.agent().unwrap();
 
-    // Access effect system (requires async lock)
-    let effects_arc = agent.runtime().effects();
-    let effects = effects_arc.read().await;
+    // Access effect system directly (no lock needed)
+    let effects = agent.runtime().effects();
 
     // Use effects
     let time = effects.physical_time().await?;
 }
 ```
 
-The effect system uses `Arc<RwLock<AuraEffectSystem>>` to safely share state across async tasks.
+The effect system uses `Arc<AuraEffectSystem>` for shared access. The effect system is immutable after construction; individual handlers manage their own internal state as needed.
 
 ### 14.5 Re-exports
 
@@ -830,17 +828,17 @@ impl ChatHandler {
 
 ### 15.2 Service Layer (Agent)
 
-Services in `aura-agent` wrap handlers with RwLock management:
+Services in `aura-agent` wrap handlers with effect system access:
 
 ```rust
 // aura-agent/src/handlers/chat_service.rs
 pub struct ChatService {
     handler: ChatHandler,
-    effects: Arc<RwLock<AuraEffectSystem>>,
+    effects: Arc<AuraEffectSystem>,
 }
 
 impl ChatService {
-    pub fn new(effects: Arc<RwLock<AuraEffectSystem>>) -> Self {
+    pub fn new(effects: Arc<AuraEffectSystem>) -> Self {
         Self {
             handler: ChatHandler::new(),
             effects,
@@ -853,9 +851,8 @@ impl ChatService {
         creator_id: AuthorityId,
         initial_members: Vec<AuthorityId>,
     ) -> AgentResult<ChatGroup> {
-        let effects = self.effects.read().await;  // <-- Acquire lock
         self.handler
-            .create_group(&*effects, name, creator_id, initial_members)
+            .create_group(&*self.effects, name, creator_id, initial_members)
             .await
             .map_err(Into::into)
     }
@@ -884,24 +881,24 @@ impl AuraAgent {
 
 This pattern keeps domain crates:
 
-- **Pure**: No tokio/RwLock dependency
+- **Pure**: No tokio dependency
 - **Testable**: Pass mock effects directly in unit tests
 - **Consistent**: Same pattern across all domain crates
 
 The agent layer provides:
 
-- **Lock management**: Automatic RwLock acquisition per call
+- **Shared access**: Effect system shared via `Arc<AuraEffectSystem>`
 - **Error normalization**: Convert domain errors to `AgentError`
-- **Lazy initialization**: Some services initialize on first use
+- **Factory methods**: Services created on-demand with no lazy-init overhead
 
 ### 15.5 When to Use
 
 | Scenario | Location |
 |----------|----------|
 | Domain service logic | Domain crate `*Handler` (e.g., `aura-chat::ChatHandler`) |
-| RwLock wrapper service | `aura-agent/src/handlers/*_service.rs` |
+| Agent service wrapper | `aura-agent/src/handlers/*_service.rs` |
 | Agent API accessor | `aura-agent/src/core/api.rs` |
 
 ## 16. Summary
 
-The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems as services accessible through `AuraAgent`. Domain crates define stateless handlers that take effect references per-call, while the agent layer wraps these with services that manage RwLock access. `AppCore` wraps the agent to provide a unified, platform-agnostic interface for all frontends. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior.
+The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems as services accessible through `AuraAgent`. Domain crates define stateless handlers that take effect references per-call, while the agent layer wraps these with services that provide shared access via `Arc<AuraEffectSystem>`. `AppCore` wraps the agent to provide a unified, platform-agnostic interface for all frontends. The `ReactiveScheduler` processes journal facts and drives UI signal updates. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior.

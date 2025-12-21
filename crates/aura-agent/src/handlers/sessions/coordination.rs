@@ -542,7 +542,7 @@ impl SessionOperations {
     async fn create_session_handle_choreographically(
         &self,
         request: &SessionRequest,
-        effects: &AuraEffectSystem,
+        _effects: &AuraEffectSystem,
     ) -> AgentResult<SessionHandle> {
         let device_id = self.device_id();
         let timestamp_millis = self.effects.current_timestamp().await.unwrap_or(0);
@@ -655,7 +655,7 @@ impl SessionOperations {
     /// End session via effects system
     async fn end_session_via_effects(
         &self,
-        effects: &AuraEffectSystem,
+        _effects: &AuraEffectSystem,
         session_id: &str,
     ) -> AgentResult<SessionHandle> {
         // End session (logging removed for simplicity)
@@ -697,7 +697,7 @@ impl SessionOperations {
     /// Get session statistics via effects system
     async fn get_session_stats_via_effects(
         &self,
-        effects: &AuraEffectSystem,
+        _effects: &AuraEffectSystem,
     ) -> AgentResult<SessionStats> {
         let current_time = self.effects.current_timestamp().await.unwrap_or(0);
 
@@ -730,7 +730,6 @@ mod tests {
     use crate::core::{AgentConfig, AuthorityContext};
     use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
     use std::sync::Arc;
-    use tokio::sync::RwLock;
 
     #[tokio::test]
     async fn test_session_creation() {

@@ -358,7 +358,7 @@ async fn test_chat_signal_message_accumulation() {
             reply_to: None,
         });
 
-        core.views().set_chat(chat);
+        core.emit(&*CHAT_SIGNAL, chat).await.unwrap();
         println!("  Emitted 2 messages to signal");
     }
 
@@ -415,7 +415,7 @@ async fn test_chat_signal_message_accumulation() {
             });
         }
 
-        core.views().set_chat(chat);
+        core.emit(&*CHAT_SIGNAL, chat).await.unwrap();
     }
 
     {
@@ -473,7 +473,7 @@ async fn test_contacts_signal_contact_tracking() {
             is_online: true,
         });
 
-        core.views().set_contacts(contacts);
+        core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();
         println!("  Emitted contact 'Alice' to signal");
     }
 
@@ -525,7 +525,7 @@ async fn test_contacts_signal_contact_tracking() {
             alice.nickname = "Alice (Guardian)".to_string();
         }
 
-        core.views().set_contacts(contacts);
+        core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();
         println!("  Updated Alice to guardian");
     }
 
@@ -607,7 +607,7 @@ async fn test_recovery_signal_state_tracking() {
             progress: 0,
         });
 
-        core.views().set_recovery(recovery);
+        core.emit(&*RECOVERY_SIGNAL, recovery).await.unwrap();
         println!("  Emitted active recovery to signal");
     }
 
@@ -656,7 +656,7 @@ async fn test_recovery_signal_state_tracking() {
             active.progress = 50;
         }
 
-        core.views().set_recovery(recovery);
+        core.emit(&*RECOVERY_SIGNAL, recovery).await.unwrap();
         println!("  First approval recorded");
     }
 
@@ -697,7 +697,7 @@ async fn test_recovery_signal_state_tracking() {
             active.progress = 100;
         }
 
-        core.views().set_recovery(recovery);
+        core.emit(&*RECOVERY_SIGNAL, recovery).await.unwrap();
         println!("  Recovery completed");
     }
 

@@ -5,7 +5,7 @@
 
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AccountId, AuthorityId, ContextId, SessionId};
+use aura_core::identifiers::{AccountId, AuthorityId, ContextId};
 use std::collections::HashMap;
 
 /// Authority-first context for agent operations
@@ -22,9 +22,6 @@ pub struct AuthorityContext {
 
     /// Active relational contexts for this authority
     pub active_contexts: HashMap<ContextId, RelationalContext>,
-
-    /// Current session (if any)
-    pub session_id: Option<SessionId>,
 
     /// Internal device identifier (derived from authority, not exposed publicly)
     #[allow(dead_code)]
@@ -70,7 +67,6 @@ impl AuthorityContext {
             authority_id,
             account_id,
             active_contexts: HashMap::new(),
-            session_id: None,
             device_id,
         }
     }
@@ -83,13 +79,6 @@ impl AuthorityContext {
     /// Get a relational context
     pub fn get_context(&self, context_id: &ContextId) -> Option<&RelationalContext> {
         self.active_contexts.get(context_id)
-    }
-
-    /// Start a new session
-    pub fn start_session(&mut self) -> SessionId {
-        let session_id = SessionId::new();
-        self.session_id = Some(session_id);
-        session_id
     }
 
     /// Internal access to device ID (crate-private)

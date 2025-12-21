@@ -11,7 +11,9 @@
 
 use aura_core::effects::intent::{AuthorizationLevel, IntentMetadata};
 use aura_core::identifiers::{AuthorityId, ContextId};
+#[cfg(any())]
 use aura_core::time::TimeStamp;
+#[cfg(any())]
 use aura_journal::JournalFact;
 use serde::{Deserialize, Serialize};
 
@@ -697,30 +699,25 @@ impl Intent {
         }
     }
 
-    /// Convert this intent to a JournalFact for recording
-    ///
-    /// Takes the source authority and timestamp and produces a fact
-    /// that can be added to the journal.
-    pub fn to_journal_fact(
+    // Legacy string-fact conversion removed from builds. The canonical pipeline is:
+    // runtime typed fact commit → ReactiveScheduler → typed signals.
+    #[cfg(any())]
+    pub fn to_legacy_journal_fact(
         &self,
         source_authority: AuthorityId,
         timestamp: TimeStamp,
     ) -> JournalFact {
-        // Serialize the intent to a content string
-        let content = self.to_fact_content();
+        let content = self.to_legacy_fact_string();
 
         JournalFact {
-            content,
             timestamp,
             source_authority,
+            content,
         }
     }
 
-    /// Convert this intent to a fact content string
-    ///
-    /// Uses the format: `FactType::key1=value1&key2=value2`
-    /// This format is parsed by the reducer in `crate::core::reducer::reduce_fact`.
-    fn to_fact_content(&self) -> String {
+    #[cfg(any())]
+    fn to_legacy_fact_string(&self) -> String {
         match self {
             // Chat intents
             Self::SendMessage {

@@ -223,8 +223,14 @@ impl EffectSystemBuilder {
             authority_id,
         );
 
+        // Ensure the runtime's reactive signal graph is initialized before any scheduler emissions.
+        // This prevents "SignalNotFound" races during startup.
+        aura_app::signal_defs::register_app_signals(&system.effects().reactive_handler())
+            .await
+            .map_err(|e| format!("Failed to register app signals: {e}"))?;
+
         // Start reactive pipeline (facts → scheduler).
-        system.start_reactive_pipeline();
+        system.start_reactive_pipeline().await?;
 
         Ok(system)
     }

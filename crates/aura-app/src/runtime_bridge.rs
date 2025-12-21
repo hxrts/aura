@@ -39,7 +39,8 @@ use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::DeviceId;
-use aura_journal::JournalFact;
+use aura_effects::ReactiveHandler;
+use aura_journal::fact::RelationalFact;
 use std::sync::Arc;
 
 /// Status of the runtime's sync service
@@ -218,15 +219,24 @@ pub trait RuntimeBridge: Send + Sync {
     /// Get the authority ID for this runtime
     fn authority_id(&self) -> AuthorityId;
 
+    /// Get the shared reactive handler used for UI-facing signals.
+    ///
+    /// In production/demo runtimes, this handler is owned by the runtime and
+    /// driven by the ReactiveScheduler. Frontends should subscribe/read from
+    /// this handler rather than maintaining parallel state.
+    fn reactive_handler(&self) -> ReactiveHandler;
+
     // =========================================================================
-    // Fact Persistence
+    // Typed Fact Commit (Canonical)
     // =========================================================================
 
-    /// Persist facts to durable storage
+    /// Commit typed relational facts to the runtime journal.
     ///
-    /// This commits facts to the journal and triggers any necessary
-    /// synchronization with peers.
-    async fn persist_facts(&self, facts: &[JournalFact]) -> Result<(), IntentError>;
+    /// This is the canonical fact pipeline. The runtime is responsible for:
+    /// - Attaching timestamps/order tokens
+    /// - Persisting the committed facts
+    /// - Publishing them to the ReactiveScheduler for UI signal updates
+    async fn commit_relational_facts(&self, facts: &[RelationalFact]) -> Result<(), IntentError>;
 
     // =========================================================================
     // Sync Operations
@@ -555,15 +565,19 @@ pub type BoxedRuntimeBridge = Arc<dyn RuntimeBridge>;
 ///
 /// This implementation returns sensible defaults and errors for operations
 /// that require a real runtime.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OfflineRuntimeBridge {
     authority_id: AuthorityId,
+    reactive: ReactiveHandler,
 }
 
 impl OfflineRuntimeBridge {
     /// Create a new offline runtime bridge
     pub fn new(authority_id: AuthorityId) -> Self {
-        Self { authority_id }
+        Self {
+            authority_id,
+            reactive: ReactiveHandler::new(),
+        }
     }
 }
 
@@ -573,8 +587,12 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         self.authority_id
     }
 
-    async fn persist_facts(&self, _facts: &[JournalFact]) -> Result<(), IntentError> {
-        // In offline mode, facts are stored locally only
+    fn reactive_handler(&self) -> ReactiveHandler {
+        self.reactive.clone()
+    }
+
+    async fn commit_relational_facts(&self, _facts: &[RelationalFact]) -> Result<(), IntentError> {
+        // In offline mode, there is no canonical runtime journal.
         Ok(())
     }
 

@@ -123,6 +123,34 @@ let environment = composer
     .build()?;
 ```
 
+### Simulation Factory Abstraction
+
+The simulator uses `SimulationEnvironmentFactory` trait (defined in `aura-core`) to decouple from `AuraEffectSystem` internals. This enables stable simulation code even when effect system implementation changes:
+
+```rust
+use aura_core::effects::{SimulationEnvironmentFactory, SimulationEnvironmentConfig};
+use aura_agent::EffectSystemFactory;
+
+// Create factory
+let factory = EffectSystemFactory::new();
+
+// Configure simulation
+let config = SimulationEnvironmentConfig {
+    seed: 42,
+    authority_id,
+    device_id: Some(device_id),
+    test_mode: true,
+};
+
+// Create effect system through factory
+let effects = factory.create_simulation_environment(config).await?;
+```
+
+The factory pattern ensures:
+- **Decoupling**: Simulator depends on traits, not concrete types
+- **Stability**: Changes to `AuraEffectSystem` only require updating the factory
+- **Testability**: Factory can be mocked for isolated testing
+
 ## Simulation Handlers
 
 ### Time Control Handler
