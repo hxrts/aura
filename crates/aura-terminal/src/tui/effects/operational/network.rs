@@ -106,7 +106,7 @@ pub async fn handle_network(
                 address
             );
 
-            // TODO: For now, we can at least export an invitation code that could be shared
+            // Export an invitation code that could be shared manually
             let app_core = app_core.read().await;
 
             // Try to export an invitation (requires runtime)

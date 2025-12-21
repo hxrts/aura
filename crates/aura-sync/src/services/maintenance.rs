@@ -33,7 +33,6 @@
 // - Added start_with_time_effects() method for proper effect system integration
 // - Updated propose_upgrade() to use RandomEffects for deterministic UUID generation
 // - Original Service trait methods still use direct time calls for compatibility
-#![allow(clippy::disallowed_methods)]
 
 use parking_lot::RwLock;
 use std::collections::BTreeSet;

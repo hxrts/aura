@@ -59,7 +59,9 @@ pub mod new_channel;
 /// Flood propagation for rendezvous packet flooding through social topology
 pub mod flood;
 
-/// LAN discovery via UDP broadcast
+/// LAN discovery packet formats and configuration (pure types).
+///
+/// Runtime UDP sockets and tasks live in the agent runtime (Layer 6).
 pub mod lan_discovery;
 
 // =============================================================================
@@ -106,6 +108,6 @@ pub use flood::{DecryptedPayload, FloodPropagation, PacketBuilder, PacketCrypto,
 
 // Re-export LAN discovery types
 pub use lan_discovery::{
-    DiscoveredPeer, LanAnnouncer, LanDiscoveryConfig, LanDiscoveryPacket, LanDiscoveryService,
-    LanListener, DEFAULT_ANNOUNCE_INTERVAL_MS, DEFAULT_LAN_PORT,
+    DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryPacket, DEFAULT_ANNOUNCE_INTERVAL_MS,
+    DEFAULT_LAN_PORT, MAX_PACKET_SIZE,
 };

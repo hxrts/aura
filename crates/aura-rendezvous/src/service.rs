@@ -9,6 +9,7 @@ use crate::facts::{RendezvousDescriptor, RendezvousFact, TransportHint};
 use crate::protocol::{guards, HandshakeComplete, HandshakeInit, NoiseHandshake};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
+use aura_protocol::guards::feature;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
@@ -69,6 +70,18 @@ pub struct GuardSnapshot {
     pub epoch: u64,
 }
 
+impl feature::CapabilitySnapshot for GuardSnapshot {
+    fn has_capability(&self, cap: &str) -> bool {
+        self.capabilities.iter().any(|c| c == cap)
+    }
+}
+
+impl feature::FlowBudgetSnapshot for GuardSnapshot {
+    fn flow_budget_remaining(&self) -> u32 {
+        self.flow_budget_remaining
+    }
+}
+
 /// Request to be evaluated by guards
 #[derive(Debug, Clone)]
 pub enum GuardRequest {
@@ -88,24 +101,8 @@ pub enum GuardRequest {
     ChannelSend { peer: AuthorityId, size: usize },
 }
 
-/// Decision from guard evaluation
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GuardDecision {
-    /// Operation is allowed
-    Allow,
-    /// Operation is denied with reason
-    Deny { reason: String },
-}
-
-impl GuardDecision {
-    pub fn is_allowed(&self) -> bool {
-        matches!(self, GuardDecision::Allow)
-    }
-
-    pub fn is_denied(&self) -> bool {
-        !self.is_allowed()
-    }
-}
+/// Decision type shared across Layer 5 feature crates.
+pub type GuardDecision = feature::GuardDecision;
 
 /// Effect command to be executed after guard approval
 #[derive(Debug, Clone)]
@@ -131,14 +128,8 @@ pub enum EffectCommand {
     },
 }
 
-/// Outcome of guard evaluation
-#[derive(Debug, Clone)]
-pub struct GuardOutcome {
-    /// The decision (allow/deny)
-    pub decision: GuardDecision,
-    /// Effect commands to execute if allowed
-    pub effects: Vec<EffectCommand>,
-}
+/// Outcome type shared across Layer 5 feature crates.
+pub type GuardOutcome = feature::GuardOutcome<EffectCommand>;
 
 // =============================================================================
 // Rendezvous Service
@@ -202,30 +193,14 @@ impl RendezvousService {
         now_ms: u64,
     ) -> GuardOutcome {
         // Check capability
-        if !snapshot
-            .capabilities
-            .contains(&guards::CAP_RENDEZVOUS_PUBLISH.to_string())
-        {
-            return GuardOutcome {
-                decision: GuardDecision::Deny {
-                    reason: format!("Missing capability: {}", guards::CAP_RENDEZVOUS_PUBLISH),
-                },
-                effects: vec![],
-            };
+        if let Some(outcome) = feature::check_capability(snapshot, guards::CAP_RENDEZVOUS_PUBLISH) {
+            return outcome;
         }
 
         // Check flow budget
-        if snapshot.flow_budget_remaining < guards::DESCRIPTOR_PUBLISH_COST {
-            return GuardOutcome {
-                decision: GuardDecision::Deny {
-                    reason: format!(
-                        "Insufficient flow budget: need {}, have {}",
-                        guards::DESCRIPTOR_PUBLISH_COST,
-                        snapshot.flow_budget_remaining
-                    ),
-                },
-                effects: vec![],
-            };
+        if let Some(outcome) = feature::check_flow_budget(snapshot, guards::DESCRIPTOR_PUBLISH_COST)
+        {
+            return outcome;
         }
 
         // Build descriptor
@@ -248,10 +223,20 @@ impl RendezvousService {
             },
         ];
 
-        GuardOutcome {
-            decision: GuardDecision::Allow,
-            effects,
+        if let Err(reason) = feature::validate_charge_before_send(
+            &effects,
+            |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
+            |c| matches!(
+                c,
+                EffectCommand::SendHandshake { .. } | EffectCommand::SendHandshakeResponse { .. }
+            ),
+        ) {
+            return GuardOutcome::denied(format!(
+                "Internal error: rendezvous guard command ordering invalid: {reason}"
+            ));
         }
+
+        GuardOutcome::allowed(effects)
     }
 
     /// Prepare to refresh an existing descriptor.
@@ -284,30 +269,13 @@ impl RendezvousService {
         psk: &[u8; 32],
     ) -> AuraResult<GuardOutcome> {
         // Check capability
-        if !snapshot
-            .capabilities
-            .contains(&guards::CAP_RENDEZVOUS_CONNECT.to_string())
-        {
-            return Ok(GuardOutcome {
-                decision: GuardDecision::Deny {
-                    reason: format!("Missing capability: {}", guards::CAP_RENDEZVOUS_CONNECT),
-                },
-                effects: vec![],
-            });
+        if let Some(outcome) = feature::check_capability(snapshot, guards::CAP_RENDEZVOUS_CONNECT) {
+            return Ok(outcome);
         }
 
         // Check flow budget
-        if snapshot.flow_budget_remaining < guards::CONNECT_DIRECT_COST {
-            return Ok(GuardOutcome {
-                decision: GuardDecision::Deny {
-                    reason: format!(
-                        "Insufficient flow budget: need {}, have {}",
-                        guards::CONNECT_DIRECT_COST,
-                        snapshot.flow_budget_remaining
-                    ),
-                },
-                effects: vec![],
-            });
+        if let Some(outcome) = feature::check_flow_budget(snapshot, guards::CONNECT_DIRECT_COST) {
+            return Ok(outcome);
         }
 
         // Get peer descriptor from cache
@@ -346,10 +314,20 @@ impl RendezvousService {
             },
         ];
 
-        Ok(GuardOutcome {
-            decision: GuardDecision::Allow,
-            effects,
-        })
+        if let Err(reason) = feature::validate_charge_before_send(
+            &effects,
+            |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
+            |c| matches!(
+                c,
+                EffectCommand::SendHandshake { .. } | EffectCommand::SendHandshakeResponse { .. }
+            ),
+        ) {
+            return Ok(GuardOutcome::denied(format!(
+                "Internal error: rendezvous guard command ordering invalid: {reason}"
+            )));
+        }
+
+        Ok(GuardOutcome::allowed(effects))
     }
 
     // =========================================================================
@@ -368,41 +346,19 @@ impl RendezvousService {
         psk: &[u8; 32],
     ) -> GuardOutcome {
         // Check capability
-        if !snapshot
-            .capabilities
-            .contains(&guards::CAP_RENDEZVOUS_CONNECT.to_string())
-        {
-            return GuardOutcome {
-                decision: GuardDecision::Deny {
-                    reason: format!("Missing capability: {}", guards::CAP_RENDEZVOUS_CONNECT),
-                },
-                effects: vec![],
-            };
+        if let Some(outcome) = feature::check_capability(snapshot, guards::CAP_RENDEZVOUS_CONNECT) {
+            return outcome;
         }
 
         // Check flow budget
-        if snapshot.flow_budget_remaining < guards::CONNECT_DIRECT_COST {
-            return GuardOutcome {
-                decision: GuardDecision::Deny {
-                    reason: format!(
-                        "Insufficient flow budget: need {}, have {}",
-                        guards::CONNECT_DIRECT_COST,
-                        snapshot.flow_budget_remaining
-                    ),
-                },
-                effects: vec![],
-            };
+        if let Some(outcome) = feature::check_flow_budget(snapshot, guards::CONNECT_DIRECT_COST) {
+            return outcome;
         }
 
         // Verify PSK commitment
         let expected_commitment = compute_psk_commitment(psk);
         if init_message.psk_commitment != expected_commitment {
-            return GuardOutcome {
-                decision: GuardDecision::Deny {
-                    reason: "PSK commitment mismatch".to_string(),
-                },
-                effects: vec![],
-            };
+            return GuardOutcome::denied("PSK commitment mismatch");
         }
 
         // Generate channel ID
@@ -444,10 +400,20 @@ impl RendezvousService {
             },
         ];
 
-        GuardOutcome {
-            decision: GuardDecision::Allow,
-            effects,
+        if let Err(reason) = feature::validate_charge_before_send(
+            &effects,
+            |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
+            |c| matches!(
+                c,
+                EffectCommand::SendHandshake { .. } | EffectCommand::SendHandshakeResponse { .. }
+            ),
+        ) {
+            return GuardOutcome::denied(format!(
+                "Internal error: rendezvous guard command ordering invalid: {reason}"
+            ));
         }
+
+        GuardOutcome::allowed(effects)
     }
 
     // =========================================================================
@@ -570,25 +536,12 @@ impl RendezvousService {
         snapshot: &GuardSnapshot,
     ) -> GuardOutcome {
         // Check capability
-        if !snapshot
-            .capabilities
-            .contains(&guards::CAP_RENDEZVOUS_RELAY.to_string())
-        {
-            return GuardOutcome {
-                decision: GuardDecision::Deny {
-                    reason: format!("Missing capability: {}", guards::CAP_RENDEZVOUS_RELAY),
-                },
-                effects: Vec::new(),
-            };
+        if let Some(outcome) = feature::check_capability(snapshot, guards::CAP_RENDEZVOUS_RELAY) {
+            return outcome;
         }
 
         // Relay support will be added in Phase 2+
-        GuardOutcome {
-            decision: GuardDecision::Deny {
-                reason: "Relay support not yet implemented".to_string(),
-            },
-            effects: Vec::new(),
-        }
+        GuardOutcome::denied("Relay support not yet implemented")
     }
 }
 

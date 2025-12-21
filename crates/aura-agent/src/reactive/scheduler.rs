@@ -17,9 +17,11 @@
 //! the simulator can control time advancement.
 
 use aura_core::effects::time::PhysicalTimeEffects;
+use aura_core::identifiers::AuthorityId;
 use aura_core::util::graph::{CycleError, DagNode};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
-use aura_journal::FactRegistry;
+use aura_journal::{DomainFact, FactRegistry};
+use aura_social::{SocialFact, SOCIAL_FACT_TYPE_ID};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -82,7 +84,12 @@ pub trait ViewReduction<Delta>: Send + Sync {
     /// - Deterministic: same facts always produce same deltas
     /// - Monotone: F₁ ⊆ F₂ ⇒ reduce(F₁) ⊆ reduce(F₂)
     /// - Idempotent: applying same delta multiple times is safe
-    fn reduce(&self, facts: &[Fact]) -> Vec<Delta>;
+    ///
+    /// # Arguments
+    /// * `facts` - The journal facts to reduce
+    /// * `own_authority` - The current user's authority ID, used for contextual
+    ///   reduction (e.g., determining if a message is own, invitation direction)
+    fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<Delta>;
 }
 
 /// Update events emitted by the scheduler to subscribers
@@ -483,6 +490,8 @@ impl ReactiveScheduler {
 ///     "chat",
 ///     ChatReduction,
 ///     chat_view.clone(),
+///     |view, delta| async move { view.apply_delta(delta).await },
+///     own_authority,  // Pass own_authority for contextual reduction
 /// );
 /// scheduler.register_view(Arc::new(chat_adapter));
 /// ```
@@ -500,6 +509,8 @@ where
     view: Arc<V>,
     /// Delta application function (view + delta → ())
     apply_fn: ApplyFn<V, Delta>,
+    /// Own authority for contextual reduction
+    own_authority: Option<AuthorityId>,
 }
 
 impl<Delta, R, V> ViewAdapter<Delta, R, V>
@@ -515,7 +526,14 @@ where
     /// - `reduction`: Pure function that converts facts to deltas
     /// - `view`: The actual view instance
     /// - `apply_fn`: Function that applies a delta to the view
-    pub fn new<F, Fut>(view_id: impl Into<String>, reduction: R, view: Arc<V>, apply_fn: F) -> Self
+    /// - `own_authority`: The current user's authority ID for contextual reduction
+    pub fn new<F, Fut>(
+        view_id: impl Into<String>,
+        reduction: R,
+        view: Arc<V>,
+        apply_fn: F,
+        own_authority: Option<AuthorityId>,
+    ) -> Self
     where
         F: Fn(&V, Delta) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
@@ -525,6 +543,7 @@ where
             reduction,
             view,
             apply_fn: Arc::new(move |v, d| Box::pin(apply_fn(v, d))),
+            own_authority,
         }
     }
 }
@@ -536,8 +555,8 @@ where
     V: Send + Sync + 'static,
 {
     async fn update(&self, facts: &[Fact]) {
-        // Step 1: Reduce facts to deltas
-        let deltas = self.reduction.reduce(facts);
+        // Step 1: Reduce facts to deltas (passing own_authority for contextual reduction)
+        let deltas = self.reduction.reduce(facts, self.own_authority);
 
         // Step 2: Apply each delta to the view
         for delta in deltas {
@@ -715,7 +734,7 @@ use aura_recovery::{RecoveryDelta, RecoveryViewReducer, RECOVERY_FACT_TYPE_ID};
 pub struct ChatReduction;
 
 impl ViewReduction<ChatDelta> for ChatReduction {
-    fn reduce(&self, facts: &[Fact]) -> Vec<ChatDelta> {
+    fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<ChatDelta> {
         let reducer = ChatViewReducer;
 
         facts
@@ -727,8 +746,7 @@ impl ViewReduction<ChatDelta> for ChatReduction {
                     ..
                 }) if binding_type == CHAT_FACT_TYPE_ID => {
                     // Use the domain reducer and downcast back to ChatDelta
-                    // TODO: Pass actual own_authority when ViewReduction trait is updated
-                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, None);
+                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, own_authority);
                     view_deltas
                         .into_iter()
                         .filter_map(|vd| downcast_delta::<ChatDelta>(&vd).cloned())
@@ -767,7 +785,7 @@ pub enum GuardianDelta {
 pub struct GuardianReduction;
 
 impl ViewReduction<GuardianDelta> for GuardianReduction {
-    fn reduce(&self, facts: &[Fact]) -> Vec<GuardianDelta> {
+    fn reduce(&self, facts: &[Fact], _own_authority: Option<AuthorityId>) -> Vec<GuardianDelta> {
         facts
             .iter()
             .filter_map(|fact| match &fact.content {
@@ -805,7 +823,7 @@ impl ViewReduction<GuardianDelta> for GuardianReduction {
 pub struct RecoveryReduction;
 
 impl ViewReduction<RecoveryDelta> for RecoveryReduction {
-    fn reduce(&self, facts: &[Fact]) -> Vec<RecoveryDelta> {
+    fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<RecoveryDelta> {
         let reducer = RecoveryViewReducer;
 
         facts
@@ -817,8 +835,7 @@ impl ViewReduction<RecoveryDelta> for RecoveryReduction {
                     ..
                 }) if binding_type == RECOVERY_FACT_TYPE_ID => {
                     // Use the domain reducer and downcast back to RecoveryDelta
-                    // TODO: Pass actual own_authority when ViewReduction trait is updated
-                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, None);
+                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, own_authority);
                     view_deltas
                         .into_iter()
                         .filter_map(|vd| downcast_delta::<RecoveryDelta>(&vd).cloned())
@@ -836,7 +853,7 @@ impl ViewReduction<RecoveryDelta> for RecoveryReduction {
 pub struct InvitationReduction;
 
 impl ViewReduction<InvitationDelta> for InvitationReduction {
-    fn reduce(&self, facts: &[Fact]) -> Vec<InvitationDelta> {
+    fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<InvitationDelta> {
         let reducer = InvitationViewReducer;
 
         facts
@@ -848,8 +865,7 @@ impl ViewReduction<InvitationDelta> for InvitationReduction {
                     ..
                 }) if binding_type == INVITATION_FACT_TYPE_ID => {
                     // Use the domain reducer and downcast back to InvitationDelta
-                    // TODO: Pass actual own_authority when ViewReduction trait is updated
-                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, None);
+                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, own_authority);
                     view_deltas
                         .into_iter()
                         .filter_map(|vd| downcast_delta::<InvitationDelta>(&vd).cloned())
@@ -891,43 +907,66 @@ pub enum BlockDelta {
 pub struct BlockReduction;
 
 impl ViewReduction<BlockDelta> for BlockReduction {
-    fn reduce(&self, facts: &[Fact]) -> Vec<BlockDelta> {
+    fn reduce(&self, facts: &[Fact], _own_authority: Option<AuthorityId>) -> Vec<BlockDelta> {
         facts
             .iter()
             .filter_map(|fact| match &fact.content {
                 FactContent::Relational(RelationalFact::Generic {
                     binding_type,
-                    binding_data: _,
+                    binding_data,
                     ..
                 }) => {
-                    // TODO: Define structured block fact types instead of Generic
-                    // Block facts would be stored as Generic for now
-                    if binding_type == "block_created" {
-                        Some(BlockDelta::BlockCreated {
-                            block_id: "block".to_string(),
-                            name: "Block".to_string(),
-                            created_at: 0,
-                            creator_id: "unknown".to_string(),
-                        })
-                    } else if binding_type == "resident_joined" {
-                        Some(BlockDelta::ResidentAdded {
-                            authority_id: "auth".to_string(),
-                            name: "Resident".to_string(),
-                            joined_at: 0,
-                        })
-                    } else if binding_type == "resident_left" {
-                        Some(BlockDelta::ResidentRemoved {
-                            authority_id: "auth".to_string(),
-                            left_at: 0,
-                        })
-                    } else if binding_type == "storage_updated" {
-                        Some(BlockDelta::StorageUpdated {
-                            used_bytes: 0,
-                            total_bytes: 0,
-                            updated_at: 0,
-                        })
-                    } else {
-                        None
+                    // Only process social facts
+                    if binding_type != SOCIAL_FACT_TYPE_ID {
+                        return None;
+                    }
+
+                    // Deserialize the SocialFact from binding_data
+                    let social_fact = SocialFact::from_bytes(binding_data)?;
+
+                    match social_fact {
+                        SocialFact::BlockCreated {
+                            block_id,
+                            created_at,
+                            creator_id,
+                            name,
+                            ..
+                        } => Some(BlockDelta::BlockCreated {
+                            block_id: format!("{}", block_id),
+                            name,
+                            created_at: created_at.ts_ms,
+                            creator_id: creator_id.to_string(),
+                        }),
+                        SocialFact::ResidentJoined {
+                            authority_id,
+                            joined_at,
+                            name,
+                            ..
+                        } => Some(BlockDelta::ResidentAdded {
+                            authority_id: authority_id.to_string(),
+                            name,
+                            joined_at: joined_at.ts_ms,
+                        }),
+                        SocialFact::ResidentLeft {
+                            authority_id,
+                            left_at,
+                            ..
+                        } => Some(BlockDelta::ResidentRemoved {
+                            authority_id: authority_id.to_string(),
+                            left_at: left_at.ts_ms,
+                        }),
+                        SocialFact::StorageUpdated {
+                            used_bytes,
+                            total_bytes,
+                            updated_at,
+                            ..
+                        } => Some(BlockDelta::StorageUpdated {
+                            used_bytes,
+                            total_bytes,
+                            updated_at: updated_at.ts_ms,
+                        }),
+                        // Other social facts don't map to BlockDelta
+                        _ => None,
                     }
                 }
                 _ => None,
@@ -948,11 +987,22 @@ mod tests {
     use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_journal::DomainFact;
+    use aura_social::BlockId;
     use tokio::sync::mpsc;
 
     /// Helper to create a test context ID
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([0u8; 32])
+    }
+
+    /// Helper to create a test block ID
+    fn test_block_id() -> BlockId {
+        BlockId::from_bytes([1u8; 32])
+    }
+
+    /// Helper to create a test authority ID
+    fn test_authority_id() -> AuthorityId {
+        AuthorityId::new_from_entropy([2u8; 32])
     }
 
     /// Helper to create test facts with unique order tokens
@@ -1060,13 +1110,13 @@ mod tests {
             AuthorityId::new_from_entropy([1u8; 32]),
         );
 
-        let message_fact = ChatFact::message_sent_ms(
+        let message_fact = ChatFact::message_sent_sealed_ms(
             test_context_id(),
             ChannelId::default(),
             "msg-123".to_string(),
             AuthorityId::new_from_entropy([2u8; 32]),
             "Alice".to_string(),
-            "Hello, world!".to_string(),
+            b"Hello, world!".to_vec(),
             1234567900,
             None,
         );
@@ -1100,27 +1150,29 @@ mod tests {
             ),
         ];
 
-        let deltas = reduction.reduce(&facts);
+        // Use a test authority for contextual reduction
+        let test_authority = Some(AuthorityId::new_from_entropy([99u8; 32]));
+        let deltas = reduction.reduce(&facts, test_authority);
 
         // Should produce 2 deltas (channel and message)
         assert_eq!(deltas.len(), 2);
         assert!(matches!(&deltas[0], ChatDelta::ChannelAdded { name, .. } if name == "general"));
         assert!(
-            matches!(&deltas[1], ChatDelta::MessageAdded { content, .. } if content == "Hello, world!")
+            matches!(&deltas[1], ChatDelta::MessageAdded { content, .. } if content == "<sealed message>")
         );
 
         // Test determinism: same facts → same deltas
-        let deltas2 = reduction.reduce(&facts);
+        let deltas2 = reduction.reduce(&facts, test_authority);
         assert_eq!(deltas, deltas2);
 
         // Test monotonicity: more facts → same or more deltas
-        let another_message = ChatFact::message_sent_ms(
+        let another_message = ChatFact::message_sent_sealed_ms(
             test_context_id(),
             ChannelId::default(),
             "msg-124".to_string(),
             AuthorityId::new_from_entropy([3u8; 32]),
             "Bob".to_string(),
-            "Reply here".to_string(),
+            b"Reply here".to_vec(),
             1234567910,
             Some("msg-123".to_string()),
         );
@@ -1135,7 +1187,7 @@ mod tests {
             }),
         ));
 
-        let more_deltas = reduction.reduce(&more_facts);
+        let more_deltas = reduction.reduce(&more_facts, test_authority);
         assert!(more_deltas.len() >= deltas.len());
         assert_eq!(more_deltas.len(), 3);
     }
@@ -1207,7 +1259,7 @@ mod tests {
             ),
         ];
 
-        let deltas = reduction.reduce(&facts);
+        let deltas = reduction.reduce(&facts, None);
         assert_eq!(deltas.len(), 2);
         assert!(matches!(&deltas[0], GuardianDelta::GuardianAdded { .. }));
         assert!(matches!(
@@ -1282,7 +1334,7 @@ mod tests {
             ),
         ];
 
-        let deltas = reduction.reduce(&facts);
+        let deltas = reduction.reduce(&facts, None);
         assert_eq!(deltas.len(), 3);
         assert!(matches!(
             &deltas[0],
@@ -1339,7 +1391,9 @@ mod tests {
             ),
         ];
 
-        let deltas = reduction.reduce(&facts);
+        // Use a test authority for invitation direction determination
+        let test_authority = Some(AuthorityId::new_from_entropy([99u8; 32]));
+        let deltas = reduction.reduce(&facts, test_authority);
         assert_eq!(deltas.len(), 2);
         assert!(matches!(
             &deltas[0],
@@ -1354,38 +1408,65 @@ mod tests {
     #[test]
     fn test_block_reduction() {
         let reduction = BlockReduction;
+
+        // Create properly serialized SocialFact instances
+        let block_created = SocialFact::block_created_ms(
+            test_block_id(),
+            test_context_id(),
+            1000,
+            test_authority_id(),
+            "Test Block".to_string(),
+        );
+
+        let resident_joined = SocialFact::resident_joined_ms(
+            test_authority_id(),
+            test_block_id(),
+            test_context_id(),
+            2000,
+            "Alice".to_string(),
+        );
+
+        let storage_updated = SocialFact::storage_updated_ms(
+            test_block_id(),
+            test_context_id(),
+            1024 * 1024,       // 1 MB used
+            10 * 1024 * 1024,  // 10 MB total
+            3000,
+        );
+
         let facts = vec![
             make_test_fact(
                 1,
                 FactContent::Relational(RelationalFact::Generic {
                     context_id: test_context_id(),
-                    binding_type: "block_created".to_string(),
-                    binding_data: vec![1, 2, 3],
+                    binding_type: SOCIAL_FACT_TYPE_ID.to_string(),
+                    binding_data: block_created.to_bytes(),
                 }),
             ),
             make_test_fact(
                 2,
                 FactContent::Relational(RelationalFact::Generic {
                     context_id: test_context_id(),
-                    binding_type: "resident_joined".to_string(),
-                    binding_data: vec![4, 5, 6],
+                    binding_type: SOCIAL_FACT_TYPE_ID.to_string(),
+                    binding_data: resident_joined.to_bytes(),
                 }),
             ),
             make_test_fact(
                 3,
                 FactContent::Relational(RelationalFact::Generic {
                     context_id: test_context_id(),
-                    binding_type: "storage_updated".to_string(),
-                    binding_data: vec![7, 8, 9],
+                    binding_type: SOCIAL_FACT_TYPE_ID.to_string(),
+                    binding_data: storage_updated.to_bytes(),
                 }),
             ),
         ];
 
-        let deltas = reduction.reduce(&facts);
+        let deltas = reduction.reduce(&facts, None);
         assert_eq!(deltas.len(), 3);
-        assert!(matches!(&deltas[0], BlockDelta::BlockCreated { .. }));
-        assert!(matches!(&deltas[1], BlockDelta::ResidentAdded { .. }));
-        assert!(matches!(&deltas[2], BlockDelta::StorageUpdated { .. }));
+        assert!(matches!(&deltas[0], BlockDelta::BlockCreated { name, .. } if name == "Test Block"));
+        assert!(matches!(&deltas[1], BlockDelta::ResidentAdded { name, .. } if name == "Alice"));
+        assert!(matches!(&deltas[2], BlockDelta::StorageUpdated { used_bytes, total_bytes, .. }
+            if *used_bytes == 1024 * 1024 && *total_bytes == 10 * 1024 * 1024));
     }
 
     // =========================================================================

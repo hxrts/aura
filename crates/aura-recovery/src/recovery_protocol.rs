@@ -9,7 +9,6 @@ use aura_core::epochs::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
 use aura_core::identifiers::ContextId;
-use aura_core::relational::fact::RelationalFact;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::Prestate;
@@ -123,7 +122,7 @@ impl RecoveryProtocol {
     }
 
     /// Get current tree commitment
-    fn current_commitment(&self) -> Hash32 {
+    fn current_commitment(&self) -> Result<Hash32> {
         self.recovery_context.journal_commitment()
     }
 
@@ -140,8 +139,8 @@ impl RecoveryProtocol {
     async fn run_consensus(&self, operation: &RecoveryOperation) -> Result<ConsensusProof> {
         // Create prestate
         let prestate = Prestate {
-            authority_commitments: vec![(self.account_authority, self.current_commitment())],
-            context_commitment: self.recovery_context.journal_commitment(),
+            authority_commitments: vec![(self.account_authority, self.current_commitment()?)],
+            context_commitment: self.recovery_context.journal_commitment()?,
         };
 
         // Run consensus using consensus adapter
@@ -190,16 +189,17 @@ impl RecoveryProtocol {
 
         // Create recovery grant
         let grant = RecoveryGrant {
-            account_old: self.current_commitment(),
+            account_old: self.current_commitment()?,
             account_new: request.new_tree_commitment,
             guardian: self.guardian_commitment(),
             operation: recovery_op,
             consensus_proof,
         };
 
-        // Add to context journal using interior mutex
-        self.recovery_context
-            .add_fact(RelationalFact::RecoveryGrant(grant.clone()))?;
+        // Record as a context-scoped detail fact.
+        let _ = self
+            .recovery_context
+            .add_recovery_grant(self.account_authority, grant.clone())?;
 
         let result = RecoveryOutcome {
             success: true,

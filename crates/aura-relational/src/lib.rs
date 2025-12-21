@@ -24,7 +24,7 @@
 //! ## What Belongs Here
 //!
 //! - RelationalContext abstraction and lifecycle management
-//! - RelationalJournal for fact-based state in relational contexts
+//! - Context-scoped fact journal mirror (uses `aura-journal` fact model)
 //! - Guardian binding management and query operations
 //! - Recovery grant management and retrieval
 //! - Consensus adapter for running Aura Consensus on relational state
@@ -50,7 +50,7 @@
 //! ## Key Components
 //!
 //! - **RelationalContext**: Multi-authority coordination unit
-//! - **RelationalJournal**: CRDT-based fact storage for relational state
+//! - **Context Journal**: CRDT fact journal for relational state (`aura-journal` facts + `Generic` extensibility)
 //! - **RelationalFact**: Guardian bindings, recovery grants, peer metadata
 //! - **ConsensusAdapter**: Aura Consensus coordination for agreement
 //!
@@ -64,12 +64,14 @@ use aura_core::relational::GuardianParameters;
 use aura_core::{
     hash::hash,
     identifiers::{AuthorityId, ContextId},
-    relational::{GuardianBinding, RecoveryGrant, RelationalFact},
+    relational::{GuardianBinding, RecoveryGrant},
+    time::{OrderTime, TimeStamp},
     Hash32, Result,
 };
-use serde::{Deserialize, Serialize};
+use aura_journal::fact::{Fact, FactContent, Journal, JournalNamespace, RelationalFact};
+use aura_journal::DomainFact;
 use std::collections::BTreeSet;
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 pub mod consensus_adapter;
 pub mod facts;
@@ -78,13 +80,17 @@ pub mod guardian_request;
 pub mod guardian_service;
 
 // Export domain fact types
-pub use facts::{ContactFact, ContactFactReducer, CONTACT_FACT_TYPE_ID};
+pub use facts::{
+    ContactFact, ContactFactReducer, CONTACT_FACT_TYPE_ID, GuardianBindingDetailsFact,
+    GuardianBindingDetailsFactReducer, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
+    RecoveryGrantDetailsFact, RecoveryGrantDetailsFactReducer, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
+};
 
 // Export consensus functions from adapter
 pub use consensus_adapter::{run_consensus, run_consensus_with_config, ConsensusConfig};
 pub use guardian_request::{
-    make_guardian_cancel_fact, make_guardian_request_fact, parse_guardian_request,
-    GuardianRequestPayload, BINDING_TYPE_CANCEL, BINDING_TYPE_REQUEST,
+    parse_guardian_request, GuardianRequestFact, GuardianRequestFactReducer, GuardianRequestPayload,
+    GUARDIAN_REQUEST_FACT_TYPE_ID,
 };
 pub use guardian_service::GuardianService;
 
@@ -98,8 +104,12 @@ pub struct RelationalContext {
     pub context_id: ContextId,
     /// Authorities participating in this context
     pub participants: Vec<AuthorityId>,
-    /// Journal storing relational facts (wrapped in Mutex for thread-safe mutation)
-    journal: Mutex<RelationalJournal>,
+    /// Context-scoped fact journal (append-only CRDT).
+    ///
+    /// This is an in-memory mirror of the journal CRDT structure; production
+    /// runtimes persist typed facts via Layer 6 (`aura-agent`) using
+    /// `AuraEffectSystem::{commit_relational_facts, commit_generic_fact_bytes}`.
+    journal: RwLock<Journal>,
 }
 
 impl RelationalContext {
@@ -110,69 +120,164 @@ impl RelationalContext {
             seed.extend_from_slice(&participant.to_bytes());
         }
         let context_id = ContextId::new_from_entropy(hash(&seed));
-        let journal = RelationalJournal::new(context_id);
 
         Self {
             context_id,
             participants,
-            journal: Mutex::new(journal),
+            journal: RwLock::new(Journal::new(JournalNamespace::Context(context_id))),
         }
     }
 
     /// Create with a specific context ID
     pub fn with_id(context_id: ContextId, participants: Vec<AuthorityId>) -> Self {
-        let journal = RelationalJournal::new(context_id);
-
         Self {
             context_id,
             participants,
-            journal: Mutex::new(journal),
+            journal: RwLock::new(Journal::new(JournalNamespace::Context(context_id))),
         }
     }
 
-    /// Add a relational fact to the context
+    /// Append a fact to the context.
     pub fn add_fact(&self, fact: RelationalFact) -> Result<()> {
+        if let RelationalFact::Generic { context_id, .. } = &fact {
+            if *context_id != self.context_id {
+                return Err(aura_core::AuraError::invalid(
+                    "Generic relational fact has mismatched context_id",
+                ));
+            }
+        }
+
         let mut journal = self
             .journal
-            .lock()
+            .write()
             .map_err(|_| aura_core::AuraError::internal("Failed to acquire journal lock"))?;
-        journal.add_fact(fact)
+
+        let order = Self::derive_order(&fact)?;
+        let typed = Fact {
+            order: order.clone(),
+            timestamp: TimeStamp::OrderClock(order),
+            content: FactContent::Relational(fact),
+        };
+
+        journal.add_fact(typed)
+    }
+
+    /// Append a domain fact to the context (stored as `RelationalFact::Generic`).
+    pub fn add_domain_fact<F: DomainFact>(&self, fact: &F) -> Result<()> {
+        self.add_fact(fact.to_generic())
+    }
+
+    /// Append an arbitrary Generic relational fact scoped to this context.
+    pub fn add_generic_fact(
+        &self,
+        binding_type: impl Into<String>,
+        binding_data: Vec<u8>,
+    ) -> Result<()> {
+        self.add_fact(RelationalFact::Generic {
+            context_id: self.context_id,
+            binding_type: binding_type.into(),
+            binding_data,
+        })
+    }
+
+    /// Record a guardian binding as:
+    /// - a protocol-level binding receipt (authority IDs + hash), and
+    /// - a domain-level detail fact (full `GuardianBinding` payload).
+    pub fn add_guardian_binding(
+        &self,
+        account_id: AuthorityId,
+        guardian_id: AuthorityId,
+        binding: GuardianBinding,
+    ) -> Result<Hash32> {
+        let details =
+            crate::facts::GuardianBindingDetailsFact::new(self.context_id, account_id, guardian_id, binding);
+        let details_bytes = details.to_bytes();
+        let binding_hash = Hash32::from_bytes(&hash(&details_bytes));
+
+        self.add_fact(RelationalFact::GuardianBinding {
+            account_id,
+            guardian_id,
+            binding_hash,
+        })?;
+        self.add_domain_fact(&details)?;
+
+        Ok(binding_hash)
+    }
+
+    /// Record a recovery grant as a domain-level detail fact (full `RecoveryGrant` payload).
+    pub fn add_recovery_grant(
+        &self,
+        account_id: AuthorityId,
+        grant: RecoveryGrant,
+    ) -> Result<Hash32> {
+        let details = crate::facts::RecoveryGrantDetailsFact::new(self.context_id, account_id, grant);
+        let bytes = details.to_bytes();
+        let grant_hash = Hash32::from_bytes(&hash(&bytes));
+        self.add_domain_fact(&details)?;
+        Ok(grant_hash)
     }
 
     /// Get all guardian bindings in this context
     pub fn guardian_bindings(&self) -> Vec<GuardianBinding> {
-        if let Ok(journal) = self.journal.lock() {
-            journal.guardian_bindings().into_iter().cloned().collect()
-        } else {
-            vec![]
-        }
+        self.get_facts()
+            .into_iter()
+            .filter_map(|fact| match fact {
+                RelationalFact::Generic {
+                    binding_type,
+                    binding_data,
+                    ..
+                } if binding_type == crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID => {
+                    crate::facts::GuardianBindingDetailsFact::from_bytes(&binding_data)
+                        .map(|f| f.binding)
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// Get guardian binding for a specific authority
     pub fn get_guardian_binding(&self, authority_id: AuthorityId) -> Option<GuardianBinding> {
-        self.guardian_bindings().into_iter().find(|b| {
-            // Compare authority IDs directly instead of converting to Hash32
-            // since account_commitment should be derived from the authority ID
-            b.account_commitment == Hash32::from_bytes(&authority_id.to_bytes())
-        })
+        self.get_facts()
+            .into_iter()
+            .filter_map(|fact| match fact {
+                RelationalFact::Generic {
+                    binding_type,
+                    binding_data,
+                    ..
+                } if binding_type == crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID => {
+                    crate::facts::GuardianBindingDetailsFact::from_bytes(&binding_data)
+                }
+                _ => None,
+            })
+            .find(|f| f.guardian_id == authority_id || f.account_id == authority_id)
+            .map(|f| f.binding)
     }
 
     /// Get all recovery grants in this context
     pub fn recovery_grants(&self) -> Vec<RecoveryGrant> {
-        if let Ok(journal) = self.journal.lock() {
-            journal.recovery_grants().into_iter().cloned().collect()
-        } else {
-            vec![]
-        }
+        self.get_facts()
+            .into_iter()
+            .filter_map(|fact| match fact {
+                RelationalFact::Generic {
+                    binding_type,
+                    binding_data,
+                    ..
+                } if binding_type == crate::facts::RECOVERY_GRANT_DETAILS_FACT_TYPE_ID => {
+                    crate::facts::RecoveryGrantDetailsFact::from_bytes(&binding_data)
+                        .map(|f| f.grant)
+                }
+                _ => None,
+            })
+            .collect()
     }
 
-    /// Get shared secret for this context
-    /// Returns the deterministic shared secret used for context-specific operations
-    pub fn shared_secret(&self) -> Option<[u8; 32]> {
-        // Derive a context secret from the context ID and all participant IDs.
-        // This remains deterministic (for reproducibility/tests) while tying the
-        // secret to the exact participant set.
-        let mut material = Vec::with_capacity(32 + self.participants.len() * 16);
+    /// Deterministic key material for this context.
+    ///
+    /// This is **not a secret**. It is derived from the `ContextId` and the ordered
+    /// participant set, and is intended for domain separation / stable identifiers.
+    /// If confidentiality is required, use explicit key agreement and secret storage.
+    pub fn context_key_material(&self) -> [u8; 32] {
+        let mut material = Vec::with_capacity(32 + self.participants.len() * 32);
         material.extend_from_slice(&self.context_id.to_bytes());
 
         // Hash participant IDs in stable order to avoid permutation differences.
@@ -182,7 +287,7 @@ impl RelationalContext {
             material.extend_from_slice(&id.to_bytes());
         }
 
-        Some(aura_core::hash::hash(&material))
+        aura_core::hash::hash(&material)
     }
 
     /// Check if an authority is a participant
@@ -204,107 +309,84 @@ impl RelationalContext {
     pub fn compute_prestate(
         &self,
         authority_commitments: Vec<(AuthorityId, Hash32)>,
-    ) -> aura_core::Prestate {
-        let journal_commitment = if let Ok(journal) = self.journal.lock() {
-            journal.compute_commitment()
-        } else {
-            Hash32([0u8; 32]) // fallback to zero hash if lock fails
-        };
-        aura_core::Prestate::new(authority_commitments, journal_commitment)
+    ) -> Result<aura_core::Prestate> {
+        Ok(aura_core::Prestate::new(
+            authority_commitments,
+            self.journal_commitment()?,
+        ))
     }
 
     /// Get all facts in this context for iteration
     pub fn get_facts(&self) -> BTreeSet<RelationalFact> {
-        if let Ok(journal) = self.journal.lock() {
-            journal.facts.clone()
-        } else {
-            BTreeSet::new()
-        }
+        let Ok(journal) = self.journal.read() else {
+            return BTreeSet::new();
+        };
+
+        journal
+            .facts
+            .iter()
+            .filter_map(|f| match &f.content {
+                FactContent::Relational(rf) => Some(rf.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Return the raw bytes for all `RelationalFact::Generic` entries with a given `binding_type`.
+    ///
+    /// This helper avoids leaking `aura-journal`'s fact enum into higher-layer crates that only
+    /// need to parse their own domain payloads.
+    pub fn generic_fact_bytes(&self, binding_type: &str) -> Vec<Vec<u8>> {
+        let Ok(journal) = self.journal.read() else {
+            return Vec::new();
+        };
+
+        journal
+            .facts
+            .iter()
+            .filter_map(|f| match &f.content {
+                FactContent::Relational(RelationalFact::Generic {
+                    binding_type: bt,
+                    binding_data,
+                    ..
+                }) if bt == binding_type => Some(binding_data.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Compute the journal commitment hash
-    pub fn journal_commitment(&self) -> Hash32 {
-        if let Ok(journal) = self.journal.lock() {
-            journal.compute_commitment()
-        } else {
-            Hash32([0u8; 32]) // fallback to zero hash if lock fails
-        }
-    }
-}
-
-/// Journal specific to relational contexts
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RelationalJournal {
-    /// Facts stored in this journal
-    pub facts: BTreeSet<RelationalFact>,
-    /// Context this journal belongs to
-    context_id: ContextId,
-}
-
-impl RelationalJournal {
-    /// Create a new relational journal
-    pub fn new(context_id: ContextId) -> Self {
-        Self {
-            facts: BTreeSet::new(),
-            context_id,
-        }
-    }
-
-    /// Add a fact to the journal
-    pub fn add_fact(&mut self, fact: RelationalFact) -> Result<()> {
-        self.facts.insert(fact);
-        Ok(())
-    }
-
-    /// Get all guardian bindings
-    pub fn guardian_bindings(&self) -> Vec<&GuardianBinding> {
-        self.facts
-            .iter()
-            .filter_map(|f| match f {
-                RelationalFact::GuardianBinding(binding) => Some(binding),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Get all recovery grants
-    pub fn recovery_grants(&self) -> Vec<&RecoveryGrant> {
-        self.facts
-            .iter()
-            .filter_map(|f| match f {
-                RelationalFact::RecoveryGrant(grant) => Some(grant),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Compute commitment hash of current state
-    pub fn compute_commitment(&self) -> Hash32 {
+    pub fn journal_commitment(&self) -> Result<Hash32> {
         use aura_core::hash;
+        let journal = self
+            .journal
+            .read()
+            .map_err(|_| aura_core::AuraError::internal("Failed to acquire journal lock"))?;
+
         let mut hasher = hash::hasher();
+        hasher.update(b"RELATIONAL_CONTEXT_FACTS");
+        hasher.update(self.context_id.as_bytes());
 
-        hasher.update(b"RELATIONAL_JOURNAL");
-        hasher.update(self.context_id.uuid().as_bytes());
-
-        // Hash facts using canonical serialization for deterministic ordering
-        for fact in &self.facts {
-            // Use serde_json for deterministic serialization
-            // In production, this could be replaced with DAG-CBOR for better efficiency
-            if let Ok(fact_bytes) = serde_json::to_vec(fact) {
-                hasher.update(&fact_bytes);
-            } else {
-                // Fallback to debug formatting if serialization fails
-                // (should never happen since RelationalFact implements Serialize)
-                hasher.update(format!("{:?}", fact).as_bytes());
-            }
+        for fact in journal.facts.iter() {
+            let bytes = bincode::serialize(fact)
+                .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
+            hasher.update(&bytes);
         }
 
-        Hash32(hasher.finalize())
+        Ok(Hash32(hasher.finalize()))
     }
 }
 
-// RelationalFact and GenericBinding moved to aura-core/src/relational/
-// They are re-exported at the top of this file for API compatibility
+impl RelationalContext {
+    fn derive_order(fact: &RelationalFact) -> Result<OrderTime> {
+        let bytes =
+            bincode::serialize(fact).map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
+        Ok(OrderTime(hash(&bytes)))
+    }
+}
+
+// Note: This crate stores context facts using `aura-journal`'s `RelationalFact`
+// model (protocol-level variants + `Generic` extensibility).
 
 #[cfg(test)]
 mod tests {
@@ -339,9 +421,7 @@ mod tests {
             GuardianParameters::default(),
         );
 
-        context
-            .add_fact(RelationalFact::GuardianBinding(binding))
-            .unwrap();
+        context.add_guardian_binding(auth1, auth2, binding).unwrap();
 
         assert_eq!(context.guardian_bindings().len(), 1);
     }

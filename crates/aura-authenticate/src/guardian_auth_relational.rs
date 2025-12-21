@@ -6,7 +6,6 @@
 use aura_core::crypto::ed25519::{Ed25519Signature, Ed25519VerifyingKey};
 use aura_core::relational::GuardianBinding;
 use aura_core::{
-    relational::{GenericBinding, RelationalFact},
     AuraError, Authority, AuthorityId, Hash32, Result,
 };
 use aura_macros::choreography;
@@ -230,7 +229,10 @@ fn verify_consensus_proof(
     }
 
     // Check 4: Verify prestate hash matches binding by hashing the binding payload
-    let binding_bytes = bincode::serialize(binding).unwrap_or_default();
+    let binding_bytes = match bincode::serialize(binding) {
+        Ok(bytes) => bytes,
+        Err(_) => return false,
+    };
     let expected_hash = aura_core::hash::hash(&binding_bytes);
     if proof.prestate_hash.0 != expected_hash {
         return false;
@@ -312,10 +314,7 @@ impl GuardianAuthHandler {
         if let Ok(binding_bytes) = serde_json::to_vec(&record) {
             let _ = self
                 .context
-                .add_fact(RelationalFact::Generic(GenericBinding::new(
-                    "recovery_request".to_string(),
-                    binding_bytes,
-                )));
+                .add_generic_fact("recovery_request", binding_bytes);
         }
 
         Ok(verified)
@@ -343,17 +342,9 @@ impl GuardianAuthHandler {
                 // Determine the latest recovery request for this guardian
                 let latest_request = self
                     .context
-                    .get_facts()
+                    .generic_fact_bytes("recovery_request")
                     .iter()
-                    .filter_map(|fact| match fact {
-                        RelationalFact::Generic(binding)
-                            if binding.binding_type == "recovery_request" =>
-                        {
-                            serde_json::from_slice::<RecoveryRequestRecord>(&binding.binding_data)
-                                .ok()
-                        }
-                        _ => None,
-                    })
+                    .filter_map(|bytes| serde_json::from_slice::<RecoveryRequestRecord>(bytes).ok())
                     .filter(|record| record.guardian_id == guardian_id)
                     .max_by_key(|record| record.requested_at);
 
@@ -419,16 +410,14 @@ impl GuardianAuthHandler {
         guardian_id: AuthorityId,
         account_id: AuthorityId,
     ) -> bool {
-        self.context.get_facts().iter().any(|fact| match fact {
-            RelationalFact::Generic(binding) if binding.binding_type == "guardian_notification" => {
-                serde_json::from_slice::<GuardianNotificationRecord>(&binding.binding_data)
-                    .map(|record| {
-                        record.guardian_id == guardian_id && record.account_id == account_id
-                    })
+        self.context
+            .generic_fact_bytes("guardian_notification")
+            .iter()
+            .any(|bytes| {
+                serde_json::from_slice::<GuardianNotificationRecord>(bytes)
+                    .map(|record| record.guardian_id == guardian_id && record.account_id == account_id)
                     .unwrap_or(false)
-            }
-            _ => false,
-        })
+            })
     }
 }
 

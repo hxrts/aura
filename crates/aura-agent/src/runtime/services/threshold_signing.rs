@@ -31,9 +31,23 @@ use aura_core::threshold::{
     ThresholdState,
 };
 use aura_core::{effects::ThresholdSigningEffects, AuraError};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+/// Threshold config metadata stored alongside keys for recovery during commit
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ThresholdConfigMetadata {
+    /// Minimum signers required (k-of-n)
+    threshold_k: u16,
+    /// Total number of participants
+    total_n: u16,
+    /// Guardian authority IDs
+    guardian_ids: Vec<String>,
+    /// Signing mode (SingleSigner for 1-of-1, Threshold for k>=2)
+    mode: SigningMode,
+}
 
 /// State for a signing context (per authority)
 #[derive(Debug, Clone)]
@@ -533,6 +547,51 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 AuraError::internal(format!("Failed to store public key package: {}", e))
             })?;
 
+        // Store threshold config metadata for use in commit_key_rotation
+        // This includes threshold_k, total_n, and guardian_ids
+        let config_metadata = ThresholdConfigMetadata {
+            threshold_k: new_threshold,
+            total_n: new_total_participants,
+            guardian_ids: guardian_ids.to_vec(),
+            mode: if new_threshold >= 2 {
+                SigningMode::Threshold
+            } else {
+                SigningMode::SingleSigner
+            },
+        };
+
+        let config_bytes = serde_json::to_vec(&config_metadata).map_err(|e| {
+            AuraError::internal(format!("Failed to serialize threshold config: {}", e))
+        })?;
+
+        let config_location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            format!("{}", authority),
+            format!("{}", new_epoch),
+        );
+
+        self.effects
+            .secure_store(
+                &config_location,
+                &config_bytes,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                AuraError::internal(format!("Failed to store threshold config: {}", e))
+            })?;
+
+        tracing::debug!(
+            ?authority,
+            new_epoch,
+            threshold_k = new_threshold,
+            total_n = new_total_participants,
+            "Stored threshold config metadata"
+        );
+
         // Don't update the in-memory context yet - wait for commit
         // The old epoch remains active until commit_key_rotation is called
 
@@ -563,14 +622,14 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         );
 
         // Load the public key package for the new epoch
-
         let pubkey_location = SecureStorageLocation::with_sub_key(
             "threshold_pubkey",
             format!("{}", authority),
             format!("{}", new_epoch),
         );
 
-        let public_key_package = self.effects
+        let public_key_package = self
+            .effects
             .secure_retrieve(
                 &pubkey_location,
                 &[
@@ -586,29 +645,56 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 ))
             })?;
 
-        // Count guardians to determine threshold config
-        // We need to inspect the stored guardian shares
-        // TODO: Store threshold config metadata alongside keys to avoid caller needing to provide it
-        // For now, we'll require the caller to provide this info via a different mechanism
-        // or we can store metadata alongside the keys
+        // Load threshold config metadata stored during rotate_keys
+        let config_location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            format!("{}", authority),
+            format!("{}", new_epoch),
+        );
 
-        // Update in-memory context to use the new epoch
-        // Note: For a full implementation, we'd need to know the new threshold config
-        // For demo mode, we'll use a reasonable default based on guardian count
+        let config_bytes = self
+            .effects
+            .secure_retrieve(
+                &config_location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                AuraError::internal(format!(
+                    "Failed to load threshold config for epoch {}: {}",
+                    new_epoch, e
+                ))
+            })?;
+
+        let config_metadata: ThresholdConfigMetadata =
+            serde_json::from_slice(&config_bytes).map_err(|e| {
+                AuraError::internal(format!("Failed to deserialize threshold config: {}", e))
+            })?;
+
+        // Build the new threshold config from stored metadata
+        let new_config = ThresholdConfig::new(config_metadata.threshold_k, config_metadata.total_n)
+            .map_err(|e| AuraError::internal(format!("Invalid threshold config: {}", e)))?;
+
+        // Update in-memory context to use the new epoch with proper config
         let mut contexts = self.contexts.write().await;
 
         if let Some(state) = contexts.get_mut(authority) {
             let old_epoch = state.epoch;
             state.epoch = new_epoch;
             state.public_key_package = public_key_package;
-            // TODO: Update threshold config from ceremony parameters
-            // Note: threshold config should be updated based on ceremony parameters
-            // For now, keep existing config - caller should update if needed
+            state.config = new_config;
+            state.mode = config_metadata.mode;
+            state.guardian_ids = config_metadata.guardian_ids;
 
             tracing::info!(
                 ?authority,
                 old_epoch,
                 new_epoch,
+                threshold_k = config_metadata.threshold_k,
+                total_n = config_metadata.total_n,
                 "Key rotation committed - new epoch is now active"
             );
         } else {
@@ -632,6 +718,28 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             "Rolling back key rotation after ceremony failure"
         );
 
+        let delete_caps = &[
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+
+        // Load the config FIRST to get guardian IDs for cleaning up their shares
+        // (before we delete it)
+        let config_location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            format!("{}", authority),
+            format!("{}", failed_epoch),
+        );
+
+        let config_metadata: Option<ThresholdConfigMetadata> = {
+            let config_bytes = self
+                .effects
+                .secure_retrieve(&config_location, delete_caps)
+                .await
+                .ok();
+
+            config_bytes.and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        };
 
         // Delete the public key package for the failed epoch
         let pubkey_location = SecureStorageLocation::with_sub_key(
@@ -640,27 +748,54 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             format!("{}", failed_epoch),
         );
 
-        // TODO: Add delete method to SecureStorageEffects for key cleanup
-        // Note: SecureStorageEffects doesn't have a delete method currently
-        // For now, we just don't commit the rotation - the old keys remain active
-        // The failed epoch's keys will be orphaned but not used
-        //
-        // In a production system, we'd want to:
-        // 1. Delete the guardian_shares/<authority>/<failed_epoch>/* entries
-        // 2. Delete the threshold_pubkey/<authority>/<failed_epoch> entry
-        // 3. Notify guardians to delete their shares
+        if let Err(e) = self.effects.secure_delete(&pubkey_location, delete_caps).await {
+            tracing::debug!(
+                ?authority,
+                failed_epoch,
+                error = %e,
+                "Failed to delete public key package (may not exist)"
+            );
+        }
+
+        // Delete the threshold config metadata
+        if let Err(e) = self.effects.secure_delete(&config_location, delete_caps).await {
+            tracing::debug!(
+                ?authority,
+                failed_epoch,
+                error = %e,
+                "Failed to delete threshold config (may not exist)"
+            );
+        }
+
+        // Delete guardian key packages for this failed epoch
+        if let Some(metadata) = config_metadata {
+            for guardian_id in &metadata.guardian_ids {
+                let share_location = SecureStorageLocation::with_sub_key(
+                    "guardian_shares",
+                    format!("{}/{}", authority, failed_epoch),
+                    guardian_id,
+                );
+
+                if let Err(e) = self.effects.secure_delete(&share_location, delete_caps).await {
+                    tracing::debug!(
+                        ?authority,
+                        failed_epoch,
+                        guardian_id,
+                        error = %e,
+                        "Failed to delete guardian share (may not exist)"
+                    );
+                }
+            }
+        }
 
         tracing::info!(
             ?authority,
             failed_epoch,
-            "Key rotation rolled back - previous epoch remains active"
+            "Key rotation rolled back - cleaned up failed epoch data"
         );
 
         // Note: The in-memory context was never updated (we wait for commit),
         // so no in-memory rollback is needed
-
-        // For now, just acknowledge - actual cleanup would require delete capability
-        let _ = (&self.effects, pubkey_location); // silence unused warnings
 
         Ok(())
     }

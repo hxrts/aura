@@ -16,7 +16,7 @@
 
 use aura_agent::reactive::ViewReduction;
 use aura_core::{
-    identifiers::ContextId,
+    identifiers::{AuthorityId, ContextId},
     time::{OrderTime, PhysicalTime, TimeStamp},
 };
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
@@ -92,7 +92,7 @@ impl TestView {
 struct CountingReduction;
 
 impl ViewReduction<TestDelta> for CountingReduction {
-    fn reduce(&self, facts: &[Fact]) -> Vec<TestDelta> {
+    fn reduce(&self, facts: &[Fact], _own_authority: Option<AuthorityId>) -> Vec<TestDelta> {
         facts
             .iter()
             .filter_map(|fact| {
@@ -112,7 +112,7 @@ impl ViewReduction<TestDelta> for CountingReduction {
 struct MessageReduction;
 
 impl ViewReduction<TestDelta> for MessageReduction {
-    fn reduce(&self, facts: &[Fact]) -> Vec<TestDelta> {
+    fn reduce(&self, facts: &[Fact], _own_authority: Option<AuthorityId>) -> Vec<TestDelta> {
         facts
             .iter()
             .filter_map(|fact| {
@@ -200,7 +200,7 @@ fn test_counting_reduction_basic() {
         make_guardian_fact(3),
     ];
 
-    let deltas = reduction.reduce(&facts);
+    let deltas = reduction.reduce(&facts, None);
 
     assert_eq!(deltas.len(), 3);
     assert!(deltas.iter().all(|d| *d == TestDelta::Increment));
@@ -216,7 +216,7 @@ fn test_counting_reduction_filters_non_guardian() {
         make_guardian_fact(3),
     ];
 
-    let deltas = reduction.reduce(&facts);
+    let deltas = reduction.reduce(&facts, None);
 
     assert_eq!(deltas.len(), 2);
 }
@@ -224,7 +224,7 @@ fn test_counting_reduction_filters_non_guardian() {
 #[test]
 fn test_counting_reduction_empty_facts() {
     let reduction = CountingReduction;
-    let deltas = reduction.reduce(&[]);
+    let deltas = reduction.reduce(&[], None);
     assert!(deltas.is_empty());
 }
 
@@ -234,7 +234,7 @@ fn test_message_reduction_basic() {
 
     let facts = vec![make_message_fact("hello", 1), make_message_fact("world", 2)];
 
-    let deltas = reduction.reduce(&facts);
+    let deltas = reduction.reduce(&facts, None);
 
     assert_eq!(deltas.len(), 2);
     assert_eq!(deltas[0], TestDelta::AppendMessage("hello".to_string()));
@@ -251,7 +251,7 @@ fn test_message_reduction_filters_non_messages() {
         make_message_fact("world", 3),
     ];
 
-    let deltas = reduction.reduce(&facts);
+    let deltas = reduction.reduce(&facts, None);
 
     assert_eq!(deltas.len(), 2);
 }
@@ -263,8 +263,8 @@ fn test_reduction_determinism() {
     let facts = vec![make_guardian_fact(1), make_guardian_fact(2)];
 
     // Same input should always produce same output
-    let deltas1 = reduction.reduce(&facts);
-    let deltas2 = reduction.reduce(&facts);
+    let deltas1 = reduction.reduce(&facts, None);
+    let deltas2 = reduction.reduce(&facts, None);
 
     assert_eq!(deltas1, deltas2);
 }
@@ -276,8 +276,8 @@ fn test_reduction_monotonicity() {
     let facts_small = vec![make_guardian_fact(1)];
     let facts_large = vec![make_guardian_fact(1), make_guardian_fact(2)];
 
-    let deltas_small = reduction.reduce(&facts_small);
-    let deltas_large = reduction.reduce(&facts_large);
+    let deltas_small = reduction.reduce(&facts_small, None);
+    let deltas_large = reduction.reduce(&facts_large, None);
 
     // F₁ ⊆ F₂ ⇒ reduce(F₁) ⊆ reduce(F₂)
     assert!(deltas_small.len() <= deltas_large.len());
@@ -366,7 +366,7 @@ async fn test_full_pipeline_facts_to_view() {
     ];
 
     // Step 2: Reduce to deltas
-    let deltas = reduction.reduce(&facts);
+    let deltas = reduction.reduce(&facts, None);
     assert_eq!(deltas.len(), 3);
 
     // Step 3: Apply deltas to view
@@ -391,8 +391,8 @@ async fn test_multiple_reductions_same_facts() {
     let count_reduction = CountingReduction;
     let message_reduction = MessageReduction;
 
-    let count_deltas = count_reduction.reduce(&facts);
-    let message_deltas = message_reduction.reduce(&facts);
+    let count_deltas = count_reduction.reduce(&facts, None);
+    let message_deltas = message_reduction.reduce(&facts, None);
 
     assert_eq!(count_deltas.len(), 2); // 2 guardian facts
     assert_eq!(message_deltas.len(), 2); // 2 message facts
@@ -433,7 +433,7 @@ async fn test_ordered_fact_processing() {
         make_message_fact("third", 3),
     ];
 
-    let deltas = reduction.reduce(&facts);
+    let deltas = reduction.reduce(&facts, None);
     for delta in deltas {
         view.apply_delta(delta).await;
     }

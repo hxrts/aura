@@ -1,76 +1,57 @@
-//! # Aura Chat - Secure Messaging Layer
+//! # Aura Chat
 //!
-//! This crate provides secure chat functionality built on top of the Aura threshold identity platform.
+//! Layer 5 feature crate for chat-related domain facts and (currently) a small, local chat service.
 //!
-//! ## Purpose
+//! ## What belongs here
 //!
-//! Chat implementation that integrates with:
-//! - **Layer 1** (`aura-core`): Authority-first identity model, effect traits
-//! - **Layer 6** (`aura-agent`): Agent runtime and effect system
-//! - **Layer 5** (`aura-transport`): AMP protocol for secure messaging
+//! - **Fact-first chat**: `ChatFact` + `ChatFactReducer` encode chat state transitions as
+//!   append-only facts stored via `RelationalFact::Generic`. Message payloads are represented as
+//!   **opaque bytes** (`MessageSentSealed`); rendering/decryption is a higher-layer concern.
+//! - **View reduction**: `ChatViewReducer` produces UI deltas from facts without assuming plaintext.
 //!
-//! ## Architecture
+//! ## Local (non-replicated) handler
 //!
-//! - **Authority-First Design**: Chat groups are tied to AuthorityIds, not device IDs
-//! - **AMP Integration**: Uses AMP channels for secure, encrypted messaging
-//! - **Effect System**: All operations go through the effect system for testability
-//! - **CRDT Support**: Message history is eventually consistent via AMP's fact-based storage
+//! `ChatHandler` is a per-call-effects handler that persists group/message state via `StorageEffects`.
+//! It is intentionally **local-only** and separate from the journal-backed `ChatFact` path.
 //!
-//! ## Key Components
+//! ## Effect system compliance
 //!
-//! - **ChatGroup**: Manages group membership and metadata
-//! - **ChatMessage**: Represents individual chat messages
-//! - **ChatHandler**: Stateless handler for chat operations (per-call effects pattern)
-//! - **ChatHistory**: Message history management and retrieval
+//! - Uses injected effect traits (no direct OS calls).
+//! - Uses unified time via `PhysicalTimeEffects` (no legacy `TimeEffects`).
 //!
-//! ## Effect System Compliance
-//!
-//! This crate follows the **Layer 5 Feature/Protocol Implementation** pattern with
-//! per-call effect references:
-//! - All operations flow through effect traits (`StorageEffects`, `RandomEffects`, `TimeEffects`)
-//! - Handler methods take effect references per-call (no Arc<E> storage)
-//! - No direct system calls or global state
-//! - Deterministic testing via mock effect implementations
-//!
-//! ## Usage
+//! ## Example
 //!
 //! ```ignore
-//! use aura_chat::{ChatHandler, ChatGroup, ChatMessage};
-//! use aura_core::context::EffectContext;
+//! use aura_chat::ChatFact;
+//! use aura_journal::DomainFact;
 //!
-//! // Create stateless chat handler
-//! let handler = ChatHandler::new();
-//!
-//! // Pass effects per-call (enables RwLock integration at agent layer)
-//! let group = handler.create_group(
-//!     &effects,
-//!     "Alice & Friends",
-//!     creator_authority,
-//!     initial_members
-//! ).await?;
-//!
-//! // Send message
-//! let message = handler.send_message(
-//!     &effects,
-//!     &group.id,
-//!     sender_authority,
-//!     "Hello everyone!".to_string()
-//! ).await?;
-//!
-//! // Get message history
-//! let history = handler.get_history(&effects, &group.id, None, None).await?;
+//! // Domain fact → Generic for storage in the journal
+//! let fact = ChatFact::message_sent_sealed_ms(
+//!     /* context_id */ todo!(),
+//!     /* channel_id */ todo!(),
+//!     "msg-123".to_string(),
+//!     /* sender_id */ todo!(),
+//!     "Alice".to_string(),
+//!     b"opaque bytes".to_vec(),
+//!     /* sent_at_ms */ 0,
+//!     None,
+//! );
+//! let _generic = fact.to_generic();
 //! ```
 
 use aura_core::AuraError;
 
 pub mod facts;
+pub mod fact_service;
 pub mod group;
+pub mod guards;
 pub mod history;
 pub mod service;
 pub mod types;
 pub mod view;
 
 pub use facts::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
+pub use fact_service::ChatFactService;
 pub use group::ChatGroup;
 pub use history::ChatHistory;
 pub use service::ChatHandler;

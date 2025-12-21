@@ -1,4 +1,4 @@
-## Digital Sovereignty
+# Network Sovereignty
 
 When people talk about the internet, they focus on tools, platforms, and features. What is harder to see is that our basic social form is changing.
 
@@ -8,7 +8,7 @@ This new social form is not yet an institution. It lacks a constitution, clear m
 
 ## Sovereignty and Personhood
 
-Sovereignty means supreme authority within a territory. Who sets the rules in a given space. Who can change them. Who decides when interests collide. Territory here does not have to mean land. It can be a jurisdiction, a legal domain, an institutional boundary, or a protocol.
+The widely understood definition of sovereignty is “supreme authority within a territory.” Who sets the rules in a given space, and who can change them. Territory here does not have to mean land. It can be a jurisdiction, a legal domain, an institutional boundary, or a protocol.
 
 Identity is a relational construct. Before a group can be sovereign, someone must decide who belongs. Someone must decide which people are visible to the system and which voices matter when decisions are made. To be recognized is to be a subject of rules and a potential source of authority. To be excluded is to be invisible.
 

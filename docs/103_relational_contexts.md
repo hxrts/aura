@@ -19,23 +19,19 @@ This identifier selects the journal namespace for a relational context. It does 
 A relational context has a defined set of participating authorities. This set is not encoded in the `ContextId`. Participation is expressed by writing relational facts to the context journal. Each fact references the commitments of the participating authorities.
 
 ```rust
-/// Domain types in aura-core/src/relational/fact.rs
+/// Canonical relational facts in `aura-journal/src/fact.rs`
 pub enum RelationalFact {
-    GuardianBinding(GuardianBinding),
-    RecoveryGrant(RecoveryGrant),
-    Generic(GenericBinding),
-}
+    // Protocol-level receipts (handled directly by `reduce_context`)
+    GuardianBinding { account_id: AuthorityId, guardian_id: AuthorityId, binding_hash: Hash32 },
+    RecoveryGrant { account_id: AuthorityId, guardian_id: AuthorityId, grant_hash: Hash32 },
+    Consensus { consensus_id: Hash32, operation_hash: Hash32, threshold_met: bool, participant_count: u16 },
 
-pub struct GenericBinding {
-    pub binding_type: String,
-    pub binding_data: Vec<u8>,
-    pub consensus_proof: Option<ConsensusProof>,
+    // Domain-level extensibility (reduced via `FactRegistry`)
+    Generic { context_id: ContextId, binding_type: String, binding_data: Vec<u8> },
 }
 ```
 
-The domain-level `RelationalFact` uses wrapper types for type safety. For protocol-level storage in journals, `aura-journal/src/fact.rs` defines a more detailed version with additional variants for AMP channel management, consensus results, and explicit authority IDs.
-
-The `Generic` variant is the extensible pattern for new fact types. Applications should use `Generic` to define context specific bindings. Do not add new enum variants to `RelationalFact` for each use case. Instead encode the operation type and schema information in the `binding_data` field. This design supports unbounded application extensibility without modifying the core fact model.
+The `Generic` variant is the extensibility mechanism for application/domain facts. Domain crates implement the `DomainFact` trait (`aura-journal/src/extensibility.rs`) and store facts as `RelationalFact::Generic` via `DomainFact::to_generic()`. The runtime registers reducers in `crates/aura-agent/src/fact_registry.rs` so `reduce_context()` can turn Generic facts into `RelationalBinding` values.
 
 ## 3. Prestate Model
 
@@ -179,7 +175,6 @@ The implementation in `aura-relational` provides concrete patterns for working w
 ### Creating and Managing Contexts
 
 ```rust
-use aura_core::relational::RelationalFact;
 use aura_core::{AuthorityId, ContextId};
 use aura_relational::RelationalContext;
 
@@ -206,25 +201,12 @@ assert!(context.is_participant(&guardian_authority));
 ```rust
 use aura_core::relational::{GuardianBinding, GuardianParameters};
 use std::time::Duration;
-use chrono::Utc;
 
-// Pattern 1: Using the builder (recommended)
-let binding = GuardianBindingBuilder::new()
-    .account(account_commitment)
-    .guardian(guardian_commitment)
-    .recovery_delay(Duration::from_secs(24 * 60 * 60)) // 24 hours
-    .notification_required(true)
-    .expires_at(Utc::now() + chrono::Duration::days(365))
-    .build()?;
-
-// Add to context
-context.add_fact(RelationalFact::GuardianBinding(binding))?;
-
-// Pattern 2: Direct construction
 let params = GuardianParameters {
     recovery_delay: Duration::from_secs(86400),
     notification_required: true,
-    expiration: Some(Utc::now() + chrono::Duration::days(365)),
+    // Use Aura's unified time system (PhysicalTimeEffects/TimeStamp) for expiration.
+    expiration: None,
 };
 
 let binding = GuardianBinding::new(
@@ -233,7 +215,8 @@ let binding = GuardianBinding::new(
     params,
 );
 
-context.add_fact(RelationalFact::GuardianBinding(binding))?;
+// Store a binding receipt + full payload via the context's journal-backed API
+context.add_guardian_binding(account_authority, guardian_authority, binding)?;
 ```
 
 ### Recovery Grant Pattern
@@ -538,7 +521,7 @@ The implementation provides concrete types (`RelationalContext`, `GuardianBindin
 - **Core Types**: `aura-core/src/relational/` - RelationalFact, GuardianBinding, RecoveryGrant, ConsensusProof domain types
 - **Journal Facts**: `aura-journal/src/fact.rs` - Protocol-level RelationalFact with AMP variants
 - **Reduction**: `aura-journal/src/reduction.rs` - RelationalState, reduce_context()
-- **Context Management**: `aura-relational/src/lib.rs` - RelationalContext, RelationalJournal protocols
+- **Context Management**: `aura-relational/src/lib.rs` - RelationalContext (context-scoped fact journal mirror + helpers)
 - **Consensus Integration**: `aura-protocol/src/consensus/relational.rs` - consensus implementation
 - **Consensus Adapter**: `aura-relational/src/consensus_adapter.rs` - thin consensus delegation layer
 - **Prestate Computation**: `aura-core/src/domain/consensus.rs` - Prestate struct and methods

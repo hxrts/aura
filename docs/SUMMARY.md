@@ -40,9 +40,9 @@
 
 # Blog
 
-- [000 Digital Sovereignty](blog/000_digital_sovereignty.md)
+- [Network Sovereignty](blog/000_network_sovereignty.md)
 - [Beyond Local-First](blog/001_beyond_local_first.md)
-- [Ratchets Without Trees](blog/002_ratchets_without_trees.md)
+- [Recoverable Ratchets](blog/002_recoverable_ratchets.md)
 - [The Shape of Agreement](blog/003_the_shape_of_agreement.md)
 - [Aura Consensus](blog/004_aura_consensus.md)
 

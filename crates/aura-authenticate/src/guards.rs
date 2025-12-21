@@ -26,6 +26,7 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
+use aura_protocol::guards::feature;
 use aura_verify::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
@@ -276,54 +277,8 @@ impl RecoveryContext {
     }
 }
 
-// =============================================================================
-// Guard Decision
-// =============================================================================
-
-/// Decision from guard evaluation
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GuardDecision {
-    /// Operation is allowed
-    Allow,
-
-    /// Operation is denied with reason
-    Deny {
-        /// Reason for denial
-        reason: String,
-    },
-}
-
-impl GuardDecision {
-    /// Create an allow decision
-    pub fn allow() -> Self {
-        GuardDecision::Allow
-    }
-
-    /// Create a deny decision with reason
-    pub fn deny(reason: impl Into<String>) -> Self {
-        GuardDecision::Deny {
-            reason: reason.into(),
-        }
-    }
-
-    /// Check if decision allows the operation
-    pub fn is_allowed(&self) -> bool {
-        matches!(self, GuardDecision::Allow)
-    }
-
-    /// Check if decision denies the operation
-    pub fn is_denied(&self) -> bool {
-        !self.is_allowed()
-    }
-
-    /// Get denial reason if denied
-    pub fn denial_reason(&self) -> Option<&str> {
-        match self {
-            GuardDecision::Deny { reason } => Some(reason),
-            GuardDecision::Allow => None,
-        }
-    }
-}
+/// Decision type shared across Layer 5 feature crates.
+pub type GuardDecision = feature::GuardDecision;
 
 // =============================================================================
 // Effect Command
@@ -426,78 +381,33 @@ pub enum EffectCommand {
     },
 }
 
-// =============================================================================
-// Guard Outcome
-// =============================================================================
-
-/// Outcome of guard evaluation.
-///
-/// Contains the decision and effect commands to execute if allowed.
-#[derive(Debug, Clone)]
-pub struct GuardOutcome {
-    /// The decision (allow/deny)
-    pub decision: GuardDecision,
-
-    /// Effect commands to execute if allowed
-    pub effects: Vec<EffectCommand>,
-}
-
-impl GuardOutcome {
-    /// Create an allowed outcome with effects
-    pub fn allowed(effects: Vec<EffectCommand>) -> Self {
-        Self {
-            decision: GuardDecision::Allow,
-            effects,
-        }
-    }
-
-    /// Create a denied outcome
-    pub fn denied(reason: impl Into<String>) -> Self {
-        Self {
-            decision: GuardDecision::Deny {
-                reason: reason.into(),
-            },
-            effects: vec![],
-        }
-    }
-
-    /// Check if outcome allows the operation
-    pub fn is_allowed(&self) -> bool {
-        self.decision.is_allowed()
-    }
-
-    /// Check if outcome denies the operation
-    pub fn is_denied(&self) -> bool {
-        self.decision.is_denied()
-    }
-}
+/// Outcome type shared across Layer 5 feature crates.
+pub type GuardOutcome = feature::GuardOutcome<EffectCommand>;
 
 // =============================================================================
 // Guard Helpers
 // =============================================================================
 
+impl feature::CapabilitySnapshot for GuardSnapshot {
+    fn has_capability(&self, cap: &str) -> bool {
+        GuardSnapshot::has_capability(self, cap)
+    }
+}
+
+impl feature::FlowBudgetSnapshot for GuardSnapshot {
+    fn flow_budget_remaining(&self) -> u32 {
+        self.flow_budget_remaining
+    }
+}
+
 /// Check capability and return denied outcome if missing
 pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<GuardOutcome> {
-    if !snapshot.has_capability(required_cap) {
-        Some(GuardOutcome::denied(format!(
-            "Missing capability: {}",
-            required_cap
-        )))
-    } else {
-        None
-    }
+    feature::check_capability(snapshot, required_cap)
 }
 
 /// Check flow budget and return denied outcome if insufficient
 pub fn check_flow_budget(snapshot: &GuardSnapshot, required_cost: u32) -> Option<GuardOutcome> {
-    if !snapshot.has_budget(required_cost) {
-        Some(GuardOutcome::denied(format!(
-            "Insufficient flow budget: need {}, have {}",
-            required_cost, snapshot.flow_budget_remaining
-        )))
-    } else {
-        None
-    }
+    feature::check_flow_budget(snapshot, required_cost)
 }
 
 /// Check if challenge has expired

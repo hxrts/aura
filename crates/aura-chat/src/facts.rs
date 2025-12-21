@@ -80,8 +80,11 @@ pub enum ChatFact {
         /// Authority that closed the channel
         actor_id: AuthorityId,
     },
-    /// Message sent in a channel
-    MessageSent {
+    /// Message sent with an opaque/sealed payload.
+    ///
+    /// The payload is treated as **opaque bytes** by default. Higher layers may
+    /// choose to render it (e.g. UTF-8) *only if* policy permits.
+    MessageSentSealed {
         /// Relational context where the message was sent
         context_id: ContextId,
         /// Channel where the message was sent
@@ -92,8 +95,8 @@ pub enum ChatFact {
         sender_id: AuthorityId,
         /// Human-readable sender name (cached for display)
         sender_name: String,
-        /// Message content (plaintext; encryption handled at transport layer)
-        content: String,
+        /// Opaque payload bytes (typically ciphertext)
+        payload: Vec<u8>,
         /// Timestamp when message was sent (uses unified time system)
         sent_at: PhysicalTime,
         /// Optional message ID this is replying to
@@ -154,7 +157,7 @@ impl ChatFact {
         match self {
             ChatFact::ChannelCreated { created_at, .. } => created_at.ts_ms,
             ChatFact::ChannelClosed { closed_at, .. } => closed_at.ts_ms,
-            ChatFact::MessageSent { sent_at, .. } => sent_at.ts_ms,
+            ChatFact::MessageSentSealed { sent_at, .. } => sent_at.ts_ms,
             ChatFact::MessageRead { read_at, .. } => read_at.ts_ms,
             ChatFact::MessageDelivered { delivered_at, .. } => delivered_at.ts_ms,
             ChatFact::DeliveryAcknowledged {
@@ -205,7 +208,11 @@ impl ChatFact {
         }
     }
 
-    /// Create a MessageSent fact with millisecond timestamp (backward compatibility)
+    /// Create a MessageSent fact with millisecond timestamp (backward compatibility).
+    ///
+    /// This is retained for older call sites but now produces a `MessageSentSealed`
+    /// fact by encoding the provided content as UTF-8 bytes.
+    #[deprecated(note = "Use ChatFact::message_sent_sealed_ms; chat facts now store opaque payload bytes")]
     #[allow(clippy::too_many_arguments)]
     pub fn message_sent_ms(
         context_id: ContextId,
@@ -217,13 +224,37 @@ impl ChatFact {
         sent_at_ms: u64,
         reply_to: Option<String>,
     ) -> Self {
-        Self::MessageSent {
+        Self::message_sent_sealed_ms(
             context_id,
             channel_id,
             message_id,
             sender_id,
             sender_name,
-            content,
+            content.into_bytes(),
+            sent_at_ms,
+            reply_to,
+        )
+    }
+
+    /// Create a MessageSentSealed fact with millisecond timestamp.
+    #[allow(clippy::too_many_arguments)]
+    pub fn message_sent_sealed_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        sender_id: AuthorityId,
+        sender_name: String,
+        payload: Vec<u8>,
+        sent_at_ms: u64,
+        reply_to: Option<String>,
+    ) -> Self {
+        Self::MessageSentSealed {
+            context_id,
+            channel_id,
+            message_id,
+            sender_id,
+            sender_name,
+            payload,
             sent_at: PhysicalTime {
                 ts_ms: sent_at_ms,
                 uncertainty: None,
@@ -310,7 +341,7 @@ impl DomainFact for ChatFact {
         match self {
             ChatFact::ChannelCreated { context_id, .. } => *context_id,
             ChatFact::ChannelClosed { context_id, .. } => *context_id,
-            ChatFact::MessageSent { context_id, .. } => *context_id,
+            ChatFact::MessageSentSealed { context_id, .. } => *context_id,
             ChatFact::MessageRead { context_id, .. } => *context_id,
             ChatFact::MessageDelivered { context_id, .. } => *context_id,
             ChatFact::DeliveryAcknowledged { context_id, .. } => *context_id,
@@ -318,7 +349,7 @@ impl DomainFact for ChatFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
+        serde_json::to_vec(self).expect("ChatFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
@@ -351,6 +382,18 @@ impl FactReducer for ChatFactReducer {
 
         let fact: ChatFact = serde_json::from_slice(binding_data).ok()?;
 
+        let fact_context_id = match &fact {
+            ChatFact::ChannelCreated { context_id, .. } => *context_id,
+            ChatFact::ChannelClosed { context_id, .. } => *context_id,
+            ChatFact::MessageSentSealed { context_id, .. } => *context_id,
+            ChatFact::MessageRead { context_id, .. } => *context_id,
+            ChatFact::MessageDelivered { context_id, .. } => *context_id,
+            ChatFact::DeliveryAcknowledged { context_id, .. } => *context_id,
+        };
+        if fact_context_id != context_id {
+            return None;
+        }
+
         let (sub_type, data) = match &fact {
             ChatFact::ChannelCreated { channel_id, .. } => (
                 "channel-created".to_string(),
@@ -360,9 +403,10 @@ impl FactReducer for ChatFactReducer {
                 "channel-closed".to_string(),
                 channel_id.to_string().into_bytes(),
             ),
-            ChatFact::MessageSent { message_id, .. } => {
-                ("message-sent".to_string(), message_id.as_bytes().to_vec())
-            }
+            ChatFact::MessageSentSealed { message_id, .. } => (
+                "message-sent".to_string(),
+                message_id.as_bytes().to_vec(),
+            ),
             ChatFact::MessageRead { message_id, .. } => {
                 ("message-read".to_string(), message_id.as_bytes().to_vec())
             }
@@ -419,14 +463,33 @@ mod tests {
     }
 
     #[test]
+    fn reducer_rejects_context_mismatch() {
+        let reducer = ChatFactReducer;
+        let fact = ChatFact::channel_created_ms(
+            test_context_id(),
+            test_channel_id(),
+            "general".to_string(),
+            None,
+            false,
+            123,
+            test_authority_id(),
+        );
+
+        // Reduce under a different context id should be rejected.
+        let other_context = ContextId::new_from_entropy([43u8; 32]);
+        let binding = reducer.reduce(other_context, CHAT_FACT_TYPE_ID, &fact.to_bytes());
+        assert!(binding.is_none());
+    }
+
+    #[test]
     fn test_chat_fact_to_generic() {
-        let fact = ChatFact::message_sent_ms(
+        let fact = ChatFact::message_sent_sealed_ms(
             test_context_id(),
             test_channel_id(),
             "msg-123".to_string(),
             test_authority_id(),
             "Alice".to_string(),
-            "Hello, world!".to_string(),
+            b"Hello, world!".to_vec(),
             1234567890,
             None,
         );
@@ -491,13 +554,13 @@ mod tests {
                 0,
                 test_authority_id(),
             ),
-            ChatFact::message_sent_ms(
+            ChatFact::message_sent_sealed_ms(
                 test_context_id(),
                 test_channel_id(),
                 "msg".to_string(),
                 test_authority_id(),
                 "Test".to_string(),
-                "Hello".to_string(),
+                b"Hello".to_vec(),
                 0,
                 None,
             ),
@@ -623,13 +686,13 @@ mod tests {
         let recipient = AuthorityId::new_from_entropy([3u8; 32]);
 
         // 1. Message sent
-        let sent = ChatFact::message_sent_ms(
+        let sent = ChatFact::message_sent_sealed_ms(
             context,
             channel,
             message_id.clone(),
             sender,
             "Sender".to_string(),
-            "Hello".to_string(),
+            b"Hello".to_vec(),
             1000,
             None,
         );

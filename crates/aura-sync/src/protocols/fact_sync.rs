@@ -429,8 +429,9 @@ mod tests {
     use async_trait::async_trait;
     use aura_core::domain::journal::FactValue;
     use aura_core::effects::indexed::{FactId, FactStreamReceiver, IndexStats};
+    use aura_core::effects::TimeError;
     use aura_core::effects::{BloomConfig, BloomFilter};
-    use aura_core::time::{PhysicalTime, TimeError};
+    use aura_core::time::PhysicalTime;
     use aura_core::AuthorityId;
     use std::sync::Mutex;
 
@@ -453,7 +454,7 @@ mod tests {
         async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
             Ok(PhysicalTime {
                 ts_ms: self.now_ms,
-                uncertainty_ms: None,
+                uncertainty: None,
             })
         }
 

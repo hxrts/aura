@@ -1,15 +1,12 @@
 //! Guardian service implementing GuardianEffects using relational contexts
 //! with consensus-backed GuardianBinding facts.
 
-use crate::guardian_request::{
-    make_guardian_cancel_fact, make_guardian_request_fact, GuardianRequestPayload,
-};
+use crate::guardian_request::{GuardianRequestFact, GuardianRequestPayload};
 use crate::{run_consensus_with_config, ConsensusConfig, RelationalContext};
 use async_trait::async_trait;
 use aura_core::effects::guardian::{GuardianAcceptInput, GuardianEffects, GuardianRequestInput};
-use aura_core::relational::fact::RelationalFact;
 use aura_core::relational::GuardianBinding;
-use aura_core::{AuraError, Prestate, Result};
+use aura_core::{Prestate, Result};
 use std::sync::Arc;
 
 /// Guardian service backed by a RelationalContext
@@ -52,9 +49,8 @@ impl GuardianEffects for GuardianService {
                 .map(aura_core::time::TimeStamp::PhysicalClock),
         };
 
-        let fact = make_guardian_request_fact(payload)
-            .map_err(|e| AuraError::serialization(e.to_string()))?;
-        ctx.add_fact(fact)
+        let fact = GuardianRequestFact::requested(ctx.context_id, payload);
+        ctx.add_domain_fact(&fact)
     }
 
     async fn cancel_guardian_request(&self, input: GuardianRequestInput) -> Result<()> {
@@ -70,9 +66,8 @@ impl GuardianEffects for GuardianService {
                 .map(aura_core::time::TimeStamp::PhysicalClock),
         };
 
-        let fact = make_guardian_cancel_fact(payload)
-            .map_err(|e| AuraError::serialization(e.to_string()))?;
-        ctx.add_fact(fact)
+        let fact = GuardianRequestFact::cancelled(ctx.context_id, payload);
+        ctx.add_domain_fact(&fact)
     }
 
     async fn accept_guardian_request(&self, input: GuardianAcceptInput) -> Result<GuardianBinding> {
@@ -84,7 +79,7 @@ impl GuardianEffects for GuardianService {
             (input.guardian, input.guardian_commitment),
         ];
 
-        let context_commitment = ctx.journal_commitment();
+        let context_commitment = ctx.journal_commitment()?;
         let prestate = Prestate::new(authority_commitments, context_commitment);
 
         // Run consensus for GuardianBinding
@@ -104,7 +99,7 @@ impl GuardianEffects for GuardianService {
             consensus_proof,
         );
 
-        ctx.add_fact(RelationalFact::GuardianBinding(binding.clone()))?;
+        let _ = ctx.add_guardian_binding(input.account, input.guardian, binding.clone())?;
 
         Ok(binding)
     }

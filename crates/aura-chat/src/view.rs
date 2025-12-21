@@ -170,32 +170,32 @@ impl ViewDeltaReducer for ChatViewReducer {
                 creator_id,
                 ..
             } => Some(ChatDelta::ChannelAdded {
-                channel_id: format!("{:?}", channel_id),
+                channel_id: channel_id.to_string(),
                 name,
                 topic,
                 is_dm,
                 member_count: 0, // Would need additional fact tracking
                 created_at: created_at.ts_ms,
-                creator_id: format!("{:?}", creator_id),
+                creator_id: creator_id.to_string(),
             }),
             ChatFact::ChannelClosed { channel_id, .. } => Some(ChatDelta::ChannelRemoved {
-                channel_id: format!("{:?}", channel_id),
+                channel_id: channel_id.to_string(),
             }),
-            ChatFact::MessageSent {
+            ChatFact::MessageSentSealed {
                 channel_id,
                 message_id,
                 sender_id,
                 sender_name,
-                content,
+                payload: _,
                 sent_at,
                 reply_to,
                 ..
             } => Some(ChatDelta::MessageAdded {
-                channel_id: format!("{:?}", channel_id),
+                channel_id: channel_id.to_string(),
                 message_id,
-                sender_id: format!("{:?}", sender_id),
+                sender_id: sender_id.to_string(),
                 sender_name,
-                content,
+                content: "<sealed message>".to_string(),
                 timestamp: sent_at.ts_ms,
                 reply_to,
             }),
@@ -206,9 +206,9 @@ impl ViewDeltaReducer for ChatViewReducer {
                 read_at,
                 ..
             } => Some(ChatDelta::MessageRead {
-                channel_id: format!("{:?}", channel_id),
+                channel_id: channel_id.to_string(),
                 message_id,
-                reader_id: format!("{:?}", reader_id),
+                reader_id: reader_id.to_string(),
                 read_at: read_at.ts_ms,
             }),
             ChatFact::MessageDelivered {
@@ -219,9 +219,9 @@ impl ViewDeltaReducer for ChatViewReducer {
                 delivered_at,
                 ..
             } => Some(ChatDelta::MessageDelivered {
-                channel_id: format!("{:?}", channel_id),
+                channel_id: channel_id.to_string(),
                 message_id,
-                recipient_id: format!("{:?}", recipient_id),
+                recipient_id: recipient_id.to_string(),
                 device_id,
                 delivered_at: delivered_at.ts_ms,
             }),
@@ -231,7 +231,7 @@ impl ViewDeltaReducer for ChatViewReducer {
                 acknowledged_at,
                 ..
             } => Some(ChatDelta::DeliveryAcknowledged {
-                channel_id: format!("{:?}", channel_id),
+                channel_id: channel_id.to_string(),
                 message_id,
                 acknowledged_at: acknowledged_at.ts_ms,
             }),
@@ -288,16 +288,51 @@ mod tests {
     }
 
     #[test]
+    fn test_ids_use_display() {
+        let reducer = ChatViewReducer;
+
+        let channel_id = ChannelId::from_bytes([1u8; 32]);
+        let creator = AuthorityId::new_from_entropy([2u8; 32]);
+
+        let fact = ChatFact::channel_created_ms(
+            test_context_id(),
+            channel_id,
+            "test-channel".to_string(),
+            None,
+            false,
+            123,
+            creator,
+        );
+
+        let bytes = fact.to_bytes();
+        let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &bytes, None);
+
+        assert_eq!(deltas.len(), 1);
+        let delta = downcast_delta::<ChatDelta>(&deltas[0]).unwrap();
+        match delta {
+            ChatDelta::ChannelAdded {
+                channel_id: id,
+                creator_id: creator_id_str,
+                ..
+            } => {
+                assert_eq!(id, &channel_id.to_string());
+                assert_eq!(creator_id_str, &creator.to_string());
+            }
+            _ => panic!("Expected ChannelAdded delta"),
+        }
+    }
+
+    #[test]
     fn test_message_sent_reduction() {
         let reducer = ChatViewReducer;
 
-        let fact = ChatFact::message_sent_ms(
+        let fact = ChatFact::message_sent_sealed_ms(
             test_context_id(),
             ChannelId::default(),
             "msg-123".to_string(),
             AuthorityId::default(),
             "Alice".to_string(),
-            "Hello, world!".to_string(),
+            b"Hello, world!".to_vec(),
             1234567890,
             None,
         );
@@ -316,7 +351,7 @@ mod tests {
             } => {
                 assert_eq!(message_id, "msg-123");
                 assert_eq!(sender_name, "Alice");
-                assert_eq!(content, "Hello, world!");
+                assert_eq!(content, "<sealed message>");
             }
             _ => panic!("Expected MessageAdded delta"),
         }

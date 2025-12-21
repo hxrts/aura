@@ -27,9 +27,9 @@ impl Screen {
     pub fn key_number(&self) -> u8 {
         match self {
             Screen::Block => 1,
-            Screen::Chat => 2,
-            Screen::Contacts => 3,
-            Screen::Neighborhood => 4,
+            Screen::Neighborhood => 2,
+            Screen::Chat => 3,
+            Screen::Contacts => 4,
             Screen::Recovery => 5,
             Screen::Settings => 6,
         }
@@ -39,9 +39,9 @@ impl Screen {
     pub fn from_key(key: u8) -> Option<Self> {
         match key {
             1 => Some(Screen::Block),
-            2 => Some(Screen::Chat),
-            3 => Some(Screen::Contacts),
-            4 => Some(Screen::Neighborhood),
+            2 => Some(Screen::Neighborhood),
+            3 => Some(Screen::Chat),
+            4 => Some(Screen::Contacts),
             5 => Some(Screen::Recovery),
             6 => Some(Screen::Settings),
             _ => None,
@@ -76,9 +76,9 @@ impl Screen {
     pub fn all() -> &'static [Screen] {
         &[
             Screen::Block,
+            Screen::Neighborhood,
             Screen::Chat,
             Screen::Contacts,
-            Screen::Neighborhood,
             Screen::Recovery,
             Screen::Settings,
         ]
@@ -87,10 +87,10 @@ impl Screen {
     /// Get next screen in tab order
     pub fn next(&self) -> Screen {
         match self {
-            Screen::Block => Screen::Chat,
+            Screen::Block => Screen::Neighborhood,
+            Screen::Neighborhood => Screen::Chat,
             Screen::Chat => Screen::Contacts,
-            Screen::Contacts => Screen::Neighborhood,
-            Screen::Neighborhood => Screen::Recovery,
+            Screen::Contacts => Screen::Recovery,
             Screen::Recovery => Screen::Settings,
             Screen::Settings => Screen::Block,
         }
@@ -100,10 +100,10 @@ impl Screen {
     pub fn prev(&self) -> Screen {
         match self {
             Screen::Block => Screen::Settings,
-            Screen::Chat => Screen::Block,
+            Screen::Neighborhood => Screen::Block,
+            Screen::Chat => Screen::Neighborhood,
             Screen::Contacts => Screen::Chat,
-            Screen::Neighborhood => Screen::Contacts,
-            Screen::Recovery => Screen::Neighborhood,
+            Screen::Recovery => Screen::Contacts,
             Screen::Settings => Screen::Recovery,
         }
     }
@@ -282,18 +282,18 @@ mod tests {
         let mut router = Router::new(Screen::Block);
 
         router.next_tab();
+        assert_eq!(router.current(), Screen::Neighborhood);
+
+        router.next_tab();
         assert_eq!(router.current(), Screen::Chat);
 
         router.next_tab();
         assert_eq!(router.current(), Screen::Contacts);
 
-        router.next_tab();
-        assert_eq!(router.current(), Screen::Neighborhood);
-
         router.prev_tab();
-        assert_eq!(router.current(), Screen::Contacts);
+        assert_eq!(router.current(), Screen::Chat);
 
-        // Go all the way back (wraps to Recovery)
+        // Go all the way back (wraps to Settings)
         let mut r2 = Router::new(Screen::Block);
         r2.prev_tab();
         assert_eq!(r2.current(), Screen::Settings);

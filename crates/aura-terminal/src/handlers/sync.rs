@@ -194,7 +194,7 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Terminal
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {}", e)))?;
 
-    // TODO: Full sync_with_peers would need the full effect system
+    // Full sync_with_peers needs the full effect system
     // For now, just add peers and show status
     for peer in &peers {
         manager.add_peer(*peer).await;

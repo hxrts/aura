@@ -422,6 +422,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
             IntentError::service_error(format!("Recovery service unavailable: {}", e))
         })?;
 
+        // Convert String guardian IDs to AuthorityIds for the ceremony protocol
+        let all_guardian_authority_ids: Vec<AuthorityId> = guardian_ids
+            .iter()
+            .filter_map(|id_str| id_str.parse().ok())
+            .collect();
+
+        if all_guardian_authority_ids.len() != guardian_ids.len() {
+            return Err(IntentError::validation_failed(
+                "Failed to parse one or more guardian IDs as AuthorityIds".to_string(),
+            ));
+        }
+
         for (idx, guardian_id) in guardian_ids.iter().enumerate() {
             let key_package = &key_packages[idx];
 
@@ -439,6 +451,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     &ceremony_id,
                     threshold_k,
                     total_n,
+                    &all_guardian_authority_ids,
+                    new_epoch,
                     key_package,
                 )
                 .await

@@ -11,7 +11,6 @@
 //!
 //! This is a **Layer 5 (Feature/Protocol)** crate that:
 //! - Depends on `aura-journal` (Layer 2) for fact types
-//! - Depends on `aura-wot` (Layer 2) for capability evaluation
 //! - Is a peer to `aura-chat`, `aura-recovery`, `aura-invitation`
 //!
 //! # Fact vs Service Separation
@@ -49,6 +48,7 @@
 pub mod availability;
 pub mod block;
 pub mod error;
+pub mod facts;
 pub mod membership;
 pub mod neighborhood;
 pub mod relay;
@@ -60,6 +60,7 @@ pub mod traversal;
 pub use availability::{BlockAvailability, NeighborhoodAvailability};
 pub use block::Block;
 pub use error::SocialError;
+pub use facts::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
 pub use neighborhood::Neighborhood;
 pub use relay::{ReachabilityChecker, RelayCandidateBuilder};
 pub use storage::StorageService;

@@ -276,7 +276,7 @@ impl DomainFact for InvitationFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
+        serde_json::to_vec(self).expect("InvitationFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>

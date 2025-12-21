@@ -8,17 +8,19 @@
 //! Supports local network peer discovery via UDP broadcast. When enabled, the manager
 //! will announce presence and discover peers on the local network.
 
-use aura_core::effects::time::TimeEffects;
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_effects::time::PhysicalTimeHandler;
 use aura_rendezvous::{
-    DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryService, RendezvousConfig,
-    RendezvousDescriptor, RendezvousFact, RendezvousService, TransportHint,
+    DiscoveredPeer, LanDiscoveryConfig, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
+    RendezvousService, TransportHint,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+
+use super::lan_discovery::LanDiscoveryService;
 
 /// Configuration for the rendezvous service manager
 #[derive(Debug, Clone)]
@@ -461,7 +463,7 @@ impl RendezvousManager {
         }
 
         // Create LAN discovery service
-        let time: Arc<dyn TimeEffects> = Arc::new(PhysicalTimeHandler::new());
+        let time: Arc<dyn PhysicalTimeEffects> = Arc::new(PhysicalTimeHandler::new());
         let lan_service =
             LanDiscoveryService::new(self.config.lan_discovery.clone(), self.authority_id, time)
                 .await

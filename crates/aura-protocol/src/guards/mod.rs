@@ -92,6 +92,7 @@
 pub mod deltas;
 pub mod effect_policy_guard;
 pub mod effect_system_trait;
+pub mod feature;
 // pub mod evaluation; // Legacy capability evaluation removed - use BiscuitAuthorizationBridge instead
 pub mod execution;
 pub mod flow;

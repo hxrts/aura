@@ -141,11 +141,39 @@ impl ReactiveView for InvitationsSignalView {
                     state.revoke_invitation(&invitation_id);
                     changed = true;
                 }
-                InvitationFact::CeremonyInitiated { .. }
-                | InvitationFact::CeremonyAcceptanceReceived { .. }
-                | InvitationFact::CeremonyCommitted { .. }
-                | InvitationFact::CeremonyAborted { .. } => {
-                    // TODO(C2): Map ceremony events into RecoveryState once recovery facts are canonical.
+                InvitationFact::CeremonyInitiated { ceremony_id, sender, timestamp_ms } => {
+                    // Invitation ceremony events don't map to InvitationsState.
+                    // They track the consensus-based invitation exchange protocol.
+                    // For RecoveryState updates, use RecoveryFacts or the ceremony tracker.
+                    tracing::debug!(
+                        ceremony_id,
+                        sender,
+                        timestamp_ms,
+                        "Invitation ceremony initiated"
+                    );
+                }
+                InvitationFact::CeremonyAcceptanceReceived { ceremony_id, timestamp_ms } => {
+                    tracing::debug!(
+                        ceremony_id,
+                        timestamp_ms,
+                        "Invitation ceremony acceptance received"
+                    );
+                }
+                InvitationFact::CeremonyCommitted { ceremony_id, relationship_id, timestamp_ms } => {
+                    tracing::info!(
+                        ceremony_id,
+                        relationship_id,
+                        timestamp_ms,
+                        "Invitation ceremony committed - relationship established"
+                    );
+                }
+                InvitationFact::CeremonyAborted { ceremony_id, reason, timestamp_ms } => {
+                    tracing::warn!(
+                        ceremony_id,
+                        reason,
+                        timestamp_ms,
+                        "Invitation ceremony aborted"
+                    );
                 }
             }
         }
@@ -365,16 +393,18 @@ impl ReactiveView for ChatSignalView {
                     state.remove_channel(&channel_id);
                     changed = true;
                 }
-                ChatFact::MessageSent {
+                ChatFact::MessageSentSealed {
                     channel_id,
                     message_id,
                     sender_id,
                     sender_name,
-                    content,
+                    payload,
                     sent_at,
                     reply_to,
                     ..
                 } => {
+                    // Sealed messages are opaque at this layer; decoding/decryption belongs above.
+                    let content = format!("[sealed: {} bytes]", payload.len());
                     let message = Message {
                         id: message_id,
                         channel_id,
@@ -389,10 +419,62 @@ impl ReactiveView for ChatSignalView {
                     state.apply_message(channel_id, message);
                     changed = true;
                 }
-                ChatFact::MessageRead { .. }
-                | ChatFact::MessageDelivered { .. }
-                | ChatFact::DeliveryAcknowledged { .. } => {
-                    // TODO(C2): Map delivery/read status into ChatState when UI needs it.
+                ChatFact::MessageRead {
+                    channel_id,
+                    message_id,
+                    reader_id,
+                    read_at,
+                    ..
+                } => {
+                    // If the reader is us, this is a confirmation of our own read action.
+                    // If the reader is someone else, update the message as read by others.
+                    // For now, mark the message as read in our local state.
+                    if state.mark_message_read(&message_id) {
+                        state.decrement_unread(&channel_id);
+                        changed = true;
+                    }
+                    tracing::debug!(
+                        channel_id = %channel_id,
+                        message_id,
+                        reader_id = %reader_id,
+                        read_at = read_at.ts_ms,
+                        "Message marked as read"
+                    );
+                }
+                ChatFact::MessageDelivered {
+                    channel_id,
+                    message_id,
+                    recipient_id,
+                    device_id,
+                    delivered_at,
+                    ..
+                } => {
+                    // Message was delivered to a recipient's device (before they read it).
+                    // Currently the Message struct doesn't have a delivery status field,
+                    // so we just log this event. A future UI could show delivery checkmarks.
+                    tracing::debug!(
+                        channel_id = %channel_id,
+                        message_id,
+                        recipient_id = %recipient_id,
+                        device_id = ?device_id,
+                        delivered_at = delivered_at.ts_ms,
+                        "Message delivered to recipient device"
+                    );
+                }
+                ChatFact::DeliveryAcknowledged {
+                    channel_id,
+                    message_id,
+                    acknowledged_at,
+                    ..
+                } => {
+                    // Sender acknowledged the delivery receipt - closes the receipt loop.
+                    // Used for internal state management and GC of pending receipts.
+                    tracing::trace!(
+                        channel_id = %channel_id,
+                        message_id,
+                        acknowledged_at = acknowledged_at.ts_ms,
+                        "Delivery receipt acknowledged"
+                    );
                 }
             }
         }

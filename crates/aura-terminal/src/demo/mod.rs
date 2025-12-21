@@ -422,8 +422,8 @@ impl SimulatedAgent {
                                 guardian_id: self.authority_id,
                                 setup_id: ceremony_id.clone(),
                                 accepted: true,
-                                // Placeholder public key - in production this would be the guardian's
-                                // actual public key for threshold key share encryption
+                                // Demo uses authority ID bytes as public key
+                                // Real implementations use guardian's actual FROST key share
                                 public_key: self.authority_id.to_bytes().to_vec(),
                                 timestamp: TimeStamp::PhysicalClock(PhysicalTime {
                                     ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),

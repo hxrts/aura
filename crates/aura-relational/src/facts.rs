@@ -34,7 +34,9 @@
 //! ```
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::relational::{GuardianBinding, RecoveryGrant};
 use aura_core::time::PhysicalTime;
+use aura_core::{hash, Hash32};
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
@@ -190,7 +192,7 @@ impl DomainFact for ContactFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
+        serde_json::to_vec(self).expect("ContactFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
@@ -241,6 +243,169 @@ impl FactReducer for ContactFactReducer {
             binding_type: RelationalBindingType::Generic(sub_type),
             context_id,
             data,
+        })
+    }
+}
+
+// =============================================================================
+// Relational detail facts (guardian bindings, recovery grants)
+// =============================================================================
+
+/// Type identifier for guardian binding detail facts.
+///
+/// These facts store the full `GuardianBinding` payload as `RelationalFact::Generic`.
+pub const GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID: &str = "guardian_binding_details";
+
+/// Stored guardian binding details for a relational context.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GuardianBindingDetailsFact {
+    pub context_id: ContextId,
+    pub account_id: AuthorityId,
+    pub guardian_id: AuthorityId,
+    pub binding: GuardianBinding,
+}
+
+impl GuardianBindingDetailsFact {
+    pub fn new(
+        context_id: ContextId,
+        account_id: AuthorityId,
+        guardian_id: AuthorityId,
+        binding: GuardianBinding,
+    ) -> Self {
+        Self {
+            context_id,
+            account_id,
+            guardian_id,
+            binding,
+        }
+    }
+}
+
+impl DomainFact for GuardianBindingDetailsFact {
+    fn type_id(&self) -> &'static str {
+        GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID
+    }
+
+    fn context_id(&self) -> ContextId {
+        self.context_id
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).expect("GuardianBindingDetailsFact must serialize")
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        bincode::deserialize(bytes).ok()
+    }
+}
+
+pub struct GuardianBindingDetailsFactReducer;
+
+impl FactReducer for GuardianBindingDetailsFactReducer {
+    fn handles_type(&self) -> &'static str {
+        GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID
+    }
+
+    fn reduce(
+        &self,
+        context_id: ContextId,
+        binding_type: &str,
+        binding_data: &[u8],
+    ) -> Option<RelationalBinding> {
+        if binding_type != GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID {
+            return None;
+        }
+
+        let fact: GuardianBindingDetailsFact = bincode::deserialize(binding_data).ok()?;
+        if fact.context_id != context_id {
+            return None;
+        }
+
+        Some(RelationalBinding {
+            binding_type: RelationalBindingType::Generic("guardian-binding-details".to_string()),
+            context_id,
+            data: hash::hash(binding_data).to_vec(),
+        })
+    }
+}
+
+/// Type identifier for recovery grant detail facts.
+///
+/// These facts store the full `RecoveryGrant` payload as `RelationalFact::Generic`.
+pub const RECOVERY_GRANT_DETAILS_FACT_TYPE_ID: &str = "recovery_grant_details";
+
+/// Stored recovery grant details for a relational context.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecoveryGrantDetailsFact {
+    pub context_id: ContextId,
+    pub account_id: AuthorityId,
+    pub grant: RecoveryGrant,
+}
+
+impl RecoveryGrantDetailsFact {
+    pub fn new(context_id: ContextId, account_id: AuthorityId, grant: RecoveryGrant) -> Self {
+        Self {
+            context_id,
+            account_id,
+            grant,
+        }
+    }
+
+    pub fn grant_hash(&self) -> Hash32 {
+        Hash32::from_bytes(&hash::hash(&self.to_bytes()))
+    }
+}
+
+impl DomainFact for RecoveryGrantDetailsFact {
+    fn type_id(&self) -> &'static str {
+        RECOVERY_GRANT_DETAILS_FACT_TYPE_ID
+    }
+
+    fn context_id(&self) -> ContextId {
+        self.context_id
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).expect("RecoveryGrantDetailsFact must serialize")
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        bincode::deserialize(bytes).ok()
+    }
+}
+
+pub struct RecoveryGrantDetailsFactReducer;
+
+impl FactReducer for RecoveryGrantDetailsFactReducer {
+    fn handles_type(&self) -> &'static str {
+        RECOVERY_GRANT_DETAILS_FACT_TYPE_ID
+    }
+
+    fn reduce(
+        &self,
+        context_id: ContextId,
+        binding_type: &str,
+        binding_data: &[u8],
+    ) -> Option<RelationalBinding> {
+        if binding_type != RECOVERY_GRANT_DETAILS_FACT_TYPE_ID {
+            return None;
+        }
+
+        let fact: RecoveryGrantDetailsFact = bincode::deserialize(binding_data).ok()?;
+        if fact.context_id != context_id {
+            return None;
+        }
+
+        Some(RelationalBinding {
+            binding_type: RelationalBindingType::Generic("recovery-grant-details".to_string()),
+            context_id,
+            data: hash::hash(binding_data).to_vec(),
         })
     }
 }
@@ -383,5 +548,24 @@ mod tests {
         for fact in facts {
             assert_eq!(fact.type_id(), CONTACT_FACT_TYPE_ID);
         }
+    }
+
+    #[test]
+    fn guardian_binding_details_roundtrip() {
+        let ctx = test_context_id();
+        let account = test_authority_id(1);
+        let guardian = test_authority_id(2);
+        let binding = GuardianBinding::new(
+            Hash32::from_bytes(&hash::hash(&account.to_bytes())),
+            Hash32::from_bytes(&hash::hash(&guardian.to_bytes())),
+            aura_core::relational::GuardianParameters::default(),
+        );
+
+        let fact = GuardianBindingDetailsFact::new(ctx, account, guardian, binding);
+        let bytes = fact.to_bytes();
+        let restored = GuardianBindingDetailsFact::from_bytes(&bytes).unwrap();
+        assert_eq!(restored.context_id, ctx);
+        assert_eq!(restored.account_id, account);
+        assert_eq!(restored.guardian_id, guardian);
     }
 }

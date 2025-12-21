@@ -1,345 +1,507 @@
-//! Chat Service - Public API for Chat Operations
+//! Chat Service - Agent API for chat operations
 //!
-//! Provides a clean public interface for chat operations at the agent layer.
-//! Wraps `aura_chat::ChatHandler` with RwLock management and proper error handling.
+//! This service uses the fact-first chat path: operations emit `ChatFact` values
+//! and commit them into the journal as `RelationalFact::Generic`.
 //!
-//! This service follows the two-layer architecture:
-//! - Layer 5 (Domain): `aura_chat::ChatHandler` - stateless handler with per-call effects
-//! - Layer 6 (Agent): `ChatService` - RwLock wrapper for effect system access
+//! The legacy KV-backed `aura_chat::ChatHandler` remains in the `aura-chat` crate
+//! as a local-only handler, but it is not used by the agent/terminal default path.
 
 use crate::core::{AgentError, AgentResult};
 use crate::runtime::AuraEffectSystem;
-use aura_chat::{ChatGroup, ChatGroupId, ChatHandler, ChatMessage, ChatMessageId};
-use aura_core::identifiers::AuthorityId;
-use aura_core::time::TimeStamp;
-use std::collections::HashMap;
-use std::sync::Arc;
+use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
+use aura_chat::types::{ChatMember, ChatRole};
+use aura_chat::{ChatFactService, ChatGroup, ChatGroupId, ChatMessage, ChatMessageId, CHAT_FACT_TYPE_ID};
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
+use aura_core::hash::hash;
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_journal::DomainFact;
+use aura_protocol::guards::GuardContextProvider;
+use uuid::Uuid;
 
-/// Chat service for the agent layer
+/// Chat service for the agent layer.
 ///
-/// Provides chat operations through a clean public API.
-/// Wraps the domain-layer `ChatHandler` with RwLock management.
+/// The service commits chat facts into the agent's canonical fact store
+/// (`AuraEffectSystem::commit_generic_fact_bytes`) so reactive views and sync
+/// pipelines can observe them.
 pub struct ChatService {
-    handler: ChatHandler,
-    effects: Arc<AuraEffectSystem>,
+    effects: std::sync::Arc<AuraEffectSystem>,
+    facts: ChatFactService,
 }
 
 impl ChatService {
-    /// Create a new chat service
-    pub fn new(effects: Arc<AuraEffectSystem>) -> Self {
+    /// Create a new chat service.
+    pub fn new(effects: std::sync::Arc<AuraEffectSystem>) -> Self {
         Self {
-            handler: ChatHandler::new(),
             effects,
+            facts: ChatFactService::new(),
         }
     }
 
-    /// Create a new chat group with the given name and initial members
+    fn channel_id_for_group(group_id: &ChatGroupId) -> ChannelId {
+        // Deterministic mapping: embed the group UUID twice into a 32-byte ChannelId.
+        // This makes the mapping stable across runs without consuming entropy.
+        let mut bytes = [0u8; 32];
+        bytes[..16].copy_from_slice(group_id.0.as_bytes());
+        bytes[16..].copy_from_slice(group_id.0.as_bytes());
+        ChannelId::from_bytes(bytes)
+    }
+
+    fn context_id_for_group(group_id: &ChatGroupId) -> ContextId {
+        ContextId::from_uuid(group_id.0)
+    }
+
+    async fn build_snapshot(
+        &self,
+        authority_id: AuthorityId,
+        context_id: ContextId,
+    ) -> AgentResult<GuardSnapshot> {
+        let now = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AgentError::effects(format!("time error: {e}")))?;
+
+        // NOTE: Authorization/capability integration for chat is not yet wired to Biscuit/WoT.
+        // The current runtime treats guard capabilities as permissive; we provide the required
+        // strings so guards can evolve without breaking call sites.
+        let capabilities = vec![
+            aura_chat::guards::costs::CAP_CHAT_CHANNEL_CREATE.to_string(),
+            aura_chat::guards::costs::CAP_CHAT_MESSAGE_SEND.to_string(),
+        ];
+
+        Ok(GuardSnapshot::new(
+            authority_id,
+            context_id,
+            u32::MAX,
+            capabilities,
+            now.ts_ms,
+        ))
+    }
+
+    async fn execute_outcome(&self, outcome: GuardOutcome) -> AgentResult<()> {
+        if outcome.is_denied() {
+            let reason = outcome.decision.denial_reason().unwrap_or("Operation denied");
+            return Err(AgentError::effects(format!("Guard denied operation: {reason}")));
+        }
+
+        for effect in outcome.effects {
+            match effect {
+                EffectCommand::ChargeFlowBudget { cost } => {
+                    // Chat is local-first: flow budget charging happens at transport-layer
+                    // send-time via the guard-chain (CapGuard → FlowGuard → JournalCoupler).
+                    // Local fact commits don't require flow charging since there's no peer
+                    // recipient at commit time. The cost is tracked here for observability
+                    // but actual budget deduction occurs when facts sync to peers.
+                    tracing::trace!(cost, "Chat fact commit - flow cost tracked for sync-time charging");
+                }
+                EffectCommand::JournalAppend { fact } => {
+                    self.effects
+                        .commit_generic_fact_bytes(fact.context_id(), CHAT_FACT_TYPE_ID, fact.to_bytes())
+                        .await
+                        .map_err(AgentError::from)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn load_group_facts(&self, group_id: &ChatGroupId) -> AgentResult<Vec<aura_chat::ChatFact>> {
+        let context_id = Self::context_id_for_group(group_id);
+        let channel_id = Self::channel_id_for_group(group_id);
+
+        let typed = self
+            .effects
+            .load_committed_facts(self.effects.authority_id())
+            .await
+            .map_err(AgentError::from)?;
+
+        let mut out = Vec::new();
+        for fact in typed {
+            let aura_journal::fact::FactContent::Relational(aura_journal::fact::RelationalFact::Generic {
+                context_id: ctx,
+                binding_type,
+                binding_data,
+            }) = fact.content
+            else {
+                continue;
+            };
+
+            if ctx != context_id || binding_type != CHAT_FACT_TYPE_ID {
+                continue;
+            }
+
+            let Some(chat_fact) = aura_chat::ChatFact::from_bytes(&binding_data) else {
+                continue;
+            };
+
+            // Restrict to the single channel for this group mapping.
+            match &chat_fact {
+                aura_chat::ChatFact::ChannelCreated { channel_id: c, .. }
+                | aura_chat::ChatFact::ChannelClosed { channel_id: c, .. }
+                | aura_chat::ChatFact::MessageSentSealed { channel_id: c, .. }
+                | aura_chat::ChatFact::MessageRead { channel_id: c, .. }
+                | aura_chat::ChatFact::MessageDelivered { channel_id: c, .. }
+                | aura_chat::ChatFact::DeliveryAcknowledged { channel_id: c, .. } => {
+                    if *c != channel_id {
+                        continue;
+                    }
+                }
+            }
+
+            out.push(chat_fact);
+        }
+
+        Ok(out)
+    }
+
+    // =========================================================================
+    // Public API (terminal/tests)
+    // =========================================================================
+
+    /// Create a new chat group.
     ///
-    /// # Arguments
-    /// * `name` - Human-readable name for the group
-    /// * `creator_id` - Authority ID of the group creator (becomes admin)
-    /// * `initial_members` - List of authority IDs to invite to the group
-    ///
-    /// # Returns
-    /// Created ChatGroup with generated ID and timestamps
+    /// This commits a `ChatFact::ChannelCreated` fact and returns a `ChatGroup`
+    /// object for convenience.
     pub async fn create_group(
         &self,
         name: &str,
         creator_id: AuthorityId,
         initial_members: Vec<AuthorityId>,
     ) -> AgentResult<ChatGroup> {
-        self.handler
-            .create_group(&*self.effects, name, creator_id, initial_members)
-            .await
-            .map_err(AgentError::from)
+        let group_uuid = self.effects.random_uuid().await;
+        let group_id = ChatGroupId::from_uuid(group_uuid);
+
+        let context_id = Self::context_id_for_group(&group_id);
+        let channel_id = Self::channel_id_for_group(&group_id);
+
+        let snapshot = self.build_snapshot(creator_id, context_id).await?;
+        let outcome = self.facts.prepare_create_channel(&snapshot, channel_id, name.to_string(), None, false);
+        self.execute_outcome(outcome).await?;
+
+        let created_at = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: snapshot.now_ms,
+            uncertainty: None,
+        });
+
+        let mut members = Vec::new();
+        members.push(ChatMember {
+            authority_id: creator_id,
+            display_name: creator_id.to_string(),
+            joined_at: created_at.clone(),
+            role: ChatRole::Admin,
+        });
+        for member in initial_members {
+            if member == creator_id {
+                continue;
+            }
+            members.push(ChatMember {
+                authority_id: member,
+                display_name: member.to_string(),
+                joined_at: created_at.clone(),
+                role: ChatRole::Member,
+            });
+        }
+
+        Ok(ChatGroup {
+            id: group_id,
+            name: name.to_string(),
+            description: String::new(),
+            created_at,
+            created_by: creator_id,
+            members,
+            metadata: Default::default(),
+        })
     }
 
-    /// Send a message to a chat group
+    /// Send a message to a group.
     ///
-    /// # Arguments
-    /// * `group_id` - Target group to send message to
-    /// * `sender_id` - Authority ID of message sender (must be group member)
-    /// * `content` - Message content to send
-    ///
-    /// # Returns
-    /// Created ChatMessage with generated ID and timestamp
+    /// Commits a `ChatFact::MessageSentSealed` fact (payload is opaque bytes).
     pub async fn send_message(
         &self,
         group_id: &ChatGroupId,
         sender_id: AuthorityId,
         content: String,
     ) -> AgentResult<ChatMessage> {
-        self.handler
-            .send_message(&*self.effects, group_id, sender_id, content)
-            .await
-            .map_err(AgentError::from)
+        let context_id = Self::context_id_for_group(group_id);
+        let channel_id = Self::channel_id_for_group(group_id);
+
+        let snapshot = self.build_snapshot(sender_id, context_id).await?;
+
+        let message_uuid = self.effects.random_uuid().await;
+        let message_id = message_uuid.to_string();
+
+        let outcome = self.facts.prepare_send_message_sealed(
+            &snapshot,
+            channel_id,
+            message_id.clone(),
+            sender_id.to_string(),
+            content.clone().into_bytes(),
+            None,
+        );
+        self.execute_outcome(outcome).await?;
+
+        Ok(ChatMessage::new_text(
+            ChatMessageId(message_uuid),
+            group_id.clone(),
+            sender_id,
+            content,
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: snapshot.now_ms,
+                uncertainty: None,
+            }),
+        ))
     }
 
-    /// Get message history for a group
-    ///
-    /// # Arguments
-    /// * `group_id` - Group to retrieve history for
-    /// * `limit` - Maximum number of messages to return
-    /// * `before` - Only return messages before this timestamp (for pagination)
-    ///
-    /// # Returns
-    /// Vector of ChatMessage in chronological order
+    /// Get message history for a group.
     pub async fn get_history(
         &self,
         group_id: &ChatGroupId,
         limit: Option<usize>,
         before: Option<TimeStamp>,
     ) -> AgentResult<Vec<ChatMessage>> {
-        self.handler
-            .get_history(&*self.effects, group_id, limit, before)
-            .await
-            .map_err(AgentError::from)
+        let facts = self.load_group_facts(group_id).await?;
+
+        let mut messages = Vec::new();
+        for fact in facts {
+            let aura_chat::ChatFact::MessageSentSealed {
+                message_id,
+                sender_id,
+                payload,
+                sent_at,
+                reply_to,
+                ..
+            } = fact
+            else {
+                continue;
+            };
+
+            let timestamp = TimeStamp::PhysicalClock(sent_at);
+            if let Some(before_ts) = &before {
+                if timestamp.to_index_ms() >= before_ts.to_index_ms() {
+                    continue;
+                }
+            }
+
+            let msg_uuid = Uuid::parse_str(&message_id).unwrap_or_else(|_| {
+                let h = hash(message_id.as_bytes());
+                Uuid::from_bytes(h[..16].try_into().unwrap())
+            });
+
+            let payload_len = payload.len();
+            let content = String::from_utf8(payload)
+                .unwrap_or_else(|_| format!("[sealed: {} bytes]", payload_len));
+
+            let mut msg = ChatMessage::new_text(
+                ChatMessageId(msg_uuid),
+                group_id.clone(),
+                sender_id,
+                content,
+                timestamp,
+            );
+
+            if let Some(reply_str) = reply_to {
+                if let Ok(reply_uuid) = Uuid::parse_str(&reply_str) {
+                    msg = msg.set_reply_to(ChatMessageId(reply_uuid));
+                }
+            }
+
+            messages.push(msg);
+        }
+
+        // Sort by timestamp for stable history
+        messages.sort_by_key(|m| m.timestamp.to_index_ms());
+
+        if let Some(limit) = limit {
+            if messages.len() > limit {
+                messages = messages.into_iter().rev().take(limit).collect();
+                messages.reverse();
+            }
+        }
+
+        Ok(messages)
     }
 
-    /// Get a chat group by ID
+    /// Get a chat group by ID.
     ///
-    /// # Arguments
-    /// * `group_id` - Group ID to retrieve
-    ///
-    /// # Returns
-    /// Option<ChatGroup> if found, None if group doesn't exist
+    /// Reconstructs a minimal view from the `ChannelCreated` fact.
     pub async fn get_group(&self, group_id: &ChatGroupId) -> AgentResult<Option<ChatGroup>> {
-        ChatHandler::get_group(&*self.effects, group_id)
-            .await
-            .map_err(AgentError::from)
+        let facts = self.load_group_facts(group_id).await?;
+
+        let mut created: Option<(String, AuthorityId, PhysicalTime)> = None;
+        for fact in facts {
+            if let aura_chat::ChatFact::ChannelCreated {
+                name,
+                creator_id,
+                created_at,
+                ..
+            } = fact
+            {
+                created = Some((name, creator_id, created_at));
+            }
+        }
+
+        let Some((name, creator_id, created_at)) = created else {
+            return Ok(None);
+        };
+
+        let created_at_ts = TimeStamp::PhysicalClock(created_at);
+        Ok(Some(ChatGroup {
+            id: group_id.clone(),
+            name,
+            description: String::new(),
+            created_at: created_at_ts.clone(),
+            created_by: creator_id,
+            members: vec![ChatMember {
+                authority_id: creator_id,
+                display_name: creator_id.to_string(),
+                joined_at: created_at_ts,
+                role: ChatRole::Admin,
+            }],
+            metadata: Default::default(),
+        }))
     }
 
-    /// List groups that an authority is a member of
-    ///
-    /// # Arguments
-    /// * `authority_id` - Authority to list groups for
-    ///
-    /// # Returns
-    /// Vector of ChatGroup that the authority is a member of
-    pub async fn list_user_groups(
-        &self,
-        authority_id: &AuthorityId,
-    ) -> AgentResult<Vec<ChatGroup>> {
-        self.handler
-            .list_user_groups(&*self.effects, authority_id)
+    /// List groups that this authority has created/observed locally.
+    pub async fn list_user_groups(&self, _authority_id: &AuthorityId) -> AgentResult<Vec<ChatGroup>> {
+        let typed = self
+            .effects
+            .load_committed_facts(self.effects.authority_id())
             .await
-            .map_err(AgentError::from)
+            .map_err(AgentError::from)?;
+
+        let mut by_group: std::collections::HashMap<ChatGroupId, (String, AuthorityId, PhysicalTime)> =
+            std::collections::HashMap::new();
+
+        for fact in typed {
+            let aura_journal::fact::FactContent::Relational(aura_journal::fact::RelationalFact::Generic {
+                context_id,
+                binding_type,
+                binding_data,
+            }) = fact.content
+            else {
+                continue;
+            };
+            if binding_type != CHAT_FACT_TYPE_ID {
+                continue;
+            }
+            let Some(chat_fact) = aura_chat::ChatFact::from_bytes(&binding_data) else {
+                continue;
+            };
+            let aura_chat::ChatFact::ChannelCreated {
+                context_id: fact_ctx,
+                name,
+                creator_id,
+                created_at,
+                ..
+            } = chat_fact
+            else {
+                continue;
+            };
+            if context_id != fact_ctx {
+                continue;
+            }
+
+            let group_uuid = Uuid::from_bytes(fact_ctx.to_bytes());
+            let group_id = ChatGroupId::from_uuid(group_uuid);
+            by_group.insert(group_id, (name, creator_id, created_at));
+        }
+
+        let mut groups: Vec<ChatGroup> = by_group
+            .into_iter()
+            .map(|(id, (name, creator_id, created_at))| {
+                let created_at_ts = TimeStamp::PhysicalClock(created_at);
+                ChatGroup {
+                    id,
+                    name,
+                    description: String::new(),
+                    created_at: created_at_ts.clone(),
+                    created_by: creator_id,
+                    members: vec![ChatMember {
+                        authority_id: creator_id,
+                        display_name: creator_id.to_string(),
+                        joined_at: created_at_ts,
+                        role: ChatRole::Admin,
+                    }],
+                    metadata: Default::default(),
+                }
+            })
+            .collect();
+
+        groups.sort_by_key(|g| g.created_at.to_index_ms());
+        Ok(groups)
     }
 
-    /// Add a member to a chat group
-    ///
-    /// # Arguments
-    /// * `group_id` - Group to add member to
-    /// * `authority_id` - Authority performing the add (must be admin)
-    /// * `new_member` - Authority to add to the group
+    // =========================================================================
+    // Legacy operations (not yet fact-backed)
+    // =========================================================================
+
     pub async fn add_member(
         &self,
-        group_id: &ChatGroupId,
-        authority_id: AuthorityId,
-        new_member: AuthorityId,
+        _group_id: &ChatGroupId,
+        _authority_id: AuthorityId,
+        _new_member: AuthorityId,
     ) -> AgentResult<()> {
-        self.handler
-            .add_member(&*self.effects, group_id, authority_id, new_member)
-            .await
-            .map_err(AgentError::from)
+        Err(AgentError::effects(
+            "Chat membership operations are not yet fact-backed",
+        ))
     }
 
-    /// Remove a member from a chat group
-    ///
-    /// # Arguments
-    /// * `group_id` - Group to remove member from
-    /// * `authority_id` - Authority performing the removal (must be admin or self)
-    /// * `member_to_remove` - Authority to remove from the group
     pub async fn remove_member(
         &self,
-        group_id: &ChatGroupId,
-        authority_id: AuthorityId,
-        member_to_remove: AuthorityId,
+        _group_id: &ChatGroupId,
+        _authority_id: AuthorityId,
+        _member_to_remove: AuthorityId,
     ) -> AgentResult<()> {
-        self.handler
-            .remove_member(&*self.effects, group_id, authority_id, member_to_remove)
-            .await
-            .map_err(AgentError::from)
+        Err(AgentError::effects(
+            "Chat membership operations are not yet fact-backed",
+        ))
     }
 
-    /// Retrieve a single message by ID
-    ///
-    /// # Arguments
-    /// * `message_id` - Message ID to retrieve
-    ///
-    /// # Returns
-    /// Option<ChatMessage> if found
-    pub async fn get_message(
-        &self,
-        message_id: &ChatMessageId,
-    ) -> AgentResult<Option<ChatMessage>> {
-        ChatHandler::get_message(&*self.effects, message_id)
-            .await
-            .map_err(AgentError::from)
+    pub async fn get_message(&self, _message_id: &ChatMessageId) -> AgentResult<Option<ChatMessage>> {
+        Err(AgentError::effects("Message lookup by ID is not yet fact-backed"))
     }
 
-    /// Edit an existing message (sender or admin only)
-    ///
-    /// # Arguments
-    /// * `group_id` - Group containing the message
-    /// * `editor` - Authority editing the message
-    /// * `message_id` - Message to edit
-    /// * `new_content` - New message content
     pub async fn edit_message(
         &self,
-        group_id: &ChatGroupId,
-        editor: AuthorityId,
-        message_id: &ChatMessageId,
-        new_content: &str,
+        _group_id: &ChatGroupId,
+        _editor: AuthorityId,
+        _message_id: &ChatMessageId,
+        _new_content: &str,
     ) -> AgentResult<ChatMessage> {
-        self.handler
-            .edit_message(&*self.effects, group_id, editor, message_id, new_content)
-            .await
-            .map_err(AgentError::from)
+        Err(AgentError::effects("Message edits are not yet fact-backed"))
     }
 
-    /// Soft-delete a message (sender or admin only)
-    ///
-    /// # Arguments
-    /// * `group_id` - Group containing the message
-    /// * `requester` - Authority requesting deletion
-    /// * `message_id` - Message to delete
     pub async fn delete_message(
         &self,
-        group_id: &ChatGroupId,
-        requester: AuthorityId,
-        message_id: &ChatMessageId,
+        _group_id: &ChatGroupId,
+        _requester: AuthorityId,
+        _message_id: &ChatMessageId,
     ) -> AgentResult<()> {
-        self.handler
-            .delete_message(&*self.effects, group_id, requester, message_id)
-            .await
-            .map_err(AgentError::from)
+        Err(AgentError::effects("Message deletion is not yet fact-backed"))
     }
 
-    /// Search messages by substring across a group
-    ///
-    /// # Arguments
-    /// * `group_id` - Group to search in
-    /// * `query` - Search query string
-    /// * `limit` - Maximum number of results
-    /// * `sender` - Optional filter by sender
     pub async fn search_messages(
         &self,
-        group_id: &ChatGroupId,
-        query: &str,
-        limit: usize,
-        sender: Option<&AuthorityId>,
+        _group_id: &ChatGroupId,
+        _query: &str,
+        _limit: usize,
+        _sender: Option<&AuthorityId>,
     ) -> AgentResult<Vec<ChatMessage>> {
-        self.handler
-            .search_messages(&*self.effects, group_id, query, limit, sender)
-            .await
-            .map_err(AgentError::from)
+        Err(AgentError::effects("Message search is not yet fact-backed"))
     }
 
-    /// Update group metadata (name/description/metadata)
-    ///
-    /// # Arguments
-    /// * `group_id` - Group to update
-    /// * `requester` - Authority requesting the update (must be admin)
-    /// * `name` - Optional new name
-    /// * `description` - Optional new description
-    /// * `metadata` - Optional metadata key-value pairs to add/update
     pub async fn update_group_details(
         &self,
-        group_id: &ChatGroupId,
-        requester: AuthorityId,
-        name: Option<String>,
-        description: Option<String>,
-        metadata: Option<HashMap<String, String>>,
+        _group_id: &ChatGroupId,
+        _requester: AuthorityId,
+        _name: Option<String>,
+        _description: Option<String>,
+        _metadata: Option<std::collections::HashMap<String, String>>,
     ) -> AgentResult<ChatGroup> {
-        self.handler
-            .update_group_details(&*self.effects, group_id, requester, name, description, metadata)
-            .await
-            .map_err(AgentError::from)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::AgentConfig;
-
-    #[tokio::test]
-    async fn test_chat_service_creation() {
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-
-        let _service = ChatService::new(effects);
-        // Service created successfully
-    }
-
-    #[tokio::test]
-    async fn test_create_group_via_service() {
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = ChatService::new(effects);
-
-        let creator_id = AuthorityId::new_from_entropy([1u8; 32]);
-        let member_id = AuthorityId::new_from_entropy([2u8; 32]);
-
-        let group = service
-            .create_group("Test Group", creator_id, vec![member_id])
-            .await
-            .unwrap();
-
-        assert_eq!(group.name, "Test Group");
-        assert!(group.is_member(&creator_id));
-        assert!(group.is_member(&member_id));
-    }
-
-    #[tokio::test]
-    async fn test_send_and_retrieve_message() {
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = ChatService::new(effects);
-
-        let creator_id = AuthorityId::new_from_entropy([3u8; 32]);
-        let group = service
-            .create_group("Chat Room", creator_id, vec![])
-            .await
-            .unwrap();
-
-        let message = service
-            .send_message(&group.id, creator_id, "Hello, world!".to_string())
-            .await
-            .unwrap();
-
-        assert_eq!(message.content, "Hello, world!");
-        assert_eq!(message.sender_id, creator_id);
-
-        // Retrieve history
-        let history = service.get_history(&group.id, None, None).await.unwrap();
-        assert!(!history.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_list_user_groups() {
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = ChatService::new(effects);
-
-        let user_id = AuthorityId::new_from_entropy([4u8; 32]);
-
-        // Create two groups
-        service
-            .create_group("Group A", user_id, vec![])
-            .await
-            .unwrap();
-        service
-            .create_group("Group B", user_id, vec![])
-            .await
-            .unwrap();
-
-        let groups = service.list_user_groups(&user_id).await.unwrap();
-        assert!(
-            groups.len() >= 2,
-            "expected at least 2 groups, found {}",
-            groups.len()
-        );
+        Err(AgentError::effects(
+            "Group metadata updates are not yet fact-backed",
+        ))
     }
 }

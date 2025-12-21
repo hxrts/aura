@@ -408,7 +408,7 @@ pub enum RelationalFact {
     ///
     /// # Domain Fact Crates
     ///
-    /// - `aura_chat::ChatFact` - Channel/message facts (ChannelCreated, MessageSent, etc.)
+    /// - `aura_chat::ChatFact` - Channel/message facts (ChannelCreated, MessageSentSealed, etc.)
     /// - `aura_invitation::InvitationFact` - Invitation lifecycle facts
     /// - `aura_relational::ContactFact` - Contact management facts
     ///
@@ -418,7 +418,16 @@ pub enum RelationalFact {
     /// use aura_chat::ChatFact;
     /// use aura_journal::DomainFact;
     ///
-    /// let chat_fact = ChatFact::MessageSent { /* ... */ };
+    /// let chat_fact = ChatFact::message_sent_sealed_ms(
+    ///     /* context_id */ todo!(),
+    ///     /* channel_id */ todo!(),
+    ///     "msg-123".to_string(),
+    ///     /* sender_id */ todo!(),
+    ///     "Alice".to_string(),
+    ///     b"opaque bytes".to_vec(),
+    ///     /* sent_at_ms */ 0,
+    ///     None,
+    /// );
     /// let generic = chat_fact.to_generic(); // Returns RelationalFact::Generic
     /// ```
     Generic {

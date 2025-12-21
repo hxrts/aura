@@ -195,4 +195,28 @@ impl ChatState {
             }
         }
     }
+
+    /// Mark a specific message as read by its ID
+    ///
+    /// Returns true if the message was found and marked as read,
+    /// false if the message was not found in current messages.
+    pub fn mark_message_read(&mut self, message_id: &str) -> bool {
+        if let Some(message) = self.messages.iter_mut().find(|m| m.id == message_id) {
+            if !message.is_read {
+                message.is_read = true;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Decrement unread count for a channel (called when a message is read)
+    pub fn decrement_unread(&mut self, channel_id: &ChannelId) {
+        if let Some(channel) = self.channel_mut(channel_id) {
+            if channel.unread_count > 0 {
+                channel.unread_count = channel.unread_count.saturating_sub(1);
+                self.total_unread = self.total_unread.saturating_sub(1);
+            }
+        }
+    }
 }

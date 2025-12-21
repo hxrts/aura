@@ -2,23 +2,19 @@
 //!
 //! The footer occupies the bottom 3 rows of the TUI and contains:
 //! - Row 1: Top border/separator
-//! - Row 2-3: Key hints (columns 1-5) + sync status (column 6)
+//! - Row 2: Screen-specific key hints (columns 1-5) + sync status (column 6)
+//! - Row 3: Global key hints (columns 1-5) + peer count (column 6)
 //!
-//! The 6-column grid aligns with the nav bar's 6 screen tabs.
+//! The 6-column grid uses the same column width (13 chars) and padding as the
+//! nav bar, ensuring perfect vertical alignment between nav tabs and footer hints.
 
 use crate::tui::layout::dim;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::KeyHint;
 use iocraft::prelude::*;
 
-/// Width of each column (6 columns across 80 chars)
+/// Width of each column (6 columns across 80 chars, matching nav bar)
 const COL_WIDTH: u16 = dim::TOTAL_WIDTH / 6; // 13 chars each
-/// Width for hints area (columns 1-5)
-const HINTS_WIDTH: u16 = COL_WIDTH * 5; // 65 chars
-/// Width for the divider
-const DIVIDER_WIDTH: u16 = 1;
-/// Width for the status column (column 6, minus divider)
-const STATUS_COL_WIDTH: u16 = dim::TOTAL_WIDTH - HINTS_WIDTH - DIVIDER_WIDTH;
 
 /// Props for Footer
 #[derive(Default, Props)]
@@ -60,11 +56,11 @@ fn format_relative_time(ts_ms: u64) -> String {
 
 /// Fixed 3-row footer with 6-column grid for the TUI.
 ///
-/// Layout:
+/// Layout (columns align with nav bar tabs):
 /// ```text
-/// ├─────────────────────────────────────────────────────────────────┬────────────┤ Row 1: Border
-/// │ [Esc] back  [Enter] select  [Tab] next  [↑↓] navigate           │ Synced 2m  │ Row 2: Hints + status
-/// │ [1-6] screen  [?] help                                          │ 3 peers    │ Row 3: Hints + peers
+/// ├──────────────────────────────────────────────────────────────────────────────┤ Row 1: Border
+/// │ [i] Insert  [v] Invite  [n] Neighbor [g] Grant    [r] Revoke  Synced 2m      │ Row 2: Screen hints + status
+/// │ [1-6] screen [?] Help   [Tab] Next   [←→] Nav     [q] Quit    3 peers        │ Row 3: Global hints + peers
 /// ```
 #[component]
 pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
@@ -131,89 +127,65 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
                 border_color: border_color,
             )
 
-            // Row 2: Screen-specific hints (cols 1-5) + divider + sync status (col 6)
+            // Row 2: Screen-specific hints (cols 1-5) + sync status (col 6)
+            // Uses same 6-column layout as nav bar for perfect alignment
             View(
                 width: 100pct,
                 height: 1u16,
                 flex_direction: FlexDirection::Row,
+                padding_left: Spacing::SM,
                 overflow: Overflow::Hidden,
             ) {
-                // Columns 1-5: Screen hints in fixed-width columns, left-justified
-                View(
-                    width: HINTS_WIDTH,
-                    height: 1u16,
-                    flex_direction: FlexDirection::Row,
-                    padding_left: Spacing::SM,
-                    overflow: Overflow::Hidden,
-                ) {
-                    #(screen_hints_text.iter().map(|hint| {
-                        let color = text_color;
-                        element! {
-                            View(
-                                width: COL_WIDTH,
-                                height: 1u16,
-                            ) {
-                                Text(content: hint.clone(), color: color)
-                            }
+                // Columns 1-5: Screen hints in fixed-width columns
+                #(screen_hints_text.iter().map(|hint| {
+                    let color = text_color;
+                    element! {
+                        View(
+                            width: COL_WIDTH,
+                            height: 1u16,
+                        ) {
+                            Text(content: hint.clone(), color: color)
                         }
-                    }))
-                }
+                    }
+                }))
 
-                // Divider
-                Text(content: "│", color: border_color)
-
-                // Column 6: Sync status (left-justified with padding)
+                // Column 6: Sync status
                 View(
-                    width: STATUS_COL_WIDTH,
+                    width: COL_WIDTH,
                     height: 1u16,
-                    flex_direction: FlexDirection::Row,
-                    padding_left: Spacing::XS,
-                    overflow: Overflow::Hidden,
                 ) {
-                    Text(content: sync_status, color: sync_color)
+                    Text(content: sync_status.clone(), color: sync_color)
                 }
             }
 
-            // Row 3: Global hints (cols 1-5) + divider + peer count (col 6)
+            // Row 3: Global hints (cols 1-5) + peer count (col 6)
+            // Uses same 6-column layout as nav bar for perfect alignment
             View(
                 width: 100pct,
                 height: 1u16,
                 flex_direction: FlexDirection::Row,
+                padding_left: Spacing::SM,
                 overflow: Overflow::Hidden,
             ) {
-                // Columns 1-5: Global hints in fixed-width columns, left-justified
-                View(
-                    width: HINTS_WIDTH,
-                    height: 1u16,
-                    flex_direction: FlexDirection::Row,
-                    padding_left: Spacing::SM,
-                    overflow: Overflow::Hidden,
-                ) {
-                    #(global_hints_text.iter().map(|hint| {
-                        let color = text_color;
-                        element! {
-                            View(
-                                width: COL_WIDTH,
-                                height: 1u16,
-                            ) {
-                                Text(content: hint.clone(), color: color)
-                            }
+                // Columns 1-5: Global hints in fixed-width columns
+                #(global_hints_text.iter().map(|hint| {
+                    let color = text_color;
+                    element! {
+                        View(
+                            width: COL_WIDTH,
+                            height: 1u16,
+                        ) {
+                            Text(content: hint.clone(), color: color)
                         }
-                    }))
-                }
+                    }
+                }))
 
-                // Divider
-                Text(content: "│", color: border_color)
-
-                // Column 6: Peer count (left-justified with padding)
+                // Column 6: Peer count
                 View(
-                    width: STATUS_COL_WIDTH,
+                    width: COL_WIDTH,
                     height: 1u16,
-                    flex_direction: FlexDirection::Row,
-                    padding_left: Spacing::XS,
-                    overflow: Overflow::Hidden,
                 ) {
-                    Text(content: peer_status, color: text_color)
+                    Text(content: peer_status.clone(), color: text_color)
                 }
             }
         }
@@ -275,11 +247,9 @@ mod tests {
 
     #[test]
     fn test_column_widths() {
-        // Verify widths add up to total
-        assert_eq!(
-            HINTS_WIDTH + DIVIDER_WIDTH + STATUS_COL_WIDTH,
-            dim::TOTAL_WIDTH
-        );
+        // Footer uses same 6-column layout as nav bar (13 chars each)
+        assert_eq!(COL_WIDTH, dim::TOTAL_WIDTH / 6);
+        assert_eq!(COL_WIDTH, 13);
     }
 
     #[test]

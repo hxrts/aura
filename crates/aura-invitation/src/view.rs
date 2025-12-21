@@ -199,7 +199,10 @@ impl ViewDeltaReducer for InvitationViewReducer {
             }),
         };
 
-        delta.map(|d| vec![d.into_view_delta()]).unwrap_or_default()
+        match delta {
+            Some(d) => vec![d.into_view_delta()],
+            None => vec![],
+        }
     }
 }
 

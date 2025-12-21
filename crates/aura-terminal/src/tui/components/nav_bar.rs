@@ -23,7 +23,7 @@ pub struct NavBarProps {
 ///
 /// Layout:
 /// ```text
-/// │ Block   Chat   Contacts   Neighborhood   Recovery   Settings │ Row 1: Tabs
+/// │ Block   Neighborhood   Chat   Contacts   Recovery   Settings │ Row 1: Tabs
 /// ├──────────────────────────────────────────────────────────────┤ Row 2: Border
 /// ```
 #[component]

@@ -109,24 +109,6 @@ impl SimulationEffectComposer {
         Ok(self)
     }
 
-    /// Add core effect system using agent runtime (sync version - only use outside tokio runtime)
-    ///
-    /// Uses `SimulationEnvironmentFactory` trait for decoupled effect system creation.
-    /// Note: This method blocks on async factory creation using `futures::executor::block_on`.
-    pub fn with_effect_system(mut self) -> Result<Self, SimulationComposerError> {
-        let factory = EffectSystemFactory::new();
-        let sim_config = self.build_simulation_config();
-
-        // Block on async factory - only safe outside tokio runtime
-        let effect_system = futures::executor::block_on(
-            factory.create_simulation_environment(sim_config),
-        )
-        .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
-
-        self.effect_system = Some(effect_system);
-        Ok(self)
-    }
-
     /// Build a SimulationEnvironmentConfig from the composer's current state
     fn build_simulation_config(&self) -> SimulationEnvironmentConfig {
         let mut config = SimulationEnvironmentConfig::new(self.seed, self.device_id);
@@ -203,21 +185,8 @@ impl SimulationEffectComposer {
         })
     }
 
-    /// Create a typical testing environment with all handlers (sync - only use outside tokio runtime)
-    pub fn for_testing(
-        device_id: DeviceId,
-    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        Self::new(device_id)
-            .with_seed(42) // Deterministic for testing
-            .with_effect_system()?
-            .with_time_control()
-            .with_fault_injection()
-            .with_scenario_management()
-            .build()
-    }
-
-    /// Create a typical testing environment with all handlers (async - safe within tokio runtime)
-    pub async fn for_testing_async(
+    /// Create a typical testing environment with all handlers
+    pub async fn for_testing(
         device_id: DeviceId,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
         Self::new(device_id)
@@ -230,33 +199,36 @@ impl SimulationEffectComposer {
             .build()
     }
 
-    /// Create a simulation environment with specific seed (sync - only use outside tokio runtime)
-    pub fn for_simulation(
+    /// Deprecated: Use `for_testing` instead
+    #[deprecated(since = "0.1.0", note = "Use for_testing instead")]
+    pub async fn for_testing_async(
+        device_id: DeviceId,
+    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
+        Self::for_testing(device_id).await
+    }
+
+    /// Create a simulation environment with specific seed
+    pub async fn for_simulation(
         device_id: DeviceId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
         Self::new(device_id)
             .with_seed(seed)
-            .with_effect_system()?
+            .with_effect_system_async()
+            .await?
             .with_time_control()
             .with_fault_injection()
             .with_scenario_management()
             .build()
     }
 
-    /// Create a simulation environment with specific seed (async - safe within tokio runtime)
+    /// Deprecated: Use `for_simulation` instead
+    #[deprecated(since = "0.1.0", note = "Use for_simulation instead")]
     pub async fn for_simulation_async(
         device_id: DeviceId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        Self::new(device_id)
-            .with_seed(seed)
-            .with_effect_system_async()
-            .await?
-            .with_time_control()
-            .with_fault_injection()
-            .with_scenario_management()
-            .build()
+        Self::for_simulation(device_id, seed).await
     }
 
     /// Create a simulation environment with shared transport inbox for multi-agent simulations
@@ -741,34 +713,36 @@ pub enum SimulationComposerError {
 pub mod factory {
     use super::*;
 
-    /// Create a testing simulation environment with all handlers (sync)
-    pub fn create_testing_environment(
+    /// Create a testing simulation environment with all handlers
+    pub async fn create_testing_environment(
         device_id: DeviceId,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        SimulationEffectComposer::for_testing(device_id)
+        SimulationEffectComposer::for_testing(device_id).await
     }
 
-    /// Create a testing simulation environment with all handlers (async)
+    /// Deprecated: Use `create_testing_environment` instead
+    #[deprecated(since = "0.1.0", note = "Use create_testing_environment instead")]
     pub async fn create_testing_environment_async(
         device_id: DeviceId,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        SimulationEffectComposer::for_testing_async(device_id).await
+        create_testing_environment(device_id).await
     }
 
-    /// Create a deterministic simulation environment for reproducible testing (sync)
-    pub fn create_deterministic_environment(
+    /// Create a deterministic simulation environment for reproducible testing
+    pub async fn create_deterministic_environment(
         device_id: DeviceId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        SimulationEffectComposer::for_simulation(device_id, seed)
+        SimulationEffectComposer::for_simulation(device_id, seed).await
     }
 
-    /// Create a deterministic simulation environment for reproducible testing (async)
+    /// Deprecated: Use `create_deterministic_environment` instead
+    #[deprecated(since = "0.1.0", note = "Use create_deterministic_environment instead")]
     pub async fn create_deterministic_environment_async(
         device_id: DeviceId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        SimulationEffectComposer::for_simulation_async(device_id, seed).await
+        create_deterministic_environment(device_id, seed).await
     }
 }
 

@@ -273,7 +273,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 | Crate | Protocol | Purpose |
 |-------|----------|---------|
 | `aura-authenticate` | Authentication | Device, threshold, and guardian auth flows |
-| `aura-chat` | Secure messaging | Group chat with AMP transport integration |
+| `aura-chat` | Chat | Chat domain facts + view reducers; local chat prototype |
 | `aura-invitation` | Invitations | Peer onboarding and relational facts |
 | `aura-recovery` | Guardian recovery | Recovery grants and dispute escalation |
 | `aura-relational` | Cross-authority relationships | RelationalContext protocols (domain types in aura-core) |
@@ -349,7 +349,7 @@ crates/
 ├── aura-agent           Runtime composition and agent lifecycle
 ├── aura-app             Portable headless application core (multi-platform)
 ├── aura-authenticate    Authentication protocols
-├── aura-chat            Secure group messaging protocols
+├── aura-chat            Chat facts + local prototype service
 ├── aura-composition     Handler composition and effect system assembly
 ├── aura-core            Foundation types and effect traits
 ├── aura-effects         Effect handler implementations
@@ -445,9 +445,9 @@ graph TD
     auth --> wot
     auth --> composition
     chat --> types
-    chat --> transport
+    chat --> journal
     chat --> composition
-    chat --> mpst
+    chat --> protocol
     recovery --> auth
     recovery --> verify
     recovery --> wot
@@ -1255,7 +1255,9 @@ Multi-party coordination and distributed protocol orchestration including guard 
 Device, threshold, and guardian authentication protocols.
 
 ### aura-chat
-Secure group messaging with authority-first design and AMP transport integration.
+Chat domain facts (`ChatFact`) and view reduction (`ChatViewReducer`) for journal-backed chat state.
+Message payloads in facts are treated as opaque bytes (`MessageSentSealed`); decryption/rendering is a higher-layer concern.
+This crate also currently contains a small local chat prototype (`ChatHandler`) that persists state via `StorageEffects`.
 
 ### FROST placement
 Core FROST primitives (key packages, signing, verification, binding) live in `aura-core::crypto::tree_signing`. Higher-level ceremonies should be colocated with their callers or folded into core adapters. Consensus and journal consume primitives via adapters/effects.
@@ -1268,6 +1270,7 @@ Guardian-based recovery with dispute escalation and audit trails.
 
 ### aura-rendezvous
 Social Bulletin Board peer discovery with relationship-based routing.
+LAN discovery packet formats/config live in `aura-rendezvous`; the UDP runtime implementation lives in `aura-agent`.
 
 ### aura-sync
 Journal synchronization and anti-entropy protocols.

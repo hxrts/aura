@@ -377,12 +377,23 @@ impl RecoveryService {
     /// 4. Guardian receives via their effect system
     /// 5. Guardian processes through guard chain + journal
     /// 6. GuardianBinding fact committed when accepted
+    ///
+    /// # Parameters
+    /// * `guardian_id` - The specific guardian to send this invitation to
+    /// * `ceremony_id` - The ceremony identifier string
+    /// * `threshold_k` - Minimum signers required
+    /// * `total_n` - Total number of guardians
+    /// * `all_guardian_ids` - All guardian authority IDs participating in the ceremony
+    /// * `new_epoch` - The epoch for the new key rotation
+    /// * `key_package` - Encrypted key package for this guardian
     pub async fn send_guardian_invitation(
         &self,
         guardian_id: &str,
         ceremony_id: &str,
         threshold_k: u16,
         total_n: u16,
+        all_guardian_ids: &[AuthorityId],
+        new_epoch: u64,
         key_package: &[u8],
     ) -> AgentResult<()> {
         use crate::core::AgentError;
@@ -435,14 +446,12 @@ impl RecoveryService {
         };
         let ceremony_context = ContextId::new_from_entropy(context_entropy);
 
-        // Create the rotation operation
-        // Note: We don't have full guardian list here, just the recipient
-        // In a full implementation, this would include all guardian IDs
+        // Create the rotation operation with full guardian list and epoch from ceremony state
         let operation = GuardianRotationOp {
             threshold_k,
             total_n,
-            guardian_ids: vec![guardian_authority], // TODO: Populate all guardian IDs from ceremony state
-            new_epoch: 1,                           // TODO: Get epoch from actual ceremony state
+            guardian_ids: all_guardian_ids.to_vec(),
+            new_epoch,
         };
 
         // Create the ceremony proposal

@@ -112,8 +112,8 @@ use aura_core::DeviceId;
 // Use deterministic ID for reproducible tests (see docs/805_testing_guide.md)
 let device_id = DeviceId::new_from_entropy([1u8; 32]);
 
-// Compose simulation handlers
-let composer = SimulationEffectComposer::for_testing(device_id)?;
+// Compose simulation handlers (async)
+let composer = SimulationEffectComposer::for_testing(device_id).await?;
 
 // Or build custom simulation environment
 let environment = composer
@@ -310,8 +310,8 @@ async fn simulate_basic_protocol() -> aura_core::AuraResult<()> {
     let device2 = DeviceId::new_from_entropy([2u8; 32]);
 
     // Create simulation environments
-    let env1 = SimulationEffectComposer::for_testing(device1)?;
-    let env2 = SimulationEffectComposer::for_testing(device2)?;
+    let env1 = SimulationEffectComposer::for_testing(device1).await?;
+    let env2 = SimulationEffectComposer::for_testing(device2).await?;
 
     // Execute protocol
     // (protocol uses effect handlers from simulation environments)
@@ -780,12 +780,11 @@ Instead of a simulation engine, use handler composition:
 ```rust
 // Instead of: sim.add_participants(5)
 // Use deterministic IDs for reproducibility:
-let participants: Vec<_> = (0..5)
-    .map(|i| {
-        let device_id = DeviceId::new_from_entropy([i as u8 + 1; 32]);
-        SimulationEffectComposer::for_testing(device_id).unwrap()
-    })
-    .collect();
+let mut participants = Vec::new();
+for i in 0..5 {
+    let device_id = DeviceId::new_from_entropy([i as u8 + 1; 32]);
+    participants.push(SimulationEffectComposer::for_testing(device_id).await?);
+}
 
 // Instead of: sim.add_byzantine_participant(interceptor)
 // Use:

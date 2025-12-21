@@ -6,6 +6,7 @@ pub mod authority_manager;
 pub mod ceremony_tracker;
 pub mod context_manager;
 pub mod flow_budget_manager;
+pub mod lan_discovery;
 pub mod receipt_manager;
 pub mod rendezvous_manager;
 pub mod social_manager;

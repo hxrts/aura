@@ -171,9 +171,6 @@ EFFECT_HANDLER_ALLOWLIST="crates/aura-effects/src/"
 # Also includes /testing/ directories which are L8-style test infrastructure in other layers
 TEST_ALLOWLIST="crates/aura-testkit/|/tests/|/testing/|/examples/|benches/"
 
-# Rendezvous LAN discovery (UDP sockets are platform-specific and intentionally live here)
-LAN_DISCOVERY_ALLOWLIST="crates/aura-rendezvous/src/lan_discovery.rs"
-
 # Simulator (Layer 6/8) - simulation-specific impurity and test infrastructure (handlers, quint ITF loading)
 SIMULATOR_ALLOWLIST="crates/aura-simulator/src/"
 
@@ -202,7 +199,6 @@ filter_common_allowlist() {
   # Filter doc comments (///) as they're examples, not actual code
   result=$(echo "$input" \
     | grep -v "$EFFECT_HANDLER_ALLOWLIST" \
-    | grep -v "$LAN_DISCOVERY_ALLOWLIST" \
     | grep -v "$SIMULATOR_ALLOWLIST" \
     | grep -Ev "$TEST_ALLOWLIST" \
     | grep -v "///" || true)
@@ -213,7 +209,7 @@ filter_common_allowlist() {
 }
 
 # Counts for summary
-declare -A CATEGORY_COUNTS
+# NOTE: Keep this script compatible with macOS bash 3.x (no associative arrays).
 
 check_cargo() {
   if command -v cargo >/dev/null 2>&1; then
@@ -386,7 +382,6 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-composition/" \
     | grep -v "crates/aura-testkit/" \
     | grep -Ev "$APP_NATIVE_ALLOWLIST" \
-    | grep -v "$LAN_DISCOVERY_ALLOWLIST" \
     | grep -v "crates/aura-wot/src/storage_authorization.rs" \
     | grep -v "crates/aura-core/src/effects/reactive.rs" \
     | grep -v "#\\[tokio::test\\]" \
@@ -411,7 +406,6 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-simulator/" \
     | grep -Ev "$RUNTIME_ALLOWLIST" \
     | grep -v "crates/aura-terminal/" \
-    | grep -v "$LAN_DISCOVERY_ALLOWLIST" \
     | grep -v "/tests/" \
     | grep -v "/benches/" \
     | grep -v "tests/performance_regression.rs" \

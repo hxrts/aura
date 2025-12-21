@@ -11,6 +11,7 @@ use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs;
+use tokio::fs::DirEntry;
 
 /// Filesystem-based storage handler for production use
 ///
@@ -91,28 +92,33 @@ impl StorageEffects for FilesystemStorageHandler {
     }
 
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        let mut entries = fs::read_dir(&self.base_path)
-            .await
-            .map_err(|e| StorageError::ReadFailed(format!("Failed to read directory: {}", e)))?;
-
+        // Keys may contain path separators (e.g. `journal/facts/...`), so we must
+        // traverse the directory tree recursively and strip the `.dat` suffix
+        // from persisted filenames.
         let mut keys = Vec::new();
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            StorageError::ReadFailed(format!("Failed to read directory entry: {}", e))
-        })? {
-            let path = entry.path();
-            if let Some(file_name) = path.file_stem() {
-                if let Some(key) = file_name.to_str() {
-                    if let Some(prefix) = prefix {
-                        if key.starts_with(prefix) {
-                            keys.push(key.to_string());
-                        }
-                    } else {
-                        keys.push(key.to_string());
-                    }
+        let mut stack: Vec<PathBuf> = vec![self.base_path.clone()];
+
+        while let Some(dir) = stack.pop() {
+            let mut entries = match fs::read_dir(&dir).await {
+                Ok(e) => e,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    return Err(StorageError::ReadFailed(format!(
+                        "Failed to read directory: {}",
+                        e
+                    )))
                 }
+            };
+
+            while let Some(entry) = entries.next_entry().await.map_err(|e| {
+                StorageError::ReadFailed(format!("Failed to read directory entry: {}", e))
+            })? {
+                Self::visit_entry_for_keys(&self.base_path, entry, prefix, &mut stack, &mut keys)
+                    .await?;
             }
         }
 
+        keys.sort();
         Ok(keys)
     }
 
@@ -145,11 +151,20 @@ impl StorageEffects for FilesystemStorageHandler {
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
-        if let Ok(mut entries) = fs::read_dir(&self.base_path).await {
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                let _ = fs::remove_file(entry.path()).await;
+        match fs::remove_dir_all(&self.base_path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(StorageError::DeleteFailed(format!(
+                    "Failed to remove storage directory: {}",
+                    e
+                )))
             }
         }
+
+        fs::create_dir_all(&self.base_path).await.map_err(|e| {
+            StorageError::WriteFailed(format!("Failed to recreate storage directory: {}", e))
+        })?;
         Ok(())
     }
 
@@ -157,14 +172,42 @@ impl StorageEffects for FilesystemStorageHandler {
         let mut key_count: u64 = 0;
         let mut total_size: u64 = 0;
 
-        if let Ok(mut entries) = fs::read_dir(&self.base_path).await {
+        let mut stack: Vec<PathBuf> = vec![self.base_path.clone()];
+        while let Some(dir) = stack.pop() {
+            let mut entries = match fs::read_dir(&dir).await {
+                Ok(e) => e,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    return Err(StorageError::ReadFailed(format!(
+                        "Failed to read directory: {}",
+                        e
+                    )))
+                }
+            };
+
             while let Ok(Some(entry)) = entries.next_entry().await {
+                let file_type = match entry.file_type().await {
+                    Ok(ft) => ft,
+                    Err(_) => continue,
+                };
+
+                if file_type.is_dir() {
+                    stack.push(entry.path());
+                    continue;
+                }
+
+                if !file_type.is_file() {
+                    continue;
+                }
+
                 let path = entry.path();
-                if path.is_file() {
-                    key_count += 1;
-                    if let Ok(metadata) = entry.metadata().await {
-                        total_size = total_size.saturating_add(metadata.len());
-                    }
+                if path.extension().and_then(|e| e.to_str()) != Some("dat") {
+                    continue;
+                }
+
+                key_count += 1;
+                if let Ok(metadata) = entry.metadata().await {
+                    total_size = total_size.saturating_add(metadata.len());
                 }
             }
         }
@@ -175,6 +218,52 @@ impl StorageEffects for FilesystemStorageHandler {
             available_space: None,
             backend_type: "filesystem".to_string(),
         })
+    }
+}
+
+impl FilesystemStorageHandler {
+    async fn visit_entry_for_keys(
+        base: &PathBuf,
+        entry: DirEntry,
+        prefix: Option<&str>,
+        stack: &mut Vec<PathBuf>,
+        keys: &mut Vec<String>,
+    ) -> Result<(), StorageError> {
+        let file_type = entry.file_type().await.map_err(|e| {
+            StorageError::ReadFailed(format!("Failed to stat directory entry: {}", e))
+        })?;
+        let path = entry.path();
+
+        if file_type.is_dir() {
+            stack.push(path);
+            return Ok(());
+        }
+        if !file_type.is_file() {
+            return Ok(());
+        }
+
+        if path.extension().and_then(|e| e.to_str()) != Some("dat") {
+            return Ok(());
+        }
+
+        let rel = path.strip_prefix(base).map_err(|e| {
+            StorageError::ReadFailed(format!("Failed to compute relative key path: {}", e))
+        })?;
+        let rel = rel.with_extension("");
+        let mut key = rel.to_string_lossy().to_string();
+        if std::path::MAIN_SEPARATOR != '/' {
+            key = key.replace(std::path::MAIN_SEPARATOR, "/");
+        }
+
+        if let Some(prefix) = prefix {
+            if key.starts_with(prefix) {
+                keys.push(key);
+            }
+        } else {
+            keys.push(key);
+        }
+
+        Ok(())
     }
 }
 

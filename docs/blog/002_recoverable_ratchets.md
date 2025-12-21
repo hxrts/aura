@@ -1,4 +1,4 @@
-# Ratchets Without Trees
+# Recoverable Ratchets
 
 The design of secure messaging protocols like MLS and TreeKEM typically focuses on cryptographic properties, key agreement, forward secrecy, post-compromise security.  distributed systems problem underneath.
 

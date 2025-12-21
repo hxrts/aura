@@ -23,6 +23,9 @@ aura-journal = { path = "../aura-journal" }
 # Effect handler composition utilities (for ViewDeltaReducer)
 aura-composition = { path = "../aura-composition" }
 
+# Guard-chain shared helpers
+aura-protocol = { path = "../aura-protocol" }
+
 # Session types and choreography
 
 # Transport layer for AMP protocol

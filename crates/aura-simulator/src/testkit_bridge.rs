@@ -31,7 +31,7 @@ impl TestkitSimulatorBridge {
     /// using the device fixtures as the foundation for multi-device scenarios.
     ///
     /// Uses `SimulationEnvironmentFactory` trait for decoupled effect system creation.
-    pub fn create_simulation_effects(
+    pub async fn create_simulation_effects(
         fixtures: &[DeviceTestFixture],
         seed: u64,
     ) -> SimResult<Vec<(DeviceId, Arc<AuraEffectSystem>)>> {
@@ -49,14 +49,15 @@ impl TestkitSimulatorBridge {
                 SimulationEnvironmentConfig::new(seed, device_id).with_authority(authority_id);
 
             // Use factory to create effect system
-            let effect_system =
-                futures::executor::block_on(factory.create_simulation_environment(sim_config))
-                    .map_err(|e| {
-                        SimulatorError::OperationFailed(format!(
-                            "Effect system creation failed for device {}: {}",
-                            device_id, e
-                        ))
-                    })?;
+            let effect_system = factory
+                .create_simulation_environment(sim_config)
+                .await
+                .map_err(|e| {
+                    SimulatorError::OperationFailed(format!(
+                        "Effect system creation failed for device {}: {}",
+                        device_id, e
+                    ))
+                })?;
 
             effect_systems.push((device_id, effect_system));
         }
@@ -111,7 +112,7 @@ impl TestkitSimulatorBridge {
     /// Convert harness to effect system
     ///
     /// Uses `SimulationEnvironmentFactory` trait for decoupled effect system creation.
-    pub fn harness_to_effects<H>(
+    pub async fn harness_to_effects<H>(
         _harness: H,
         device_id: DeviceId,
         seed: u64,
@@ -124,9 +125,12 @@ impl TestkitSimulatorBridge {
             SimulationEnvironmentConfig::new(seed, device_id).with_authority(authority_id);
 
         // Use factory to create effect system
-        futures::executor::block_on(factory.create_simulation_environment(sim_config)).map_err(
-            |e| SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e)),
-        )
+        factory
+            .create_simulation_environment(sim_config)
+            .await
+            .map_err(|e| {
+                SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
+            })
     }
 }
 

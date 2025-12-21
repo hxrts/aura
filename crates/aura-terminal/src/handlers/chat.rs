@@ -43,11 +43,15 @@ pub async fn handle_chat(
             )
             .await?;
 
-            if description.is_some() {
-                // Update with description if provided
-                let _ = chat
-                    .update_group_details(&group.id, authority_id, None, description.clone(), None)
-                    .await;
+            if let Some(desc) = description {
+                ConsoleEffects::log_warn(
+                    ctx.effects(),
+                    &format!(
+                        "Group descriptions are not yet fact-backed; ignoring provided description: {}",
+                        desc
+                    ),
+                )
+                .await?;
             }
         }
 
@@ -315,7 +319,7 @@ pub async fn handle_chat(
             format: _,
             include_system: _,
         } => {
-            // TODO: Export is more complex - for now just acknowledge
+            // Export functionality requires additional infrastructure
             ConsoleEffects::log_info(
                 ctx.effects(),
                 &format!(

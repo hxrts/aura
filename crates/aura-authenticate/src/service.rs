@@ -119,6 +119,14 @@ impl AuthService {
             expires_at_ms,
             created_at_ms: snapshot.now_ms,
         };
+        let fact_data = match serde_json::to_vec(&fact) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return GuardOutcome::denied(format!(
+                    "Internal error: failed to serialize auth fact: {err}"
+                ));
+            }
+        };
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -130,7 +138,7 @@ impl AuthService {
             },
             EffectCommand::JournalAppend {
                 fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data: serde_json::to_vec(&fact).unwrap_or_default(),
+                fact_data,
             },
         ])
     }
@@ -165,6 +173,14 @@ impl AuthService {
             proof_hash,
             submitted_at_ms: snapshot.now_ms,
         };
+        let fact_data = match serde_json::to_vec(&fact) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return GuardOutcome::denied(format!(
+                    "Internal error: failed to serialize auth fact: {err}"
+                ));
+            }
+        };
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -172,7 +188,7 @@ impl AuthService {
             },
             EffectCommand::JournalAppend {
                 fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data: serde_json::to_vec(&fact).unwrap_or_default(),
+                fact_data,
             },
             EffectCommand::RecordReceipt {
                 operation: format!("proof_submission:{}", session_id),
@@ -225,6 +241,14 @@ impl AuthService {
             issued_at_ms: snapshot.now_ms,
             expires_at_ms,
         };
+        let fact_data = match serde_json::to_vec(&fact) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return GuardOutcome::denied(format!(
+                    "Internal error: failed to serialize auth fact: {err}"
+                ));
+            }
+        };
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -237,7 +261,7 @@ impl AuthService {
             },
             EffectCommand::JournalAppend {
                 fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data: serde_json::to_vec(&fact).unwrap_or_default(),
+                fact_data,
             },
         ])
     }
@@ -302,6 +326,14 @@ impl AuthService {
             requested_at_ms: snapshot.now_ms,
             expires_at_ms,
         };
+        let fact_data = match serde_json::to_vec(&fact) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return GuardOutcome::denied(format!(
+                    "Internal error: failed to serialize auth fact: {err}"
+                ));
+            }
+        };
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -309,7 +341,7 @@ impl AuthService {
             },
             EffectCommand::JournalAppend {
                 fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data: serde_json::to_vec(&fact).unwrap_or_default(),
+                fact_data,
             },
             EffectCommand::AggregateGuardianApprovals {
                 request_id: request_id.clone(),
@@ -361,6 +393,14 @@ impl AuthService {
                 denied_at_ms: snapshot.now_ms,
             }
         };
+        let fact_data = match serde_json::to_vec(&fact) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return GuardOutcome::denied(format!(
+                    "Internal error: failed to serialize auth fact: {err}"
+                ));
+            }
+        };
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -368,7 +408,7 @@ impl AuthService {
             },
             EffectCommand::JournalAppend {
                 fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data: serde_json::to_vec(&fact).unwrap_or_default(),
+                fact_data,
             },
             EffectCommand::RecordReceipt {
                 operation: format!("guardian_decision:{}:{}", request_id, approved),
@@ -403,11 +443,19 @@ impl AuthService {
             reason,
             revoked_at_ms: snapshot.now_ms,
         };
+        let fact_data = match serde_json::to_vec(&fact) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return GuardOutcome::denied(format!(
+                    "Internal error: failed to serialize auth fact: {err}"
+                ));
+            }
+        };
 
         GuardOutcome::allowed(vec![
             EffectCommand::JournalAppend {
                 fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data: serde_json::to_vec(&fact).unwrap_or_default(),
+                fact_data,
             },
             EffectCommand::RecordReceipt {
                 operation: format!("session_revocation:{}", session_id),
