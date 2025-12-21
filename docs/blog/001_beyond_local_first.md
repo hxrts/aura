@@ -2,7 +2,7 @@
 
 [Local-First](https://www.inkandswitch.com/essay/local-first/) gets a lot right. Its seven ideals for software (fast, multi-device, offline, collaborative, long-lived, private, user-controlled) describe what we actually want from our tools. The key architectural move is treating CRDTs as first-class citizens. Data becomes a distributed structure that converges across replicas without central coordination.
 
-Aura takes this further. If data can be a distributed relation, so can identity. An identity in Aura is not stored on a device. It is a threshold structure distributed across participants, recoverable from the social graph alone. The same is true for all state. If your devices are lost, your data and your identity can be reconstructed from the peers who share your contexts.
+Aura takes this further. If data can be a distributed relation, so can identity. An identity in Aura is not stored on a device. It is a threshold structure distributed across participants, recoverable from the social graph alone. The same is true for all state. If all of your devices are lost, your data and your identity can be reconstructed from the peers who share your contexts.
 
 This calls into question what "local" means. In Local-First, local means the device. In Aura, local means the trust graph. Your data is local to the people you have chosen to share it with. Your identity is local to the relationships that constitute it. The device is just a window into this distributed locality, not the source of truth.
 

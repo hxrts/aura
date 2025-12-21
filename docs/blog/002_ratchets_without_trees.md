@@ -1,10 +1,10 @@
 # Ratchets Without Trees
 
-The Aura Messaging Protocol (AMP) provides secure asynchronous messaging for threshold identity systems. 
+The design of secure messaging protocols like MLS and TreeKEM typically focuses on cryptographic properties, key agreement, forward secrecy, post-compromise security.  distributed systems problem underneath.
 
-Typically messaging protocols assume that secrets are stored on specific devices. Aura uses threshold cryptography to enable cryptographic recovery after catastrophic device loss.
+In Aura, both state and identity are distributed. Multiple devices form a single authority. Facts replicate across nodes via CRDT journals. There is no central ordering service. This changes the problem. We need messaging with explicit safety, liveness, and partition tolerance properties.
 
-AMP takes a different approach. Shared state in CRDT journals is canonical. Secrets derive deterministically from this shared state. Ratchet operations remain fully recoverable. See the [protocol specification](../112_amp.md) for complete technical details.
+The Aura Messaging Protocol (AMP) brings a distributed systems lens to secure messaging. It provides the same cryptographic guarantees as TreeKEM-based protocols while supporting deterministic recovery from replicated state alone. See the [protocol specification](../112_amp.md) for complete technical details and the [comparison section](#comparison-with-existing-protocols) for how AMP differs from MLS and Keyhive.
 
 ## Requirements
 
@@ -69,7 +69,9 @@ Branch nodes define threshold policies. Leaf nodes hold device signing shares. E
 
 ### State and Consistency
 
-Journals store all authoritative state as monotone facts, including the channel checkpoints that anchor ratchet windows. Epoch bumps require consensus for strong agreement while message sends use CRDT merge for concurrent tolerance.
+This is where the distributed systems perspective becomes concrete. Journals store all authoritative state as monotone facts, including the channel checkpoints that anchor ratchet windows. The protocol must remain safe under network partitions and live under partial connectivity.
+
+AMP achieves this through selective consistency. Message sends use CRDT merge for availability during partitions. Epoch bumps require consensus for linearizable agreement. The dual window ratchet bridges these modes by accepting messages from both current and previous epochs during transitions.
 
 ### Dual Ratchet
 
@@ -120,7 +122,9 @@ Recovery is fully deterministic. A device that loses all local state can recover
 
 ## Comparison with Existing Protocols
 
-Several protocols address secure group messaging in decentralized settings. MLS and its decentralized variants focus on TreeKEM-based key agreement. Keyhive adapts TreeKEM for CRDT-based coordination. These are excellent protocols, however each makes different trade-offs, none of which quite fit Aura's requirements.
+Several protocols address secure group messaging in decentralized settings. MLS and its decentralized variants focus on TreeKEM-based key agreement. Keyhive adapts TreeKEM for CRDT-based coordination. These are excellent protocols with different trade-offs.
+
+The key difference is how each handles the distributed systems problem. MLS delegates ordering to a Delivery Service. Keyhive uses eventual consistency everywhere. Neither provides the selective consistency that Aura requires for both concurrent messaging and linearizable epoch transitions.
 
 ### MLS
 
@@ -158,9 +162,11 @@ TreeKEM protocols expose group structure through tree operations. AMP derives ke
 
 ## Conclusion
 
-The Aura Messaging Protocol demonstrates that deterministic recovery and post-compromise security are compatible. The protocol achieves this through integration of commitment trees, CRDT journals, dual window ratchets, and consensus-finalized epoch transitions.
+Secure messaging is usually framed as a cryptographic problem. AMP reframes it as a distributed systems problem where both state and identity are replicated across nodes with no central coordinator.
 
-Existing protocols optimize for different constraints. MLS optimizes for ordered delivery with immediate forward secrecy. Keyhive optimizes for eventual consistency without coordination. AMP optimizes for deterministic recovery and distributed concurrency without sacrificing post-compromise security.
+The protocol demonstrates that deterministic recovery and post-compromise security are compatible. This requires explicit choices about safety, liveness, and partition tolerance at each layer. Message sends favor availability. Epoch transitions favor consistency. The dual window ratchet provides bounded forward secrecy while remaining fully recoverable from journal state.
+
+MLS assumes ordered delivery. Keyhive assumes eventual consistency everywhere. AMP applies each consistency model where the distributed systems requirements demand it.
 
 ## See Also
 
