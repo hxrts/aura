@@ -14,7 +14,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aura_agent::{AgentBuilder, AgentConfig, AuraAgent, EffectContext};
+use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_app::{AppConfig, AppCore};
+use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -157,6 +159,36 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
     }
 
     ceremony_task.abort();
+
+    // Contacts should reflect guardian status via committed GuardianBinding facts.
+    let start = tokio::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let contacts = {
+            let core = app_core.read().await;
+            core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
+        };
+
+        let alice_guardian = contacts
+            .contact(&alice_id)
+            .map(|c| c.is_guardian)
+            .unwrap_or(false);
+        let carol_guardian = contacts
+            .contact(&carol_id)
+            .map(|c| c.is_guardian)
+            .unwrap_or(false);
+
+        if alice_guardian && carol_guardian {
+            break;
+        }
+
+        if start.elapsed() > Duration::from_secs(5) {
+            panic!(
+                "Timed out waiting for guardian flags; alice={alice_guardian} carol={carol_guardian}"
+            );
+        }
+    }
+
     simulator.stop().await.expect("stop demo simulator");
 }
 

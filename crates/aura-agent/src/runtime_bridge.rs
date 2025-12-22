@@ -490,6 +490,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         ceremony_id: &str,
     ) -> Result<aura_app::runtime_bridge::CeremonyStatus, IntentError> {
+        // Ensure ceremony progress is driven even when the caller only polls status.
+        //
+        // In demo mode, acceptances arrive via transport envelopes. If nothing processes
+        // them, ceremonies will never complete and guardian bindings will never be committed.
+        if let Err(e) = self.agent.process_ceremony_acceptances().await {
+            tracing::debug!("Failed to process ceremony acceptances: {}", e);
+        }
+
         let tracker = self.agent.ceremony_tracker().await;
 
         let state = tracker

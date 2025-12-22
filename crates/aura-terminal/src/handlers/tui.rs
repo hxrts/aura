@@ -772,7 +772,7 @@ async fn handle_tui_launch(
                 "  Carol invite code: {}",
                 hints.carol_invite_code
             ));
-            let mut builder = IoContext::builder()
+            let builder = IoContext::builder()
                 .with_app_core(app_core)
                 .with_base_path(base_path.clone())
                 .with_device_id(device_id_for_account.to_string())

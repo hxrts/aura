@@ -138,6 +138,8 @@ impl AuraAgent {
         let recovery_service = self.recovery()?;
         let ceremony_tracker = self.ceremony_tracker().await;
 
+        let authority_id = self.authority_id();
+
         // Process incoming acceptances from transport
         let acceptances = recovery_service.process_guardian_acceptances().await?;
         let acceptance_count = acceptances.len();
@@ -167,7 +169,6 @@ impl AuraAgent {
                                 }
 
                                 let new_epoch = ceremony_state.new_epoch;
-                                let authority_id = self.authority_id();
 
                                 tracing::info!(
                                     ceremony_id = %ceremony_id,
@@ -185,6 +186,70 @@ impl AuraAgent {
 
                                 match commit_result {
                                     Ok(()) => {
+                                        // Commit GuardianBinding facts so UI and downstream protocols
+                                        // can treat the selected contacts as guardians.
+                                        //
+                                        // This is the canonical signal for contact guardian status:
+                                        // `ContactsSignalView` updates `Contact.is_guardian` based on
+                                        // `RelationalFact::GuardianBinding`.
+                                        //
+                                        // Note: we only do this once per ceremony, guarded by
+                                        // `ceremony_state.is_committed`.
+                                        let mut bindings = Vec::new();
+                                        for guardian_str in &ceremony_state.guardian_ids {
+                                            let Ok(guardian_id) = guardian_str.parse() else {
+                                                let _ = ceremony_tracker
+                                                    .mark_failed(
+                                                        &ceremony_id,
+                                                        Some(format!(
+                                                            "Invalid guardian id: {guardian_str}"
+                                                        )),
+                                                    )
+                                                    .await;
+                                                continue;
+                                            };
+
+                                            let binding_hash =
+                                                aura_core::Hash32(aura_core::hash::hash(
+                                                    format!(
+                                                        "guardian-binding:{}:{}:{}:{}",
+                                                        ceremony_id,
+                                                        authority_id,
+                                                        guardian_id,
+                                                        new_epoch
+                                                    )
+                                                    .as_bytes(),
+                                                ));
+
+                                            bindings.push(aura_journal::fact::RelationalFact::GuardianBinding {
+                                                account_id: authority_id,
+                                                guardian_id,
+                                                binding_hash,
+                                            });
+                                        }
+
+                                        if !bindings.is_empty() {
+                                            let effects = self.runtime.effects();
+                                            if let Err(e) =
+                                                effects.commit_relational_facts(bindings).await
+                                            {
+                                                tracing::error!(
+                                                    ceremony_id = %ceremony_id,
+                                                    error = %e,
+                                                    "Failed to commit GuardianBinding facts"
+                                                );
+                                                let _ = ceremony_tracker
+                                                    .mark_failed(
+                                                        &ceremony_id,
+                                                        Some(format!(
+                                                            "Failed to commit guardian bindings: {e}"
+                                                        )),
+                                                    )
+                                                    .await;
+                                                continue;
+                                            }
+                                        }
+
                                         tracing::info!(
                                             ceremony_id = %ceremony_id,
                                             new_epoch,
