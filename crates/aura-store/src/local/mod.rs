@@ -1,12 +1,12 @@
-//! # Encrypted Local Storage
+//! # Local Storage
 //!
-//! This module provides encrypted local storage for CLI/TUI preferences and cached data.
+//! This module provides local storage for CLI/TUI preferences and cached data.
+//!
+//! Note: Encryption at rest is handled by the unified storage layer (`EncryptedStorage`)
+//! beneath `StorageEffects`; this module intentionally does not implement encryption itself.
 //!
 //! ## Features
 //!
-//! - **Encryption at rest**: All data encrypted with ChaCha20-Poly1305
-//! - **Key derivation**: HKDF from authority cryptographic material
-//! - **Effect-based randomness**: Nonce generation via `RandomEffects` for deterministic testing
 //! - **Contact caching**: Offline display of contact information
 //! - **Theme preferences**: User customization settings
 //!
@@ -14,16 +14,17 @@
 //!
 //! ```ignore
 //! use aura_store::local::{LocalStore, LocalStoreConfig, ThemePreference};
+//! use aura_core::effects::StorageEffects;
 //!
-//! // Create store with key material from authority
+//! // Create store
 //! let config = LocalStoreConfig::new("/path/to/store.dat");
-//! let mut store = LocalStore::new(config, authority_key_material)?;
+//! let mut store = LocalStore::new(config);
 //!
 //! // Modify preferences
 //! store.data_mut().theme = ThemePreference::Dark;
 //!
-//! // Save with RandomEffects for deterministic nonce generation
-//! store.save(&random_effects).await?;
+//! // Save via StorageEffects
+//! store.save(&storage_effects).await?;
 //! ```
 
 mod errors;

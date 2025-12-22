@@ -191,6 +191,7 @@ impl DomainFact for ContactFact {
         }
     }
 
+    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).expect("ContactFact must serialize")
     }
@@ -290,6 +291,7 @@ impl DomainFact for GuardianBindingDetailsFact {
         self.context_id
     }
 
+    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
         bincode::serialize(self).expect("GuardianBindingDetailsFact must serialize")
     }
@@ -368,6 +370,7 @@ impl DomainFact for RecoveryGrantDetailsFact {
         self.context_id
     }
 
+    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
         bincode::serialize(self).expect("RecoveryGrantDetailsFact must serialize")
     }

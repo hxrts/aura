@@ -7,6 +7,7 @@
     clippy::clone_on_copy,
     clippy::if_same_then_else
 )]
+#![allow(deprecated)]
 //! TUI End-to-End Integration Tests (Legacy PTY-based)
 //!
 //! **DEPRECATED**: Prefer deterministic tests in `tui_deterministic.rs` and `itf_trace_replay.rs`.
@@ -817,6 +818,11 @@ use aura_terminal::tui::types::{Contact, ContactStatus, InvitationType};
 async fn test_account_creation_callback_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_core::effects::StorageEffects;
+    use aura_effects::{
+        EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
+        RealSecureStorageHandler,
+    };
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use std::sync::Arc;
@@ -826,7 +832,7 @@ async fn test_account_creation_callback_flow() {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let account_file = test_dir.join("account.json");
+    let account_file = test_dir.join("account.json.dat");
     println!("Test directory: {:?}", test_dir);
     println!("Account file: {:?}", account_file);
 
@@ -849,7 +855,7 @@ async fn test_account_creation_callback_flow() {
     assert!(!ctx.has_account(), "Should not have account initially");
     assert!(
         !account_file.exists(),
-        "account.json should not exist before creation"
+        "account.json.dat should not exist before creation"
     );
 
     // STEP 4: Simulate what the callback does - this is the core of the test
@@ -867,19 +873,32 @@ async fn test_account_creation_callback_flow() {
     // CRITICAL: Verify the file was created
     assert!(
         account_file.exists(),
-        "account.json MUST exist after create_account"
+        "account.json.dat MUST exist after create_account"
     );
 
     // STEP 6: Verify file content is valid
-    let content =
-        std::fs::read_to_string(&account_file).expect("Should be able to read account.json");
+    let storage = EncryptedStorage::new(
+        FilesystemStorageHandler::from_path(test_dir.clone()),
+        Arc::new(RealCryptoHandler::new()),
+        Arc::new(RealSecureStorageHandler::with_base_path(test_dir.clone())),
+        EncryptedStorageConfig::default(),
+    );
+    let content = storage
+        .retrieve("account.json")
+        .await
+        .expect("Should be able to read account config from storage")
+        .expect("account.json should exist in storage");
     assert!(
-        content.contains("authority_id"),
-        "File should contain authority_id"
+        content
+            .windows(b"authority_id".len())
+            .any(|w| w == b"authority_id"),
+        "Account config should contain authority_id"
     );
     assert!(
-        content.contains("context_id"),
-        "File should contain context_id"
+        content
+            .windows(b"context_id".len())
+            .any(|w| w == b"context_id"),
+        "Account config should contain context_id"
     );
     println!("✓ Account file content verified");
 
@@ -887,13 +906,13 @@ async fn test_account_creation_callback_flow() {
     // This simulates restarting the TUI - it should find the existing account
     let app_core2 = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core2 = Arc::new(RwLock::new(app_core2));
-    let initialized_app_core2 = InitializedAppCore::new(app_core2.clone())
+    let _initialized_app_core2 = InitializedAppCore::new(app_core2.clone())
         .await
         .expect("Failed to init signals");
     // Note: The actual account loading happens in handle_tui_launch via try_load_account
     // We can't easily test that here, but we verify the file structure is correct
     let loaded_content: serde_json::Value =
-        serde_json::from_str(&content).expect("Should be valid JSON");
+        serde_json::from_slice(&content).expect("Should be valid JSON");
     assert!(
         loaded_content.get("authority_id").is_some(),
         "Should have authority_id field"
@@ -934,6 +953,11 @@ async fn test_account_creation_callback_flow() {
 async fn test_device_id_determinism() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_core::effects::StorageEffects;
+    use aura_effects::{
+        EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
+        RealSecureStorageHandler,
+    };
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use std::sync::Arc;
@@ -947,7 +971,28 @@ async fn test_device_id_determinism() {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let account_file = test_dir.join("account.json");
+    let account_file = test_dir.join("account.json.dat");
+
+    async fn read_authority_id(test_dir: &std::path::Path) -> String {
+        let storage = EncryptedStorage::new(
+            FilesystemStorageHandler::from_path(test_dir.to_path_buf()),
+            Arc::new(RealCryptoHandler::new()),
+            Arc::new(RealSecureStorageHandler::with_base_path(
+                test_dir.to_path_buf(),
+            )),
+            EncryptedStorageConfig::default(),
+        );
+        let bytes = storage
+            .retrieve("account.json")
+            .await
+            .expect("Failed to read account config from storage")
+            .expect("account.json missing from storage");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("Invalid account JSON");
+        json["authority_id"]
+            .as_str()
+            .expect("authority_id should be a string")
+            .to_string()
+    }
 
     // =========================================================================
     // Phase 1: Create account with device_id
@@ -972,15 +1017,7 @@ async fn test_device_id_determinism() {
         .await
         .expect("Failed to create account");
 
-    let original_content =
-        std::fs::read_to_string(&account_file).expect("Failed to read account.json");
-    let original_json: serde_json::Value =
-        serde_json::from_str(&original_content).expect("Invalid JSON");
-
-    let original_authority_id = original_json["authority_id"]
-        .as_str()
-        .expect("authority_id should be a string")
-        .to_string();
+    let original_authority_id = read_authority_id(&test_dir).await;
 
     println!("  authority_id: {}", &original_authority_id[..16]);
     println!("  ✓ Account created");
@@ -990,7 +1027,7 @@ async fn test_device_id_determinism() {
     // =========================================================================
     println!("\nPhase 2: Delete account.json, recreate with SAME device_id");
 
-    std::fs::remove_file(&account_file).expect("Failed to delete account.json");
+    std::fs::remove_file(&account_file).expect("Failed to delete account.json.dat");
 
     let app_core2 = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core2 = Arc::new(RwLock::new(app_core2));
@@ -1010,15 +1047,7 @@ async fn test_device_id_determinism() {
         .await
         .expect("Failed to recreate account");
 
-    let recreated_content =
-        std::fs::read_to_string(&account_file).expect("Failed to read recreated account.json");
-    let recreated_json: serde_json::Value =
-        serde_json::from_str(&recreated_content).expect("Invalid JSON");
-
-    let recreated_authority_id = recreated_json["authority_id"]
-        .as_str()
-        .expect("authority_id should be a string")
-        .to_string();
+    let recreated_authority_id = read_authority_id(&test_dir).await;
 
     // Same device_id should produce same authority_id
     assert_eq!(
@@ -1032,7 +1061,7 @@ async fn test_device_id_determinism() {
     // =========================================================================
     println!("\nPhase 3: Create account with DIFFERENT device_id");
 
-    std::fs::remove_file(&account_file).expect("Failed to delete account.json");
+    std::fs::remove_file(&account_file).expect("Failed to delete account.json.dat");
 
     let app_core3 = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core3 = Arc::new(RwLock::new(app_core3));
@@ -1052,15 +1081,7 @@ async fn test_device_id_determinism() {
         .await
         .expect("Failed to create account");
 
-    let different_content =
-        std::fs::read_to_string(&account_file).expect("Failed to read new account.json");
-    let different_json: serde_json::Value =
-        serde_json::from_str(&different_content).expect("Invalid JSON");
-
-    let different_authority_id = different_json["authority_id"]
-        .as_str()
-        .expect("authority_id should be a string")
-        .to_string();
+    let different_authority_id = read_authority_id(&test_dir).await;
 
     // Different device_id MUST produce different authority_id
     assert_ne!(
@@ -1102,6 +1123,11 @@ async fn test_device_id_determinism() {
 async fn test_guardian_recovery_preserves_cryptographic_identity() {
     use async_lock::RwLock;
     use aura_app::AppCore;
+    use aura_core::effects::StorageEffects;
+    use aura_effects::{
+        EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
+        RealSecureStorageHandler,
+    };
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use std::sync::Arc;
@@ -1115,7 +1141,28 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let account_file = test_dir.join("account.json");
+    let account_file = test_dir.join("account.json.dat");
+
+    async fn read_authority_id(test_dir: &std::path::Path) -> String {
+        let storage = EncryptedStorage::new(
+            FilesystemStorageHandler::from_path(test_dir.to_path_buf()),
+            Arc::new(RealCryptoHandler::new()),
+            Arc::new(RealSecureStorageHandler::with_base_path(
+                test_dir.to_path_buf(),
+            )),
+            EncryptedStorageConfig::default(),
+        );
+        let bytes = storage
+            .retrieve("account.json")
+            .await
+            .expect("Failed to read account config from storage")
+            .expect("account.json missing from storage");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("Invalid account JSON");
+        json["authority_id"]
+            .as_str()
+            .expect("authority_id should be a string")
+            .to_string()
+    }
 
     // =========================================================================
     // Phase 1: Bob creates account on ORIGINAL device
@@ -1142,15 +1189,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
         .await
         .expect("Failed to create account");
 
-    let original_content =
-        std::fs::read_to_string(&account_file).expect("Failed to read account.json");
-    let original_json: serde_json::Value =
-        serde_json::from_str(&original_content).expect("Invalid JSON");
-
-    let original_authority_id = original_json["authority_id"]
-        .as_str()
-        .expect("authority_id should be a string")
-        .to_string();
+    let original_authority_id = read_authority_id(&test_dir).await;
 
     println!("  Original device_id: {}", original_device_id);
     println!("  Original authority_id: {}", &original_authority_id[..16]);
@@ -1161,7 +1200,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     // =========================================================================
     println!("\nPhase 2: CATASTROPHIC LOSS - Bob loses original device");
 
-    std::fs::remove_file(&account_file).expect("Failed to delete account.json");
+    std::fs::remove_file(&account_file).expect("Failed to delete account.json.dat");
     println!("  ✓ Bob has lost his device - no access to device_id or local data");
 
     // =========================================================================
@@ -1191,14 +1230,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
         .await
         .expect("Failed to create account");
 
-    let wrong_content =
-        std::fs::read_to_string(&account_file).expect("Failed to read account.json");
-    let wrong_json: serde_json::Value = serde_json::from_str(&wrong_content).expect("Invalid JSON");
-
-    let wrong_authority_id = wrong_json["authority_id"]
-        .as_str()
-        .expect("authority_id should be a string")
-        .to_string();
+    let wrong_authority_id = read_authority_id(&test_dir).await;
 
     println!("  New device_id: {}", new_device_id);
     println!(
@@ -1225,7 +1257,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     println!("    - account.json is written with ORIGINAL authority_id");
 
     // Delete the wrong account
-    std::fs::remove_file(&account_file).expect("Failed to delete wrong account");
+    std::fs::remove_file(&account_file).expect("Failed to delete wrong account.json.dat");
 
     // NOW USE THE ACTUAL restore_recovered_account() CODE PATH
     // This exercises the real recovery completion flow via IoContext
@@ -1269,15 +1301,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     // =========================================================================
     println!("\nPhase 5: Verifying cryptographic identity is PRESERVED");
 
-    let recovered_content =
-        std::fs::read_to_string(&account_file).expect("Failed to read recovered account.json");
-    let recovered_json: serde_json::Value =
-        serde_json::from_str(&recovered_content).expect("Invalid JSON");
-
-    let recovered_authority_id = recovered_json["authority_id"]
-        .as_str()
-        .expect("authority_id should be a string")
-        .to_string();
+    let recovered_authority_id = read_authority_id(&test_dir).await;
 
     println!("  Original authority_id: {}", &original_authority_id[..16]);
     println!(
@@ -4087,7 +4111,7 @@ async fn test_error_toast_display() {
     println!("\nPhase 3: Testing IoContext toast operations");
 
     // Create a mock IoContext (using with_defaults for testing)
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::IoContext;
     let io_ctx = IoContext::with_defaults_async().await;
 
     // Initially should have no toasts
@@ -4450,10 +4474,10 @@ async fn test_account_backup_restore_flow() {
     println!("    Context: {}", restored_context);
 
     // Verify the account file was created
-    let account_path_b = test_dir_b.join("account.json");
+    let account_path_b = test_dir_b.join("account.json.dat");
     assert!(
         account_path_b.exists(),
-        "account.json should exist after import"
+        "account.json.dat should exist after import"
     );
     println!("  ✓ account.json created at {:?}", account_path_b);
 
@@ -4711,7 +4735,7 @@ async fn test_snapshot_data_accuracy() {
     // Create a block with a specific created_at timestamp
     let test_created_at = 1702000000000u64; // A specific timestamp
     let block_id = "test-block-1".parse::<ChannelId>().unwrap_or_default();
-    let block_context_id = ContextId::new_from_entropy([9u8; 32]);
+    let _block_context_id = ContextId::new_from_entropy([9u8; 32]);
     let block_state = BlockState::new(
         block_id,
         Some("Test Block".to_string()),

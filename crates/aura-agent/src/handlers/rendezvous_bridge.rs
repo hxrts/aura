@@ -216,7 +216,7 @@ mod tests {
             effects: vec![EffectCommand::ChargeFlowBudget { cost: 1 }],
         };
 
-        let result = execute_guard_outcome(outcome, &authority, context_id, &*effects).await;
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
         assert!(result.is_ok());
     }
 
@@ -234,7 +234,7 @@ mod tests {
             effects: vec![],
         };
 
-        let result = execute_guard_outcome(outcome, &authority, context_id, &*effects).await;
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
         assert!(result.is_err());
     }
 
@@ -265,7 +265,7 @@ mod tests {
             }],
         };
 
-        let result = execute_guard_outcome(outcome, &authority, context_id, &*effects).await;
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
         assert!(result.is_ok());
     }
 
@@ -285,7 +285,7 @@ mod tests {
             }],
         };
 
-        let result = execute_guard_outcome(outcome, &authority, context_id, &*effects).await;
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
         assert!(result.is_ok());
     }
 
@@ -308,7 +308,7 @@ mod tests {
             ],
         };
 
-        let result = execute_guard_outcome(outcome, &authority, context_id, &*effects).await;
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
         assert!(result.is_ok());
     }
 }

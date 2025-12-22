@@ -39,13 +39,14 @@ async fn test_ctx(
     let raw_app_core = app_core.raw().clone();
 
     let dir = tempfile::tempdir().expect("Failed to create temp dir");
-    let ctx = IoContext::with_account_status(
-        app_core.clone(),
-        has_existing_account,
-        dir.path().to_path_buf(),
-        "test-device".to_string(),
-        TuiMode::Production,
-    );
+    let ctx = IoContext::builder()
+        .with_app_core(app_core.clone())
+        .with_existing_account(has_existing_account)
+        .with_base_path(dir.path().to_path_buf())
+        .with_device_id("test-device".to_string())
+        .with_mode(TuiMode::Production)
+        .build()
+        .expect("IoContext builder should succeed for tests");
     (raw_app_core, ctx, dir)
 }
 

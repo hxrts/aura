@@ -226,10 +226,13 @@ impl RendezvousService {
         if let Err(reason) = feature::validate_charge_before_send(
             &effects,
             |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
-            |c| matches!(
-                c,
-                EffectCommand::SendHandshake { .. } | EffectCommand::SendHandshakeResponse { .. }
-            ),
+            |c| {
+                matches!(
+                    c,
+                    EffectCommand::SendHandshake { .. }
+                        | EffectCommand::SendHandshakeResponse { .. }
+                )
+            },
         ) {
             return GuardOutcome::denied(format!(
                 "Internal error: rendezvous guard command ordering invalid: {reason}"
@@ -317,10 +320,13 @@ impl RendezvousService {
         if let Err(reason) = feature::validate_charge_before_send(
             &effects,
             |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
-            |c| matches!(
-                c,
-                EffectCommand::SendHandshake { .. } | EffectCommand::SendHandshakeResponse { .. }
-            ),
+            |c| {
+                matches!(
+                    c,
+                    EffectCommand::SendHandshake { .. }
+                        | EffectCommand::SendHandshakeResponse { .. }
+                )
+            },
         ) {
             return Ok(GuardOutcome::denied(format!(
                 "Internal error: rendezvous guard command ordering invalid: {reason}"
@@ -403,10 +409,13 @@ impl RendezvousService {
         if let Err(reason) = feature::validate_charge_before_send(
             &effects,
             |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
-            |c| matches!(
-                c,
-                EffectCommand::SendHandshake { .. } | EffectCommand::SendHandshakeResponse { .. }
-            ),
+            |c| {
+                matches!(
+                    c,
+                    EffectCommand::SendHandshake { .. }
+                        | EffectCommand::SendHandshakeResponse { .. }
+                )
+            },
         ) {
             return GuardOutcome::denied(format!(
                 "Internal error: rendezvous guard command ordering invalid: {reason}"

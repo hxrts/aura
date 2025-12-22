@@ -48,9 +48,11 @@ pub async fn handle_invitations(
             match import_invitation_details(app_core, code).await {
                 Ok(invitation) => {
                     // Demo semantics: importing a CONTACT invite code is the acceptance step.
-                    if matches!(invitation.invitation_type, InvitationBridgeType::Contact { .. }) {
-                        if let Err(e) =
-                            accept_invitation(app_core, &invitation.invitation_id).await
+                    if matches!(
+                        invitation.invitation_type,
+                        InvitationBridgeType::Contact { .. }
+                    ) {
+                        if let Err(e) = accept_invitation(app_core, &invitation.invitation_id).await
                         {
                             return Some(Err(OpError::InvalidArgument(format!(
                                 "Failed to accept invitation: {}",

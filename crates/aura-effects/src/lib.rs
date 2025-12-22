@@ -29,7 +29,7 @@
 //! # What Belongs Here
 //!
 //! Basic effect implementations (RealCryptoHandler, ProductionLeakageHandler)
-//! Storage backends (FilesystemStorageHandler, EncryptedStorageHandler)
+//! Storage backends (FilesystemStorageHandler, EncryptedStorage)
 //! Network transports (TcpTransportHandler, WebSocketTransportHandler)
 //! Time providers (RealTimeHandler), System handlers (LoggingSystemHandler)
 //!
@@ -69,6 +69,8 @@ pub mod database;
 // NOTE: JournalEffects moved to aura-journal (domain crate) per Layer 2 pattern
 /// Unified effect handler composing Authorization, Journal, Query, and Reactive effects
 pub mod effect_handler;
+/// Unified encrypted storage wrapper for transparent encryption at rest
+pub mod encrypted_storage;
 pub mod guard_interpreter;
 pub mod leakage;
 /// Query effect handler for typed Datalog queries
@@ -80,8 +82,6 @@ pub mod secure;
 #[cfg(feature = "simulation")]
 pub mod simulation;
 pub mod storage;
-/// Unified encrypted storage wrapper for transparent encryption at rest
-pub mod encrypted_storage;
 // sync_bridge removed - replaced by pure guard evaluation (ADR-014)
 pub mod system;
 pub mod time;
@@ -105,9 +105,7 @@ pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
 pub use secure::RealSecureStorageHandler;
 #[cfg(feature = "simulation")]
 pub use simulation::FallbackSimulationHandler;
-pub use storage::{
-    EncryptedStorageHandler, FilesystemStorageHandler, PathFilesystemStorageHandler,
-};
+pub use storage::FilesystemStorageHandler;
 // Re-export the new unified encrypted storage (Task 1.1)
 pub use encrypted_storage::{EncryptedStorage, EncryptedStorageConfig};
 // ProductionSyncExecutor removed - replaced by ProductionEffectInterpreter (ADR-014)

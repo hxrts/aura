@@ -76,15 +76,19 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
         ])
         .await;
 
-    let update = tokio::time::timeout(Duration::from_secs(1), updates.recv())
-        .await
-        .expect("expected scheduler batch")
-        .unwrap();
+    let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
+        Ok(Ok(update)) => update,
+        Ok(Err(err)) => panic!("expected scheduler batch, got recv error: {err}"),
+        Err(_) => panic!("expected scheduler batch"),
+    };
     assert!(matches!(update, ViewUpdate::Batch { count } if count > 0));
 
     let contacts_state = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
 
-    let contact = contacts_state.contact(&alice).expect("alice exists");
+    let contact = match contacts_state.contact(&alice) {
+        Some(contact) => contact,
+        None => panic!("alice exists"),
+    };
     assert_eq!(contact.nickname, "Alice Cooper");
 }
 
@@ -129,16 +133,23 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
         ])
         .await;
 
-    let update = tokio::time::timeout(Duration::from_secs(1), updates.recv())
-        .await
-        .expect("expected scheduler batch")
-        .unwrap();
+    let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
+        Ok(Ok(update)) => update,
+        Ok(Err(err)) => panic!("expected scheduler batch, got recv error: {err}"),
+        Err(_) => panic!("expected scheduler batch"),
+    };
     assert!(matches!(update, ViewUpdate::Batch { count } if count > 0));
 
     let contacts_state = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
 
-    let contact = contacts_state.contact(&guardian).expect("guardian exists");
-    assert!(contact.is_guardian, "guardian binding should reflect into contacts");
+    let contact = match contacts_state.contact(&guardian) {
+        Some(contact) => contact,
+        None => panic!("guardian exists"),
+    };
+    assert!(
+        contact.is_guardian,
+        "guardian binding should reflect into contacts"
+    );
 }
 
 #[tokio::test]
@@ -169,15 +180,19 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
         .publish_journal_facts(vec![fact(1, FactContent::Relational(bad))])
         .await;
 
-    let update = tokio::time::timeout(Duration::from_secs(1), updates.recv())
-        .await
-        .expect("expected scheduler batch")
-        .unwrap();
+    let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
+        Ok(Ok(update)) => update,
+        Ok(Err(err)) => panic!("expected scheduler batch, got recv error: {err}"),
+        Err(_) => panic!("expected scheduler batch"),
+    };
     assert!(matches!(update, ViewUpdate::Batch { count } if count > 0));
 
     let err = reactive.read(&*ERROR_SIGNAL).await.unwrap();
 
-    let msg = err.expect("expected Some(AppError)");
+    let msg = match err {
+        Some(msg) => msg,
+        None => panic!("expected Some(AppError)"),
+    };
     assert!(
         msg.to_string().contains("decode ContactFact"),
         "error should mention ContactFact decode failure, got: {msg}"

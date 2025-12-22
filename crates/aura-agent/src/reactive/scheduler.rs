@@ -746,7 +746,8 @@ impl ViewReduction<ChatDelta> for ChatReduction {
                     ..
                 }) if binding_type == CHAT_FACT_TYPE_ID => {
                     // Use the domain reducer and downcast back to ChatDelta
-                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, own_authority);
+                    let view_deltas =
+                        reducer.reduce_fact(binding_type, binding_data, own_authority);
                     view_deltas
                         .into_iter()
                         .filter_map(|vd| downcast_delta::<ChatDelta>(&vd).cloned())
@@ -835,7 +836,8 @@ impl ViewReduction<RecoveryDelta> for RecoveryReduction {
                     ..
                 }) if binding_type == RECOVERY_FACT_TYPE_ID => {
                     // Use the domain reducer and downcast back to RecoveryDelta
-                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, own_authority);
+                    let view_deltas =
+                        reducer.reduce_fact(binding_type, binding_data, own_authority);
                     view_deltas
                         .into_iter()
                         .filter_map(|vd| downcast_delta::<RecoveryDelta>(&vd).cloned())
@@ -865,7 +867,8 @@ impl ViewReduction<InvitationDelta> for InvitationReduction {
                     ..
                 }) if binding_type == INVITATION_FACT_TYPE_ID => {
                     // Use the domain reducer and downcast back to InvitationDelta
-                    let view_deltas = reducer.reduce_fact(binding_type, binding_data, own_authority);
+                    let view_deltas =
+                        reducer.reduce_fact(binding_type, binding_data, own_authority);
                     view_deltas
                         .into_iter()
                         .filter_map(|vd| downcast_delta::<InvitationDelta>(&vd).cloned())
@@ -1429,8 +1432,8 @@ mod tests {
         let storage_updated = SocialFact::storage_updated_ms(
             test_block_id(),
             test_context_id(),
-            1024 * 1024,       // 1 MB used
-            10 * 1024 * 1024,  // 10 MB total
+            1024 * 1024,      // 1 MB used
+            10 * 1024 * 1024, // 10 MB total
             3000,
         );
 
@@ -1463,10 +1466,14 @@ mod tests {
 
         let deltas = reduction.reduce(&facts, None);
         assert_eq!(deltas.len(), 3);
-        assert!(matches!(&deltas[0], BlockDelta::BlockCreated { name, .. } if name == "Test Block"));
+        assert!(
+            matches!(&deltas[0], BlockDelta::BlockCreated { name, .. } if name == "Test Block")
+        );
         assert!(matches!(&deltas[1], BlockDelta::ResidentAdded { name, .. } if name == "Alice"));
-        assert!(matches!(&deltas[2], BlockDelta::StorageUpdated { used_bytes, total_bytes, .. }
-            if *used_bytes == 1024 * 1024 && *total_bytes == 10 * 1024 * 1024));
+        assert!(
+            matches!(&deltas[2], BlockDelta::StorageUpdated { used_bytes, total_bytes, .. }
+            if *used_bytes == 1024 * 1024 && *total_bytes == 10 * 1024 * 1024)
+        );
     }
 
     // =========================================================================

@@ -397,8 +397,9 @@ mod tests {
 
     #[test]
     fn test_command_context_uses_block_id() {
-        let block_id =
-            aura_core::identifiers::ContextId::from(uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap());
+        let block_id = aura_core::identifiers::ContextId::from(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+        );
         let ctx = IntentContext {
             block_id: Some(block_id),
             recovery_context_id: None,
@@ -424,8 +425,9 @@ mod tests {
 
     #[test]
     fn test_command_context_uses_recovery_id() {
-        let recovery_id =
-            aura_core::identifiers::ContextId::from(uuid::Uuid::parse_str("660e8400-e29b-41d4-a716-446655440001").unwrap());
+        let recovery_id = aura_core::identifiers::ContextId::from(
+            uuid::Uuid::parse_str("660e8400-e29b-41d4-a716-446655440001").unwrap(),
+        );
         let ctx = IntentContext {
             block_id: None,
             recovery_context_id: Some(recovery_id),

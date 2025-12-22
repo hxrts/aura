@@ -155,16 +155,15 @@ impl IoContextBuilder {
         // Mode is required in the builder but no longer used here - mode isolation
         // is achieved via mode-specific base_path directories. Keep the check to
         // maintain the API contract.
-        let _mode = self
-            .mode
-            .ok_or(ContextBuildError::MissingField("mode"))?;
+        let _mode = self.mode.ok_or(ContextBuildError::MissingField("mode"))?;
 
         let operational = Arc::new(OperationalHandler::new(app_core.raw().clone()));
         let snapshots = SnapshotHelper::new(app_core.raw().clone(), device_id.clone());
         let toasts = ToastHelper::new();
 
-        let has_existing_account =
-            Arc::new(std::sync::atomic::AtomicBool::new(self.has_existing_account));
+        let has_existing_account = Arc::new(std::sync::atomic::AtomicBool::new(
+            self.has_existing_account,
+        ));
         let account_files =
             AccountFilesHelper::new(base_path, device_id, has_existing_account.clone());
 
@@ -275,14 +274,17 @@ impl IoContext {
         device_id_str: String,
         mode: TuiMode,
     ) -> Self {
-        IoContext::builder()
+        match IoContext::builder()
             .with_app_core(app_core)
             .with_base_path(base_path)
             .with_device_id(device_id_str)
             .with_mode(mode)
             .with_existing_account(has_existing_account)
             .build()
-            .expect("IoContext::with_account_status: all required fields provided")
+        {
+            Ok(ctx) => ctx,
+            Err(err) => panic!("IoContext::with_account_status: {err}"),
+        }
     }
 
     /// Create a new IoContext with demo hints for development mode.
@@ -300,7 +302,7 @@ impl IoContext {
         device_id_str: String,
         mode: TuiMode,
     ) -> Self {
-        IoContext::builder()
+        match IoContext::builder()
             .with_app_core(app_core)
             .with_base_path(base_path)
             .with_device_id(device_id_str)
@@ -308,7 +310,10 @@ impl IoContext {
             .with_existing_account(has_existing_account)
             .with_demo_hints(hints)
             .build()
-            .expect("IoContext::with_demo_hints: all required fields provided")
+        {
+            Ok(ctx) => ctx,
+            Err(err) => panic!("IoContext::with_demo_hints: {err}"),
+        }
     }
 
     /// Create an IoContext with default configuration (for testing).

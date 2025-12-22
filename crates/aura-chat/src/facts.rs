@@ -212,7 +212,9 @@ impl ChatFact {
     ///
     /// This is retained for older call sites but now produces a `MessageSentSealed`
     /// fact by encoding the provided content as UTF-8 bytes.
-    #[deprecated(note = "Use ChatFact::message_sent_sealed_ms; chat facts now store opaque payload bytes")]
+    #[deprecated(
+        note = "Use ChatFact::message_sent_sealed_ms; chat facts now store opaque payload bytes"
+    )]
     #[allow(clippy::too_many_arguments)]
     pub fn message_sent_ms(
         context_id: ContextId,
@@ -348,6 +350,7 @@ impl DomainFact for ChatFact {
         }
     }
 
+    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).expect("ChatFact must serialize")
     }
@@ -403,10 +406,9 @@ impl FactReducer for ChatFactReducer {
                 "channel-closed".to_string(),
                 channel_id.to_string().into_bytes(),
             ),
-            ChatFact::MessageSentSealed { message_id, .. } => (
-                "message-sent".to_string(),
-                message_id.as_bytes().to_vec(),
-            ),
+            ChatFact::MessageSentSealed { message_id, .. } => {
+                ("message-sent".to_string(), message_id.as_bytes().to_vec())
+            }
             ChatFact::MessageRead { message_id, .. } => {
                 ("message-read".to_string(), message_id.as_bytes().to_vec())
             }

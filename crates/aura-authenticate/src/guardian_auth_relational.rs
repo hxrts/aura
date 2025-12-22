@@ -5,9 +5,7 @@
 
 use aura_core::crypto::ed25519::{Ed25519Signature, Ed25519VerifyingKey};
 use aura_core::relational::GuardianBinding;
-use aura_core::{
-    AuraError, Authority, AuthorityId, Hash32, Result,
-};
+use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
 use aura_relational::RelationalContext;
 use serde::{Deserialize, Serialize};
@@ -415,7 +413,9 @@ impl GuardianAuthHandler {
             .iter()
             .any(|bytes| {
                 serde_json::from_slice::<GuardianNotificationRecord>(bytes)
-                    .map(|record| record.guardian_id == guardian_id && record.account_id == account_id)
+                    .map(|record| {
+                        record.guardian_id == guardian_id && record.account_id == account_id
+                    })
                     .unwrap_or(false)
             })
     }

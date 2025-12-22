@@ -100,14 +100,17 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
         let agent_config = self.to_agent_config(&config);
 
         // Determine authority ID (use provided or derive from device ID)
-        let authority_id = config.authority_id.unwrap_or_else(|| {
-            AuthorityId::new_from_entropy(hash(
-                &config
-                    .device_id
-                    .to_bytes()
-                    .expect("device id should convert to bytes"),
-            ))
-        });
+        let authority_id = match config.authority_id {
+            Some(authority_id) => authority_id,
+            None => {
+                let device_bytes = config.device_id.to_bytes().map_err(|e| {
+                    SimulationEnvironmentError::CreationFailed(format!(
+                        "DeviceId::to_bytes failed: {e}"
+                    ))
+                })?;
+                AuthorityId::new_from_entropy(hash(&device_bytes))
+            }
+        };
 
         let effect_system =
             AuraEffectSystem::simulation_for_authority(&agent_config, config.seed, authority_id)
@@ -124,14 +127,17 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
         let agent_config = self.to_agent_config(&config);
 
         // Determine authority ID (use provided or derive from device ID)
-        let authority_id = config.authority_id.unwrap_or_else(|| {
-            AuthorityId::new_from_entropy(hash(
-                &config
-                    .device_id
-                    .to_bytes()
-                    .expect("device id should convert to bytes"),
-            ))
-        });
+        let authority_id = match config.authority_id {
+            Some(authority_id) => authority_id,
+            None => {
+                let device_bytes = config.device_id.to_bytes().map_err(|e| {
+                    SimulationEnvironmentError::CreationFailed(format!(
+                        "DeviceId::to_bytes failed: {e}"
+                    ))
+                })?;
+                AuthorityId::new_from_entropy(hash(&device_bytes))
+            }
+        };
 
         let effect_system = AuraEffectSystem::simulation_with_shared_transport_for_authority(
             &agent_config,
@@ -148,26 +154,29 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
 #[cfg(all(test, feature = "simulation"))]
 mod tests {
     use super::*;
+    use aura_core::effects::RuntimeEffectsBundle;
     use aura_core::DeviceId;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_factory_creates_effect_system() {
         let factory = EffectSystemFactory::new();
-        let device_id = DeviceId(Uuid::new_v4());
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let config = SimulationEnvironmentConfig::new(42, device_id);
 
         let result = factory.create_simulation_environment(config).await;
         assert!(result.is_ok());
 
-        let effects = result.unwrap();
+        let effects = match result {
+            Ok(effects) => effects,
+            Err(err) => panic!("failed to create simulation environment: {err:?}"),
+        };
         assert!(effects.is_simulation_mode());
     }
 
     #[tokio::test]
     async fn test_factory_with_shared_transport() {
         let factory = EffectSystemFactory::new();
-        let device_id = DeviceId(Uuid::new_v4());
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let config = SimulationEnvironmentConfig::new(42, device_id);
         let shared_inbox = Arc::new(RwLock::new(Vec::new()));
 
@@ -180,7 +189,7 @@ mod tests {
     #[tokio::test]
     async fn test_factory_with_explicit_authority() {
         let factory = EffectSystemFactory::new();
-        let device_id = DeviceId(Uuid::new_v4());
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
         let config = SimulationEnvironmentConfig::new(42, device_id).with_authority(authority_id);
 

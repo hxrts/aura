@@ -81,16 +81,16 @@ pub mod guardian_service;
 
 // Export domain fact types
 pub use facts::{
-    ContactFact, ContactFactReducer, CONTACT_FACT_TYPE_ID, GuardianBindingDetailsFact,
-    GuardianBindingDetailsFactReducer, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
-    RecoveryGrantDetailsFact, RecoveryGrantDetailsFactReducer, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
+    ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
+    RecoveryGrantDetailsFact, RecoveryGrantDetailsFactReducer, CONTACT_FACT_TYPE_ID,
+    GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
 };
 
 // Export consensus functions from adapter
 pub use consensus_adapter::{run_consensus, run_consensus_with_config, ConsensusConfig};
 pub use guardian_request::{
-    parse_guardian_request, GuardianRequestFact, GuardianRequestFactReducer, GuardianRequestPayload,
-    GUARDIAN_REQUEST_FACT_TYPE_ID,
+    parse_guardian_request, GuardianRequestFact, GuardianRequestFactReducer,
+    GuardianRequestPayload, GUARDIAN_REQUEST_FACT_TYPE_ID,
 };
 pub use guardian_service::GuardianService;
 
@@ -189,8 +189,12 @@ impl RelationalContext {
         guardian_id: AuthorityId,
         binding: GuardianBinding,
     ) -> Result<Hash32> {
-        let details =
-            crate::facts::GuardianBindingDetailsFact::new(self.context_id, account_id, guardian_id, binding);
+        let details = crate::facts::GuardianBindingDetailsFact::new(
+            self.context_id,
+            account_id,
+            guardian_id,
+            binding,
+        );
         let details_bytes = details.to_bytes();
         let binding_hash = Hash32::from_bytes(&hash(&details_bytes));
 
@@ -210,7 +214,8 @@ impl RelationalContext {
         account_id: AuthorityId,
         grant: RecoveryGrant,
     ) -> Result<Hash32> {
-        let details = crate::facts::RecoveryGrantDetailsFact::new(self.context_id, account_id, grant);
+        let details =
+            crate::facts::RecoveryGrantDetailsFact::new(self.context_id, account_id, grant);
         let bytes = details.to_bytes();
         let grant_hash = Hash32::from_bytes(&hash(&bytes));
         self.add_domain_fact(&details)?;
@@ -379,8 +384,8 @@ impl RelationalContext {
 
 impl RelationalContext {
     fn derive_order(fact: &RelationalFact) -> Result<OrderTime> {
-        let bytes =
-            bincode::serialize(fact).map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
+        let bytes = bincode::serialize(fact)
+            .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
         Ok(OrderTime(hash(&bytes)))
     }
 }

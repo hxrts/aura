@@ -116,7 +116,9 @@ pub fn use_contacts_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) ->
                 let app_core_for_refresh = app_core_for_refresh.clone();
                 let refresh_in_flight = refresh_in_flight.clone();
                 tokio::spawn(async move {
-                    let _ = aura_app::workflows::system::refresh_account(app_core_for_refresh.raw()).await;
+                    let _ =
+                        aura_app::workflows::system::refresh_account(app_core_for_refresh.raw())
+                            .await;
                     refresh_in_flight.store(false, Ordering::SeqCst);
                 });
             })

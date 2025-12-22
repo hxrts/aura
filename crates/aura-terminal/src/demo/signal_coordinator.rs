@@ -28,9 +28,9 @@ use aura_app::views::chat::Message as ChatMessage;
 use aura_app::views::recovery::{Guardian, GuardianStatus, RecoveryProcessStatus};
 use aura_app::views::{ChatState, RecoveryState};
 use aura_app::AppCore;
-use aura_core::Hash32;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuthorityId;
+use aura_core::Hash32;
 use aura_journal::fact::RelationalFact;
 use tokio::sync::mpsc;
 

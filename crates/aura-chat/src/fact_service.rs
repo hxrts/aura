@@ -6,7 +6,9 @@
 use aura_core::identifiers::ChannelId;
 
 use crate::facts::ChatFact;
-use crate::guards::{check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot};
+use crate::guards::{
+    check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
+};
 
 /// Guard-compatible fact-first chat operations.
 #[derive(Debug, Clone, Default)]
@@ -113,7 +115,10 @@ mod tests {
             None,
             false,
         );
-        assert!(matches!(out.decision, crate::guards::GuardDecision::Deny { .. }));
+        assert!(matches!(
+            out.decision,
+            crate::guards::GuardDecision::Deny { .. }
+        ));
     }
 
     #[test]
@@ -139,7 +144,10 @@ mod tests {
         assert!(matches!(out.decision, crate::guards::GuardDecision::Allow));
         assert!(matches!(
             out.effects.as_slice(),
-            [EffectCommand::ChargeFlowBudget { .. }, EffectCommand::JournalAppend { .. }]
+            [
+                EffectCommand::ChargeFlowBudget { .. },
+                EffectCommand::JournalAppend { .. }
+            ]
         ));
     }
 }

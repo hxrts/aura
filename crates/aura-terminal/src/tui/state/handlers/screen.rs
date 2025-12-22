@@ -287,11 +287,7 @@ pub fn handle_neighborhood_key(
 
 /// Handle invitations screen key events (deprecated - handled via Contacts)
 #[allow(dead_code)]
-pub fn handle_invitations_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
+pub fn handle_invitations_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             state.invitations.selected_index = navigate_list(

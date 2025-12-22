@@ -668,7 +668,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
 
         // Create signing context for OTA activation
         let signing_context = SigningContext::ota_activation(
-            authority.clone(),
+            authority,
             ceremony_id.0 .0, // [u8; 32] from OTACeremonyId
             upgrade_hash.0,   // [u8; 32] from Hash32
             prestate_hash.0,  // [u8; 32] from Hash32

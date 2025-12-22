@@ -21,17 +21,17 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
 use aura_terminal::demo::DemoSimulator;
-use aura_terminal::tui::context::InitializedAppCore;
 use aura_terminal::ids;
-use uuid::Uuid;
+use aura_terminal::tui::context::InitializedAppCore;
+
+mod support;
 
 #[tokio::test]
 async fn demo_guardian_ceremony_completes_with_demo_peers() {
     let seed = 2024u64;
 
     // Unique data dir so this test is hermetic.
-    let test_dir = std::env::temp_dir().join(format!("aura-guardian-e2e-{}", Uuid::new_v4()));
-    std::fs::create_dir_all(&test_dir).expect("create test dir");
+    let test_dir = support::unique_test_dir("aura-guardian-e2e");
 
     // Start demo peers (Alice + Carol) as real runtimes and share their transport with Bob.
     let mut simulator = DemoSimulator::new(seed, test_dir.clone())
@@ -47,9 +47,14 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
     let bob_context_entropy = hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
     let bob_context = ContextId::new_from_entropy(bob_context_entropy);
 
-    let mut agent_config = AgentConfig::default();
-    agent_config.device_id = ids::device_id(bob_device_id_str);
-    agent_config.storage.base_path = test_dir.clone();
+    let agent_config = AgentConfig {
+        device_id: ids::device_id(bob_device_id_str),
+        storage: aura_agent::core::config::StorageConfig {
+            base_path: test_dir.clone(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
     let effect_ctx = EffectContext::new(
         bob_authority,
@@ -73,7 +78,9 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
         .expect("create AppCore with runtime");
     let app_core = Arc::new(RwLock::new(app_core));
 
-    let initialized = InitializedAppCore::new(app_core.clone()).await.expect("init signals");
+    let initialized = InitializedAppCore::new(app_core.clone())
+        .await
+        .expect("init signals");
     let _ = initialized;
 
     // Ensure Alice + Carol exist as contacts so guardian binding facts can flip the flag.

@@ -44,7 +44,12 @@ use aura_app::signal_defs::{
 };
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::effects::StorageEffects;
 use aura_core::identifiers::AuthorityId;
+use aura_effects::{
+    EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
+    RealSecureStorageHandler,
+};
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
@@ -85,13 +90,14 @@ impl TestAgent {
             .await
             .expect("Failed to init signals");
 
-        let ctx = IoContext::with_account_status(
-            initialized_app_core.clone(),
-            false,
-            test_dir.clone(),
-            format!("test-device-{}", name),
-            TuiMode::Production,
-        );
+        let ctx = IoContext::builder()
+            .with_app_core(initialized_app_core.clone())
+            .with_existing_account(false)
+            .with_base_path(test_dir.clone())
+            .with_device_id(format!("test-device-{}", name))
+            .with_mode(TuiMode::Production)
+            .build()
+            .expect("IoContext builder should succeed for tests");
 
         Self {
             name: name.to_string(),
@@ -109,12 +115,21 @@ impl TestAgent {
             .await
             .map_err(|e| format!("Failed to create account for {}: {:?}", self.name, e))?;
 
-        // Read the account file to get authority_id
-        let account_path = self.test_dir.join("account.json");
-        let account_content = std::fs::read_to_string(&account_path)
-            .map_err(|e| format!("Failed to read account file: {}", e))?;
-        let config: AccountConfig = serde_json::from_str(&account_content)
-            .map_err(|e| format!("Failed to parse account config: {}", e))?;
+        let storage = EncryptedStorage::new(
+            FilesystemStorageHandler::from_path(self.test_dir.clone()),
+            Arc::new(RealCryptoHandler::new()),
+            Arc::new(RealSecureStorageHandler::with_base_path(
+                self.test_dir.clone(),
+            )),
+            EncryptedStorageConfig::default(),
+        );
+        let bytes = storage
+            .retrieve("account.json")
+            .await
+            .map_err(|e| format!("Failed to read account config from storage: {e}"))?
+            .ok_or_else(|| "Missing account config in storage".to_string())?;
+        let config: AccountConfig = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("Failed to parse account config: {e}"))?;
 
         // Parse authority_id from hex string
         let authority_bytes: [u8; 16] = hex::decode(&config.authority_id)

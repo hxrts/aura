@@ -3,7 +3,7 @@
 //! Provides helpers for integrating the LocalStore with the TUI lifecycle.
 //! Handles loading preferences on startup and saving on shutdown.
 
-use aura_core::effects::{CryptoEffects, StorageEffects};
+use aura_core::effects::StorageEffects;
 use aura_core::AuthorityId;
 use aura_store::local::{ContactCache, LocalData, LocalStore, LocalStoreConfig, LocalStoreError};
 use std::path::PathBuf;
@@ -12,12 +12,10 @@ use std::sync::Arc;
 /// Manager for the TUI's local store
 ///
 /// Wraps the LocalStore with TUI-specific convenience methods
-/// and manages the store lifecycle with crypto and storage effects.
-pub struct TuiLocalStore<C: CryptoEffects, S: StorageEffects> {
+/// and manages the store lifecycle with storage effects.
+pub struct TuiLocalStore<S: StorageEffects> {
     /// The underlying local store
     store: LocalStore,
-    /// Crypto effects handler
-    crypto: Arc<C>,
     /// Storage effects handler
     storage: Arc<S>,
     /// Whether there are unsaved changes
@@ -27,32 +25,26 @@ pub struct TuiLocalStore<C: CryptoEffects, S: StorageEffects> {
 /// Local store filename (same for all modes - isolation via directory)
 pub const LOCAL_STORE_FILENAME: &str = "local.store";
 
-impl<C: CryptoEffects, S: StorageEffects> TuiLocalStore<C, S> {
+impl<S: StorageEffects> TuiLocalStore<S> {
     /// Open or create a local store for the TUI
     ///
     /// # Arguments
     ///
     /// * `authority_id` - The authority this store belongs to
-    /// * `key_material` - Secret material for encryption key derivation
     /// * `data_dir` - Data directory (mode-specific: .aura or .aura-demo)
-    /// * `crypto` - Crypto effects handler
     /// * `storage` - Storage effects handler
     pub async fn open(
         _authority_id: AuthorityId,
-        key_material: &[u8],
         data_dir: PathBuf,
-        crypto: Arc<C>,
         storage: Arc<S>,
     ) -> Result<Self, LocalStoreError> {
         let path = data_dir.join(LOCAL_STORE_FILENAME);
 
         let config = LocalStoreConfig::new(path);
-        let store =
-            LocalStore::load(config, key_material, crypto.as_ref(), storage.as_ref()).await?;
+        let store = LocalStore::load(config, storage.as_ref()).await?;
 
         Ok(Self {
             store,
-            crypto,
             storage,
             dirty: false,
         })
@@ -77,9 +69,7 @@ impl<C: CryptoEffects, S: StorageEffects> TuiLocalStore<C, S> {
     /// Save changes to disk
     pub async fn save(&mut self) -> Result<(), LocalStoreError> {
         if self.dirty {
-            self.store
-                .save(self.crypto.as_ref(), self.storage.as_ref())
-                .await?;
+            self.store.save(self.storage.as_ref()).await?;
             self.dirty = false;
         }
         Ok(())
@@ -87,23 +77,15 @@ impl<C: CryptoEffects, S: StorageEffects> TuiLocalStore<C, S> {
 
     /// Force save even if not dirty
     pub async fn force_save(&mut self) -> Result<(), LocalStoreError> {
-        self.store
-            .save(self.crypto.as_ref(), self.storage.as_ref())
-            .await?;
+        self.store.save(self.storage.as_ref()).await?;
         self.dirty = false;
         Ok(())
     }
 
     /// Reload data from disk (discards unsaved changes)
-    pub async fn reload(&mut self, key_material: &[u8]) -> Result<(), LocalStoreError> {
+    pub async fn reload(&mut self) -> Result<(), LocalStoreError> {
         let config = LocalStoreConfig::new(self.store.path());
-        self.store = LocalStore::load(
-            config,
-            key_material,
-            self.crypto.as_ref(),
-            self.storage.as_ref(),
-        )
-        .await?;
+        self.store = LocalStore::load(config, self.storage.as_ref()).await?;
         self.dirty = false;
         Ok(())
     }
@@ -167,24 +149,10 @@ impl<C: CryptoEffects, S: StorageEffects> TuiLocalStore<C, S> {
     }
 }
 
-/// Helper to derive key material from an authority
-///
-/// In a real implementation, this would derive from the authority's
-/// secret key. Here we deterministically hash the authority ID for repeatable demos.
-pub fn derive_key_material(authority_id: &AuthorityId) -> Vec<u8> {
-    // Deterministic derivation keeps the TUI cache reproducible.
-    use aura_core::hash::hash;
-    let mut data = Vec::new();
-    data.extend_from_slice(b"aura-local-store-key-v1");
-    data.extend_from_slice(&authority_id.to_bytes());
-    hash(&data).to_vec()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_testkit::stateful_effects::MemoryStorageHandler;
-    use aura_testkit::MockCryptoHandler;
     use tempfile::TempDir;
 
     fn test_authority() -> AuthorityId {
@@ -195,19 +163,11 @@ mod tests {
     async fn test_tui_local_store_open() {
         let temp_dir = TempDir::new().unwrap();
         let authority_id = test_authority();
-        let key_material = derive_key_material(&authority_id);
-        let crypto = Arc::new(MockCryptoHandler::new());
         let storage = Arc::new(MemoryStorageHandler::new());
 
-        let store = TuiLocalStore::open(
-            authority_id,
-            &key_material,
-            temp_dir.path().to_path_buf(),
-            crypto,
-            storage,
-        )
-        .await
-        .unwrap();
+        let store = TuiLocalStore::open(authority_id, temp_dir.path().to_path_buf(), storage)
+            .await
+            .unwrap();
 
         assert!(!store.is_dirty());
     }
@@ -216,19 +176,11 @@ mod tests {
     async fn test_dirty_tracking() {
         let temp_dir = TempDir::new().unwrap();
         let authority_id = test_authority();
-        let key_material = derive_key_material(&authority_id);
-        let crypto = Arc::new(MockCryptoHandler::new());
         let storage = Arc::new(MemoryStorageHandler::new());
 
-        let mut store = TuiLocalStore::open(
-            authority_id,
-            &key_material,
-            temp_dir.path().to_path_buf(),
-            crypto,
-            storage,
-        )
-        .await
-        .unwrap();
+        let mut store = TuiLocalStore::open(authority_id, temp_dir.path().to_path_buf(), storage)
+            .await
+            .unwrap();
 
         assert!(!store.is_dirty());
 
@@ -244,28 +196,20 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
         let authority_id = test_authority();
-        let key_material = derive_key_material(&authority_id);
-        let crypto = Arc::new(MockCryptoHandler::new());
         let storage = Arc::new(MemoryStorageHandler::new());
 
         // Create and save
         {
-            let mut store = TuiLocalStore::open(
-                authority_id,
-                &key_material,
-                data_dir.clone(),
-                crypto.clone(),
-                storage.clone(),
-            )
-            .await
-            .unwrap();
+            let mut store = TuiLocalStore::open(authority_id, data_dir.clone(), storage.clone())
+                .await
+                .unwrap();
             store.visit_conversation("conversation-1");
             store.save().await.unwrap();
         }
 
         // Reopen and verify
         {
-            let store = TuiLocalStore::open(authority_id, &key_material, data_dir, crypto, storage)
+            let store = TuiLocalStore::open(authority_id, data_dir, storage)
                 .await
                 .unwrap();
             assert_eq!(store.recent_conversations(), &["conversation-1"]);
@@ -277,19 +221,11 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let authority_id = test_authority();
         let contact_authority = crate::ids::authority_id("tui:local-store:contact");
-        let key_material = derive_key_material(&authority_id);
-        let crypto = Arc::new(MockCryptoHandler::new());
         let storage = Arc::new(MemoryStorageHandler::new());
 
-        let mut store = TuiLocalStore::open(
-            authority_id,
-            &key_material,
-            temp_dir.path().to_path_buf(),
-            crypto,
-            storage,
-        )
-        .await
-        .unwrap();
+        let mut store = TuiLocalStore::open(authority_id, temp_dir.path().to_path_buf(), storage)
+            .await
+            .unwrap();
 
         let mut contact = ContactCache::new(contact_authority);
         contact.display_name = Some("Alice".to_string());

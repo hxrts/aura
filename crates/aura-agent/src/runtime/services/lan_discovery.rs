@@ -5,7 +5,9 @@
 
 use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
 use aura_core::identifiers::AuthorityId;
-use aura_rendezvous::{DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryPacket, RendezvousDescriptor};
+use aura_rendezvous::{
+    DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryPacket, RendezvousDescriptor,
+};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use tokio::net::UdpSocket;

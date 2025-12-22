@@ -28,7 +28,11 @@ impl EffectContext {
     /// Create a new context for an operation scoped to a specific authority and context.
     ///
     /// A fresh `SessionId` is allocated to represent the operation/session boundary.
-    pub fn new(authority_id: AuthorityId, context_id: ContextId, execution_mode: ExecutionMode) -> Self {
+    pub fn new(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Self {
         Self {
             authority_id,
             context_id,

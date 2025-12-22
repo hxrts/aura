@@ -91,6 +91,38 @@ Typed handlers implement concrete effect traits. Type-erased handlers allow dyna
 
 Handlers do not store global state. All required inputs flow through method parameters. This avoids hidden dependencies.
 
+### 2.1 Unified Encrypted Storage (StorageEffects)
+
+Aura uses `StorageEffects` as the *single* persistence interface in application code. The production runtime wires `StorageEffects` through a unified encryption-at-rest wrapper:
+
+- `FilesystemStorageHandler` (raw bytes persistence)
+- `RealSecureStorageHandler` (`SecureStorageEffects` for master-key persistence; Keychain/TPM/Keystore with a filesystem fallback during bring-up)
+- `EncryptedStorage` (implements `StorageEffects` by encrypting/decrypting transparently)
+
+`EncryptedStorage` generates/loads the master key **lazily** on first use, so runtime assembly remains synchronous.
+
+In `aura-agent`, the storage behavior is controlled by `StorageConfig`:
+- `encryption_enabled` (default `true`; testing/bring-up only)
+- `opaque_names` (default `false`; note that prefix-based listing is not meaningful without an index)
+
+Example wiring (simplified):
+
+```rust
+use aura_effects::{
+    EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
+    RealSecureStorageHandler,
+};
+use std::sync::Arc;
+
+let secure = Arc::new(RealSecureStorageHandler::with_base_path(base_path.clone()));
+let storage = EncryptedStorage::new(
+    FilesystemStorageHandler::from_path(base_path.clone()),
+    Arc::new(RealCryptoHandler::new()),
+    secure,
+    EncryptedStorageConfig::default(),
+);
+```
+
 ```rust
 pub struct RealCryptoHandler;
 

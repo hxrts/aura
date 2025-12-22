@@ -190,7 +190,9 @@ impl RecoveryService {
     /// # Returns
     /// The recovery result
     pub async fn cancel(&self, recovery_id: &str, reason: String) -> AgentResult<RecoveryResult> {
-        self.handler.cancel(&self.effects, recovery_id, reason).await
+        self.handler
+            .cancel(&self.effects, recovery_id, reason)
+            .await
     }
 
     /// Get the state of a recovery ceremony
@@ -286,7 +288,8 @@ impl RecoveryService {
             guardian_ids.iter().map(|id| id.to_string()).collect();
 
         // Generate new threshold keys
-        let (new_epoch, key_packages, public_key) = self.effects
+        let (new_epoch, key_packages, public_key) = self
+            .effects
             .rotate_keys(&authority_id, threshold_k, total_n, &guardian_id_strings)
             .await
             .map_err(|e| {

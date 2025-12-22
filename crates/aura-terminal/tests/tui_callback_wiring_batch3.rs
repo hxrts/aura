@@ -39,11 +39,7 @@ use aura_terminal::tui::effects::EffectCommand;
 
 /// Create a test environment with IoContext and AppCore
 async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!(
-        "aura-callback-test3-{}-{}",
-        name,
-        std::process::id()
-    ));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test3-{}", name));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -54,13 +50,14 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         .expect("Failed to init signals");
     let raw_app_core = app_core.raw().clone();
 
-    let ctx = IoContext::with_account_status(
-        app_core.clone(),
-        false,
-        test_dir,
-        format!("test-device-{}", name),
-        TuiMode::Production,
-    );
+    let ctx = IoContext::builder()
+        .with_app_core(app_core.clone())
+        .with_existing_account(false)
+        .with_base_path(test_dir)
+        .with_device_id(format!("test-device-{}", name))
+        .with_mode(TuiMode::Production)
+        .build()
+        .expect("IoContext builder should succeed for tests");
 
     // Create account for testing
     ctx.create_account(&format!("TestUser-{}", name))
@@ -72,11 +69,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
 
 /// Cleanup test directory
 fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!(
-        "aura-callback-test3-{}-{}",
-        name,
-        std::process::id()
-    ));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test3-{}", name));
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 

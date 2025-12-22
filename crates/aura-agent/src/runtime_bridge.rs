@@ -11,13 +11,13 @@ use aura_app::runtime_bridge::{
     RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::IntentError;
-use aura_effects::ReactiveHandler;
 use aura_core::effects::{StorageEffects, ThresholdSigningEffects, TransportEffects};
 use aura_core::identifiers::AuthorityId;
-use aura_core::EffectContext;
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::DeviceId;
+use aura_core::EffectContext;
+use aura_effects::ReactiveHandler;
 use aura_journal::fact::RelationalFact;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -70,10 +70,7 @@ impl AgentRuntimeBridge {
                 continue;
             };
 
-            let content = String::from_utf8(bytes)
-                .map_err(|e| IntentError::internal_error(format!("Invalid {key} UTF-8: {e}")))?;
-
-            let config: StoredAccountConfig = serde_json::from_str(&content)
+            let config: StoredAccountConfig = serde_json::from_slice(&bytes)
                 .map_err(|e| IntentError::internal_error(format!("Failed to parse {key}: {e}")))?;
 
             return Ok(Some((key.to_string(), config)));
@@ -93,12 +90,12 @@ impl AgentRuntimeBridge {
         key: &str,
         config: &StoredAccountConfig,
     ) -> Result<(), IntentError> {
-        let content = serde_json::to_string_pretty(config)
+        let content = serde_json::to_vec_pretty(config)
             .map_err(|e| IntentError::internal_error(format!("Failed to serialize {key}: {e}")))?;
 
         let effects = self.agent.runtime().effects();
         effects
-            .store(key, content.into_bytes())
+            .store(key, content)
             .await
             .map_err(|e| IntentError::storage_error(format!("Failed to write {key}: {e}")))?;
 
@@ -167,8 +164,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
     }
 
-
-
     async fn is_peer_online(&self, peer: AuthorityId) -> bool {
         let effects = self.agent.runtime().effects();
         let context = EffectContext::with_authority(self.agent.authority_id()).context_id();
@@ -204,7 +199,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let effects = self.agent.runtime().effects();
 
             // Sync with the specific peer
-            sync.sync_with_peers(&*effects, peers)
+            sync.sync_with_peers(&effects, peers)
                 .await
                 .map_err(|e| IntentError::internal_error(format!("Sync failed: {}", e)))
         } else {
@@ -681,7 +676,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let invitation = invitation_service
             .import_and_cache(code)
             .await
-            .map_err(|e| IntentError::validation_failed(format!("Invalid invitation code: {}", e)))?;
+            .map_err(|e| {
+                IntentError::validation_failed(format!("Invalid invitation code: {}", e))
+            })?;
 
         Ok(convert_invitation_to_bridge_info(&invitation))
     }
@@ -816,12 +813,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // Time Operations
     // =========================================================================
 
-    #[allow(clippy::disallowed_methods)] // RuntimeBridge is the boundary where effects are implemented
     fn current_time_ms(&self) -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
+        // RuntimeBridge currently exposes a synchronous time accessor.
+        //
+        // Aura's unified time system is effect-injected and async; until this bridge is
+        // updated to support an async time call (or to return an explicitly provided
+        // timestamp), return a deterministic value.
+        0
     }
 
     // =========================================================================

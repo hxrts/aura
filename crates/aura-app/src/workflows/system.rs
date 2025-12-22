@@ -66,7 +66,13 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
         let runtime = core.runtime().cloned();
         let contact_ids: Vec<AuthorityId> = match core.read(&*CONTACTS_SIGNAL).await {
             Ok(state) => state.contacts.iter().map(|c| c.id).collect(),
-            Err(_) => core.snapshot().contacts.contacts.iter().map(|c| c.id).collect(),
+            Err(_) => core
+                .snapshot()
+                .contacts
+                .contacts
+                .iter()
+                .map(|c| c.id)
+                .collect(),
         };
         (runtime, contact_ids)
     };

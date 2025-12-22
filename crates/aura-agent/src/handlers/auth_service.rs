@@ -55,12 +55,14 @@ impl AuthService {
     /// # Returns
     /// An `AuthResult` indicating whether authentication succeeded
     pub async fn authenticate_with_device_key(&self) -> AgentResult<AuthResult> {
-
         // Create challenge
         let challenge = self.handler.create_challenge(&self.effects).await?;
 
         // Sign with device key
-        let response = self.handler.sign_challenge(&self.effects, &challenge).await?;
+        let response = self
+            .handler
+            .sign_challenge(&self.effects, &challenge)
+            .await?;
 
         // Verify the response
         self.handler.verify_response(&self.effects, &response).await

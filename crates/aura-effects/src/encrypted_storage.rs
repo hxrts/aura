@@ -18,6 +18,7 @@ use aura_core::effects::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
 use zeroize::Zeroizing;
 
 /// Nonce size for ChaCha20-Poly1305 (96 bits = 12 bytes)
@@ -30,9 +31,15 @@ const BLOB_VERSION: u8 = 0x01;
 const MASTER_KEY_NAMESPACE: &str = "aura-encryption";
 const MASTER_KEY_ID: &str = "master-key";
 
+type MasterKeyMaterial = Arc<Zeroizing<[u8; 32]>>;
+
 /// Configuration for encrypted storage behavior
 #[derive(Debug, Clone)]
 pub struct EncryptedStorageConfig {
+    /// Enable encryption (and master-key management) for all operations.
+    ///
+    /// This exists primarily for testing and bring-up. Production should keep this `true`.
+    pub enabled: bool,
     /// Use opaque (hashed) file names instead of semantic names
     pub opaque_names: bool,
     /// Custom namespace for master key in secure storage
@@ -44,6 +51,7 @@ pub struct EncryptedStorageConfig {
 impl Default for EncryptedStorageConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             opaque_names: false,
             key_namespace: None,
             key_id: None,
@@ -60,6 +68,12 @@ impl EncryptedStorageConfig {
     /// Enable opaque file names (HKDF-derived from master key + semantic name)
     pub fn with_opaque_names(mut self) -> Self {
         self.opaque_names = true;
+        self
+    }
+
+    /// Enable or disable encryption.
+    pub fn with_encryption_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
         self
     }
 
@@ -103,7 +117,7 @@ impl EncryptedStorageConfig {
 /// ```
 pub struct EncryptedStorage<S, C, Sec>
 where
-    S: StorageEffects + Clone,
+    S: StorageEffects,
     C: CryptoEffects,
     Sec: SecureStorageEffects,
 {
@@ -113,105 +127,34 @@ where
     crypto: Arc<C>,
     /// Secure storage for master key
     secure: Arc<Sec>,
-    /// Cached master key (loaded from secure storage on init, Arc-wrapped for Clone)
-    master_key: Arc<Zeroizing<[u8; 32]>>,
+    /// Cached master key (lazily loaded/created on first use).
+    master_key: RwLock<Option<MasterKeyMaterial>>,
+    /// Single-flight guard for master-key initialization.
+    master_key_init: Mutex<()>,
     /// Configuration options
     config: EncryptedStorageConfig,
 }
 
-impl<S, C, Sec> Clone for EncryptedStorage<S, C, Sec>
-where
-    S: StorageEffects + Clone,
-    C: CryptoEffects,
-    Sec: SecureStorageEffects,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            crypto: self.crypto.clone(),
-            secure: self.secure.clone(),
-            master_key: self.master_key.clone(),
-            config: self.config.clone(),
-        }
-    }
-}
-
 impl<S, C, Sec> EncryptedStorage<S, C, Sec>
 where
-    S: StorageEffects + Clone,
+    S: StorageEffects,
     C: CryptoEffects,
     Sec: SecureStorageEffects,
 {
     /// Create a new encrypted storage handler.
     ///
-    /// This will:
-    /// 1. Check secure storage for existing master key
-    /// 2. Generate and store a new key if none exists
-    /// 3. Cache the key in memory (using Zeroizing for secure cleanup)
-    pub async fn new(
-        inner: S,
-        crypto: Arc<C>,
-        secure: Arc<Sec>,
-        config: EncryptedStorageConfig,
-    ) -> Result<Self, StorageError> {
-        let location = Self::master_key_location(&config);
-        let capabilities = vec![
-            SecureStorageCapability::Read,
-            SecureStorageCapability::Write,
-        ];
-
-        // Try to load existing master key
-        let master_key = if secure.secure_exists(&location).await.map_err(|e| {
-            StorageError::ConfigurationError {
-                reason: format!("Failed to check secure storage: {}", e),
-            }
-        })? {
-            // Load existing key
-            let key_bytes = secure
-                .secure_retrieve(&location, &capabilities)
-                .await
-                .map_err(|e| StorageError::ConfigurationError {
-                    reason: format!("Failed to retrieve master key: {}", e),
-                })?;
-
-            if key_bytes.len() != 32 {
-                return Err(StorageError::ConfigurationError {
-                    reason: format!("Invalid master key length: {}", key_bytes.len()),
-                });
-            }
-
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&key_bytes);
-            Arc::new(Zeroizing::new(key))
-        } else {
-            // Generate new key
-            let key_bytes = crypto.random_bytes(32).await;
-            if key_bytes.len() != 32 {
-                return Err(StorageError::ConfigurationError {
-                    reason: "Failed to generate 32-byte key".to_string(),
-                });
-            }
-
-            // Store in secure storage
-            secure
-                .secure_store(&location, &key_bytes, &capabilities)
-                .await
-                .map_err(|e| StorageError::ConfigurationError {
-                    reason: format!("Failed to store master key: {}", e),
-                })?;
-
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&key_bytes);
-            Arc::new(Zeroizing::new(key))
-        };
-
-        Ok(Self {
+    /// Master key initialization is **lazy**: the key is loaded/created on the first
+    /// `store/retrieve/...` call. This keeps runtime assembly synchronous and avoids
+    /// turning effect-system constructors into async APIs.
+    pub fn new(inner: S, crypto: Arc<C>, secure: Arc<Sec>, config: EncryptedStorageConfig) -> Self {
+        Self {
             inner,
             crypto,
             secure,
-            master_key,
+            master_key: RwLock::new(None),
+            master_key_init: Mutex::new(()),
             config,
-        })
+        }
     }
 
     /// Get the secure storage location for the master key
@@ -225,33 +168,96 @@ where
         )
     }
 
+    async fn get_or_init_master_key(&self) -> Result<MasterKeyMaterial, StorageError> {
+        if let Some(key) = self.master_key.read().await.clone() {
+            return Ok(key);
+        }
+
+        // Single-flight to avoid concurrent "create key" races.
+        let _guard = self.master_key_init.lock().await;
+        if let Some(key) = self.master_key.read().await.clone() {
+            return Ok(key);
+        }
+
+        let location = Self::master_key_location(&self.config);
+        let read_caps = [SecureStorageCapability::Read];
+        let write_caps = [SecureStorageCapability::Write];
+
+        let key_bytes = if self.secure.secure_exists(&location).await.map_err(|e| {
+            StorageError::ConfigurationError {
+                reason: format!("Failed to check secure storage: {}", e),
+            }
+        })? {
+            self.secure
+                .secure_retrieve(&location, &read_caps)
+                .await
+                .map_err(|e| StorageError::ConfigurationError {
+                    reason: format!("Failed to retrieve master key: {}", e),
+                })?
+        } else {
+            let key_bytes = self.crypto.random_bytes(32).await;
+            if key_bytes.len() != 32 {
+                return Err(StorageError::ConfigurationError {
+                    reason: "Failed to generate 32-byte key".to_string(),
+                });
+            }
+
+            self.secure
+                .secure_store(&location, &key_bytes, &write_caps)
+                .await
+                .map_err(|e| StorageError::ConfigurationError {
+                    reason: format!("Failed to store master key: {}", e),
+                })?;
+
+            key_bytes
+        };
+
+        if key_bytes.len() != 32 {
+            return Err(StorageError::ConfigurationError {
+                reason: format!("Invalid master key length: {}", key_bytes.len()),
+            });
+        }
+
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&key_bytes);
+        let key = Arc::new(Zeroizing::new(key));
+        *self.master_key.write().await = Some(key.clone());
+        Ok(key)
+    }
+
     /// Derive an opaque storage key from the semantic key.
     ///
     /// Uses HKDF to derive a deterministic but unpredictable key name
     /// from the master key and semantic key.
-    async fn derive_opaque_key(&self, semantic_key: &str) -> String {
+    async fn derive_opaque_key(&self, semantic_key: &str) -> Result<String, StorageError> {
+        let master_key = self.get_or_init_master_key().await?;
         // Use HKDF to derive a 16-byte key name
         let derived = self
             .crypto
             .hkdf_derive(
-                &**self.master_key,
+                &**master_key,
                 semantic_key.as_bytes(),
                 b"aura-opaque-key-v1",
                 16,
             )
             .await
-            .unwrap_or_else(|_| vec![0u8; 16]);
+            .map_err(|e| StorageError::EncryptionFailed {
+                reason: format!("Opaque key derivation failed: {}", e),
+            })?;
 
         // Encode as hex for filesystem-safe name
-        hex::encode(&derived)
+        Ok(hex::encode(&derived))
     }
 
     /// Get the storage key to use (opaque or semantic)
-    async fn storage_key(&self, key: &str) -> String {
+    async fn storage_key(&self, key: &str) -> Result<String, StorageError> {
+        if !self.config.enabled {
+            return Ok(key.to_string());
+        }
         if self.config.opaque_names {
             self.derive_opaque_key(key).await
         } else {
-            key.to_string()
+            Ok(key.to_string())
         }
     }
 
@@ -260,10 +266,11 @@ where
     /// This binds the encryption to the storage key, providing key separation
     /// and preventing cross-key ciphertext attacks without needing AAD.
     async fn derive_encryption_key(&self, storage_key: &str) -> Result<[u8; 32], StorageError> {
+        let master_key = self.get_or_init_master_key().await?;
         let derived = self
             .crypto
             .hkdf_derive(
-                &**self.master_key,
+                &**master_key,
                 storage_key.as_bytes(),
                 b"aura-storage-encryption-v1",
                 32,
@@ -373,18 +380,24 @@ where
 #[async_trait]
 impl<S, C, Sec> StorageEffects for EncryptedStorage<S, C, Sec>
 where
-    S: StorageEffects + Clone + Send + Sync,
+    S: StorageEffects + Send + Sync,
     C: CryptoEffects + Send + Sync,
     Sec: SecureStorageEffects + Send + Sync,
 {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        let storage_key = self.storage_key(key).await;
+        if !self.config.enabled {
+            return self.inner.store(key, value).await;
+        }
+        let storage_key = self.storage_key(key).await?;
         let encrypted = self.encrypt(key, &value).await?;
         self.inner.store(&storage_key, encrypted).await
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        let storage_key = self.storage_key(key).await;
+        if !self.config.enabled {
+            return self.inner.retrieve(key).await;
+        }
+        let storage_key = self.storage_key(key).await?;
         match self.inner.retrieve(&storage_key).await? {
             Some(blob) => {
                 let decrypted = self.decrypt(key, &blob).await?;
@@ -395,11 +408,17 @@ where
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-        let storage_key = self.storage_key(key).await;
+        if !self.config.enabled {
+            return self.inner.remove(key).await;
+        }
+        let storage_key = self.storage_key(key).await?;
         self.inner.remove(&storage_key).await
     }
 
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        if !self.config.enabled {
+            return self.inner.list_keys(prefix).await;
+        }
         // If using opaque names, we can't filter by prefix effectively
         // Return all keys and let caller filter (or return empty if opaque)
         if self.config.opaque_names {
@@ -411,15 +430,21 @@ where
     }
 
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        let storage_key = self.storage_key(key).await;
+        if !self.config.enabled {
+            return self.inner.exists(key).await;
+        }
+        let storage_key = self.storage_key(key).await?;
         self.inner.exists(&storage_key).await
     }
 
     async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
+        if !self.config.enabled {
+            return self.inner.store_batch(pairs).await;
+        }
         // Encrypt each value
         let mut encrypted_pairs = HashMap::with_capacity(pairs.len());
         for (key, value) in pairs {
-            let storage_key = self.storage_key(&key).await;
+            let storage_key = self.storage_key(&key).await?;
             let encrypted = self.encrypt(&key, &value).await?;
             encrypted_pairs.insert(storage_key, encrypted);
         }
@@ -430,11 +455,14 @@ where
         &self,
         keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+        if !self.config.enabled {
+            return self.inner.retrieve_batch(keys).await;
+        }
         // Map semantic keys to storage keys
         let mut storage_keys = Vec::with_capacity(keys.len());
         let mut key_map = HashMap::with_capacity(keys.len());
         for key in keys {
-            let storage_key = self.storage_key(key).await;
+            let storage_key = self.storage_key(key).await?;
             key_map.insert(storage_key.clone(), key.clone());
             storage_keys.push(storage_key);
         }
@@ -455,10 +483,16 @@ where
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
+        if !self.config.enabled {
+            return self.inner.clear_all().await;
+        }
         self.inner.clear_all().await
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
+        if !self.config.enabled {
+            return self.inner.stats().await;
+        }
         let mut stats = self.inner.stats().await?;
         // Update backend type to indicate encryption
         stats.backend_type = format!("encrypted({})", stats.backend_type);
@@ -469,7 +503,7 @@ where
 // Debug impl that doesn't expose the master key
 impl<S, C, Sec> std::fmt::Debug for EncryptedStorage<S, C, Sec>
 where
-    S: StorageEffects + Clone + std::fmt::Debug,
+    S: StorageEffects + std::fmt::Debug,
     C: CryptoEffects,
     Sec: SecureStorageEffects,
 {
@@ -491,15 +525,14 @@ mod tests {
 
     // Simple mock implementations for testing
 
+    #[derive(Default)]
     struct MockStorage {
         data: RwLock<HashMap<String, Vec<u8>>>,
     }
 
     impl MockStorage {
         fn new() -> Self {
-            Self {
-                data: RwLock::new(HashMap::new()),
-            }
+            Self::default()
         }
     }
 
@@ -584,7 +617,7 @@ mod tests {
         }
 
         async fn random_uuid(&self) -> uuid::Uuid {
-            uuid::Uuid::nil()
+            uuid::Uuid::from_u128(1)
         }
     }
 
@@ -598,12 +631,7 @@ mod tests {
             len: usize,
         ) -> Result<Vec<u8>, aura_core::AuraError> {
             let mut result = vec![0u8; len];
-            for (i, byte) in ikm
-                .iter()
-                .chain(salt.iter())
-                .chain(info.iter())
-                .enumerate()
-            {
+            for (i, byte) in ikm.iter().chain(salt.iter()).chain(info.iter()).enumerate() {
                 result[i % len] ^= byte;
             }
             Ok(result)
@@ -933,14 +961,8 @@ mod tests {
         let crypto = Arc::new(MockCrypto);
         let secure = Arc::new(MockSecureStorage::new());
 
-        let encrypted = EncryptedStorage::new(
-            storage,
-            crypto,
-            secure,
-            EncryptedStorageConfig::default(),
-        )
-        .await
-        .unwrap();
+        let encrypted =
+            EncryptedStorage::new(storage, crypto, secure, EncryptedStorageConfig::default());
 
         // Store data
         let key = "test-key";
@@ -958,19 +980,17 @@ mod tests {
         let crypto = Arc::new(MockCrypto);
         let secure = Arc::new(MockSecureStorage::new());
 
-        // Create encrypted storage (should generate master key)
-        let _encrypted = EncryptedStorage::new(
+        // Create encrypted storage and trigger key init via a write.
+        let encrypted = EncryptedStorage::new(
             storage,
             crypto,
             secure.clone(),
             EncryptedStorageConfig::default(),
-        )
-        .await
-        .unwrap();
+        );
+        encrypted.store("probe", b"probe".to_vec()).await.unwrap();
 
         // Verify master key was stored in secure storage
-        let location =
-            SecureStorageLocation::new(MASTER_KEY_NAMESPACE, MASTER_KEY_ID);
+        let location = SecureStorageLocation::new(MASTER_KEY_NAMESPACE, MASTER_KEY_ID);
         assert!(secure.secure_exists(&location).await.unwrap());
     }
 
@@ -979,8 +999,7 @@ mod tests {
         let secure = Arc::new(MockSecureStorage::new());
 
         // Pre-store a master key
-        let location =
-            SecureStorageLocation::new(MASTER_KEY_NAMESPACE, MASTER_KEY_ID);
+        let location = SecureStorageLocation::new(MASTER_KEY_NAMESPACE, MASTER_KEY_ID);
         let key = vec![1u8; 32];
         secure
             .secure_store(&location, &key, &[SecureStorageCapability::Write])
@@ -996,9 +1015,7 @@ mod tests {
             crypto,
             secure.clone(),
             EncryptedStorageConfig::default(),
-        )
-        .await
-        .unwrap();
+        );
 
         // Store and retrieve to verify encryption works
         encrypted.store("test", b"data".to_vec()).await.unwrap();
@@ -1012,14 +1029,8 @@ mod tests {
         let crypto = Arc::new(MockCrypto);
         let secure = Arc::new(MockSecureStorage::new());
 
-        let encrypted = EncryptedStorage::new(
-            storage,
-            crypto,
-            secure,
-            EncryptedStorageConfig::default(),
-        )
-        .await
-        .unwrap();
+        let encrypted =
+            EncryptedStorage::new(storage, crypto, secure, EncryptedStorageConfig::default());
 
         // Store data
         encrypted.store("test", b"data".to_vec()).await.unwrap();
@@ -1027,7 +1038,7 @@ mod tests {
         // Check raw blob format
         let raw = encrypted.inner().retrieve("test").await.unwrap().unwrap();
         assert_eq!(raw[0], BLOB_VERSION); // Version byte
-        assert!(raw.len() >= 1 + NONCE_SIZE); // At least version + nonce
+        assert!(raw.len() > NONCE_SIZE); // At least version + nonce
     }
 
     #[tokio::test]
@@ -1036,14 +1047,24 @@ mod tests {
         let mut blob = vec![BLOB_VERSION];
         blob.extend_from_slice(&[0u8; NONCE_SIZE]);
         blob.extend_from_slice(b"ciphertext");
-        assert!(EncryptedStorage::<MockStorage, MockCrypto, MockSecureStorage>::is_encrypted(&blob));
+        assert!(
+            EncryptedStorage::<MockStorage, MockCrypto, MockSecureStorage>::is_encrypted(&blob)
+        );
 
         // Plaintext (wrong version)
         let plaintext = b"just plain text";
-        assert!(!EncryptedStorage::<MockStorage, MockCrypto, MockSecureStorage>::is_encrypted(plaintext));
+        assert!(!EncryptedStorage::<
+            MockStorage,
+            MockCrypto,
+            MockSecureStorage,
+        >::is_encrypted(plaintext));
 
         // Empty
-        assert!(!EncryptedStorage::<MockStorage, MockCrypto, MockSecureStorage>::is_encrypted(&[]));
+        assert!(!EncryptedStorage::<
+            MockStorage,
+            MockCrypto,
+            MockSecureStorage,
+        >::is_encrypted(&[]));
     }
 
     #[tokio::test]
@@ -1052,14 +1073,8 @@ mod tests {
         let crypto = Arc::new(MockCrypto);
         let secure = Arc::new(MockSecureStorage::new());
 
-        let encrypted = EncryptedStorage::new(
-            storage,
-            crypto,
-            secure,
-            EncryptedStorageConfig::default(),
-        )
-        .await
-        .unwrap();
+        let encrypted =
+            EncryptedStorage::new(storage, crypto, secure, EncryptedStorageConfig::default());
 
         let stats = encrypted.stats().await.unwrap();
         assert!(stats.backend_type.starts_with("encrypted("));

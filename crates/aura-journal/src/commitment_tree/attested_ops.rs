@@ -33,10 +33,7 @@ impl TreeOp {
     /// This method properly separates the deterministic conversion from ID generation,
     /// using RandomEffects to generate fact IDs that integrate with the effect system.
     /// This enables deterministic testing and proper effect boundaries.
-    pub async fn to_fact(
-        self,
-        random: &dyn RandomEffects,
-    ) -> Result<Fact> {
+    pub async fn to_fact(self, random: &dyn RandomEffects) -> Result<Fact> {
         let attested = AttestedOp {
             tree_op: self.kind,
             parent_commitment: self.parent,

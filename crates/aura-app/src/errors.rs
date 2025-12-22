@@ -123,20 +123,11 @@ pub enum AppError {
         context: String,
     },
     /// Sync protocol failures
-    Sync {
-        stage: SyncStage,
-        details: String,
-    },
+    Sync { stage: SyncStage, details: String },
     /// User action failures (with recovery hint)
-    UserAction {
-        action: String,
-        hint: String,
-    },
+    UserAction { action: String, hint: String },
     /// Internal errors (unexpected conditions)
-    Internal {
-        source: String,
-        message: String,
-    },
+    Internal { source: String, message: String },
 }
 
 impl AppError {
@@ -306,7 +297,10 @@ mod tests {
     #[test]
     fn test_user_action_error() {
         let err = AppError::user_action("Message too long", "Limit is 4096 characters");
-        assert_eq!(err.to_string(), "Message too long - Limit is 4096 characters");
+        assert_eq!(
+            err.to_string(),
+            "Message too long - Limit is 4096 characters"
+        );
         assert_eq!(err.code(), "USER_ACTION");
         assert!(err.is_recoverable());
         assert_eq!(err.toast_level(), ToastSeverity::Info);

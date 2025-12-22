@@ -10,7 +10,9 @@ use crate::core::{AgentError, AgentResult};
 use crate::runtime::AuraEffectSystem;
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
 use aura_chat::types::{ChatMember, ChatRole};
-use aura_chat::{ChatFactService, ChatGroup, ChatGroupId, ChatMessage, ChatMessageId, CHAT_FACT_TYPE_ID};
+use aura_chat::{
+    ChatFactService, ChatGroup, ChatGroupId, ChatMessage, ChatMessageId, CHAT_FACT_TYPE_ID,
+};
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -81,8 +83,13 @@ impl ChatService {
 
     async fn execute_outcome(&self, outcome: GuardOutcome) -> AgentResult<()> {
         if outcome.is_denied() {
-            let reason = outcome.decision.denial_reason().unwrap_or("Operation denied");
-            return Err(AgentError::effects(format!("Guard denied operation: {reason}")));
+            let reason = outcome
+                .decision
+                .denial_reason()
+                .unwrap_or("Operation denied");
+            return Err(AgentError::effects(format!(
+                "Guard denied operation: {reason}"
+            )));
         }
 
         for effect in outcome.effects {
@@ -93,11 +100,18 @@ impl ChatService {
                     // Local fact commits don't require flow charging since there's no peer
                     // recipient at commit time. The cost is tracked here for observability
                     // but actual budget deduction occurs when facts sync to peers.
-                    tracing::trace!(cost, "Chat fact commit - flow cost tracked for sync-time charging");
+                    tracing::trace!(
+                        cost,
+                        "Chat fact commit - flow cost tracked for sync-time charging"
+                    );
                 }
                 EffectCommand::JournalAppend { fact } => {
                     self.effects
-                        .commit_generic_fact_bytes(fact.context_id(), CHAT_FACT_TYPE_ID, fact.to_bytes())
+                        .commit_generic_fact_bytes(
+                            fact.context_id(),
+                            CHAT_FACT_TYPE_ID,
+                            fact.to_bytes(),
+                        )
                         .await
                         .map_err(AgentError::from)?;
                 }
@@ -107,7 +121,10 @@ impl ChatService {
         Ok(())
     }
 
-    async fn load_group_facts(&self, group_id: &ChatGroupId) -> AgentResult<Vec<aura_chat::ChatFact>> {
+    async fn load_group_facts(
+        &self,
+        group_id: &ChatGroupId,
+    ) -> AgentResult<Vec<aura_chat::ChatFact>> {
         let context_id = Self::context_id_for_group(group_id);
         let channel_id = Self::channel_id_for_group(group_id);
 
@@ -119,11 +136,13 @@ impl ChatService {
 
         let mut out = Vec::new();
         for fact in typed {
-            let aura_journal::fact::FactContent::Relational(aura_journal::fact::RelationalFact::Generic {
-                context_id: ctx,
-                binding_type,
-                binding_data,
-            }) = fact.content
+            let aura_journal::fact::FactContent::Relational(
+                aura_journal::fact::RelationalFact::Generic {
+                    context_id: ctx,
+                    binding_type,
+                    binding_data,
+                },
+            ) = fact.content
             else {
                 continue;
             };
@@ -177,7 +196,9 @@ impl ChatService {
         let channel_id = Self::channel_id_for_group(&group_id);
 
         let snapshot = self.build_snapshot(creator_id, context_id).await?;
-        let outcome = self.facts.prepare_create_channel(&snapshot, channel_id, name.to_string(), None, false);
+        let outcome =
+            self.facts
+                .prepare_create_channel(&snapshot, channel_id, name.to_string(), None, false);
         self.execute_outcome(outcome).await?;
 
         let created_at = TimeStamp::PhysicalClock(PhysicalTime {
@@ -286,7 +307,9 @@ impl ChatService {
 
             let msg_uuid = Uuid::parse_str(&message_id).unwrap_or_else(|_| {
                 let h = hash(message_id.as_bytes());
-                Uuid::from_bytes(h[..16].try_into().unwrap())
+                let mut uuid_bytes = [0u8; 16];
+                uuid_bytes.copy_from_slice(&h[..16]);
+                Uuid::from_bytes(uuid_bytes)
             });
 
             let payload_len = payload.len();
@@ -364,22 +387,29 @@ impl ChatService {
     }
 
     /// List groups that this authority has created/observed locally.
-    pub async fn list_user_groups(&self, _authority_id: &AuthorityId) -> AgentResult<Vec<ChatGroup>> {
+    pub async fn list_user_groups(
+        &self,
+        _authority_id: &AuthorityId,
+    ) -> AgentResult<Vec<ChatGroup>> {
         let typed = self
             .effects
             .load_committed_facts(self.effects.authority_id())
             .await
             .map_err(AgentError::from)?;
 
-        let mut by_group: std::collections::HashMap<ChatGroupId, (String, AuthorityId, PhysicalTime)> =
-            std::collections::HashMap::new();
+        let mut by_group: std::collections::HashMap<
+            ChatGroupId,
+            (String, AuthorityId, PhysicalTime),
+        > = std::collections::HashMap::new();
 
         for fact in typed {
-            let aura_journal::fact::FactContent::Relational(aura_journal::fact::RelationalFact::Generic {
-                context_id,
-                binding_type,
-                binding_data,
-            }) = fact.content
+            let aura_journal::fact::FactContent::Relational(
+                aura_journal::fact::RelationalFact::Generic {
+                    context_id,
+                    binding_type,
+                    binding_data,
+                },
+            ) = fact.content
             else {
                 continue;
             };
@@ -459,8 +489,13 @@ impl ChatService {
         ))
     }
 
-    pub async fn get_message(&self, _message_id: &ChatMessageId) -> AgentResult<Option<ChatMessage>> {
-        Err(AgentError::effects("Message lookup by ID is not yet fact-backed"))
+    pub async fn get_message(
+        &self,
+        _message_id: &ChatMessageId,
+    ) -> AgentResult<Option<ChatMessage>> {
+        Err(AgentError::effects(
+            "Message lookup by ID is not yet fact-backed",
+        ))
     }
 
     pub async fn edit_message(
@@ -479,7 +514,9 @@ impl ChatService {
         _requester: AuthorityId,
         _message_id: &ChatMessageId,
     ) -> AgentResult<()> {
-        Err(AgentError::effects("Message deletion is not yet fact-backed"))
+        Err(AgentError::effects(
+            "Message deletion is not yet fact-backed",
+        ))
     }
 
     pub async fn search_messages(

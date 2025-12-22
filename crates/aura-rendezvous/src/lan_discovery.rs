@@ -77,7 +77,11 @@ pub struct LanDiscoveryPacket {
 
 impl LanDiscoveryPacket {
     /// Create a new discovery packet.
-    pub fn new(authority_id: AuthorityId, descriptor: RendezvousDescriptor, timestamp_ms: u64) -> Self {
+    pub fn new(
+        authority_id: AuthorityId,
+        descriptor: RendezvousDescriptor,
+        timestamp_ms: u64,
+    ) -> Self {
         Self {
             version: PROTOCOL_VERSION,
             authority_id,

@@ -2,6 +2,7 @@
 //!
 //! Core effect system components per Layer-6 spec.
 
+use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
 use crate::fact_registry::build_fact_registry;
 use async_trait::async_trait;
@@ -21,14 +22,15 @@ use aura_core::{
 use aura_effects::{
     crypto::RealCryptoHandler,
     database::IndexedJournalHandler,
-    ReactiveHandler,
+    encrypted_storage::{EncryptedStorage, EncryptedStorageConfig},
     secure::RealSecureStorageHandler,
     storage::FilesystemStorageHandler,
     time::{LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler},
+    ReactiveHandler,
 };
-use aura_journal::fact::{Fact as TypedFact, FactContent, RelationalFact};
 use aura_journal::commitment_tree::state::TreeState as JournalTreeState;
 use aura_journal::extensibility::{DomainFact, FactRegistry};
+use aura_journal::fact::{Fact as TypedFact, FactContent, RelationalFact};
 use aura_protocol::amp::{AmpJournalEffects, ChannelMembershipFact, ChannelParticipantEvent};
 use aura_protocol::effects::{
     AuraEffects, AuthorizationEffects, BloomDigest, ChoreographicEffects, ChoreographicRole,
@@ -58,13 +60,17 @@ pub struct AuraEffectSystem {
     composite: CompositeHandlerAdapter,
     flow_budget: FlowBudgetHandler,
     crypto_handler: aura_effects::crypto::RealCryptoHandler,
-    storage_handler: aura_effects::storage::FilesystemStorageHandler,
+    storage_handler: Arc<
+        EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
+    >,
     time_handler: PhysicalTimeHandler,
     logical_clock: LogicalClockHandler,
     order_clock: OrderClockHandler,
     authorization_handler:
         aura_wot::effects::WotAuthorizationHandler<aura_effects::crypto::RealCryptoHandler>,
-    leakage_handler: aura_effects::leakage::ProductionLeakageHandler<FilesystemStorageHandler>,
+    leakage_handler: aura_effects::leakage::ProductionLeakageHandler<
+        EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
+    >,
     journal_policy: Option<(biscuit_auth::Biscuit, aura_wot::BiscuitAuthorizationBridge)>,
     journal_verifying_key: Option<Vec<u8>>,
     authority_id: AuthorityId,
@@ -81,7 +87,7 @@ pub struct AuraEffectSystem {
     /// with a full runtime. It is driven by the ReactiveScheduler pipeline.
     reactive_handler: ReactiveHandler,
     /// Secure storage for cryptographic key material (FROST keys, device keys)
-    secure_storage_handler: RealSecureStorageHandler,
+    secure_storage_handler: Arc<RealSecureStorageHandler>,
     /// Indexed journal handler for efficient fact lookups (B-tree, Bloom, Merkle)
     indexed_journal: Arc<IndexedJournalHandler>,
     /// Test mode flag to bypass authorization guards
@@ -121,6 +127,42 @@ impl BiscuitAuthorizationEffects for NoopBiscuitAuthorizationHandler {
 }
 
 impl AuraEffectSystem {
+    fn normalize_test_config(mut config: AgentConfig) -> AgentConfig {
+        // Avoid writing test data into the user's real data directory (e.g. `~/.aura`).
+        //
+        // Tests that require a specific persistent directory should override
+        // `config.storage.base_path` explicitly.
+        if config.storage.base_path == default_storage_path() {
+            static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+            let temp_root = std::env::temp_dir();
+            let mut attempt = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+            let mut selected: Option<std::path::PathBuf> = None;
+            for _ in 0..256 {
+                let candidate = temp_root.join(format!("aura-agent-test-{attempt}"));
+                match std::fs::create_dir(&candidate) {
+                    Ok(()) => {
+                        selected = Some(candidate);
+                        break;
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                        attempt = attempt.wrapping_add(1);
+                        continue;
+                    }
+                    Err(_) => {
+                        selected = Some(candidate);
+                        break;
+                    }
+                }
+            }
+
+            config.storage.base_path =
+                selected.unwrap_or_else(|| temp_root.join("aura-agent-test-fallback"));
+        }
+        config
+    }
+
     /// Internal helper that builds the effect system with the given composite handler.
     ///
     /// All factory methods delegate to this to avoid code duplication.
@@ -147,12 +189,25 @@ impl AuraEffectSystem {
         };
         let authorization_handler =
             Self::init_authorization_handler(authority, &crypto_handler, &journal_verifying_key);
-        let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
-        let leakage_storage =
-            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
-        let leakage_handler = aura_effects::leakage::ProductionLeakageHandler::with_storage(
-            Arc::new(leakage_storage),
-        );
+        let secure_storage_handler = Arc::new(RealSecureStorageHandler::with_base_path(
+            config.storage.base_path.clone(),
+        ));
+        let encrypted_storage_config = {
+            let mut cfg = EncryptedStorageConfig::default()
+                .with_encryption_enabled(config.storage.encryption_enabled);
+            if config.storage.opaque_names {
+                cfg = cfg.with_opaque_names();
+            }
+            cfg
+        };
+        let storage_handler = Arc::new(EncryptedStorage::new(
+            FilesystemStorageHandler::new(config.storage.base_path.clone()),
+            Arc::new(crypto_handler.clone()),
+            secure_storage_handler.clone(),
+            encrypted_storage_config,
+        ));
+        let leakage_handler =
+            aura_effects::leakage::ProductionLeakageHandler::with_storage(storage_handler.clone());
         let oplog = Arc::new(RwLock::new(Vec::new()));
         let tree_handler = InMemoryTreeHandler::new(oplog.clone());
         let sync_handler = LocalSyncHandler::new(oplog);
@@ -168,7 +223,6 @@ impl AuraEffectSystem {
             .map(|shared| shared.inbox())
             .unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())));
         let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
-        let secure_storage_handler = RealSecureStorageHandler::default();
         // Create indexed journal with capacity for 100k facts
         let indexed_journal = Arc::new(IndexedJournalHandler::with_capacity(100_000));
 
@@ -235,7 +289,10 @@ impl AuraEffectSystem {
         format!("{}/{}/", TYPED_FACT_STORAGE_PREFIX, authority_id)
     }
 
-    fn typed_fact_storage_key(authority_id: AuthorityId, order: &aura_core::time::OrderTime) -> String {
+    fn typed_fact_storage_key(
+        authority_id: AuthorityId,
+        order: &aura_core::time::OrderTime,
+    ) -> String {
         format!(
             "{}{}",
             Self::typed_fact_storage_prefix(authority_id),
@@ -338,6 +395,7 @@ impl AuraEffectSystem {
 
     /// Create new effect system with configuration (testing mode).
     pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
+        let config = Self::normalize_test_config(config);
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Ok(Self::build_internal(
             config,
@@ -362,7 +420,7 @@ impl AuraEffectSystem {
     pub fn testing(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Ok(Self::build_internal(
-            config.clone(),
+            Self::normalize_test_config(config.clone()),
             composite,
             true,
             Some(Self::TEST_CRYPTO_SEED),
@@ -381,7 +439,7 @@ impl AuraEffectSystem {
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Ok(Self::build_internal(
-            config.clone(),
+            Self::normalize_test_config(config.clone()),
             composite,
             true,
             Some(Self::TEST_CRYPTO_SEED),
@@ -453,7 +511,7 @@ impl AuraEffectSystem {
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Ok(Self::build_internal(
-            config.clone(),
+            Self::normalize_test_config(config.clone()),
             composite,
             true,
             Some(Self::TEST_CRYPTO_SEED),
@@ -571,7 +629,9 @@ impl AuraEffectSystem {
         &self,
     ) -> aura_journal::JournalHandler<
         RealCryptoHandler,
-        FilesystemStorageHandler,
+        Arc<
+            EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
+        >,
         NoopBiscuitAuthorizationHandler,
         FlowBudgetHandler,
     > {
@@ -897,7 +957,9 @@ impl TransportEffects for AuraEffectSystem {
             return shared.is_peer_online(peer);
         }
 
-        self.transport_handler.is_channel_established(context, peer).await
+        self.transport_handler
+            .is_channel_established(context, peer)
+            .await
     }
 
     async fn get_transport_stats(&self) -> TransportStats {

@@ -118,8 +118,8 @@ impl ThresholdSigningService {
             "1",
         );
 
-
-        let key_package = self.effects
+        let key_package = self
+            .effects
             .secure_retrieve(
                 &location,
                 &[
@@ -131,7 +131,8 @@ impl ThresholdSigningService {
             .map_err(|e| AuraError::internal(format!("Failed to load key package: {}", e)))?;
 
         // Direct Ed25519 signing (no FROST overhead)
-        let signature = self.effects
+        let signature = self
+            .effects
             .sign_with_key(message, &key_package, SigningMode::SingleSigner)
             .await
             .map_err(|e| AuraError::internal(format!("Ed25519 signing failed: {}", e)))?;
@@ -165,8 +166,8 @@ impl ThresholdSigningService {
             format!("{}", state.my_signer_index.unwrap_or(1)),
         );
 
-
-        let key_package = self.effects
+        let key_package = self
+            .effects
             .secure_retrieve(
                 &location,
                 &[
@@ -178,14 +179,16 @@ impl ThresholdSigningService {
             .map_err(|e| AuraError::internal(format!("Failed to load key package: {}", e)))?;
 
         // Generate nonces
-        let nonces = self.effects
+        let nonces = self
+            .effects
             .frost_generate_nonces(&key_package)
             .await
             .map_err(|e| AuraError::internal(format!("Nonce generation failed: {}", e)))?;
 
         // Create signing package (single participant)
         let participants = vec![state.my_signer_index.unwrap_or(1)];
-        let signing_package = self.effects
+        let signing_package = self
+            .effects
             .frost_create_signing_package(
                 message,
                 std::slice::from_ref(&nonces),
@@ -196,13 +199,15 @@ impl ThresholdSigningService {
             .map_err(|e| AuraError::internal(format!("Signing package creation failed: {}", e)))?;
 
         // Sign
-        let share = self.effects
+        let share = self
+            .effects
             .frost_sign_share(&signing_package, &key_package, &nonces)
             .await
             .map_err(|e| AuraError::internal(format!("Signature share creation failed: {}", e)))?;
 
         // Aggregate (trivial for single signer)
-        let signature = self.effects
+        let signature = self
+            .effects
             .frost_aggregate_signatures(&signing_package, &[share])
             .await
             .map_err(|e| AuraError::internal(format!("Signature aggregation failed: {}", e)))?;
@@ -247,9 +252,9 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             "Bootstrapping authority with 1-of-1 Ed25519 keys"
         );
 
-
         // Generate 1-of-1 signing keys (will use Ed25519 single-signer mode)
-        let key_result = self.effects
+        let key_result = self
+            .effects
             .generate_signing_keys(1, 1)
             .await
             .map_err(|e| AuraError::internal(format!("Key generation failed: {}", e)))?;
@@ -279,7 +284,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             )
             .await
             .map_err(|e| AuraError::internal(format!("Failed to store key package: {}", e)))?;
-
 
         // Create context state
         let config = ThresholdConfig::new(1, 1)?;
@@ -457,7 +461,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
         let new_epoch = current_epoch + 1;
 
-
         // Generate new threshold keys using FROST
         // For threshold >= 2, this uses FROST DKG
         // For threshold == 1 with max_signers == 1, this uses Ed25519
@@ -471,7 +474,8 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 .map_err(|e| AuraError::internal(format!("FROST key rotation failed: {}", e)))?
         } else {
             // Single-signer mode (shouldn't happen for guardian ceremony, but handle it)
-            let result = self.effects
+            let result = self
+                .effects
                 .generate_signing_keys(new_threshold, new_total_participants)
                 .await
                 .map_err(|e| AuraError::internal(format!("Key generation failed: {}", e)))?;
@@ -580,9 +584,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 ],
             )
             .await
-            .map_err(|e| {
-                AuraError::internal(format!("Failed to store threshold config: {}", e))
-            })?;
+            .map_err(|e| AuraError::internal(format!("Failed to store threshold config: {}", e)))?;
 
         tracing::debug!(
             ?authority,
@@ -669,8 +671,8 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 ))
             })?;
 
-        let config_metadata: ThresholdConfigMetadata =
-            serde_json::from_slice(&config_bytes).map_err(|e| {
+        let config_metadata: ThresholdConfigMetadata = serde_json::from_slice(&config_bytes)
+            .map_err(|e| {
                 AuraError::internal(format!("Failed to deserialize threshold config: {}", e))
             })?;
 
@@ -748,7 +750,11 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             format!("{}", failed_epoch),
         );
 
-        if let Err(e) = self.effects.secure_delete(&pubkey_location, delete_caps).await {
+        if let Err(e) = self
+            .effects
+            .secure_delete(&pubkey_location, delete_caps)
+            .await
+        {
             tracing::debug!(
                 ?authority,
                 failed_epoch,
@@ -758,7 +764,11 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         }
 
         // Delete the threshold config metadata
-        if let Err(e) = self.effects.secure_delete(&config_location, delete_caps).await {
+        if let Err(e) = self
+            .effects
+            .secure_delete(&config_location, delete_caps)
+            .await
+        {
             tracing::debug!(
                 ?authority,
                 failed_epoch,
@@ -776,7 +786,11 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                     guardian_id,
                 );
 
-                if let Err(e) = self.effects.secure_delete(&share_location, delete_caps).await {
+                if let Err(e) = self
+                    .effects
+                    .secure_delete(&share_location, delete_caps)
+                    .await
+                {
                     tracing::debug!(
                         ?authority,
                         failed_epoch,

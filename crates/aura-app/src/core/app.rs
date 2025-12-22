@@ -272,7 +272,7 @@ impl AppCore {
     /// ```
     pub async fn init_signals(&mut self) -> Result<(), IntentError> {
         // Idempotent init: if signals are already registered, don't re-register.
-        let chat_id = (&*crate::signal_defs::CHAT_SIGNAL).id();
+        let chat_id = (*crate::signal_defs::CHAT_SIGNAL).id();
         if self.reactive.is_registered(chat_id) {
             return Ok(());
         }

@@ -41,11 +41,17 @@ pub enum GuardianRequestFact {
 
 impl GuardianRequestFact {
     pub fn requested(context_id: ContextId, payload: GuardianRequestPayload) -> Self {
-        Self::Requested { context_id, payload }
+        Self::Requested {
+            context_id,
+            payload,
+        }
     }
 
     pub fn cancelled(context_id: ContextId, payload: GuardianRequestPayload) -> Self {
-        Self::Cancelled { context_id, payload }
+        Self::Cancelled {
+            context_id,
+            payload,
+        }
     }
 }
 
@@ -61,6 +67,7 @@ impl DomainFact for GuardianRequestFact {
         }
     }
 
+    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
         bincode::serialize(self).expect("GuardianRequestFact must serialize")
     }
@@ -110,7 +117,10 @@ impl FactReducer for GuardianRequestFactReducer {
 }
 
 /// Best-effort decode helper when iterating Generic facts.
-pub fn parse_guardian_request(binding_type: &str, binding_data: &[u8]) -> Option<GuardianRequestFact> {
+pub fn parse_guardian_request(
+    binding_type: &str,
+    binding_data: &[u8],
+) -> Option<GuardianRequestFact> {
     if binding_type != GUARDIAN_REQUEST_FACT_TYPE_ID {
         return None;
     }

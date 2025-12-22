@@ -20,15 +20,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aura_agent::core::{AgentBuilder, AgentConfig, AuraAgent};
-use aura_agent::EffectContext;
 use aura_agent::handlers::ShareableInvitation;
+use aura_agent::EffectContext;
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::{AppConfig, AppCore};
-use aura_core::effects::ExecutionMode;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::effects::ExecutionMode;
 use aura_core::identifiers::AuthorityId;
-use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::handlers::tui::create_account;
+use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::ids;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
@@ -96,21 +96,22 @@ async fn setup_test_env(name: &str) -> TestEnv {
     let device_id_str = format!("test-device-{}", name);
     let display_name = format!("DemoUser-{}", name);
 
-    let (authority_id, context_id) =
-        create_account(&test_dir, &device_id_str, &display_name)
-            .await
-            .expect("Failed to create account");
+    let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &display_name)
+        .await
+        .expect("Failed to create account");
 
-    let mut agent_config = AgentConfig::default();
-    agent_config.device_id = ids::device_id(&device_id_str);
-    agent_config.storage.base_path = test_dir.clone();
+    let agent_config = AgentConfig {
+        device_id: ids::device_id(&device_id_str),
+        storage: aura_agent::core::config::StorageConfig {
+            base_path: test_dir.clone(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
     let seed = 2024u64;
-    let effect_ctx = EffectContext::new(
-        authority_id,
-        context_id,
-        ExecutionMode::Simulation { seed },
-    );
+    let effect_ctx =
+        EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
     let agent = AgentBuilder::new()
         .with_config(agent_config)
@@ -131,14 +132,14 @@ async fn setup_test_env(name: &str) -> TestEnv {
         .await
         .expect("Failed to init signals");
 
-    #[allow(deprecated)] // Tests use legacy helper; production uses IoContext::builder()
-    let ctx = IoContext::with_account_status(
-        initialized_app_core.clone(),
-        true,
-        test_dir.clone(),
-        device_id_str,
-        TuiMode::Production,
-    );
+    let ctx = IoContext::builder()
+        .with_app_core(initialized_app_core.clone())
+        .with_existing_account(true)
+        .with_base_path(test_dir.clone())
+        .with_device_id(device_id_str)
+        .with_mode(TuiMode::Production)
+        .build()
+        .expect("IoContext builder should succeed for tests");
 
     TestEnv {
         ctx: Arc::new(ctx),
@@ -366,19 +367,19 @@ async fn test_complete_demo_invitation_flow() {
 
     env.ctx
         .dispatch(EffectCommand::ImportInvitation {
-        code: alice_code.clone(),
-    })
-    .await
-    .expect("Alice import should succeed");
+            code: alice_code.clone(),
+        })
+        .await
+        .expect("Alice import should succeed");
     println!("  Alice's invitation imported successfully");
     wait_for_contact(&env.app_core, alice_invitation.sender_id).await;
 
     env.ctx
         .dispatch(EffectCommand::ImportInvitation {
-        code: carol_code.clone(),
-    })
-    .await
-    .expect("Carol import should succeed");
+            code: carol_code.clone(),
+        })
+        .await
+        .expect("Carol import should succeed");
     println!("  Carol's invitation imported successfully");
     wait_for_contact(&env.app_core, carol_invitation.sender_id).await;
 
@@ -465,8 +466,7 @@ async fn test_complete_demo_invitation_flow() {
         chat_state
             .messages
             .iter()
-            .any(|m| m.channel_id == guardians.id
-                && m.content.contains("Hello Alice and Carol!")),
+            .any(|m| m.channel_id == guardians.id && m.content.contains("Hello Alice and Carol!")),
         "Expected the greeting message to appear in the selected channel messages"
     );
 

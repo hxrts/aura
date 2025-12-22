@@ -37,7 +37,7 @@ impl SessionOperations {
         self.persist_metadata(_session_id, entry).await?;
         HandlerUtilities::append_relational_fact(
             &self.authority_context,
-            &*self.effects(),
+            self.effects(),
             self.guard_context(),
             "session_metadata_updated",
             &SessionMetadataFact {
@@ -67,7 +67,7 @@ impl SessionOperations {
         self.persist_participants(_session_id, participants).await?;
         HandlerUtilities::append_relational_fact(
             &self.authority_context,
-            &*self.effects(),
+            self.effects(),
             self.guard_context(),
             "session_participant_added",
             &SessionParticipantsFact {
@@ -93,7 +93,7 @@ impl SessionOperations {
             self.persist_participants(_session_id, participants).await?;
             HandlerUtilities::append_relational_fact(
                 &self.authority_context,
-                &*self.effects(),
+                self.effects(),
                 self.guard_context(),
                 "session_participant_removed",
                 &SessionParticipantsFact {

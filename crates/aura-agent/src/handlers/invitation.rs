@@ -10,16 +10,16 @@ use super::invitation_bridge::execute_guard_outcome;
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::RandomEffects;
 use aura_core::effects::storage::StorageEffects;
+use aura_core::effects::RandomEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
-use aura_protocol::effects::EffectApiEffects;
-use aura_journal::DomainFact;
-use aura_journal::fact::{FactContent, RelationalFact};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
+use aura_journal::fact::{FactContent, RelationalFact};
+use aura_journal::DomainFact;
+use aura_protocol::effects::EffectApiEffects;
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -242,7 +242,9 @@ impl InvitationHandler {
             effects
                 .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID, fact.to_bytes())
                 .await
-                .map_err(|e| crate::core::AgentError::effects(format!("commit contact fact: {e}")))?;
+                .map_err(|e| {
+                    crate::core::AgentError::effects(format!("commit contact fact: {e}"))
+                })?;
         }
 
         // Update cache if we have this invitation
@@ -278,9 +280,7 @@ impl InvitationHandler {
                     } else {
                         inv.sender_id
                     };
-                    let nickname = nickname
-                        .clone()
-                        .unwrap_or_else(|| other.to_string());
+                    let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
                     return Ok(Some((other, nickname)));
                 }
             }
@@ -666,7 +666,7 @@ mod tests {
 
         let invitation = handler
             .create_invitation(
-                &*effects,
+                &effects,
                 receiver_id,
                 InvitationType::Contact {
                     nickname: Some("alice".to_string()),
@@ -695,7 +695,7 @@ mod tests {
 
         let invitation = handler
             .create_invitation(
-                &*effects,
+                &effects,
                 receiver_id,
                 InvitationType::Guardian {
                     subject_authority: AuthorityId::new_from_entropy([95u8; 32]),
@@ -707,7 +707,7 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .accept_invitation(&*effects, &invitation.invitation_id)
+            .accept_invitation(&effects, &invitation.invitation_id)
             .await
             .unwrap();
 
@@ -726,7 +726,7 @@ mod tests {
 
         let invitation = handler
             .create_invitation(
-                &*effects,
+                &effects,
                 receiver_id,
                 InvitationType::Channel {
                     block_id: "block-123".to_string(),
@@ -738,7 +738,7 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .decline_invitation(&*effects, &invitation.invitation_id)
+            .decline_invitation(&effects, &invitation.invitation_id)
             .await
             .unwrap();
 
@@ -750,7 +750,8 @@ mod tests {
     async fn importing_and_accepting_contact_invitation_commits_contact_fact() {
         let own_authority = AuthorityId::new_from_entropy([120u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
+        let effects =
+            Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
 
         let mut authority_context = AuthorityContext::new(own_authority);
         authority_context.add_context(RelationalContext {
@@ -775,14 +776,14 @@ mod tests {
         let code = shareable.to_code();
 
         let imported = handler
-            .import_invitation_code(&*effects, &code)
+            .import_invitation_code(&effects, &code)
             .await
             .unwrap();
         assert_eq!(imported.sender_id, sender_id);
         assert_eq!(imported.receiver_id, own_authority);
 
         handler
-            .accept_invitation(&*effects, &imported.invitation_id)
+            .accept_invitation(&effects, &imported.invitation_id)
             .await
             .unwrap();
 
@@ -861,13 +862,13 @@ mod tests {
         let code = shareable.to_code();
 
         let imported = handler_import
-            .import_invitation_code(&*effects, &code)
+            .import_invitation_code(&effects, &code)
             .await
             .unwrap();
 
         // Accept using a separate handler instance to ensure we don't rely on in-memory caches.
         handler_accept
-            .accept_invitation(&*effects, &imported.invitation_id)
+            .accept_invitation(&effects, &imported.invitation_id)
             .await
             .unwrap();
 
@@ -911,7 +912,7 @@ mod tests {
 
         let invitation = handler
             .create_invitation(
-                &*effects,
+                &effects,
                 receiver_id,
                 InvitationType::Contact { nickname: None },
                 None,
@@ -921,7 +922,7 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .cancel_invitation(&*effects, &invitation.invitation_id)
+            .cancel_invitation(&effects, &invitation.invitation_id)
             .await
             .unwrap();
 
@@ -940,11 +941,10 @@ mod tests {
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
         let handler = InvitationHandler::new(authority_context).unwrap();
 
-
         // Create 3 invitations
         let inv1 = handler
             .create_invitation(
-                &*effects,
+                &effects,
                 AuthorityId::new_from_entropy([101u8; 32]),
                 InvitationType::Contact { nickname: None },
                 None,
@@ -955,7 +955,7 @@ mod tests {
 
         let inv2 = handler
             .create_invitation(
-                &*effects,
+                &effects,
                 AuthorityId::new_from_entropy([102u8; 32]),
                 InvitationType::Contact { nickname: None },
                 None,
@@ -966,7 +966,7 @@ mod tests {
 
         let _inv3 = handler
             .create_invitation(
-                &*effects,
+                &effects,
                 AuthorityId::new_from_entropy([103u8; 32]),
                 InvitationType::Contact { nickname: None },
                 None,
@@ -977,11 +977,11 @@ mod tests {
 
         // Accept one, decline another
         handler
-            .accept_invitation(&*effects, &inv1.invitation_id)
+            .accept_invitation(&effects, &inv1.invitation_id)
             .await
             .unwrap();
         handler
-            .decline_invitation(&*effects, &inv2.invitation_id)
+            .decline_invitation(&effects, &inv2.invitation_id)
             .await
             .unwrap();
 

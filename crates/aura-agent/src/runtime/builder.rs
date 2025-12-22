@@ -15,11 +15,11 @@
 use std::sync::Arc;
 
 use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
+use super::shared_transport::SharedTransport;
 use super::system::RuntimeSystem;
 use super::{ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager};
 use crate::core::AgentConfig;
 use aura_core::identifiers::AuthorityId;
-use super::shared_transport::SharedTransport;
 
 // Re-export ExecutionMode from aura_core for convenience
 pub use aura_core::effects::ExecutionMode;

@@ -174,7 +174,9 @@ fn handle_account_setup_key_queue(
                         s.start_creating();
                     }
                 });
-                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }));
+                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateAccount {
+                    name,
+                }));
             }
         }
         KeyCode::Esc => {

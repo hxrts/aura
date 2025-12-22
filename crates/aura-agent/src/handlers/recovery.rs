@@ -553,7 +553,7 @@ mod tests {
 
         let request = handler
             .initiate(
-                &*effects,
+                &effects,
                 RecoveryOperation::AddDevice {
                     device_public_key: vec![0u8; 32],
                 },
@@ -584,7 +584,7 @@ mod tests {
 
         let request = handler
             .initiate(
-                &*effects,
+                &effects,
                 RecoveryOperation::RemoveDevice { leaf_index: 0 },
                 guardians.clone(),
                 2, // 2-of-2
@@ -602,10 +602,7 @@ mod tests {
             share_data: None,
             approved_at: 12345,
         };
-        let state = handler
-            .submit_approval(&*effects, approval1)
-            .await
-            .unwrap();
+        let state = handler.submit_approval(&effects, approval1).await.unwrap();
 
         match state {
             RecoveryState::Initiated { collected, .. } => {
@@ -622,10 +619,7 @@ mod tests {
             share_data: None,
             approved_at: 12346,
         };
-        let state = handler
-            .submit_approval(&*effects, approval2)
-            .await
-            .unwrap();
+        let state = handler.submit_approval(&effects, approval2).await.unwrap();
 
         match state {
             RecoveryState::CollectingShares { collected, .. } => {
@@ -646,7 +640,7 @@ mod tests {
 
         let request = handler
             .initiate(
-                &*effects,
+                &effects,
                 RecoveryOperation::ReplaceTree {
                     new_public_key: vec![0u8; 32],
                 },
@@ -666,14 +660,11 @@ mod tests {
             share_data: Some(vec![1, 2, 3]),
             approved_at: 12345,
         };
-        handler
-            .submit_approval(&*effects, approval)
-            .await
-            .unwrap();
+        handler.submit_approval(&effects, approval).await.unwrap();
 
         // Complete recovery
         let result = handler
-            .complete(&*effects, &request.recovery_id)
+            .complete(&effects, &request.recovery_id)
             .await
             .unwrap();
 
@@ -698,7 +689,7 @@ mod tests {
 
         let request = handler
             .initiate(
-                &*effects,
+                &effects,
                 RecoveryOperation::UpdateGuardians {
                     new_guardians: vec![],
                     new_threshold: 1,
@@ -712,11 +703,7 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .cancel(
-                &*effects,
-                &request.recovery_id,
-                "User cancelled".to_string(),
-            )
+            .cancel(&effects, &request.recovery_id, "User cancelled".to_string())
             .await
             .unwrap();
 
@@ -740,7 +727,7 @@ mod tests {
 
         let result = handler
             .initiate(
-                &*effects,
+                &effects,
                 RecoveryOperation::AddDevice {
                     device_public_key: vec![0u8; 32],
                 },

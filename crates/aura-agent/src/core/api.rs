@@ -106,6 +106,7 @@ impl AuraAgent {
     /// - Multi-device signing (your devices)
     /// - Guardian recovery approvals (cross-authority)
     /// - Group operation approvals (shared authority)
+    ///
     /// Returns a new lightweight service instance (services are stateless wrappers).
     pub fn threshold_signing(&self) -> ThresholdSigningService {
         ThresholdSigningService::new(self.runtime.effects())
@@ -179,9 +180,7 @@ impl AuraAgent {
                                     let effects = self.runtime.effects();
 
                                     use aura_core::effects::ThresholdSigningEffects;
-                                    effects
-                                        .commit_key_rotation(&authority_id, new_epoch)
-                                        .await
+                                    effects.commit_key_rotation(&authority_id, new_epoch).await
                                 };
 
                                 match commit_result {
@@ -308,7 +307,10 @@ impl AgentBuilder {
         if let Some(sync_config) = sync_config {
             builder = builder.with_sync_config(sync_config);
         }
-        let runtime = builder.build(&temp_context).await.map_err(AgentError::runtime)?;
+        let runtime = builder
+            .build(&temp_context)
+            .await
+            .map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }

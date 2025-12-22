@@ -5,7 +5,7 @@
 
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::{identifiers::DeviceId, AuraResult};
-use aura_effects::{EncryptedStorageHandler, FilesystemStorageHandler};
+use aura_effects::FilesystemStorageHandler;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -28,8 +28,6 @@ pub enum StorageBackend {
     Memory(Arc<FilesystemStorageHandler>),
     /// Filesystem storage
     Filesystem(Arc<FilesystemStorageHandler>),
-    /// Encrypted memory storage
-    Encrypted(Arc<EncryptedStorageHandler>),
 }
 
 impl StorageBackend {
@@ -38,7 +36,6 @@ impl StorageBackend {
         match self {
             StorageBackend::Memory(_) => "memory",
             StorageBackend::Filesystem(_) => "filesystem",
-            StorageBackend::Encrypted(_) => "encrypted",
         }
     }
 
@@ -53,7 +50,6 @@ impl StorageBackend {
         match self {
             StorageBackend::Memory(handler) => operation(handler.as_ref()).await,
             StorageBackend::Filesystem(handler) => operation(handler.as_ref()).await,
-            StorageBackend::Encrypted(handler) => operation(handler.as_ref()).await,
         }
     }
 }
@@ -115,20 +111,6 @@ impl StorageCoordinator {
     pub fn with_memory(device_id: DeviceId) -> Self {
         let primary = StorageBackend::Memory(Arc::new(FilesystemStorageHandler::from_path(
             std::env::temp_dir().join("aura_memory_storage"),
-        )));
-        Self {
-            primary,
-            replicas: Vec::new(),
-            device_id,
-            routing_rules: HashMap::new(),
-        }
-    }
-
-    /// Create coordinator with encrypted storage
-    pub fn with_encrypted(device_id: DeviceId, encryption_key: Option<Vec<u8>>) -> Self {
-        let primary = StorageBackend::Encrypted(Arc::new(EncryptedStorageHandler::from_path(
-            "/tmp/storage".to_string().into(),
-            encryption_key,
         )));
         Self {
             primary,
@@ -375,8 +357,10 @@ mod tests {
             .with_primary(StorageBackend::Memory(Arc::new(
                 FilesystemStorageHandler::from_path(std::env::temp_dir().join("aura_test_storage")),
             )))
-            .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::from_path("/tmp/test".to_string().into(), None),
+            .add_replica(StorageBackend::Filesystem(Arc::new(
+                FilesystemStorageHandler::from_path(
+                    std::env::temp_dir().join("aura_test_storage_replica"),
+                ),
             )))
             .build()
             .unwrap();
@@ -402,10 +386,12 @@ mod tests {
             .with_primary(StorageBackend::Memory(Arc::new(
                 FilesystemStorageHandler::from_path(std::env::temp_dir().join("aura_test_storage")),
             )))
-            .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::from_path("/tmp/test".to_string().into(), None),
+            .add_replica(StorageBackend::Filesystem(Arc::new(
+                FilesystemStorageHandler::from_path(
+                    std::env::temp_dir().join("aura_test_storage_replica"),
+                ),
             )))
-            .with_routing_rule("secret_".to_string(), "encrypted".to_string())
+            .with_routing_rule("secret_".to_string(), "filesystem".to_string())
             .build()
             .unwrap();
 
@@ -418,10 +404,10 @@ mod tests {
             "memory"
         );
 
-        // Secret data should go to encrypted backend
+        // Secret data should go to filesystem backend
         assert_eq!(
             coordinator.select_backend(secret_key).backend_type(),
-            "encrypted"
+            "filesystem"
         );
     }
 }

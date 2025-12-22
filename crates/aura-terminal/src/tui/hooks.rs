@@ -280,7 +280,10 @@ async fn maybe_emit_reactive_error(
 
     *last_emitted = Some(message.clone());
     let _ = reactive
-        .emit(&*ERROR_SIGNAL, Some(AppError::internal("tui:reactive", message)))
+        .emit(
+            &*ERROR_SIGNAL,
+            Some(AppError::internal("tui:reactive", message)),
+        )
         .await;
 }
 

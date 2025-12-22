@@ -297,6 +297,7 @@ impl DomainFact for SocialFact {
         }
     }
 
+    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).expect("SocialFact must serialize")
     }
@@ -337,14 +338,12 @@ impl FactReducer for SocialFactReducer {
         }
 
         let (sub_type, data) = match &fact {
-            SocialFact::BlockCreated { block_id, .. } => (
-                "block-created".to_string(),
-                block_id.0.to_vec(),
-            ),
-            SocialFact::BlockDeleted { block_id, .. } => (
-                "block-deleted".to_string(),
-                block_id.0.to_vec(),
-            ),
+            SocialFact::BlockCreated { block_id, .. } => {
+                ("block-created".to_string(), block_id.0.to_vec())
+            }
+            SocialFact::BlockDeleted { block_id, .. } => {
+                ("block-deleted".to_string(), block_id.0.to_vec())
+            }
             SocialFact::ResidentJoined { authority_id, .. } => (
                 "resident-joined".to_string(),
                 authority_id.to_string().into_bytes(),
@@ -361,20 +360,29 @@ impl FactReducer for SocialFactReducer {
                 "steward-revoked".to_string(),
                 authority_id.to_string().into_bytes(),
             ),
-            SocialFact::StorageUpdated { block_id, .. } => (
-                "storage-updated".to_string(),
-                block_id.0.to_vec(),
-            ),
-            SocialFact::NeighborhoodCreated { neighborhood_id, .. } => (
+            SocialFact::StorageUpdated { block_id, .. } => {
+                ("storage-updated".to_string(), block_id.0.to_vec())
+            }
+            SocialFact::NeighborhoodCreated {
+                neighborhood_id, ..
+            } => (
                 "neighborhood-created".to_string(),
                 neighborhood_id.0.to_vec(),
             ),
-            SocialFact::BlockJoinedNeighborhood { block_id, neighborhood_id, .. } => {
+            SocialFact::BlockJoinedNeighborhood {
+                block_id,
+                neighborhood_id,
+                ..
+            } => {
                 let mut data = block_id.0.to_vec();
                 data.extend_from_slice(&neighborhood_id.0);
                 ("block-joined-neighborhood".to_string(), data)
             }
-            SocialFact::BlockLeftNeighborhood { block_id, neighborhood_id, .. } => {
+            SocialFact::BlockLeftNeighborhood {
+                block_id,
+                neighborhood_id,
+                ..
+            } => {
                 let mut data = block_id.0.to_vec();
                 data.extend_from_slice(&neighborhood_id.0);
                 ("block-left-neighborhood".to_string(), data)
@@ -416,7 +424,10 @@ mod tests {
         );
 
         let bytes = fact.to_bytes();
-        let restored = SocialFact::from_bytes(&bytes).expect("should deserialize");
+        let restored = match SocialFact::from_bytes(&bytes) {
+            Some(restored) => restored,
+            None => panic!("should deserialize"),
+        };
 
         assert_eq!(fact, restored);
     }
@@ -432,7 +443,10 @@ mod tests {
         );
 
         let bytes = fact.to_bytes();
-        let restored = SocialFact::from_bytes(&bytes).expect("should deserialize");
+        let restored = match SocialFact::from_bytes(&bytes) {
+            Some(restored) => restored,
+            None => panic!("should deserialize"),
+        };
 
         assert_eq!(fact, restored);
     }
@@ -442,13 +456,16 @@ mod tests {
         let fact = SocialFact::storage_updated_ms(
             test_block_id(),
             test_context_id(),
-            1024 * 1024, // 1 MB used
+            1024 * 1024,      // 1 MB used
             10 * 1024 * 1024, // 10 MB total
             1234567890,
         );
 
         let bytes = fact.to_bytes();
-        let restored = SocialFact::from_bytes(&bytes).expect("should deserialize");
+        let restored = match SocialFact::from_bytes(&bytes) {
+            Some(restored) => restored,
+            None => panic!("should deserialize"),
+        };
 
         assert_eq!(fact, restored);
     }
@@ -480,9 +497,11 @@ mod tests {
             "Test Block".to_string(),
         );
 
-        let binding = reducer
-            .reduce(test_context_id(), SOCIAL_FACT_TYPE_ID, &fact.to_bytes())
-            .expect("should reduce");
+        let binding = match reducer.reduce(test_context_id(), SOCIAL_FACT_TYPE_ID, &fact.to_bytes())
+        {
+            Some(binding) => binding,
+            None => panic!("should reduce"),
+        };
 
         assert_eq!(binding.context_id, test_context_id());
         match binding.binding_type {

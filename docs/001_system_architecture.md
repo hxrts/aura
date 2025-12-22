@@ -141,9 +141,10 @@ The handler registration system enables clean composition across crate boundarie
 #### 3.3.1 Split Layer 3 Architecture
 
 **`aura-effects`** - Stateless Effect Implementations:
-- Production handlers: `RealCryptoHandler`, `TcpTransportHandler`, `FilesystemStorageHandler`, `PhysicalTimeHandler`
+- Production handlers: `RealCryptoHandler`, `FilesystemStorageHandler`, `RealSecureStorageHandler`, `PhysicalTimeHandler`
+- Unified encryption-at-rest: `EncryptedStorage` (implements `StorageEffects` by composing `StorageEffects` + `CryptoEffects` + `SecureStorageEffects`)
 - Each implements exactly one effect trait independently
-- Pure input→output transformations with no internal state
+- Pure input→output transformations with minimal internal caching (no cross-operation coordination)
 - Reusable across any context (unit tests, integration tests, production)
 
 **`aura-composition`** - Handler Assembly Infrastructure:
@@ -158,6 +159,17 @@ The handler registration system enables clean composition across crate boundarie
 - Final runtime assembly point for effect system composition
 
 #### 3.3.2 Registration Flow Across Layers
+
+#### 3.3.3 Unified Encrypted Storage
+
+Aura treats `StorageEffects` as the *single* persistence interface. All application data is written through `StorageEffects`, and the production runtime wires `StorageEffects` to `EncryptedStorage` (Layer 3), which wraps an underlying storage backend (e.g. `FilesystemStorageHandler`).
+
+`EncryptedStorage` provides encryption-at-rest by:
+- Generating or loading a 256-bit master key via `SecureStorageEffects` (Keychain/TPM/Keystore; with a filesystem fallback during bring-up)
+- Deriving per-key encryption keys from the master key + logical storage key to bind ciphertext integrity to the intended key
+- Encrypting values with ChaCha20-Poly1305 using a fresh 96-bit nonce per write (blob format: version byte + nonce + ciphertext)
+
+Master-key initialization is **lazy** (first storage operation), so runtime assembly remains synchronous. No automatic migration from legacy plaintext blobs is performed in this pre-launch iteration.
 
 The registration system enables composition without runtime overhead:
 

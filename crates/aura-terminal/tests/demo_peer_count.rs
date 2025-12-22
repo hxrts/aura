@@ -25,7 +25,8 @@ use aura_relational::ContactFact;
 use aura_terminal::demo::DemoSimulator;
 use aura_terminal::tui::context::InitializedAppCore;
 use aura_terminal::{handlers::tui::TuiMode, ids};
-use uuid::Uuid;
+
+mod support;
 
 async fn wait_for_contacts(app_core: &Arc<RwLock<AppCore>>, expected: &[AuthorityId]) {
     let start = tokio::time::Instant::now();
@@ -69,21 +70,29 @@ async fn demo_refresh_account_reports_two_online_contacts() {
     let context_id = ContextId::new_from_entropy(bob_context_entropy);
 
     // Use a unique data dir so this test is hermetic.
-    let test_dir = std::env::temp_dir().join(format!("aura-demo-peer-count-{}", Uuid::new_v4()));
-    std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
+    let test_dir = support::unique_test_dir("aura-demo-peer-count");
 
     // Start demo peers (Alice + Carol) as real runtimes and share their transport with Bob.
     let mut simulator = DemoSimulator::new(seed, test_dir.clone())
         .await
         .expect("Failed to create demo simulator");
-    simulator.start().await.expect("Failed to start demo simulator");
+    simulator
+        .start()
+        .await
+        .expect("Failed to start demo simulator");
     let shared_transport = simulator.shared_transport();
 
-    let mut agent_config = AgentConfig::default();
-    agent_config.device_id = ids::device_id(bob_device_id_str);
-    agent_config.storage.base_path = test_dir.clone();
+    let agent_config = AgentConfig {
+        device_id: ids::device_id(bob_device_id_str),
+        storage: aura_agent::core::config::StorageConfig {
+            base_path: test_dir.clone(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
-    let effect_ctx = EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
+    let effect_ctx =
+        EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
     let agent = AgentBuilder::new()
         .with_config(agent_config)
@@ -101,7 +110,9 @@ async fn demo_refresh_account_reports_two_online_contacts() {
         .expect("Failed to create AppCore with runtime");
     let app_core = Arc::new(RwLock::new(app_core));
 
-    let initialized = InitializedAppCore::new(app_core.clone()).await.expect("init signals");
+    let initialized = InitializedAppCore::new(app_core.clone())
+        .await
+        .expect("init signals");
 
     // Make Alice + Carol contacts (facts), then wait for CONTACTS_SIGNAL to reflect them.
     let alice_id = simulator.alice_authority();
@@ -153,5 +164,8 @@ async fn demo_refresh_account_reports_two_online_contacts() {
     // demo/prod mode remains a first-class concept in the public handler API.
     let _ = TuiMode::Demo { seed };
 
-    simulator.stop().await.expect("Failed to stop demo simulator");
+    simulator
+        .stop()
+        .await
+        .expect("Failed to stop demo simulator");
 }

@@ -111,6 +111,7 @@ pub trait IntoIntent {
     ///
     /// Returns `Some(Intent)` for commands that should be journaled via AppCore.
     /// Returns `None` for operational commands handled elsewhere.
+    #[allow(clippy::wrong_self_convention)]
     fn into_intent(&self, ctx: &IntentContext) -> Option<Intent>;
 
     /// Check if this command can be converted to an Intent.

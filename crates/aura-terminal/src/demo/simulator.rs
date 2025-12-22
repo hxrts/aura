@@ -16,8 +16,8 @@ use aura_agent::{AuraAgent, EffectContext, SharedTransport};
 use aura_core::effects::{ExecutionMode, TransportEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_recovery::guardian_setup::GuardianAcceptance;
 use aura_effects::time::PhysicalTimeHandler;
+use aura_recovery::guardian_setup::GuardianAcceptance;
 
 use crate::error::TerminalResult;
 use crate::ids;
@@ -49,8 +49,6 @@ impl DemoSimulator {
         let peers_root = base_path.join("peers");
         let alice_dir = peers_root.join("alice");
         let carol_dir = peers_root.join("carol");
-        let _ = std::fs::create_dir_all(&alice_dir);
-        let _ = std::fs::create_dir_all(&carol_dir);
 
         let (alice, carol) = tokio::try_join!(
             build_demo_peer_agent(
@@ -156,7 +154,9 @@ async fn build_demo_peer_agent(
         .with_authority(authority_id)
         .build_simulation_async_with_shared_transport(seed, &ctx, shared_transport)
         .await
-        .map_err(|e| aura_core::AuraError::internal(format!("Failed to build {name} agent: {e}")))?;
+        .map_err(|e| {
+            aura_core::AuraError::internal(format!("Failed to build {name} agent: {e}"))
+        })?;
 
     Ok(Arc::new(agent))
 }
@@ -187,10 +187,8 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                     "application/aura-guardian-acceptance".to_string(),
                 );
                 response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
-                response_metadata.insert(
-                    "guardian-id".to_string(),
-                    agent.authority_id().to_string(),
-                );
+                response_metadata
+                    .insert("guardian-id".to_string(), agent.authority_id().to_string());
 
                 let acceptance = GuardianAcceptance {
                     guardian_id: agent.authority_id(),
@@ -237,4 +235,3 @@ mod tests {
         sim.stop().await.unwrap();
     }
 }
-

@@ -1,6 +1,6 @@
 //! Local store data types
 //!
-//! Types for encrypted local storage of CLI/TUI preferences and cached data.
+//! Types for local storage of CLI/TUI preferences and cached data.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -126,28 +126,12 @@ impl LocalData {
 pub struct LocalStoreConfig {
     /// Path to the store file
     pub path: std::path::PathBuf,
-
-    /// Salt for key derivation (should be unique per installation)
-    pub salt: [u8; 32],
 }
 
 impl LocalStoreConfig {
     /// Create a new config with the given path
-    ///
-    /// Generates a default salt - for production use, provide a persistent salt
     pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
-        Self {
-            path: path.into(),
-            salt: [0u8; 32], // Will be overwritten on first save
-        }
-    }
-
-    /// Create config with a specific salt
-    pub fn with_salt(path: impl Into<std::path::PathBuf>, salt: [u8; 32]) -> Self {
-        Self {
-            path: path.into(),
-            salt,
-        }
+        Self { path: path.into() }
     }
 
     /// Get the storage key derived from the path

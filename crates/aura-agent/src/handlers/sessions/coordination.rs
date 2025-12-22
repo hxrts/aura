@@ -232,7 +232,8 @@ impl SessionOperations {
         session_key: &str,
     ) -> AgentResult<Option<SessionHandle>> {
         let key = format!("session/{}", session_key);
-        let maybe = self.effects
+        let maybe = self
+            .effects
             .retrieve(&key)
             .await
             .map_err(|e| AgentError::effects(format!("retrieve session: {e}")))?;
@@ -328,7 +329,8 @@ impl SessionOperations {
         session_type: SessionType,
         participants: Vec<DeviceId>,
     ) -> AgentResult<SessionHandle> {
-        self.enforce_guard(&self.effects, "session:create", 100).await?;
+        self.enforce_guard(&self.effects, "session:create", 100)
+            .await?;
         let device_id = self.device_id();
         let _timestamp_millis = self.effects.current_timestamp().await.unwrap_or(0);
 
@@ -577,7 +579,6 @@ struct ParticipantResponse {
 impl SessionOperations {
     /// Get session information
     pub async fn get_session(&self, session_id: &str) -> AgentResult<Option<SessionHandle>> {
-
         // Convert string to SessionId by parsing the UUID part
         let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
             match uuid::Uuid::parse_str(uuid_str) {
@@ -601,7 +602,8 @@ impl SessionOperations {
 
     /// End a session
     pub async fn end_session(&self, session_id: &str) -> AgentResult<SessionHandle> {
-        self.end_session_via_effects(&self.effects, session_id).await
+        self.end_session_via_effects(&self.effects, session_id)
+            .await
     }
 
     /// List all active sessions

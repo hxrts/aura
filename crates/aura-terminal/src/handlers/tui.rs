@@ -26,7 +26,10 @@ use aura_core::effects::StorageEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_effects::time::PhysicalTimeHandler;
-use aura_effects::PathFilesystemStorageHandler;
+use aura_effects::{
+    EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
+    RealSecureStorageHandler,
+};
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::tui::TuiArgs;
@@ -88,6 +91,22 @@ const ACCOUNT_FILENAME: &str = "account.json";
 /// - Production: `$AURA_PATH/.aura/journal.json` (default: `~/.aura/journal.json`)
 /// - Demo: `$AURA_PATH/.aura-demo/journal.json` (default: `~/.aura-demo/journal.json`)
 const JOURNAL_FILENAME: &str = "journal.json";
+
+type BootstrapStorage =
+    EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>;
+
+fn open_bootstrap_storage(base_path: &Path) -> BootstrapStorage {
+    let crypto = Arc::new(RealCryptoHandler::new());
+    let secure = Arc::new(RealSecureStorageHandler::with_base_path(
+        base_path.to_path_buf(),
+    ));
+    EncryptedStorage::new(
+        FilesystemStorageHandler::from_path(base_path.to_path_buf()),
+        crypto,
+        secure,
+        EncryptedStorageConfig::default(),
+    )
+}
 
 /// Resolve the storage base path for Aura.
 ///
@@ -159,10 +178,7 @@ async fn try_load_account(storage: &impl StorageEffects) -> Result<AccountLoadRe
         return Ok(AccountLoadResult::NotFound);
     };
 
-    let content = String::from_utf8(bytes)
-        .map_err(|e| AuraError::internal(format!("Invalid account config UTF-8: {}", e)))?;
-
-    let config: AccountConfig = serde_json::from_str(&content)
+    let config: AccountConfig = serde_json::from_slice(&bytes)
         .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
 
     // Parse authority ID from hex string (16 bytes = UUID)
@@ -224,11 +240,11 @@ async fn persist_account_config(
         created_at,
     };
 
-    let content = serde_json::to_string_pretty(&config)
+    let content = serde_json::to_vec_pretty(&config)
         .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
 
     storage
-        .store(ACCOUNT_FILENAME, content.into_bytes())
+        .store(ACCOUNT_FILENAME, content)
         .await
         .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
 
@@ -244,7 +260,7 @@ pub async fn create_account(
     device_id_str: &str,
     display_name: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
+    let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
 
     // Create new account with deterministic IDs based on device_id
@@ -288,7 +304,7 @@ pub async fn restore_recovered_account(
     recovered_authority_id: AuthorityId,
     recovered_context_id: Option<ContextId>,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
+    let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
 
     // Use the recovered authority directly (NOT derived from device_id)
@@ -303,14 +319,7 @@ pub async fn restore_recovered_account(
         ContextId::new_from_entropy(context_entropy)
     });
 
-    persist_account_config(
-        &storage,
-        &time,
-        recovered_authority_id,
-        context_id,
-        None,
-    )
-    .await?;
+    persist_account_config(&storage, &time, recovered_authority_id, context_id, None).await?;
 
     Ok((recovered_authority_id, context_id))
 }
@@ -359,7 +368,7 @@ pub async fn export_account_backup(
     base_path: &Path,
     device_id: Option<&str>,
 ) -> Result<String, AuraError> {
-    let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
+    let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
 
     let Some(account_bytes) = storage
@@ -370,10 +379,7 @@ pub async fn export_account_backup(
         return Err(AuraError::internal("No account exists to backup"));
     };
 
-    let account_content = String::from_utf8(account_bytes)
-        .map_err(|e| AuraError::internal(format!("Invalid account config UTF-8: {}", e)))?;
-
-    let account: AccountConfig = serde_json::from_str(&account_content)
+    let account: AccountConfig = serde_json::from_slice(&account_bytes)
         .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
 
     let journal = storage
@@ -422,7 +428,7 @@ pub async fn import_account_backup(
     backup_code: &str,
     overwrite: bool,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
+    let storage = open_bootstrap_storage(base_path);
 
     // Parse backup code
     if !backup_code.starts_with(BACKUP_PREFIX) {
@@ -481,12 +487,12 @@ pub async fn import_account_backup(
         ));
     }
 
-    // Write account configuration (pretty JSON for readability).
-    let account_content = serde_json::to_string_pretty(&backup.account)
+    // Write account configuration.
+    let account_content = serde_json::to_vec_pretty(&backup.account)
         .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
 
     storage
-        .store(ACCOUNT_FILENAME, account_content.into_bytes())
+        .store(ACCOUNT_FILENAME, account_content)
         .await
         .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
 
@@ -523,13 +529,10 @@ pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
     };
 
     // Default device ID for demo mode
-    let device_id = args.device_id.as_deref().or_else(|| {
-        if args.demo {
-            Some("demo:bob")
-        } else {
-            None
-        }
-    });
+    let device_id = args
+        .device_id
+        .as_deref()
+        .or(if args.demo { Some("demo:bob") } else { None });
 
     // Path resolution happens in handle_tui_launch via resolve_storage_path
     handle_tui_launch(stdio, args.data_dir.as_deref(), device_id, mode).await
@@ -562,7 +565,7 @@ async fn handle_tui_launch(
     // Safe to call multiple times; only the first init wins.
     init_tui_tracing(&base_path, mode);
 
-    let storage = PathFilesystemStorageHandler::new(base_path.clone());
+    let storage = open_bootstrap_storage(&base_path);
 
     // Determine device ID
     let device_id = device_id_str
@@ -576,22 +579,21 @@ async fn handle_tui_launch(
     let device_id_for_account = device_id_str.unwrap_or("tui:production-device");
 
     // Try to load existing account, or use placeholders if no account exists
-    let (authority_id, context_id, has_existing_account) =
-        match try_load_account(&storage).await? {
-            AccountLoadResult::Loaded { authority, context } => {
-                stdio.println(format_args!("Authority: {}", authority));
-                stdio.println(format_args!("Context: {}", context));
-                (authority, context, true)
-            }
-            AccountLoadResult::NotFound => {
-                // Use placeholder IDs - the TUI will show account setup modal
-                let (authority, context) = create_placeholder_ids(device_id_for_account);
-                stdio.println(format_args!("No existing account - will show setup modal"));
-                stdio.println(format_args!("Placeholder Authority: {}", authority));
-                stdio.println(format_args!("Placeholder Context: {}", context));
-                (authority, context, false)
-            }
-        };
+    let (authority_id, context_id, has_existing_account) = match try_load_account(&storage).await? {
+        AccountLoadResult::Loaded { authority, context } => {
+            stdio.println(format_args!("Authority: {}", authority));
+            stdio.println(format_args!("Context: {}", context));
+            (authority, context, true)
+        }
+        AccountLoadResult::NotFound => {
+            // Use placeholder IDs - the TUI will show account setup modal
+            let (authority, context) = create_placeholder_ids(device_id_for_account);
+            stdio.println(format_args!("No existing account - will show setup modal"));
+            stdio.println(format_args!("Placeholder Authority: {}", authority));
+            stdio.println(format_args!("Placeholder Context: {}", context));
+            (authority, context, false)
+        }
+    };
 
     // Create agent configuration
     let agent_config = AgentConfig {
@@ -778,9 +780,9 @@ async fn handle_tui_launch(
                 .with_existing_account(has_existing_account)
                 .with_demo_hints(hints);
 
-            builder
-                .build()
-                .expect("IoContext build failed with all required fields")
+            builder.build().map_err(|e| {
+                crate::error::TerminalError::Config(format!("IoContext build failed: {e}"))
+            })?
         }
         TuiMode::Production => IoContext::builder()
             .with_app_core(app_core.clone())
@@ -789,7 +791,9 @@ async fn handle_tui_launch(
             .with_mode(mode)
             .with_existing_account(has_existing_account)
             .build()
-            .expect("IoContext build failed with all required fields"),
+            .map_err(|e| {
+                crate::error::TerminalError::Config(format!("IoContext build failed: {e}"))
+            })?,
     };
 
     #[cfg(not(feature = "development"))]
@@ -800,7 +804,7 @@ async fn handle_tui_launch(
         .with_mode(mode)
         .with_existing_account(has_existing_account)
         .build()
-        .expect("IoContext build failed with all required fields");
+        .map_err(|e| crate::error::TerminalError::Config(format!("IoContext build failed: {e}")))?;
 
     // Without development feature, demo mode just shows a warning
     #[cfg(not(feature = "development"))]

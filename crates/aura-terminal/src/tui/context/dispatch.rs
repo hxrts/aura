@@ -59,8 +59,12 @@ impl AccountFilesHelper {
         &self,
         display_name: &str,
     ) -> Result<(AuthorityId, ContextId), String> {
-        match crate::handlers::tui::create_account(&self.base_path, &self.device_id_str, display_name)
-            .await
+        match crate::handlers::tui::create_account(
+            &self.base_path,
+            &self.device_id_str,
+            display_name,
+        )
+        .await
         {
             Ok((authority_id, context_id)) => {
                 self.set_account_created();
@@ -213,10 +217,7 @@ impl DispatchHelper {
             }
         } else {
             // Unknown command.
-            tracing::warn!(
-                "Unknown command not handled by Operational: {:?}",
-                command
-            );
+            tracing::warn!("Unknown command not handled by Operational: {:?}", command);
             let msg = format!("Unknown command: {:?}", command);
             self.operational
                 .emit_error(TerminalError::Operation(msg.clone()))

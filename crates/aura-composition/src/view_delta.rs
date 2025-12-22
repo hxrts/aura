@@ -76,8 +76,8 @@ pub trait ViewDeltaReducer: Send + Sync {
     /// # Arguments
     /// * `binding_type` - The type identifier from `RelationalFact::Generic`
     /// * `binding_data` - The serialized fact data
-    /// * `own_authority` - The current user's authority ID for contextual reduction
-    ///                     (e.g., determining inbound vs outbound invitations)
+    /// * `own_authority` - The current user's authority ID for contextual reduction.
+    ///   For example, determining inbound vs outbound invitations.
     ///
     /// # Returns
     /// A vector of view deltas. Returns empty if the binding type doesn't match

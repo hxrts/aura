@@ -51,11 +51,7 @@ fn dm_channel_id(target: &str) -> ChannelId {
 
 /// Create a test environment with IoContext and AppCore
 async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!(
-        "aura-callback-test2-{}-{}",
-        name,
-        std::process::id()
-    ));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test2-{}", name));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -65,13 +61,14 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
-        initialized_app_core.clone(),
-        false,
-        test_dir,
-        format!("test-device-{}", name),
-        TuiMode::Production,
-    );
+    let ctx = IoContext::builder()
+        .with_app_core(initialized_app_core.clone())
+        .with_existing_account(false)
+        .with_base_path(test_dir)
+        .with_device_id(format!("test-device-{}", name))
+        .with_mode(TuiMode::Production)
+        .build()
+        .expect("IoContext builder should succeed for tests");
 
     // Create account for testing
     ctx.create_account(&format!("TestUser-{}", name))
@@ -106,11 +103,7 @@ async fn wait_for_chat(
 
 /// Cleanup test directory
 fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!(
-        "aura-callback-test2-{}-{}",
-        name,
-        std::process::id()
-    ));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test2-{}", name));
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 

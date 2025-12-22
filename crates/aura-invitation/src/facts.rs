@@ -275,6 +275,7 @@ impl DomainFact for InvitationFact {
         }
     }
 
+    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).expect("InvitationFact must serialize")
     }

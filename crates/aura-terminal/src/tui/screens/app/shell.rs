@@ -277,9 +277,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let app_core = app_ctx.app_core.clone();
         let mut tui = tui.clone();
         async move {
-            let format_error = |err: &AppError| {
-                format!("{}: {}", err.code(), err)
-            };
+            let format_error = |err: &AppError| format!("{}: {}", err.code(), err);
 
             // Initial read.
             {

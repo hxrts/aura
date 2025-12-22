@@ -10,6 +10,10 @@ use aura_rendezvous::LanDiscoveryConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+fn default_true() -> bool {
+    true
+}
+
 /// Resolve the default storage path for Aura agents.
 ///
 /// This is the SINGLE SOURCE OF TRUTH for agent storage path resolution.
@@ -75,6 +79,18 @@ pub struct StorageConfig {
     /// Base storage directory
     pub base_path: PathBuf,
 
+    /// Enable encrypted-at-rest storage.
+    ///
+    /// This should remain `true` in production. Disabling is intended for tests/bring-up only.
+    #[serde(default = "default_true")]
+    pub encryption_enabled: bool,
+
+    /// Enable opaque storage key names (metadata minimization).
+    ///
+    /// Note: When enabled, prefix-based key listing is not meaningful without an index.
+    #[serde(default)]
+    pub opaque_names: bool,
+
     /// Maximum cache size in bytes
     pub cache_size: usize,
 
@@ -86,6 +102,8 @@ impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             base_path: default_storage_path(),
+            encryption_enabled: true,
+            opaque_names: false,
             cache_size: 50 * 1024 * 1024,
             enable_compression: true,
         }

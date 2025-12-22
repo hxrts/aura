@@ -167,11 +167,7 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
 }
 
 /// Handle insert mode key events
-pub fn handle_insert_mode_key(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-) {
+pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
     // Capture screen type once to avoid borrow conflicts
     let screen = state.screen();
 

@@ -49,8 +49,8 @@ use async_lock::RwLock;
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, ERROR_SIGNAL, SYNC_STATUS_SIGNAL,
 };
-use aura_app::{AppError, AuthFailure, NetworkErrorCode};
 use aura_app::AppCore;
+use aura_app::{AppError, AuthFailure, NetworkErrorCode};
 use aura_core::effects::reactive::ReactiveEffects;
 
 pub use types::{OpError, OpResponse, OpResult};

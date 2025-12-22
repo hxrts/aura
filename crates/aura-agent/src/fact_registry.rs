@@ -35,10 +35,10 @@ use aura_journal::FactRegistry;
 use aura_protocol::moderation::register_moderation_facts;
 use aura_recovery::{RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
-    ContactFact, ContactFactReducer, CONTACT_FACT_TYPE_ID, GuardianBindingDetailsFact,
-    GuardianBindingDetailsFactReducer, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID, GuardianRequestFact,
-    GuardianRequestFactReducer, GUARDIAN_REQUEST_FACT_TYPE_ID, RecoveryGrantDetailsFact,
-    RecoveryGrantDetailsFactReducer, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
+    ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
+    GuardianRequestFact, GuardianRequestFactReducer, RecoveryGrantDetailsFact,
+    RecoveryGrantDetailsFactReducer, CONTACT_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
+    GUARDIAN_REQUEST_FACT_TYPE_ID, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
 };
 use aura_rendezvous::{RendezvousFact, RendezvousFactReducer, RENDEZVOUS_FACT_TYPE_ID};
 

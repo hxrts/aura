@@ -13,13 +13,15 @@ use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATI
 use aura_app::views::{
     chat::{Channel, ChannelType, ChatState, Message},
     contacts::{Contact, ContactsState},
-    invitations::{Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState},
+    invitations::{
+        Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
+    },
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_effects::ReactiveHandler;
-use aura_journal::DomainFact;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
+use aura_journal::DomainFact;
 use tokio::sync::Mutex;
 
 use super::scheduler::ReactiveView;
@@ -30,7 +32,10 @@ use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
     let _ = reactive
-        .emit(&*ERROR_SIGNAL, Some(AppError::internal("reactive_scheduler", message)))
+        .emit(
+            &*ERROR_SIGNAL,
+            Some(AppError::internal("reactive_scheduler", message)),
+        )
         .await;
 }
 
@@ -86,7 +91,10 @@ impl ReactiveView for InvitationsSignalView {
             let Some(inv) = InvitationFact::from_bytes(binding_data) else {
                 emit_internal_error(
                     &self.reactive,
-                    format!("Failed to decode InvitationFact bytes (len={})", binding_data.len()),
+                    format!(
+                        "Failed to decode InvitationFact bytes (len={})",
+                        binding_data.len()
+                    ),
                 )
                 .await;
                 continue;
@@ -141,7 +149,11 @@ impl ReactiveView for InvitationsSignalView {
                     state.revoke_invitation(&invitation_id);
                     changed = true;
                 }
-                InvitationFact::CeremonyInitiated { ceremony_id, sender, timestamp_ms } => {
+                InvitationFact::CeremonyInitiated {
+                    ceremony_id,
+                    sender,
+                    timestamp_ms,
+                } => {
                     // Invitation ceremony events don't map to InvitationsState.
                     // They track the consensus-based invitation exchange protocol.
                     // For RecoveryState updates, use RecoveryFacts or the ceremony tracker.
@@ -152,14 +164,21 @@ impl ReactiveView for InvitationsSignalView {
                         "Invitation ceremony initiated"
                     );
                 }
-                InvitationFact::CeremonyAcceptanceReceived { ceremony_id, timestamp_ms } => {
+                InvitationFact::CeremonyAcceptanceReceived {
+                    ceremony_id,
+                    timestamp_ms,
+                } => {
                     tracing::debug!(
                         ceremony_id,
                         timestamp_ms,
                         "Invitation ceremony acceptance received"
                     );
                 }
-                InvitationFact::CeremonyCommitted { ceremony_id, relationship_id, timestamp_ms } => {
+                InvitationFact::CeremonyCommitted {
+                    ceremony_id,
+                    relationship_id,
+                    timestamp_ms,
+                } => {
                     tracing::info!(
                         ceremony_id,
                         relationship_id,
@@ -167,7 +186,11 @@ impl ReactiveView for InvitationsSignalView {
                         "Invitation ceremony committed - relationship established"
                     );
                 }
-                InvitationFact::CeremonyAborted { ceremony_id, reason, timestamp_ms } => {
+                InvitationFact::CeremonyAborted {
+                    ceremony_id,
+                    reason,
+                    timestamp_ms,
+                } => {
                     tracing::warn!(
                         ceremony_id,
                         reason,
@@ -283,7 +306,9 @@ impl ReactiveView for ContactsSignalView {
                         }
                     }
                 }
-                FactContent::Relational(RelationalFact::GuardianBinding { guardian_id, .. }) => {
+                FactContent::Relational(RelationalFact::GuardianBinding {
+                    guardian_id, ..
+                }) => {
                     // Reflect guardian status into contacts for details screens.
                     state.set_guardian_status(*guardian_id, true);
                     changed = true;
@@ -355,7 +380,10 @@ impl ReactiveView for ChatSignalView {
             let Some(chat_fact) = ChatFact::from_bytes(binding_data) else {
                 emit_internal_error(
                     &self.reactive,
-                    format!("Failed to decode ChatFact bytes (len={})", binding_data.len()),
+                    format!(
+                        "Failed to decode ChatFact bytes (len={})",
+                        binding_data.len()
+                    ),
                 )
                 .await;
                 continue;

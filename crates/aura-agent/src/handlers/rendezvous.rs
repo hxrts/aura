@@ -453,7 +453,7 @@ mod tests {
         let context_id = ContextId::new_from_entropy([151u8; 32]);
         let result = handler
             .publish_descriptor(
-                &*effects,
+                &effects,
                 context_id,
                 vec![TransportHint::QuicDirect {
                     addr: "127.0.0.1:8443".to_string(),
@@ -524,7 +524,7 @@ mod tests {
 
         // Now initiate channel
         let result = handler
-            .initiate_channel(&*effects, context_id, peer)
+            .initiate_channel(&effects, context_id, peer)
             .await
             .unwrap();
 
@@ -546,7 +546,7 @@ mod tests {
         let channel_id = [99u8; 32];
 
         let result = handler
-            .complete_channel(&*effects, context_id, peer, channel_id, 1)
+            .complete_channel(&effects, context_id, peer, channel_id, 1)
             .await
             .unwrap();
 

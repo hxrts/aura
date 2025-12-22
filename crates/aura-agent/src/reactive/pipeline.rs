@@ -15,9 +15,9 @@ use aura_journal::FactRegistry;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
-use super::{FactSource, ReactiveScheduler, SchedulerConfig};
-use super::{ChatSignalView, ContactsSignalView, InvitationsSignalView};
 use super::ViewUpdate;
+use super::{ChatSignalView, ContactsSignalView, InvitationsSignalView};
+use super::{FactSource, ReactiveScheduler, SchedulerConfig};
 
 /// Owns the running scheduler + the single fact publication mechanism.
 ///

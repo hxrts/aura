@@ -351,8 +351,8 @@ mod tests {
     use async_trait::async_trait;
     use aura_core::domain::journal::FactValue;
     use aura_core::effects::indexed::{FactId, FactStreamReceiver};
-    use aura_core::effects::TimeError;
     use aura_core::effects::BloomConfig;
+    use aura_core::effects::TimeError;
     use aura_core::time::PhysicalTime;
     use aura_core::AuthorityId;
     use std::sync::Mutex;
