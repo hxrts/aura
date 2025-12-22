@@ -1,34 +1,24 @@
 //! Contacts screen view state
 
-use super::PanelFocus;
-
-use super::invitations::{
-    CreateInvitationModalState, ImportInvitationModalState, InvitationCodeModalState,
-};
+use crate::tui::navigation::TwoPanelFocus;
 
 /// Contacts screen state
 #[derive(Clone, Debug, Default)]
 pub struct ContactsViewState {
     /// Panel focus (list or detail)
-    pub focus: PanelFocus,
+    pub focus: TwoPanelFocus,
     /// Selected contact index
     pub selected_index: usize,
     /// Total contact count (for wrap-around navigation)
     pub contact_count: usize,
     /// Filter text
     pub filter: String,
-    /// Nickname edit modal state
-    pub nickname_modal: NicknameModalState,
-    /// Import invitation modal state (accept an invitation code)
-    pub import_modal: ImportInvitationModalState,
-    /// Create invitation modal state (send an invitation)
-    pub create_modal: CreateInvitationModalState,
-    /// Invitation code display modal state (show generated code)
-    pub code_modal: InvitationCodeModalState,
     /// Demo mode: Alice's invitation code (for Ctrl+a shortcut)
     pub demo_alice_code: String,
     /// Demo mode: Carol's invitation code (for Ctrl+l shortcut)
     pub demo_carol_code: String,
+    // Note: Modal state is now stored in ModalQueue, not here.
+    // Use modal_queue.enqueue(QueuedModal::ContactsNickname/Import/Create/Code(...)) to show modals.
 }
 
 /// State for nickname edit modal

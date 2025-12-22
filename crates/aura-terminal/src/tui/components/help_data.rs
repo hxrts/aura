@@ -76,9 +76,9 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
     vec![
         // Global navigation
         HelpCommand::new(
-            "1-7",
-            "1, 2, 3, 4, 5, 6, 7",
-            "Switch screens (Block, Chat, Contacts, Neighborhood, Invitations, Settings, Recovery)",
+            "1-6",
+            "1, 2, 3, 4, 5, 6",
+            "Switch screens (Block, Neighborhood, Chat, Contacts, Recovery, Settings)",
             "Navigation",
         ),
         HelpCommand::new("?", "?", "Show/hide help", "Navigation"),
@@ -108,16 +108,12 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         HelpCommand::new("e", "e", "Edit contact nickname", "Contacts"),
         HelpCommand::new("g", "g", "Toggle guardian status", "Contacts"),
         HelpCommand::new("c", "c", "Start chat with contact", "Contacts"),
-        HelpCommand::new("i", "i", "Invite selected peer", "Contacts"),
+        HelpCommand::new("i", "i", "Import invitation code", "Contacts"),
+        HelpCommand::new("n", "n", "Create invitation code", "Contacts"),
         // Neighborhood screen
         HelpCommand::new("Enter", "Enter", "Enter selected block", "Neighborhood"),
         HelpCommand::new("g", "g", "Go to home block", "Neighborhood"),
         HelpCommand::new("b", "b", "Back to street view", "Neighborhood"),
-        // Invitations screen
-        HelpCommand::new("n", "n", "Create new invitation", "Invitations"),
-        HelpCommand::new("i", "i", "Import invitation code", "Invitations"),
-        HelpCommand::new("e", "e", "Export invitation code", "Invitations"),
-        HelpCommand::new("f", "f", "Filter invitations", "Invitations"),
         // Settings screen
         HelpCommand::new("h/l", "h, l", "Switch panels", "Settings"),
         HelpCommand::new("Space", "Space", "Toggle option/edit field", "Settings"),

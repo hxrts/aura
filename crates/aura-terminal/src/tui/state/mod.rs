@@ -111,7 +111,6 @@ pub struct TuiState {
 impl TuiState {
     /// Create a new TUI state with default values
     pub fn new() -> Self {
-        #[allow(deprecated)]
         Self {
             terminal_size: (80, 24),
             ..Default::default()
@@ -120,7 +119,6 @@ impl TuiState {
 
     /// Create a TUI state with specific terminal size
     pub fn with_size(width: u16, height: u16) -> Self {
-        #[allow(deprecated)]
         Self {
             terminal_size: (width, height),
             ..Default::default()

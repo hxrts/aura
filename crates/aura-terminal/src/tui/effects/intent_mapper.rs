@@ -31,10 +31,6 @@ use aura_app::{Intent, IntentChannelType, InvitationType};
 use super::intent_context::{parse_context_id, IntentContext, IntoIntent};
 use super::EffectCommand;
 
-// Deprecated re-exports for backwards compatibility
-#[deprecated(since = "0.1.0", note = "Use IntentContext instead")]
-pub use super::intent_context::IntentContext as CommandContext;
-
 /// Map a TUI EffectCommand to a domain Intent.
 ///
 /// Returns `Some(Intent)` for commands that should be journaled via AppCore.

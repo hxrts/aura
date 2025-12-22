@@ -813,6 +813,14 @@ quint-compile input output:
     nix develop --command quint compile --target json --out {{output}} {{input}}
     @echo "Compilation completed successfully!"
 
+# Regenerate deterministic ITF trace for the TUI replay tests
+tui-itf-trace out="verification/quint/tui_trace.itf.json" seed="424242" max_steps="50":
+    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} nix develop --command scripts/gen-tui-itf-trace.sh {{out}}
+
+# Check that the checked-in ITF trace matches regeneration
+tui-itf-trace-check seed="424242" max_steps="50":
+    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} nix develop --command scripts/check-tui-itf-trace.sh
+
 # Test Quint parsing with example file
 test-quint-parse:
     #!/usr/bin/env bash

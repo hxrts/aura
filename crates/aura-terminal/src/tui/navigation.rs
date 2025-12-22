@@ -11,7 +11,7 @@
 //! ## Common Layouts
 //!
 //! 1. **Single panel**: Only vertical navigation (Help)
-//! 2. **Two panels**: Left/Right switches panels, Up/Down navigates within (Contacts, Invitations, Settings)
+//! 2. **Two panels**: Left/Right switches panels, Up/Down navigates within (Contacts, Settings)
 //! 3. **Three panels**: Horizontal cycle through panels (Chat)
 //! 4. **Grid**: 2D navigation (Neighborhood)
 
@@ -101,6 +101,16 @@ impl TwoPanelFocus {
             _ => *self,
         }
     }
+
+    /// Check if list panel is focused
+    pub fn is_list(self) -> bool {
+        matches!(self, TwoPanelFocus::List)
+    }
+
+    /// Check if detail panel is focused
+    pub fn is_detail(self) -> bool {
+        matches!(self, TwoPanelFocus::Detail)
+    }
 }
 
 /// Focus state for three-panel layouts (list + content + input)
@@ -155,7 +165,7 @@ pub enum TwoPanelNavResult {
 /// Unified navigation for two-panel screens (list + detail layout)
 ///
 /// Handles both panel focus (Left/Right) and list navigation (Up/Down).
-/// Use this for screens like Contacts, Invitations, and similar list+detail layouts.
+/// Use this for screens like Contacts and similar list+detail layouts.
 ///
 /// # Example
 ///

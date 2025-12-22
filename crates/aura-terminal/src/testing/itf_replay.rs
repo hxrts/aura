@@ -17,9 +17,11 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+use aura_core::effects::terminal::{events, KeyCode, KeyEvent, TerminalEvent};
+
 use crate::tui::screens::Router;
 use crate::tui::screens::Screen;
-use crate::tui::state_machine::{ModalType, TuiState};
+use crate::tui::state_machine::{ModalType, TuiCommand, TuiState};
 
 /// ITF trace structure matching Quint output
 #[derive(Debug, Clone, Deserialize)]
@@ -63,6 +65,19 @@ pub struct TuiITFState {
     pub should_exit: bool,
     pub terminal_width: u16,
     pub terminal_height: u16,
+    pub command_queue: Vec<ItfCommand>,
+}
+
+/// Commands in the ITF trace (Quint model output).
+///
+/// The Rust state machine has many more commands; for ITF replay we compare only
+/// the subset modeled by the Quint spec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItfCommand {
+    Exit,
+    ShowToast,
+    DismissToast,
+    Render,
 }
 
 /// Result of replaying a single step
@@ -112,17 +127,44 @@ impl ITFTraceReplayer {
         let mut failed_steps = Vec::new();
         let total_steps = trace.states.len();
 
-        for (i, itf_state) in trace.states.iter().enumerate() {
-            let expected = Self::extract_tui_state(&itf_state.variables)?;
+        let mut expected_states = Vec::with_capacity(total_steps);
+        for itf_state in &trace.states {
+            expected_states.push(Self::extract_tui_state(&itf_state.variables)?);
+        }
 
-            // Validate state invariants from ITF
-            if !Self::validate_state_invariants(&expected) {
+        // Validate invariants and step-to-step reachability.
+        for i in 0..expected_states.len() {
+            let expected = &expected_states[i];
+
+            if !Self::validate_state_invariants(expected) {
                 failed_steps.push(StepResult {
                     step_index: i,
                     expected: expected.clone(),
-                    actual: self.create_matching_tui_state(&expected),
+                    actual: self.create_matching_tui_state(expected),
                     matches: false,
                     diff: Some("State violates invariants".to_string()),
+                });
+                continue;
+            }
+
+            // For the first state, we only validate invariants.
+            if i == 0 {
+                continue;
+            }
+
+            let from = self.create_matching_tui_state(&expected_states[i - 1]);
+            let to = expected;
+
+            if self.find_transition_witness(&from, to).is_none() {
+                failed_steps.push(StepResult {
+                    step_index: i,
+                    expected: expected.clone(),
+                    actual: self.create_matching_tui_state(expected),
+                    matches: false,
+                    diff: Some(
+                        "No modeled event produces expected next state from previous state"
+                            .to_string(),
+                    ),
                 });
             }
         }
@@ -166,6 +208,11 @@ impl ITFTraceReplayer {
         let terminal_height =
             Self::parse_bigint(vars.get("terminalHeight").ok_or("Missing terminalHeight")?)? as u16;
 
+        let command_queue = match vars.get("commandQueue") {
+            Some(v) => Self::parse_command_queue(v)?,
+            None => Vec::new(),
+        };
+
         Ok(TuiITFState {
             current_screen,
             current_modal,
@@ -174,6 +221,7 @@ impl ITFTraceReplayer {
             should_exit,
             terminal_width,
             terminal_height,
+            command_queue,
         })
     }
 
@@ -227,6 +275,30 @@ impl ITFTraceReplayer {
         }
     }
 
+    fn parse_command_queue(value: &serde_json::Value) -> Result<Vec<ItfCommand>, String> {
+        let Some(items) = value.as_array() else {
+            return Err("commandQueue is not an array".to_string());
+        };
+
+        let mut commands = Vec::with_capacity(items.len());
+        for cmd in items {
+            let tag = cmd
+                .get("tag")
+                .and_then(|v| v.as_str())
+                .ok_or("Command missing tag")?;
+            let mapped = match tag {
+                "ExitCommand" => ItfCommand::Exit,
+                "ShowToastCommand" => ItfCommand::ShowToast,
+                "DismissToastCommand" => ItfCommand::DismissToast,
+                "RenderCommand" => ItfCommand::Render,
+                other => return Err(format!("Unknown command: {other}")),
+            };
+            commands.push(mapped);
+        }
+
+        Ok(commands)
+    }
+
     /// Parse bigint from ITF format
     fn parse_bigint(value: &serde_json::Value) -> Result<i64, String> {
         // ITF encodes bigints as {"#bigint": "value"}
@@ -257,6 +329,68 @@ impl ITFTraceReplayer {
             && state.terminal_height <= 200;
 
         insert_mode_valid && size_valid
+    }
+
+    fn project_tui_state(state: &TuiState, commands: &[TuiCommand]) -> TuiITFState {
+        TuiITFState {
+            current_screen: state.screen(),
+            current_modal: state.current_modal_type(),
+            block_insert_mode: state.block.insert_mode,
+            chat_insert_mode: state.chat.insert_mode,
+            should_exit: state.should_exit,
+            terminal_width: state.terminal_size.0,
+            terminal_height: state.terminal_size.1,
+            command_queue: commands
+                .iter()
+                .filter_map(|c| match c {
+                    TuiCommand::Exit => Some(ItfCommand::Exit),
+                    TuiCommand::ShowToast { .. } => Some(ItfCommand::ShowToast),
+                    TuiCommand::DismissToast { .. } => Some(ItfCommand::DismissToast),
+                    TuiCommand::Render => Some(ItfCommand::Render),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    fn find_transition_witness(
+        &self,
+        from: &TuiState,
+        expected_to: &TuiITFState,
+    ) -> Option<(TerminalEvent, TuiState, Vec<TuiCommand>)> {
+        let mut candidates: Vec<TerminalEvent> = Vec::new();
+
+        // Always allow a tick as a "no-op" witness when toasts are absent.
+        candidates.push(events::tick());
+
+        // Keys modeled by the Quint spec.
+        candidates.push(events::escape());
+        candidates.push(events::char('q'));
+        candidates.push(events::char('?'));
+        candidates.push(events::char('i'));
+
+        for c in ['1', '2', '3', '4', '5', '6'] {
+            candidates.push(events::char(c));
+        }
+
+        candidates.push(events::tab());
+        candidates.push(TerminalEvent::Key(KeyEvent::press(KeyCode::BackTab)));
+
+        // If this step is a resize in the spec, the next state encodes the desired dimensions.
+        candidates.push(events::resize(
+            expected_to.terminal_width,
+            expected_to.terminal_height,
+        ));
+
+        for event in candidates {
+            let (state, cmds) = crate::tui::state_machine::transition(from, event.clone());
+            let projected = Self::project_tui_state(&state, &cmds);
+            if &projected == expected_to {
+                return Some((event, state, cmds));
+            }
+        }
+
+        None
     }
 
     /// Create a TuiState matching the ITF state (for comparison)
@@ -380,6 +514,7 @@ mod tests {
             should_exit: false,
             terminal_width: 80,
             terminal_height: 24,
+            command_queue: Vec::new(),
         };
         assert!(ITFTraceReplayer::validate_state_invariants(&state));
 
@@ -392,6 +527,7 @@ mod tests {
             should_exit: false,
             terminal_width: 80,
             terminal_height: 24,
+            command_queue: Vec::new(),
         };
         assert!(!ITFTraceReplayer::validate_state_invariants(&state));
     }

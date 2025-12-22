@@ -12,7 +12,6 @@ use super::super::toast::ToastLevel;
 use super::super::views::{
     AddDeviceModalState, BlockFocus, ChatFocus, CreateChannelModalState,
     CreateInvitationModalState, DisplayNameModalState, ImportInvitationModalState,
-    NicknameModalState, ThresholdModalState,
 };
 use super::super::TuiState;
 
@@ -212,10 +211,10 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             }
         }
         KeyCode::Char('e') => {
-            // Open nickname edit modal via queue
-            state
-                .modal_queue
-                .enqueue(QueuedModal::ContactsNickname(NicknameModalState::default()));
+            // Open nickname edit modal via dispatch (shell populates selected contact details)
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::OpenContactNicknameModal,
+            ));
         }
         KeyCode::Char('g') => {
             // Open guardian setup modal via dispatch (shell will populate contacts)
@@ -374,20 +373,16 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                     ));
                 }
                 SettingsSection::Threshold => {
-                    // Open threshold edit modal via queue
-                    state.modal_queue.enqueue(QueuedModal::SettingsThreshold(
-                        ThresholdModalState::default(),
-                    ));
+                    // Open threshold edit modal via dispatch (shell populates current values)
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::OpenThresholdModal));
                 }
                 _ => {}
             }
         }
         KeyCode::Char('t') => {
             if state.settings.section == SettingsSection::Threshold {
-                // Open threshold edit modal via queue
-                state.modal_queue.enqueue(QueuedModal::SettingsThreshold(
-                    ThresholdModalState::default(),
-                ));
+                // Open threshold edit modal via dispatch (shell populates current values)
+                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenThresholdModal));
             }
         }
         KeyCode::Char('a') => {

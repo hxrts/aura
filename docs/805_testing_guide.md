@@ -714,8 +714,9 @@ quint test verification/quint/tui_state_machine.qnt
 # Verify invariants with Apalache
 quint verify --max-steps=5 --invariant=allInvariants verification/quint/tui_state_machine.qnt
 
-# Generate ITF trace for replay
-quint run --max-samples=100 --out-itf=trace.itf.json verification/quint/tui_state_machine.qnt
+# Generate (or check) the deterministic ITF trace used by replay tests
+just tui-itf-trace
+just tui-itf-trace-check
 ```
 
 ### CLI Test Harness

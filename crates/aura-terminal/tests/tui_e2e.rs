@@ -348,12 +348,11 @@ async fn test_account_creation() {
 
     // VALIDATION 4: Modal should be closed - verify by navigating screens
     println!("  → Verifying modal closed by testing screen navigation");
-    tui.goto_screen(2).expect("Failed to navigate to Chat");
+    tui.goto_screen(3).expect("Failed to navigate to Chat");
     std::thread::sleep(Duration::from_millis(500));
 
     // Navigate to another screen to prove navigation works
-    tui.goto_screen(5)
-        .expect("Failed to navigate to Invitations");
+    tui.goto_screen(6).expect("Failed to navigate to Settings");
     std::thread::sleep(Duration::from_millis(500));
 
     // Navigate back to Block
@@ -390,16 +389,16 @@ async fn test_screen_navigation() {
     // Wait for startup
     std::thread::sleep(Duration::from_secs(3));
 
-    // Navigate to Chat screen (2)
-    tui.goto_screen(2).expect("Failed to go to Chat");
+    // Navigate to Neighborhood screen (2)
+    tui.goto_screen(2).expect("Failed to go to Neighborhood");
     std::thread::sleep(Duration::from_millis(500));
 
-    // Navigate to Contacts screen (3)
-    tui.goto_screen(3).expect("Failed to go to Contacts");
+    // Navigate to Chat screen (3)
+    tui.goto_screen(3).expect("Failed to go to Chat");
     std::thread::sleep(Duration::from_millis(500));
 
-    // Navigate to Neighborhood screen (4)
-    tui.goto_screen(4).expect("Failed to go to Neighborhood");
+    // Navigate to Contacts screen (4)
+    tui.goto_screen(4).expect("Failed to go to Contacts");
     std::thread::sleep(Duration::from_millis(500));
 
     // Navigate to Recovery screen (5)
@@ -478,7 +477,7 @@ async fn test_full_recovery_demo_flow() {
         // CRITICAL VALIDATION: Verify account was actually created by testing navigation
         // If modal is still blocking, navigation won't work
         println!("  → Validating account creation by testing navigation...");
-        tui.goto_screen(2)
+        tui.goto_screen(4)
             .expect("Navigation should work after account creation");
         std::thread::sleep(Duration::from_millis(300));
         tui.goto_screen(1).expect("Navigate back to Block");
@@ -488,7 +487,7 @@ async fn test_full_recovery_demo_flow() {
     } else {
         println!("  → Using existing account");
         // Still verify navigation works
-        tui.goto_screen(2).expect("Should navigate to Chat");
+        tui.goto_screen(4).expect("Should navigate to Contacts");
         std::thread::sleep(Duration::from_millis(300));
         tui.goto_screen(1).expect("Should navigate back");
     }
@@ -498,10 +497,10 @@ async fn test_full_recovery_demo_flow() {
     // =========================================================================
     println!("\nPhase 2: Invitation Management");
 
-    // Navigate to Invitations screen (5)
-    tui.goto_screen(5).expect("Failed to go to Invitations");
+    // Invitation codes are managed from the Contacts screen (4)
+    tui.goto_screen(4).expect("Failed to go to Contacts");
     std::thread::sleep(Duration::from_secs(1));
-    println!("  → Navigated to Invitations screen");
+    println!("  → Navigated to Contacts screen");
 
     // Create a new invitation (press 'n' for new)
     tui.send_char('n').expect("Failed to press 'n'");
@@ -585,13 +584,13 @@ async fn test_full_recovery_demo_flow() {
     // =========================================================================
     println!("\nPhase 5: Contacts Management");
 
-    // Navigate to Contacts screen (3)
-    tui.goto_screen(3).expect("Failed to go to Contacts");
+    // Navigate to Contacts screen (4)
+    tui.goto_screen(4).expect("Failed to go to Contacts");
     std::thread::sleep(Duration::from_secs(1));
     println!("  → Navigated to Contacts screen");
 
     // In demo mode, Alice and Carol may appear as contacts
-    // Press 'i' to invite from LAN discovery
+    // Press 'i' to open the invitation import modal
     tui.send_char('i').expect("Failed to press 'i'");
     std::thread::sleep(Duration::from_millis(500));
 
@@ -605,8 +604,8 @@ async fn test_full_recovery_demo_flow() {
     // =========================================================================
     println!("\nPhase 6: Recovery Screen Verification");
 
-    // Navigate to Recovery screen (7)
-    tui.goto_screen(7).expect("Failed to go to Recovery");
+    // Navigate to Recovery screen (5)
+    tui.goto_screen(5).expect("Failed to go to Recovery");
     std::thread::sleep(Duration::from_secs(1));
     println!("  → Navigated to Recovery screen");
 
@@ -662,8 +661,8 @@ async fn test_full_recovery_demo_flow() {
     // =========================================================================
     println!("\nPhase 9: Neighborhood Navigation");
 
-    // Navigate to Neighborhood screen (4)
-    tui.goto_screen(4).expect("Failed to go to Neighborhood");
+    // Navigate to Neighborhood screen (2)
+    tui.goto_screen(2).expect("Failed to go to Neighborhood");
     std::thread::sleep(Duration::from_secs(1));
     println!("  → Navigated to Neighborhood screen");
 
@@ -735,7 +734,7 @@ async fn test_chat_keyboard_shortcuts() {
     std::thread::sleep(Duration::from_secs(3));
 
     // Go to Chat screen
-    tui.goto_screen(2).expect("Failed to go to Chat");
+    tui.goto_screen(3).expect("Failed to go to Chat");
     std::thread::sleep(Duration::from_secs(1));
 
     // Test 'h' for focus left (channel list)
@@ -776,8 +775,8 @@ async fn test_invitation_import() {
     // Wait for startup
     std::thread::sleep(Duration::from_secs(3));
 
-    // Go to Invitations screen
-    tui.goto_screen(5).expect("Failed to go to Invitations");
+    // Invitation import is on the Contacts screen
+    tui.goto_screen(4).expect("Failed to go to Contacts");
     std::thread::sleep(Duration::from_secs(1));
 
     // Press 'i' to import invitation
@@ -3912,10 +3911,6 @@ async fn test_help_screen_shortcuts() {
         "Should have Neighborhood category"
     );
     assert!(
-        categories.contains("Invitations"),
-        "Should have Invitations category"
-    );
-    assert!(
         categories.contains("Settings"),
         "Should have Settings category"
     );
@@ -3949,14 +3944,14 @@ async fn test_help_screen_shortcuts() {
 
     let has_quit = commands.iter().any(|c| c.name == "q");
     let has_help = commands.iter().any(|c| c.name == "?");
-    let has_nav = commands.iter().any(|c| c.name == "1-7");
+    let has_nav = commands.iter().any(|c| c.name == "1-6");
     let has_escape = commands.iter().any(|c| c.name == "Esc");
 
     assert!(has_quit, "Should have quit shortcut (q)");
     assert!(has_help, "Should have help shortcut (?)");
-    assert!(has_nav, "Should have screen navigation (1-7)");
+    assert!(has_nav, "Should have screen navigation (1-6)");
     assert!(has_escape, "Should have escape shortcut");
-    println!("  ✓ Essential global shortcuts present (q, ?, 1-7, Esc)");
+    println!("  ✓ Essential global shortcuts present (q, ?, 1-6, Esc)");
 
     // Phase 5: Test HelpCommand structure
     println!("\nPhase 5: Testing HelpCommand structure");

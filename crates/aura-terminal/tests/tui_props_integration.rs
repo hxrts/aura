@@ -24,7 +24,7 @@ use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::screens::{BlockFocus, ChatFocus};
 use aura_terminal::tui::state_machine::{
     transition, ChatFocus as StateChatFocus, ContactSelectModalState, DispatchCommand, QueuedModal,
-    TuiCommand, TuiState,
+    NicknameModalState, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
 
@@ -61,6 +61,12 @@ impl PropsTestHarness {
                 new_state.show_modal(QueuedModal::BlockInvite(ContactSelectModalState::single(
                     "Invite to block",
                     vec![("contact-1".to_string(), "Alice".to_string())],
+                )));
+            }
+            if let TuiCommand::Dispatch(DispatchCommand::OpenContactNicknameModal) = cmd {
+                new_state.show_modal(QueuedModal::ContactsNickname(NicknameModalState::for_contact(
+                    "contact-1",
+                    "",
                 )));
             }
         }

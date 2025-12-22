@@ -250,6 +250,7 @@ impl IoContext {
     /// # Deprecated
     ///
     /// Use `IoContext::builder()` instead for more flexible construction.
+    #[doc(hidden)]
     #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
     pub fn new(
         app_core: InitializedAppCore,
@@ -266,6 +267,7 @@ impl IoContext {
     /// # Deprecated
     ///
     /// Use `IoContext::builder()` instead for more flexible construction.
+    #[doc(hidden)]
     #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
     pub fn with_account_status(
         app_core: InitializedAppCore,
@@ -292,6 +294,7 @@ impl IoContext {
     /// # Deprecated
     ///
     /// Use `IoContext::builder()` instead for more flexible construction.
+    #[doc(hidden)]
     #[cfg(feature = "development")]
     #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
     pub fn with_demo_hints(

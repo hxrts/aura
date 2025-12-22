@@ -110,7 +110,7 @@ pub fn DemoInviteCodes(props: &DemoInviteCodesProps) -> impl Into<AnyElement<'st
                 )
                 View(margin_top: Spacing::XS) {
                     Text(
-                        content: "Go to Invitations (5) and Import (i) to add contacts:",
+                        content: "Go to Contacts (4) and Import (i) to add contacts:",
                         color: Theme::TEXT_MUTED,
                     )
                 }

@@ -33,8 +33,4 @@ pub use command_parser::{
 pub use dispatcher::{CapabilityPolicy, CommandDispatcher, DispatchError};
 pub use intent_context::{parse_context_id, IntentContext, IntoIntent};
 pub use intent_mapper::{command_to_intent, is_intent_command};
-
-// Deprecated: Use IntentContext instead
-#[deprecated(since = "0.1.0", note = "Use IntentContext instead")]
-pub use intent_mapper::CommandContext;
 pub use operational::{OpError, OpResponse, OpResult, OperationalHandler};

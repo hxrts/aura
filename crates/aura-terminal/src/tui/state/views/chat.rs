@@ -31,12 +31,8 @@ pub struct ChatViewState {
     pub insert_mode: bool,
     /// Character used to enter insert mode (to prevent it being typed)
     pub insert_mode_entry_char: Option<char>,
-    /// Create channel modal state
-    pub create_modal: CreateChannelModalState,
-    /// Topic edit modal state
-    pub topic_modal: TopicModalState,
-    /// Channel info modal state
-    pub info_modal: ChannelInfoModalState,
+    // Note: Modal state is now stored in ModalQueue, not here.
+    // Use modal_queue.enqueue(QueuedModal::ChatCreate/Topic/Info(...)) to show modals.
 }
 
 /// State for create channel modal

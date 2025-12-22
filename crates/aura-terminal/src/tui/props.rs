@@ -20,10 +20,8 @@
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::screens::{BlockFocus as ScreenBlockFocus, ChatFocus as ScreenChatFocus};
 use crate::tui::state_machine::{
-    BlockFocus, ChatFocus, GuardianCeremonyResponse, GuardianSetupStep, PanelFocus, QueuedModal,
-    TuiState,
+    BlockFocus, ChatFocus, GuardianCeremonyResponse, GuardianSetupStep, QueuedModal, TuiState,
 };
-use cfg_if::cfg_if;
 
 // ============================================================================
 // Block Screen Props Extraction
@@ -202,10 +200,7 @@ pub struct GuardianCandidateViewProps {
 
 /// Extract ContactsScreen view props from TuiState
 pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
-    let focus = match state.contacts.focus {
-        PanelFocus::List => TwoPanelFocus::List,
-        PanelFocus::Detail => TwoPanelFocus::Detail,
-    };
+    let focus = state.contacts.focus;
 
     // Extract modal state from queue (all modals now use queue system)
     let (nickname_visible, nickname_contact_id, nickname_value) = match state.modal_queue.current()
@@ -278,82 +273,46 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         ),
     };
 
-    cfg_if! {
-        if #[cfg(feature = "development")] {
-            ContactsViewProps {
-                focus,
-                selected_index: state.contacts.selected_index,
-                filter: state.contacts.filter.clone(),
-                // Nickname modal (from queue)
-                nickname_modal_visible: nickname_visible,
-                nickname_modal_contact_id: nickname_contact_id,
-                nickname_modal_value: nickname_value,
-                // Import modal (from queue)
-                import_modal_visible: import_visible,
-                import_modal_code: import_code,
-                import_modal_importing: import_importing,
-                // Create modal (from queue)
-                create_modal_visible: create_visible,
-                create_modal_type_index: create_type_index,
-                create_modal_message: create_message,
-                create_modal_ttl_hours: create_ttl,
-                create_modal_step: create_step,
-                // Code display modal (from queue)
-                code_modal_visible: code_visible,
-                code_modal_invitation_id: code_invitation_id,
-                code_modal_code: code_code,
-                code_modal_loading: code_loading,
-                // Guardian setup modal (from queue)
-                guardian_setup_modal_visible: guardian_visible,
-                guardian_setup_modal_step: guardian_step,
-                guardian_setup_modal_contacts: guardian_contacts,
-                guardian_setup_modal_selected_indices: guardian_selected,
-                guardian_setup_modal_focused_index: guardian_focused,
-                guardian_setup_modal_threshold_k: guardian_k,
-                guardian_setup_modal_threshold_n: guardian_n,
-                guardian_setup_modal_ceremony_responses: guardian_responses,
-                guardian_setup_modal_error: guardian_error,
-                // Demo mode
-                demo_mode: !state.contacts.demo_alice_code.is_empty(),
-                demo_alice_code: state.contacts.demo_alice_code.clone(),
-                demo_carol_code: state.contacts.demo_carol_code.clone(),
-            }
-        } else {
-            ContactsViewProps {
-                focus,
-                selected_index: state.contacts.selected_index,
-                filter: state.contacts.filter.clone(),
-                // Nickname modal (from queue)
-                nickname_modal_visible: nickname_visible,
-                nickname_modal_contact_id: nickname_contact_id,
-                nickname_modal_value: nickname_value,
-                // Import modal (from queue)
-                import_modal_visible: import_visible,
-                import_modal_code: import_code,
-                import_modal_importing: import_importing,
-                // Create modal (from queue)
-                create_modal_visible: create_visible,
-                create_modal_type_index: create_type_index,
-                create_modal_message: create_message,
-                create_modal_ttl_hours: create_ttl,
-                create_modal_step: create_step,
-                // Code display modal (from queue)
-                code_modal_visible: code_visible,
-                code_modal_invitation_id: code_invitation_id,
-                code_modal_code: code_code,
-                code_modal_loading: code_loading,
-                // Guardian setup modal (from queue)
-                guardian_setup_modal_visible: guardian_visible,
-                guardian_setup_modal_step: guardian_step,
-                guardian_setup_modal_contacts: guardian_contacts,
-                guardian_setup_modal_selected_indices: guardian_selected,
-                guardian_setup_modal_focused_index: guardian_focused,
-                guardian_setup_modal_threshold_k: guardian_k,
-                guardian_setup_modal_threshold_n: guardian_n,
-                guardian_setup_modal_ceremony_responses: guardian_responses,
-                guardian_setup_modal_error: guardian_error,
-            }
-        }
+    ContactsViewProps {
+        focus,
+        selected_index: state.contacts.selected_index,
+        filter: state.contacts.filter.clone(),
+        // Nickname modal (from queue)
+        nickname_modal_visible: nickname_visible,
+        nickname_modal_contact_id: nickname_contact_id,
+        nickname_modal_value: nickname_value,
+        // Import modal (from queue)
+        import_modal_visible: import_visible,
+        import_modal_code: import_code,
+        import_modal_importing: import_importing,
+        // Create modal (from queue)
+        create_modal_visible: create_visible,
+        create_modal_type_index: create_type_index,
+        create_modal_message: create_message,
+        create_modal_ttl_hours: create_ttl,
+        create_modal_step: create_step,
+        // Code display modal (from queue)
+        code_modal_visible: code_visible,
+        code_modal_invitation_id: code_invitation_id,
+        code_modal_code: code_code,
+        code_modal_loading: code_loading,
+        // Guardian setup modal (from queue)
+        guardian_setup_modal_visible: guardian_visible,
+        guardian_setup_modal_step: guardian_step,
+        guardian_setup_modal_contacts: guardian_contacts,
+        guardian_setup_modal_selected_indices: guardian_selected,
+        guardian_setup_modal_focused_index: guardian_focused,
+        guardian_setup_modal_threshold_k: guardian_k,
+        guardian_setup_modal_threshold_n: guardian_n,
+        guardian_setup_modal_ceremony_responses: guardian_responses,
+        guardian_setup_modal_error: guardian_error,
+        // Demo mode (development feature only)
+        #[cfg(feature = "development")]
+        demo_mode: !state.contacts.demo_alice_code.is_empty(),
+        #[cfg(feature = "development")]
+        demo_alice_code: state.contacts.demo_alice_code.clone(),
+        #[cfg(feature = "development")]
+        demo_carol_code: state.contacts.demo_carol_code.clone(),
     }
 }
 
@@ -388,10 +347,7 @@ pub struct InvitationsViewProps {
 
 /// Extract InvitationsScreen view props from TuiState
 pub fn extract_invitations_view_props(state: &TuiState) -> InvitationsViewProps {
-    let focus = match state.invitations.focus {
-        PanelFocus::List => TwoPanelFocus::List,
-        PanelFocus::Detail => TwoPanelFocus::Detail,
-    };
+    let focus = state.invitations.focus;
 
     // Extract modal state from queue (all modals now use queue system)
     let (create_visible, create_type_index, create_message, create_ttl, create_step) =

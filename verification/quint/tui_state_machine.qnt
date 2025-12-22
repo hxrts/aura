@@ -21,8 +21,12 @@ module tui_state_machine {
 
   type Option[a] = Some(a) | None
 
-  // Screens in the TUI (7 total)
-  type Screen = Block | Chat | Contacts | Neighborhood | Invitations | Settings | Recovery
+  // Screens in the TUI (6 total)
+  //
+  // This must stay in sync with:
+  // - `crates/aura-terminal/src/tui/screens/router.rs` (`Screen`)
+  // - the nav bar tab ordering in the TUI shell
+  type Screen = Block | Neighborhood | Chat | Contacts | Recovery | Settings
 
   // Modal types that can be displayed
   type ModalType =
@@ -122,39 +126,36 @@ module tui_state_machine {
   // Check if navigation is allowed
   val canNavigate: bool = not(hasModal) and not(isInsertMode)
 
-  // Get screen from number key (1-7)
+  // Get screen from number key (1-6)
   pure def screenFromKey(key: int): Option[Screen] =
     if (key == 1) Some(Block)
-    else if (key == 2) Some(Chat)
-    else if (key == 3) Some(Contacts)
-    else if (key == 4) Some(Neighborhood)
-    else if (key == 5) Some(Invitations)
+    else if (key == 2) Some(Neighborhood)
+    else if (key == 3) Some(Chat)
+    else if (key == 4) Some(Contacts)
+    else if (key == 5) Some(Recovery)
     else if (key == 6) Some(Settings)
-    else if (key == 7) Some(Recovery)
     else None
 
   // Get next screen (for Tab navigation)
   pure def nextScreen(screen: Screen): Screen =
     match screen {
-      | Block => Chat
+      | Block => Neighborhood
+      | Neighborhood => Chat
       | Chat => Contacts
-      | Contacts => Neighborhood
-      | Neighborhood => Invitations
-      | Invitations => Settings
-      | Settings => Recovery
-      | Recovery => Block
+      | Contacts => Recovery
+      | Recovery => Settings
+      | Settings => Block
     }
 
   // Get previous screen (for Shift+Tab navigation)
   pure def prevScreen(screen: Screen): Screen =
     match screen {
-      | Block => Recovery
-      | Chat => Block
+      | Block => Settings
+      | Neighborhood => Block
+      | Chat => Neighborhood
       | Contacts => Chat
-      | Neighborhood => Contacts
-      | Invitations => Neighborhood
-      | Settings => Invitations
-      | Recovery => Settings
+      | Recovery => Contacts
+      | Settings => Recovery
     }
 
   // No modifiers
@@ -325,34 +326,6 @@ module tui_state_machine {
   }
 
   action navigateTo2 = all {
-    currentScreen' = Chat,
-    currentModal' = currentModal,
-    modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
-    chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
-    chatInputBuffer' = chatInputBuffer,
-    shouldExit' = shouldExit,
-    terminalWidth' = terminalWidth,
-    terminalHeight' = terminalHeight,
-    commandQueue' = []
-  }
-
-  action navigateTo3 = all {
-    currentScreen' = Contacts,
-    currentModal' = currentModal,
-    modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
-    chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
-    chatInputBuffer' = chatInputBuffer,
-    shouldExit' = shouldExit,
-    terminalWidth' = terminalWidth,
-    terminalHeight' = terminalHeight,
-    commandQueue' = []
-  }
-
-  action navigateTo4 = all {
     currentScreen' = Neighborhood,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
@@ -366,8 +339,36 @@ module tui_state_machine {
     commandQueue' = []
   }
 
+  action navigateTo3 = all {
+    currentScreen' = Chat,
+    currentModal' = currentModal,
+    modalInputBuffer' = modalInputBuffer,
+    blockInsertMode' = blockInsertMode,
+    chatInsertMode' = chatInsertMode,
+    blockInputBuffer' = blockInputBuffer,
+    chatInputBuffer' = chatInputBuffer,
+    shouldExit' = shouldExit,
+    terminalWidth' = terminalWidth,
+    terminalHeight' = terminalHeight,
+    commandQueue' = []
+  }
+
+  action navigateTo4 = all {
+    currentScreen' = Contacts,
+    currentModal' = currentModal,
+    modalInputBuffer' = modalInputBuffer,
+    blockInsertMode' = blockInsertMode,
+    chatInsertMode' = chatInsertMode,
+    blockInputBuffer' = blockInputBuffer,
+    chatInputBuffer' = chatInputBuffer,
+    shouldExit' = shouldExit,
+    terminalWidth' = terminalWidth,
+    terminalHeight' = terminalHeight,
+    commandQueue' = []
+  }
+
   action navigateTo5 = all {
-    currentScreen' = Invitations,
+    currentScreen' = Recovery,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
     blockInsertMode' = blockInsertMode,
@@ -382,20 +383,6 @@ module tui_state_machine {
 
   action navigateTo6 = all {
     currentScreen' = Settings,
-    currentModal' = currentModal,
-    modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
-    chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
-    chatInputBuffer' = chatInputBuffer,
-    shouldExit' = shouldExit,
-    terminalWidth' = terminalWidth,
-    terminalHeight' = terminalHeight,
-    commandQueue' = []
-  }
-
-  action navigateTo7 = all {
-    currentScreen' = Recovery,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
     blockInsertMode' = blockInsertMode,
@@ -443,22 +430,22 @@ module tui_state_machine {
     if (not(hasModal) and not(isInsertMode)) navigateTo1
     else unchanged
 
-  // Handle number key 2 - go to Chat
+  // Handle number key 2 - go to Neighborhood
   action handleKey2 =
     if (not(hasModal) and not(isInsertMode)) navigateTo2
     else unchanged
 
-  // Handle number key 3 - go to Contacts
+  // Handle number key 3 - go to Chat
   action handleKey3 =
     if (not(hasModal) and not(isInsertMode)) navigateTo3
     else unchanged
 
-  // Handle number key 4 - go to Neighborhood
+  // Handle number key 4 - go to Contacts
   action handleKey4 =
     if (not(hasModal) and not(isInsertMode)) navigateTo4
     else unchanged
 
-  // Handle number key 5 - go to Invitations
+  // Handle number key 5 - go to Recovery
   action handleKey5 =
     if (not(hasModal) and not(isInsertMode)) navigateTo5
     else unchanged
@@ -466,11 +453,6 @@ module tui_state_machine {
   // Handle number key 6 - go to Settings
   action handleKey6 =
     if (not(hasModal) and not(isInsertMode)) navigateTo6
-    else unchanged
-
-  // Handle number key 7 - go to Recovery
-  action handleKey7 =
-    if (not(hasModal) and not(isInsertMode)) navigateTo7
     else unchanged
 
   // Handle Tab key (next screen)
@@ -552,7 +534,6 @@ module tui_state_machine {
     handleKey4,
     handleKey5,
     handleKey6,
-    handleKey7,
     handleTab,
     handleShiftTab,
     handleInsertKey,
@@ -579,15 +560,14 @@ module tui_state_machine {
     // (This is a liveness property, verified via temporal logic below)
     true
 
-  // Screen is always one of the 7 valid screens
+  // Screen is always one of the 6 valid screens
   val validScreen: bool =
     currentScreen == Block or
+    currentScreen == Neighborhood or
     currentScreen == Chat or
     currentScreen == Contacts or
-    currentScreen == Neighborhood or
-    currentScreen == Invitations or
-    currentScreen == Settings or
-    currentScreen == Recovery
+    currentScreen == Recovery or
+    currentScreen == Settings
 
   // Terminal size is reasonable
   val validTerminalSize: bool =
@@ -615,7 +595,7 @@ module tui_state_machine {
   temporal insertModeEventuallyExits: bool =
     always(isInsertMode implies eventually(not(isInsertMode)))
 
-  // Tab cycling returns to start after 7 presses
+  // Tab cycling returns to start after 6 presses
   // (This is verified in the Rust tests via proptest)
 
   // ============ TEST SCENARIOS ============
@@ -623,9 +603,9 @@ module tui_state_machine {
   // Test: Navigation cycle
   run navigationCycleTest = {
     init
-    .then(handleKey2)              // Go to Chat
-    .then(handleKey3)              // Go to Contacts
-    .then(handleTab)               // Tab to Neighborhood
+    .then(handleKey3)              // Go to Chat
+    .then(handleKey4)              // Go to Contacts
+    .then(handleTab)               // Tab to Recovery
     .then(handleShiftTab)          // Shift+Tab back to Contacts
     .then(handleKey1)              // Go to Block
     .then(all {
@@ -642,7 +622,7 @@ module tui_state_machine {
       assert(hasModal),
       unchanged
     })
-    .then(handleKey2)              // Try to navigate (blocked)
+    .then(handleKey3)              // Try to navigate (blocked)
     .then(all {
       assert(currentScreen == Block),  // Still on Block
       assert(hasModal),              // Modal still open

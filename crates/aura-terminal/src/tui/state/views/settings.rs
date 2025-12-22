@@ -1,28 +1,21 @@
 //! Settings screen view state
 
+use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::types::{MfaPolicy, SettingsSection};
-
-use super::PanelFocus;
 
 /// Settings screen state
 #[derive(Clone, Debug, Default)]
 pub struct SettingsViewState {
     /// Panel focus (menu or detail)
-    pub focus: PanelFocus,
+    pub focus: TwoPanelFocus,
     /// Current section
     pub section: SettingsSection,
     /// Selected item in current section
     pub selected_index: usize,
     /// Current MFA policy
     pub mfa_policy: MfaPolicy,
-    /// Display name edit modal state (user's own display name)
-    pub display_name_modal: DisplayNameModalState,
-    /// Threshold config modal state
-    pub threshold_modal: ThresholdModalState,
-    /// Add device modal state
-    pub add_device_modal: AddDeviceModalState,
-    /// Remove device confirm modal state
-    pub confirm_remove_modal: ConfirmRemoveModalState,
+    // Note: Modal state is now stored in ModalQueue, not here.
+    // Use modal_queue.enqueue(QueuedModal::SettingsDisplayName/Threshold/AddDevice/RemoveDevice(...)) to show modals.
 }
 
 /// State for display name edit modal (settings screen)

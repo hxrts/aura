@@ -37,7 +37,7 @@ use crate::tui::layout::dim;
 use crate::tui::screens::app::subscriptions::{
     use_channels_subscription, use_contacts_subscription, use_invitations_subscription,
     use_messages_subscription, use_nav_status_signals, use_neighborhood_blocks_subscription,
-    use_pending_requests_subscription, use_residents_subscription,
+    use_pending_requests_subscription, use_residents_subscription, use_threshold_subscription,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
@@ -266,6 +266,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Pending requests subscription: SharedPendingRequests for dispatch handlers to read
     // =========================================================================
     let shared_pending_requests = use_pending_requests_subscription(&mut hooks, &app_ctx);
+
+    // =========================================================================
+    // Threshold subscription: SharedThreshold for dispatch handlers to read
+    // =========================================================================
+    // Used to populate the threshold modal with current k/n values.
+    let shared_threshold = use_threshold_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
     // ERROR_SIGNAL subscription: central domain error surfacing
@@ -866,6 +872,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     let current_screen = screen.get();
 
+    // Read the TUI state version to establish reactivity - when tui.replace() bumps the version,
+    // this component will re-render. Without this read, iocraft doesn't know to track this dependency.
+    let _state_version = tui_state_version.get();
+
     // Check if in insert mode (MessageInput has its own hint bar, so hide main hints)
     let is_insert_mode = tui_state.read().is_insert_mode();
 
@@ -1003,6 +1013,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_invitations_for_dispatch = shared_invitations.clone();
         let shared_neighborhood_blocks_for_dispatch = shared_neighborhood_blocks.clone();
         let shared_pending_requests_for_dispatch = shared_pending_requests.clone();
+        // Clone shared threshold for opening threshold modal with current values
+        let shared_threshold_for_dispatch = shared_threshold.clone();
         // This Arc is updated by a reactive subscription, so reading from it
         // always gets current contacts (not stale props)
         let shared_contacts_for_dispatch = shared_contacts.clone();
@@ -1166,6 +1178,26 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         nickname,
                                     } => {
                                         (cb.contacts.on_update_nickname)(contact_id, nickname);
+                                    }
+                                    DispatchCommand::OpenContactNicknameModal => {
+                                        let idx = new_state.contacts.selected_index;
+                                        if let Ok(guard) = shared_contacts_for_dispatch.read() {
+                                            if let Some(contact) = guard.get(idx) {
+                                                let modal_state = crate::tui::state_machine::NicknameModalState::for_contact(
+                                                    &contact.id,
+                                                    &contact.nickname,
+                                                );
+                                                new_state
+                                                    .modal_queue
+                                                    .enqueue(crate::tui::state_machine::QueuedModal::ContactsNickname(
+                                                        modal_state,
+                                                    ));
+                                            } else {
+                                                new_state.toast_error("No contact selected");
+                                            }
+                                        } else {
+                                            new_state.toast_error("Failed to read contacts");
+                                        }
                                     }
                                     DispatchCommand::StartChat => {
                                         let idx = new_state.contacts.selected_index;
@@ -1570,6 +1602,23 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::RemoveDevice { device_id } => {
                                         (cb.settings.on_remove_device)(device_id);
+                                    }
+                                    DispatchCommand::OpenThresholdModal => {
+                                        // Read current threshold from shared state (updated by reactive subscription)
+                                        let (current_k, current_n) = shared_threshold_for_dispatch
+                                            .read()
+                                            .map(|guard| *guard)
+                                            .unwrap_or((2, 3));
+
+                                        // Populate the threshold modal with the current values
+                                        new_state
+                                            .modal_queue
+                                            .enqueue(crate::tui::state_machine::QueuedModal::SettingsThreshold(
+                                                crate::tui::state_machine::ThresholdModalState::with_threshold(
+                                                    current_k,
+                                                    current_n,
+                                                ),
+                                            ));
                                     }
 
                                     // === Neighborhood Screen Commands ===

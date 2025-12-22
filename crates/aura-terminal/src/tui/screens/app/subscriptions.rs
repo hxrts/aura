@@ -11,7 +11,7 @@ use iocraft::prelude::*;
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL,
     CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
-    RECOVERY_SIGNAL, SYNC_STATUS_SIGNAL,
+    RECOVERY_SIGNAL, SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
 use aura_effects::time::PhysicalTimeHandler;
 
@@ -360,4 +360,34 @@ pub fn use_pending_requests_subscription(
     });
 
     shared_requests
+}
+
+/// Shared threshold settings.
+///
+/// Tuple of (threshold_k, threshold_n) for recovery threshold configuration.
+/// Used to populate the threshold modal with current values.
+pub type SharedThreshold = Arc<RwLock<(u8, u8)>>;
+
+/// Create a shared threshold holder and subscribe it to SETTINGS_SIGNAL.
+///
+/// Returns an Arc that closures can capture. The subscription updates the Arc's
+/// contents whenever settings change, so readers always get current threshold.
+pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> SharedThreshold {
+    let shared_threshold_ref = hooks.use_ref(|| Arc::new(RwLock::new((2u8, 3u8))));
+    let shared_threshold: SharedThreshold = shared_threshold_ref.read().clone();
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let threshold = shared_threshold.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
+                if let Ok(mut guard) = threshold.write() {
+                    *guard = (settings_state.threshold_k, settings_state.threshold_n);
+                }
+            })
+            .await;
+        }
+    });
+
+    shared_threshold
 }

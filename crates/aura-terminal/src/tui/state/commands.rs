@@ -76,6 +76,11 @@ pub enum DispatchCommand {
         contact_id: String,
         nickname: String,
     },
+    /// Open the “edit nickname” modal for the currently-selected contact.
+    ///
+    /// The shell populates the modal with the selected contact ID and current nickname
+    /// from reactive subscriptions.
+    OpenContactNicknameModal,
     StartChat,
     RemoveContact {
         contact_id: String,
@@ -121,6 +126,8 @@ pub enum DispatchCommand {
     ApproveRecovery,
 
     // Settings screen
+    /// Open threshold modal (shell will populate current values)
+    OpenThresholdModal,
     UpdateDisplayName {
         display_name: String,
     },

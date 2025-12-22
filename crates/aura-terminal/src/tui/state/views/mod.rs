@@ -24,33 +24,5 @@ pub use neighborhood::*;
 pub use recovery::*;
 pub use settings::*;
 
-/// Focus for two-panel screens (list + detail layout)
-///
-/// Used by screens with a left panel (list) and right panel (detail view).
-/// Navigation: Left/Right (h/l) toggles between panels, Up/Down (j/k) navigates within.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PanelFocus {
-    #[default]
-    List,
-    Detail,
-}
-
-impl PanelFocus {
-    /// Toggle between list and detail focus
-    pub fn toggle(self) -> Self {
-        match self {
-            PanelFocus::List => PanelFocus::Detail,
-            PanelFocus::Detail => PanelFocus::List,
-        }
-    }
-
-    /// Check if list panel is focused
-    pub fn is_list(self) -> bool {
-        matches!(self, PanelFocus::List)
-    }
-
-    /// Check if detail panel is focused
-    pub fn is_detail(self) -> bool {
-        matches!(self, PanelFocus::Detail)
-    }
-}
+// Note: PanelFocus has been unified with TwoPanelFocus from navigation.rs.
+// Use TwoPanelFocus for two-panel screen layouts.

@@ -585,9 +585,16 @@ mod contacts_screen {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Contacts);
 
-        // Open edit modal with 'e'
+        // 'e' emits a dispatch so the shell can populate the modal with the selected contact.
         tui.send_char('e');
-        assert!(tui.has_modal()); // Screen-specific modal (nickname_modal.visible)
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenContactNicknameModal)));
+
+        // Simulate the shell opening the modal with a concrete contact ID.
+        use aura_terminal::tui::state_machine::NicknameModalState;
+        tui.state.modal_queue.enqueue(QueuedModal::ContactsNickname(
+            NicknameModalState::for_contact("contact-123", ""),
+        ));
+        assert!(tui.has_modal());
 
         // Type new nickname
         tui.type_text("Alice");

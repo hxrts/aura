@@ -13,7 +13,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
-use aura_app::runtime_bridge::RuntimeBridge;
 use aura_app::signal_defs::{ConnectionStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
