@@ -44,6 +44,18 @@ pub enum NavKey {
 }
 
 impl NavKey {
+    /// Create NavKey from KeyCode (arrows or hjkl)
+    pub fn from_key_code(code: iocraft::prelude::KeyCode) -> Option<Self> {
+        use iocraft::prelude::KeyCode;
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => Some(NavKey::Up),
+            KeyCode::Down | KeyCode::Char('j') => Some(NavKey::Down),
+            KeyCode::Left | KeyCode::Char('h') => Some(NavKey::Left),
+            KeyCode::Right | KeyCode::Char('l') => Some(NavKey::Right),
+            _ => None,
+        }
+    }
+
     /// Check if this is a vertical navigation key
     pub fn is_vertical(&self) -> bool {
         matches!(self, NavKey::Up | NavKey::Down)
@@ -126,6 +138,115 @@ impl ThreePanelFocus {
             NavKey::Right => self.next(),
             _ => *self,
         }
+    }
+}
+
+/// Result of two-panel navigation operation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TwoPanelNavResult {
+    /// Focus changed between panels
+    FocusChanged,
+    /// List index changed
+    IndexChanged,
+    /// No change (key not handled)
+    None,
+}
+
+/// Unified navigation for two-panel screens (list + detail layout)
+///
+/// Handles both panel focus (Left/Right) and list navigation (Up/Down).
+/// Use this for screens like Contacts, Invitations, and similar list+detail layouts.
+///
+/// # Example
+///
+/// ```ignore
+/// // In screen state:
+/// pub nav: TwoPanelListNav,
+///
+/// // In key handler:
+/// match key.code {
+///     KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right
+///     | KeyCode::Char('h') | KeyCode::Char('j') | KeyCode::Char('k') | KeyCode::Char('l') => {
+///         if let Some(nav_key) = NavKey::from_key_code(key.code) {
+///             state.screen.nav.navigate(nav_key);
+///         }
+///     }
+///     // ... other key handling
+/// }
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TwoPanelListNav {
+    /// Panel focus (List or Detail)
+    pub focus: TwoPanelFocus,
+    /// Current selected index in the list
+    pub index: usize,
+    /// Total item count (updated from data layer)
+    pub count: usize,
+}
+
+impl TwoPanelListNav {
+    /// Create a new two-panel navigation state
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Navigate using a NavKey
+    ///
+    /// - Left/Right: Toggle between List and Detail panels
+    /// - Up/Down: Navigate within list (only when List panel is focused)
+    ///
+    /// Returns what changed to help with conditional actions.
+    pub fn navigate(&mut self, key: NavKey) -> TwoPanelNavResult {
+        match key {
+            NavKey::Left | NavKey::Right => {
+                self.focus = self.focus.toggle();
+                TwoPanelNavResult::FocusChanged
+            }
+            NavKey::Up | NavKey::Down => {
+                if matches!(self.focus, TwoPanelFocus::List) {
+                    self.index = navigate_list(self.index, self.count, key);
+                    TwoPanelNavResult::IndexChanged
+                } else {
+                    TwoPanelNavResult::None
+                }
+            }
+        }
+    }
+
+    /// Check if list panel is focused
+    pub fn is_list_focused(&self) -> bool {
+        matches!(self.focus, TwoPanelFocus::List)
+    }
+
+    /// Check if detail panel is focused
+    pub fn is_detail_focused(&self) -> bool {
+        matches!(self.focus, TwoPanelFocus::Detail)
+    }
+
+    /// Update item count (call when data changes)
+    pub fn set_count(&mut self, count: usize) {
+        self.count = count;
+        // Clamp index if count shrunk
+        if count > 0 && self.index >= count {
+            self.index = count - 1;
+        } else if count == 0 {
+            self.index = 0;
+        }
+    }
+
+    /// Get current selected index, clamped to valid range
+    pub fn current_index(&self) -> usize {
+        if self.count == 0 {
+            0
+        } else {
+            self.index.min(self.count - 1)
+        }
+    }
+
+    /// Reset to first item with list focused
+    pub fn reset(&mut self) {
+        self.focus = TwoPanelFocus::List;
+        self.index = 0;
     }
 }
 

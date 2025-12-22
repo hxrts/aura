@@ -15,7 +15,6 @@ use async_lock::RwLock;
 
 use super::{SnapshotHelper, ToastHelper};
 use crate::error::TerminalError;
-use crate::handlers::tui::TuiMode;
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
 
@@ -24,11 +23,14 @@ use crate::tui::types::ChannelMode;
 /// Note: These are currently implemented via the TUI handler helpers (disk I/O).
 /// We isolate them here so we can later swap to effect-based storage without
 /// touching UI dispatch sites.
+///
+/// Mode isolation is achieved via mode-specific base_path directories:
+/// - Production: `$AURA_PATH/.aura` (default: `~/.aura`)
+/// - Demo: `$AURA_PATH/.aura-demo` (default: `~/.aura-demo`)
 #[derive(Clone)]
 pub struct AccountFilesHelper {
     base_path: PathBuf,
     device_id_str: String,
-    mode: TuiMode,
     has_existing_account: Arc<AtomicBool>,
 }
 
@@ -36,13 +38,11 @@ impl AccountFilesHelper {
     pub fn new(
         base_path: PathBuf,
         device_id_str: String,
-        mode: TuiMode,
         has_existing_account: Arc<AtomicBool>,
     ) -> Self {
         Self {
             base_path,
             device_id_str,
-            mode,
             has_existing_account,
         }
     }
@@ -59,13 +59,8 @@ impl AccountFilesHelper {
         &self,
         display_name: &str,
     ) -> Result<(AuthorityId, ContextId), String> {
-        match crate::handlers::tui::create_account(
-            &self.base_path,
-            &self.device_id_str,
-            self.mode,
-            display_name,
-        )
-        .await
+        match crate::handlers::tui::create_account(&self.base_path, &self.device_id_str, display_name)
+            .await
         {
             Ok((authority_id, context_id)) => {
                 self.set_account_created();
@@ -87,7 +82,6 @@ impl AccountFilesHelper {
             &self.base_path,
             recovered_authority_id,
             recovered_context_id,
-            self.mode,
         )
         .await
         {
@@ -107,23 +101,13 @@ impl AccountFilesHelper {
             return Err("No account exists to backup".to_string());
         }
 
-        crate::handlers::tui::export_account_backup(
-            &self.base_path,
-            Some(&self.device_id_str),
-            self.mode,
-        )
-        .await
-        .map_err(|e| format!("Failed to export backup: {}", e))
+        crate::handlers::tui::export_account_backup(&self.base_path, Some(&self.device_id_str))
+            .await
+            .map_err(|e| format!("Failed to export backup: {}", e))
     }
 
     pub async fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
-        match crate::handlers::tui::import_account_backup(
-            &self.base_path,
-            backup_code,
-            true,
-            self.mode,
-        )
-        .await
+        match crate::handlers::tui::import_account_backup(&self.base_path, backup_code, true).await
         {
             Ok((_authority_id, _context_id)) => {
                 self.set_account_created();

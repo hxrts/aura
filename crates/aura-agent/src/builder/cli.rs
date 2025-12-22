@@ -13,6 +13,7 @@ use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 
 use crate::builder::BuildError;
+use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
 use crate::runtime::EffectContext;
 use crate::{AgentBuilder, AgentResult, AuraAgent, EffectSystemBuilder};
@@ -117,7 +118,7 @@ impl CliPresetBuilder {
     /// - Effect handlers fail to initialize
     /// - Runtime construction fails
     pub async fn build(self) -> AgentResult<AuraAgent> {
-        let data_dir = self.data_dir.unwrap_or_else(default_data_dir);
+        let data_dir = self.data_dir.unwrap_or_else(default_storage_path);
 
         // Ensure data directory exists
         if !data_dir.exists() {
@@ -173,7 +174,7 @@ impl CliPresetBuilder {
     /// This uses `build_sync` internally, which is suitable for tests
     /// that don't have an async runtime available.
     pub fn build_sync(self) -> AgentResult<AuraAgent> {
-        let data_dir = self.data_dir.unwrap_or_else(default_data_dir);
+        let data_dir = self.data_dir.unwrap_or_else(default_storage_path);
 
         // Ensure data directory exists
         if !data_dir.exists() {
@@ -218,13 +219,6 @@ impl Default for CliPresetBuilder {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Get the default data directory for the current platform.
-fn default_data_dir() -> PathBuf {
-    dirs::data_dir()
-        .map(|p| p.join("aura"))
-        .unwrap_or_else(|| PathBuf::from(".aura"))
 }
 
 // Extend AgentBuilder with CLI preset entry point

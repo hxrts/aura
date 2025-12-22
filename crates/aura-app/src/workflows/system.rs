@@ -4,11 +4,12 @@
 //! These are mostly lightweight health-check and state refresh operations.
 
 use crate::signal_defs::{
-    ConnectionStatus, SettingsState, CONNECTION_STATUS_SIGNAL, SETTINGS_SIGNAL,
+    ConnectionStatus, SettingsState, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, SETTINGS_SIGNAL,
 };
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::AuthorityId;
 use aura_core::AuraError;
 use std::sync::Arc;
 
@@ -56,17 +57,37 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     // Refresh discovered peers
     let _ = super::network::get_discovered_peers(app_core).await;
 
-    // Refresh connection status from runtime
-    let core = app_core.read().await;
-    if let Some(runtime) = core.runtime() {
-        let status = runtime.get_sync_status().await;
-        let connection = if status.connected_peers > 0 {
+    // Refresh connection status + settings from runtime.
+    //
+    // ConnectionStatus is intended to represent "how many of my contacts are online",
+    // not merely "how many peers are configured".
+    let (runtime, contact_ids) = {
+        let core = app_core.read().await;
+        let runtime = core.runtime().cloned();
+        let contact_ids: Vec<AuthorityId> = match core.read(&*CONTACTS_SIGNAL).await {
+            Ok(state) => state.contacts.iter().map(|c| c.id).collect(),
+            Err(_) => core.snapshot().contacts.contacts.iter().map(|c| c.id).collect(),
+        };
+        (runtime, contact_ids)
+    };
+
+    if let Some(runtime) = runtime {
+        let mut online_contacts = 0usize;
+        for contact_id in contact_ids {
+            if runtime.is_peer_online(contact_id).await {
+                online_contacts += 1;
+            }
+        }
+
+        let connection = if online_contacts > 0 {
             ConnectionStatus::Online {
-                peer_count: status.connected_peers,
+                peer_count: online_contacts,
             }
         } else {
             ConnectionStatus::Offline
         };
+
+        let core = app_core.read().await;
         let _ = core.emit(&*CONNECTION_STATUS_SIGNAL, connection).await;
 
         // Refresh settings from runtime

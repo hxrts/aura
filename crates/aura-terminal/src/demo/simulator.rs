@@ -1,275 +1,227 @@
-//! # Demo Simulator
+//! # Demo Simulator (Real Runtime Peers)
 //!
-//! Coordinates simulated peer agents (Alice, Carol) for demo mode.
-//!
-//! The simulator runs alongside the TUI, processing events for the simulated
-//! agents and routing their responses back to the TUI.
+//! Demo mode should exercise the same runtime assembly path as production.
+//! This simulator instantiates real `AuraAgent` runtimes for Alice and Carol and
+//! runs a small automation loop on their behalf (e.g., auto-accept guardian setup).
 
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 
-use aura_core::identifiers::AuthorityId;
+use aura_agent::core::{AgentBuilder, AgentConfig};
+use aura_agent::{AuraAgent, EffectContext, SharedTransport};
+use aura_core::effects::{ExecutionMode, TransportEffects};
+use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_recovery::guardian_setup::GuardianAcceptance;
+use aura_effects::time::PhysicalTimeHandler;
 
-use super::{AgentFactory, AgentResponse, SimulatedAgent, SimulatedBridge};
 use crate::error::TerminalResult;
+use crate::ids;
 
-/// Demo simulator that manages Alice and Carol peer agents
+/// Demo simulator that manages Alice and Carol peer runtimes.
 pub struct DemoSimulator {
-    /// Simulation seed for determinism
     seed: u64,
-
-    /// Alice agent
-    alice: Arc<Mutex<SimulatedAgent>>,
-
-    /// Carol agent
-    carol: Arc<Mutex<SimulatedAgent>>,
-
-    /// Bridge for routing events between TUI and agents
-    bridge: Arc<SimulatedBridge>,
-
-    /// Response sender for agents (used by Alice/Carol to send responses)
-    #[allow(dead_code)]
-    response_tx: mpsc::UnboundedSender<(AuthorityId, AgentResponse)>,
-
-    /// Background event loop handle
+    shared_transport: SharedTransport,
+    alice: Arc<AuraAgent>,
+    carol: Arc<AuraAgent>,
     event_loop_handle: Option<JoinHandle<()>>,
-
-    /// Shutdown signal
     shutdown_tx: Option<mpsc::Sender<()>>,
-
-    /// Shared transport inbox for Bob, Alice, and Carol
-    pub shared_transport_inbox:
-        std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>,
 }
 
 impl DemoSimulator {
-    /// Create a new demo simulator with the given seed
-    pub async fn new(seed: u64) -> TerminalResult<Self> {
-        // Create shared transport inbox for Bob, Alice, and Carol to communicate
-        let shared_inbox = std::sync::Arc::new(std::sync::RwLock::new(Vec::new()));
+    /// Create a new demo simulator with the given seed and base data dir.
+    pub async fn new(seed: u64, base_path: PathBuf) -> TerminalResult<Self> {
+        let shared_transport = SharedTransport::new();
 
-        // Create Alice and Carol agents with shared transport
-        let (alice, carol) =
-            AgentFactory::create_demo_agents(seed, Some(shared_inbox.clone())).await?;
+        // Peer identities MUST match demo hint derivations.
+        let alice_authority = ids::authority_id(&format!("demo:{}:{}:authority", seed, "Alice"));
+        let carol_authority =
+            ids::authority_id(&format!("demo:{}:{}:authority", seed + 1, "Carol"));
 
-        // Get Bob's authority ID - MUST match how TUI derives it in handle_tui_launch()
-        // The TUI uses device_id_str = "demo:bob" and computes:
-        //   authority_entropy = aura_core::hash::hash("authority:demo:bob")
-        //   authority_id = AuthorityId::new_from_entropy(authority_entropy)
-        // We need to use the SAME derivation here.
-        let bob_device_id_str = "demo:bob";
-        let bob_authority_entropy =
-            aura_core::hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
-        let bob_authority =
-            aura_core::identifiers::AuthorityId::new_from_entropy(bob_authority_entropy);
+        let alice_device = ids::device_id(&format!("demo:{}:{}:device", seed, "Alice"));
+        let carol_device = ids::device_id(&format!("demo:{}:{}:device", seed + 1, "Carol"));
 
-        // Get Bob's context ID for guardian bindings (same derivation as TUI)
-        let bob_context_entropy =
-            aura_core::hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
-        let bob_context = aura_core::identifiers::ContextId::new_from_entropy(bob_context_entropy);
+        // Each peer has its own storage sandbox under the demo directory.
+        let peers_root = base_path.join("peers");
+        let alice_dir = peers_root.join("alice");
+        let carol_dir = peers_root.join("carol");
+        let _ = std::fs::create_dir_all(&alice_dir);
+        let _ = std::fs::create_dir_all(&carol_dir);
 
-        // Create the bridge that routes events
-        let (bridge, response_tx) = SimulatedBridge::new(bob_authority, None);
-
-        // Set up response channels for agents
-        let mut alice = alice;
-        let mut carol = carol;
-        alice.set_response_channel(response_tx.clone());
-        carol.set_response_channel(response_tx.clone());
-
-        // Configure Alice and Carol as guardians for Bob
-        // This is the "pre-setup" state for the demo - Alice and Carol
-        // are already Bob's guardians when the demo starts
-        alice.add_guardian_for(bob_authority, bob_context);
-        carol.add_guardian_for(bob_authority, bob_context);
+        let (alice, carol) = tokio::try_join!(
+            build_demo_peer_agent(
+                seed,
+                "Alice",
+                alice_authority,
+                ids::context_id(&format!("demo:{}:{}:context", seed, "Alice")),
+                alice_device,
+                alice_dir,
+                shared_transport.clone(),
+            ),
+            build_demo_peer_agent(
+                seed + 1,
+                "Carol",
+                carol_authority,
+                ids::context_id(&format!("demo:{}:{}:context", seed + 1, "Carol")),
+                carol_device,
+                carol_dir,
+                shared_transport.clone(),
+            )
+        )?;
 
         Ok(Self {
             seed,
-            alice: Arc::new(Mutex::new(alice)),
-            carol: Arc::new(Mutex::new(carol)),
-            bridge: Arc::new(bridge),
-            response_tx,
+            shared_transport,
+            alice,
+            carol,
             event_loop_handle: None,
             shutdown_tx: None,
-            shared_transport_inbox: shared_inbox,
         })
     }
 
-    /// Get the simulation seed
+    /// Access the shared transport wiring used by Bob + peers.
+    pub fn shared_transport(&self) -> SharedTransport {
+        self.shared_transport.clone()
+    }
+
+    /// Get the simulation seed.
     pub fn seed(&self) -> u64 {
         self.seed
     }
 
-    /// Get Alice's authority ID
-    pub async fn alice_authority(&self) -> AuthorityId {
-        self.alice.lock().await.authority_id()
+    pub fn alice_authority(&self) -> AuthorityId {
+        self.alice.authority_id()
     }
 
-    /// Get Carol's authority ID
-    pub async fn carol_authority(&self) -> AuthorityId {
-        self.carol.lock().await.authority_id()
+    pub fn carol_authority(&self) -> AuthorityId {
+        self.carol.authority_id()
     }
 
-    /// Get the bridge for connecting to the TUI
-    pub fn bridge(&self) -> Arc<SimulatedBridge> {
-        self.bridge.clone()
-    }
-
-    /// Take the response receiver for use by DemoSignalCoordinator
-    ///
-    /// This transfers ownership of the response receiver from the bridge
-    /// to the caller (typically DemoSignalCoordinator). After this call,
-    /// the bridge's process_responses() method will no longer receive
-    /// agent responses - they will go directly to the coordinator.
-    ///
-    /// Can only be called once - returns None after first call.
-    pub async fn take_response_receiver(
-        &self,
-    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<(AuthorityId, super::AgentResponse)>> {
-        self.bridge.take_response_receiver().await
-    }
-
-    /// Start the simulated agents and event loop
+    /// Start background automation loops for peer runtimes.
     pub async fn start(&mut self) -> TerminalResult<()> {
-        // Start both agents
-        self.alice.lock().await.start().await?;
-        self.carol.lock().await.start().await?;
-
-        // Create shutdown channel
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         self.shutdown_tx = Some(shutdown_tx);
 
-        // Subscribe to agent events from the bridge
-        let mut event_rx = self.bridge.subscribe_agent_events();
-
-        // Clone references for the event loop
         let alice = self.alice.clone();
         let carol = self.carol.clone();
-        let bridge = self.bridge.clone();
 
-        // Spawn event processing loop
-        let handle = tokio::spawn(async move {
-            // Interval for processing responses (check every 100ms)
-            let mut response_interval = interval(Duration::from_millis(100));
-
+        self.event_loop_handle = Some(tokio::spawn(async move {
+            let mut tick = interval(Duration::from_millis(100));
             loop {
                 tokio::select! {
-                    // Check for shutdown signal
-                    _ = shutdown_rx.recv() => {
-                        tracing::info!("Demo simulator shutting down");
-                        break;
-                    }
-
-                    // Process incoming events from TUI
-                    event = event_rx.recv() => {
-                        match event {
-                            Ok(agent_event) => {
-                                // Route event to both agents
-                                let mut alice_guard = alice.lock().await;
-                                let mut carol_guard = carol.lock().await;
-
-                                // Process event in Alice
-                                if let Ok(responses) = alice_guard.process_event(&agent_event).await {
-                                    for response in responses {
-                                        tracing::debug!("Alice response: {:?}", response);
-                                    }
-                                }
-
-                                // Process event in Carol
-                                if let Ok(responses) = carol_guard.process_event(&agent_event).await {
-                                    for response in responses {
-                                        tracing::debug!("Carol response: {:?}", response);
-                                    }
-                                }
-
-                                // Immediately process any responses generated
-                                bridge.process_responses().await;
-                            }
-                            Err(e) => {
-                                tracing::warn!("Event receive error: {}", e);
-                            }
-                        }
-                    }
-
-                    // Periodically process responses and transport messages
-                    _ = response_interval.tick() => {
-                        // Check for incoming transport messages (guardian invitations, etc.)
-                        let mut alice_guard = alice.lock().await;
-                        if let Ok(responses) = alice_guard.process_transport_messages().await {
-                            for response in responses {
-                                tracing::debug!("Alice transport response: {:?}", response);
-                            }
-                        }
-                        drop(alice_guard);
-
-                        let mut carol_guard = carol.lock().await;
-                        if let Ok(responses) = carol_guard.process_transport_messages().await {
-                            for response in responses {
-                                tracing::debug!("Carol transport response: {:?}", response);
-                            }
-                        }
-                        drop(carol_guard);
-
-                        // Process any responses generated
-                        bridge.process_responses().await;
+                    _ = shutdown_rx.recv() => break,
+                    _ = tick.tick() => {
+                        let _ = process_peer_transport_messages("Alice", &alice).await;
+                        let _ = process_peer_transport_messages("Carol", &carol).await;
                     }
                 }
             }
-        });
-
-        self.event_loop_handle = Some(handle);
-
-        tracing::info!(
-            "Demo simulator started with seed {} - Alice and Carol are online",
-            self.seed
-        );
+        }));
 
         Ok(())
     }
 
-    /// Stop the simulator
     pub async fn stop(&mut self) -> TerminalResult<()> {
-        // Send shutdown signal
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(()).await;
         }
-
-        // Wait for event loop to finish
         if let Some(handle) = self.event_loop_handle.take() {
             let _ = handle.await;
         }
-
-        // Stop agents
-        self.alice.lock().await.stop().await?;
-        self.carol.lock().await.stop().await?;
-
-        tracing::info!("Demo simulator stopped");
         Ok(())
-    }
-
-    /// Get statistics for all agents
-    pub async fn get_statistics(&self) -> Vec<super::AgentStatistics> {
-        vec![
-            self.alice.lock().await.get_statistics(),
-            self.carol.lock().await.get_statistics(),
-        ]
-    }
-
-    /// Get the number of connected peers (always 2 for demo: Alice + Carol)
-    pub fn peer_count(&self) -> usize {
-        2
     }
 }
 
-impl Drop for DemoSimulator {
-    fn drop(&mut self) {
-        // Best effort cleanup - can't await in drop
-        if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.try_send(());
+async fn build_demo_peer_agent(
+    seed: u64,
+    name: &str,
+    authority_id: AuthorityId,
+    context_id: ContextId,
+    device_id: aura_core::DeviceId,
+    storage_dir: PathBuf,
+    shared_transport: SharedTransport,
+) -> TerminalResult<Arc<AuraAgent>> {
+    let mut config = AgentConfig::default();
+    config.device_id = device_id;
+    config.storage.base_path = storage_dir;
+
+    let ctx = EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
+
+    let agent = AgentBuilder::new()
+        .with_config(config)
+        .with_authority(authority_id)
+        .build_simulation_async_with_shared_transport(seed, &ctx, shared_transport)
+        .await
+        .map_err(|e| aura_core::AuraError::internal(format!("Failed to build {name} agent: {e}")))?;
+
+    Ok(Arc::new(agent))
+}
+
+/// Peer-side automation: currently only guardian setup auto-acceptance.
+async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> TerminalResult<()> {
+    let effects = agent.runtime().effects();
+
+    loop {
+        let envelope = match effects.receive_envelope().await {
+            Ok(env) => env,
+            Err(aura_core::effects::TransportError::NoMessage) => break,
+            Err(e) => {
+                tracing::warn!("{name} transport receive error: {e}");
+                break;
+            }
+        };
+
+        if envelope
+            .metadata
+            .get("content-type")
+            .is_some_and(|v| v == "application/aura-guardian-proposal")
+        {
+            if let Some(ceremony_id) = envelope.metadata.get("ceremony-id").cloned() {
+                let mut response_metadata = std::collections::HashMap::new();
+                response_metadata.insert(
+                    "content-type".to_string(),
+                    "application/aura-guardian-acceptance".to_string(),
+                );
+                response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+                response_metadata.insert(
+                    "guardian-id".to_string(),
+                    agent.authority_id().to_string(),
+                );
+
+                let acceptance = GuardianAcceptance {
+                    guardian_id: agent.authority_id(),
+                    setup_id: ceremony_id,
+                    accepted: true,
+                    public_key: agent.authority_id().to_bytes().to_vec(),
+                    timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                        ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
+                        uncertainty: None,
+                    }),
+                };
+
+                let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
+
+                let response = aura_core::effects::TransportEnvelope {
+                    destination: envelope.source,
+                    source: agent.authority_id(),
+                    context: envelope.context,
+                    payload,
+                    metadata: response_metadata,
+                    receipt: None,
+                };
+
+                if let Err(e) = effects.send_envelope(response).await {
+                    tracing::warn!("{name} failed to send guardian acceptance: {e}");
+                }
+            }
         }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -277,23 +229,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_demo_simulator_creation() {
-        let simulator = DemoSimulator::new(2024).await.unwrap();
-        assert_eq!(simulator.seed(), 2024);
-        assert_eq!(simulator.peer_count(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_demo_simulator_start_stop() {
-        let mut simulator = DemoSimulator::new(2024).await.unwrap();
-        simulator.start().await.unwrap();
-
-        // Get statistics
-        let stats = simulator.get_statistics().await;
-        assert_eq!(stats.len(), 2);
-        assert!(stats.iter().any(|s| s.name == "Alice"));
-        assert!(stats.iter().any(|s| s.name == "Carol"));
-
-        simulator.stop().await.unwrap();
+    async fn demo_simulator_builds_peers() {
+        let dir = std::env::temp_dir().join("aura-demo-sim-test");
+        let mut sim = DemoSimulator::new(2024, dir).await.unwrap();
+        sim.start().await.unwrap();
+        assert_ne!(sim.alice_authority(), sim.carol_authority());
+        sim.stop().await.unwrap();
     }
 }
+

@@ -24,6 +24,9 @@ pub struct TuiLocalStore<C: CryptoEffects, S: StorageEffects> {
     dirty: bool,
 }
 
+/// Local store filename (same for all modes - isolation via directory)
+pub const LOCAL_STORE_FILENAME: &str = "local.store";
+
 impl<C: CryptoEffects, S: StorageEffects> TuiLocalStore<C, S> {
     /// Open or create a local store for the TUI
     ///
@@ -31,22 +34,17 @@ impl<C: CryptoEffects, S: StorageEffects> TuiLocalStore<C, S> {
     ///
     /// * `authority_id` - The authority this store belongs to
     /// * `key_material` - Secret material for encryption key derivation
-    /// * `data_dir` - Optional custom data directory
+    /// * `data_dir` - Data directory (mode-specific: .aura or .aura-demo)
     /// * `crypto` - Crypto effects handler
     /// * `storage` - Storage effects handler
     pub async fn open(
         _authority_id: AuthorityId,
         key_material: &[u8],
-        data_dir: Option<PathBuf>,
+        data_dir: PathBuf,
         crypto: Arc<C>,
         storage: Arc<S>,
     ) -> Result<Self, LocalStoreError> {
-        let path = data_dir.unwrap_or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".aura").join("local.store"))
-                .unwrap_or_else(|| PathBuf::from(".aura/local.store"))
-        });
+        let path = data_dir.join(LOCAL_STORE_FILENAME);
 
         let config = LocalStoreConfig::new(path);
         let store =
@@ -204,7 +202,7 @@ mod tests {
         let store = TuiLocalStore::open(
             authority_id,
             &key_material,
-            Some(temp_dir.path().join("test.store")),
+            temp_dir.path().to_path_buf(),
             crypto,
             storage,
         )
@@ -225,7 +223,7 @@ mod tests {
         let mut store = TuiLocalStore::open(
             authority_id,
             &key_material,
-            Some(temp_dir.path().join("test.store")),
+            temp_dir.path().to_path_buf(),
             crypto,
             storage,
         )
@@ -244,7 +242,7 @@ mod tests {
     #[tokio::test]
     async fn test_persistence() {
         let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path().join("test.store");
+        let data_dir = temp_dir.path().to_path_buf();
         let authority_id = test_authority();
         let key_material = derive_key_material(&authority_id);
         let crypto = Arc::new(MockCryptoHandler::new());
@@ -255,7 +253,7 @@ mod tests {
             let mut store = TuiLocalStore::open(
                 authority_id,
                 &key_material,
-                Some(path.clone()),
+                data_dir.clone(),
                 crypto.clone(),
                 storage.clone(),
             )
@@ -267,10 +265,9 @@ mod tests {
 
         // Reopen and verify
         {
-            let store =
-                TuiLocalStore::open(authority_id, &key_material, Some(path), crypto, storage)
-                    .await
-                    .unwrap();
+            let store = TuiLocalStore::open(authority_id, &key_material, data_dir, crypto, storage)
+                .await
+                .unwrap();
             assert_eq!(store.recent_conversations(), &["conversation-1"]);
         }
     }
@@ -287,7 +284,7 @@ mod tests {
         let mut store = TuiLocalStore::open(
             authority_id,
             &key_material,
-            Some(temp_dir.path().join("test.store")),
+            temp_dir.path().to_path_buf(),
             crypto,
             storage,
         )

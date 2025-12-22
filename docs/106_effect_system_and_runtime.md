@@ -178,27 +178,30 @@ pub trait ReactiveEffects: Send + Sync {
 
 ### 4.3 Usage Pattern
 
-The typical usage pattern follows Intent → ViewState → Signal → UI:
+The typical usage pattern follows Fact → Scheduler → Signal → UI:
 
 ```rust
 // 1. Register signals on startup (in AppCore::init_signals)
 app.register(&*CHAT_SIGNAL, ChatState::default()).await?;
 
-// 2. UI reads current state from ViewState
-let chat = app_core.views().snapshot().chat;
+// 2. Commit a typed fact (production path)
+// The fact is published to ReactiveScheduler which updates the signal
+let fact = Fact::new(FactContent::Relational(chat_fact));
+runtime.commit_fact(fact).await?;
 
-// 3. Intent handler updates ViewState (auto-forwards to signals)
-app_core.add_chat_message(new_message);
-// Signal forwarding automatically emits to CHAT_SIGNAL
+// 3. UI reads current state from signal
+let chat = app_core.read(&*CHAT_SIGNAL).await?;
 
-// 4. UI automatically receives updates via subscription
+// 4. UI subscribes for updates
 let mut stream = app_core.subscribe(&*CHAT_SIGNAL);
 while let Ok(state) = stream.recv().await {
     render_chat_view(&state);
 }
 ```
 
-**Important**: Domain signals (CHAT_SIGNAL, CONTACTS_SIGNAL, etc.) are driven by the `ReactiveScheduler` in `aura-agent/src/reactive/`. Journal facts committed to the runtime are published to the scheduler, which batches them and updates registered signal views. The signal views (`ChatSignalView`, `ContactsSignalView`, `InvitationsSignalView`) process facts and emit full state snapshots to their respective signals.
+Domain signals (CHAT_SIGNAL, CONTACTS_SIGNAL, RECOVERY_SIGNAL, etc.) are driven by the `ReactiveScheduler` in `aura-agent/src/reactive/`. Journal facts committed to the runtime are published to the scheduler, which batches them and updates registered signal views. The signal views (`ChatSignalView`, `ContactsSignalView`, `InvitationsSignalView`) process facts and emit full state snapshots to their respective signals.
+
+For demo/test scenarios that don't have a full runtime, code can emit directly to signals via `ReactiveEffects::emit()`.
 
 ### 4.4 Implementation
 

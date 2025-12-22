@@ -91,7 +91,7 @@ pub mod handlers;
 pub mod reactive;
 
 // RuntimeBridge implementation (for aura-app dependency inversion)
-mod runtime_bridge_impl;
+mod runtime_bridge;
 
 // Journal fact registry helpers (public helper functions)
 pub mod fact_registry;
@@ -132,7 +132,7 @@ pub use handlers::{ChannelResult, RendezvousHandler, RendezvousResult, Rendezvou
 pub use runtime::{
     AuraHandlerAdapter as ChoreographyAdapter, EffectContext, EffectExecutor, EffectRegistry,
     EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, FlowBudgetManager,
-    LifecycleManager, ReceiptManager, RuntimeBuilder, RuntimeSystem,
+    LifecycleManager, ReceiptManager, RuntimeBuilder, RuntimeSystem, SharedTransport,
 };
 
 // Sync service types

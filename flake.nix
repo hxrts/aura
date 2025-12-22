@@ -251,6 +251,13 @@
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0
+
+            # Set AURA_PATH to the project directory for development.
+            # This ensures TUI data files (.aura/, .aura-demo/) are created in the
+            # project root rather than ~/.aura, making them visible and easy to
+            # inspect/delete during development. In production, AURA_PATH defaults
+            # to ~ (home directory).
+            export AURA_PATH="$PWD"
           '';
         };
 
@@ -292,6 +299,10 @@
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0
+
+            # Set AURA_PATH to the project directory for development.
+            # See default devShell for full explanation.
+            export AURA_PATH="$PWD"
           '';
         };
       }

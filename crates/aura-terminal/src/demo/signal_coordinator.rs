@@ -7,18 +7,31 @@
 //! The signal coordinator:
 //! 1. Subscribes to AppCore signals to detect Bob's actions
 //! 2. Routes actions to simulated agents (Alice/Carol)
-//! 3. Updates signals with agent responses
+//! 3. Commits typed facts through the runtime, which flow to signals
+//!
+//! ## Single Source of Truth
+//!
+//! Demo mode uses the same fact-based pipeline as production (per work/002.md C2.5):
+//! - Facts are committed via `RuntimeBridge.commit_relational_facts()`
+//! - The `ReactiveScheduler` processes facts and updates signals
+//! - UI components subscribe to signals
+//!
+//! For operations that don't have a natural fact representation (like chat
+//! messages from simulated agents), we emit directly to signals. This is
+//! acceptable because demo mode is for testing/demos, not production.
 
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, RECOVERY_SIGNAL};
+use aura_app::signal_defs::{CHAT_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::views::chat::Message as ChatMessage;
 use aura_app::views::recovery::{Guardian, GuardianStatus, RecoveryProcessStatus};
 use aura_app::views::{ChatState, RecoveryState};
 use aura_app::AppCore;
+use aura_core::Hash32;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuthorityId;
+use aura_journal::fact::RelationalFact;
 use tokio::sync::mpsc;
 
 use super::{AgentEvent, AgentResponse, SimulatedBridge};
@@ -195,15 +208,19 @@ impl DemoSignalCoordinator {
         }
     }
 
-    /// Handle an agent response by updating ViewState
+    /// Handle an agent response by committing facts or emitting to signals.
     ///
-    /// Uses AppCore methods to update ViewState. Signal forwarding
-    /// automatically propagates changes to ReactiveEffects signals.
+    /// For operations with natural fact representations (guardian bindings),
+    /// we commit facts through the runtime. For others (chat messages, recovery
+    /// approvals), we emit directly to signals since they're demo-specific.
     async fn handle_agent_response(&self, authority_id: AuthorityId, response: AgentResponse) {
+        let core = self.app_core.read().await;
+
         match response {
             AgentResponse::SendMessage { channel, content } => {
-                // Add message via ViewState
-                // Signal forwarding automatically propagates to CHAT_SIGNAL
+                // Chat messages from simulated agents don't have a natural fact
+                // representation (they'd need sealed payloads with crypto).
+                // Emit directly to signal for demo purposes.
                 let channel_id = channel.parse().unwrap_or_default();
                 let new_message = ChatMessage {
                     id: crate::ids::uuid("demo-msg").to_string(),
@@ -220,27 +237,29 @@ impl DemoSignalCoordinator {
                     is_read: false,
                 };
 
-                let core = self.app_core.read().await;
-                core.add_chat_message(new_message);
-                tracing::debug!("Demo: Added agent message to chat");
+                let mut chat_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+                chat_state.messages.push(new_message);
+
+                if let Err(e) = core.emit(&*CHAT_SIGNAL, chat_state).await {
+                    tracing::warn!("Demo: Failed to emit CHAT_SIGNAL: {}", e);
+                } else {
+                    tracing::debug!("Demo: Added agent message to chat signal");
+                }
             }
 
             AgentResponse::ApproveRecovery {
                 session_id,
                 account: _,
             } => {
-                // Update recovery via ViewState
-                // Signal forwarding automatically propagates to RECOVERY_SIGNAL
-                let core = self.app_core.read().await;
-                // Check if this is the active recovery session
-                let recovery = core.views().snapshot().recovery;
-                if let Some(ref active) = recovery.active_recovery {
-                    if active.id == session_id && !active.approved_by.contains(&authority_id) {
-                        core.add_recovery_approval(authority_id.clone());
+                // Recovery approvals in demo mode update the signal directly.
+                // Production would use RecoveryGrant facts through consensus.
+                let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap_or_default();
 
-                        // Log approval status
-                        let updated_recovery = core.views().snapshot().recovery;
-                        if let Some(ref active) = updated_recovery.active_recovery {
+                if let Some(ref mut active) = recovery.active_recovery {
+                    if active.id == session_id && !active.approved_by.contains(&authority_id) {
+                        recovery.add_guardian_approval(authority_id.clone());
+
+                        if let Some(ref active) = recovery.active_recovery {
                             tracing::info!(
                                 "Demo: Guardian {} approved recovery ({}/{})",
                                 authority_id,
@@ -251,62 +270,77 @@ impl DemoSignalCoordinator {
                                 tracing::info!("Demo: Recovery threshold reached!");
                             }
                         }
+
+                        if let Err(e) = core.emit(&*RECOVERY_SIGNAL, recovery).await {
+                            tracing::warn!("Demo: Failed to emit RECOVERY_SIGNAL: {}", e);
+                        }
                     }
                 }
             }
 
             AgentResponse::AcceptGuardianBinding {
                 account,
-                context_id,
+                context_id: _,
             } => {
                 let guardian_name = self.get_agent_name(&authority_id);
                 tracing::info!(
-                    "Demo: Guardian {} ({}) accepted binding for {} in {}",
+                    "Demo: Guardian {} ({}) accepted binding for {}",
                     guardian_name,
                     authority_id,
-                    account,
-                    context_id
+                    account
                 );
 
-                // Read contacts from CONTACTS_SIGNAL (populated by ReactiveScheduler)
-                // rather than from ViewState (which is not synced from the signal)
-                let core = self.app_core.read().await;
-                let contacts_state = core
-                    .read(&*CONTACTS_SIGNAL)
-                    .await
-                    .unwrap_or_default();
+                // Commit a GuardianBinding fact through the runtime.
+                // This flows through the scheduler to update CONTACTS_SIGNAL.
+                if let Some(runtime) = core.runtime() {
+                    let binding_fact = RelationalFact::GuardianBinding {
+                        account_id: self.bob_authority,
+                        guardian_id: authority_id.clone(),
+                        binding_hash: Hash32::default(), // Demo uses empty hash
+                    };
 
-                if let Some(contact) = contacts_state.contacts.iter().find(|c| c.id == authority_id) {
-                    // First, ensure the contact exists in ViewState (sync from signal)
-                    // This is needed because contacts added via ReactiveScheduler only update
-                    // the signal, not ViewState directly
-                    core.add_contact(contact.clone());
+                    match runtime.commit_relational_facts(&[binding_fact]).await {
+                        Ok(()) => {
+                            tracing::info!(
+                                "Demo: Committed GuardianBinding fact for {}",
+                                authority_id
+                            );
 
-                    // Now update ViewState to mark contact as guardian
-                    core.set_contact_guardian_status(&authority_id, true);
-                    tracing::info!("Demo: Updated contact {} is_guardian=true", authority_id);
+                            // Also add to recovery guardians list via signal
+                            // (scheduler doesn't update RECOVERY_SIGNAL for bindings)
+                            let mut recovery =
+                                core.read(&*RECOVERY_SIGNAL).await.unwrap_or_default();
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
 
-                    // Update ViewState to add guardian to recovery state
-                    // Signal forwarding automatically propagates to RECOVERY_SIGNAL
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
+                            if !recovery.guardians.iter().any(|g| g.id == authority_id) {
+                                recovery.guardians.push(Guardian {
+                                    id: authority_id.clone(),
+                                    name: guardian_name,
+                                    status: GuardianStatus::Active,
+                                    added_at: now,
+                                    last_seen: Some(now),
+                                });
+                                recovery.guardian_count = recovery.guardians.len() as u32;
 
-                    core.add_guardian(Guardian {
-                        id: authority_id.clone(),
-                        name: guardian_name,
-                        status: GuardianStatus::Active,
-                        added_at: now,
-                        last_seen: Some(now),
-                    });
-                    tracing::info!("Demo: Added {} to guardians list", authority_id);
+                                if let Err(e) = core.emit(&*RECOVERY_SIGNAL, recovery).await {
+                                    tracing::warn!("Demo: Failed to emit RECOVERY_SIGNAL: {}", e);
+                                } else {
+                                    tracing::info!(
+                                        "Demo: Added {} to guardians list",
+                                        authority_id
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Demo: Failed to commit GuardianBinding fact: {}", e);
+                        }
+                    }
                 } else {
-                    tracing::warn!(
-                        "Demo: Contact {} not found in CONTACTS_SIGNAL ({} contacts present)",
-                        authority_id,
-                        contacts_state.contacts.len()
-                    );
+                    tracing::warn!("Demo: No runtime available for fact commitment");
                 }
             }
         }

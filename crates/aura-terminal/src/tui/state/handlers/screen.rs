@@ -185,19 +185,31 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
 /// Handle contacts screen key events
 pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
     match key.code {
+        // Panel navigation (h/l or arrows)
+        KeyCode::Left | KeyCode::Char('h') => {
+            state.contacts.focus = state.contacts.focus.toggle();
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            state.contacts.focus = state.contacts.focus.toggle();
+        }
+        // List navigation (j/k or arrows) - only when list is focused
         KeyCode::Up | KeyCode::Char('k') => {
-            state.contacts.selected_index = navigate_list(
-                state.contacts.selected_index,
-                state.contacts.contact_count,
-                NavKey::Up,
-            );
+            if state.contacts.focus.is_list() {
+                state.contacts.selected_index = navigate_list(
+                    state.contacts.selected_index,
+                    state.contacts.contact_count,
+                    NavKey::Up,
+                );
+            }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            state.contacts.selected_index = navigate_list(
-                state.contacts.selected_index,
-                state.contacts.contact_count,
-                NavKey::Down,
-            );
+            if state.contacts.focus.is_list() {
+                state.contacts.selected_index = navigate_list(
+                    state.contacts.selected_index,
+                    state.contacts.contact_count,
+                    NavKey::Down,
+                );
+            }
         }
         KeyCode::Char('e') => {
             // Open nickname edit modal via queue

@@ -10,7 +10,7 @@ Cargo.lock
 /bin/
 
 # Documentation builds
-/docs/book/
+docs/book/
 
 # WASM artifacts
 pkg/
@@ -33,15 +33,15 @@ console/styles/*.rs
 AGENTS.md
 GEMINI.md
 
-# Aura test artifacts
+# Aura data directories (mode-specific)
+# All data (leakage/, secure_store/, etc.) is now inside these directories
 .aura/
+.aura-demo/
 .aura-test/
-aura-data/
 *.sealed
 *.dat
 outcomes/
 *.txt
-leakage/
 secure_store/
 
 # Nix

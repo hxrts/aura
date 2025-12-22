@@ -19,6 +19,7 @@ use super::system::RuntimeSystem;
 use super::{ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager};
 use crate::core::AgentConfig;
 use aura_core::identifiers::AuthorityId;
+use super::shared_transport::SharedTransport;
 
 // Re-export ExecutionMode from aura_core for convenience
 pub use aura_core::effects::ExecutionMode;
@@ -31,8 +32,7 @@ pub struct EffectSystemBuilder {
     sync_config: Option<super::services::SyncManagerConfig>,
     rendezvous_config: Option<super::services::RendezvousManagerConfig>,
     social_config: Option<super::services::SocialManagerConfig>,
-    shared_transport_inbox:
-        Option<std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
+    shared_transport: Option<SharedTransport>,
 }
 
 impl EffectSystemBuilder {
@@ -45,7 +45,7 @@ impl EffectSystemBuilder {
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
-            shared_transport_inbox: None,
+            shared_transport: None,
         }
     }
 
@@ -58,7 +58,7 @@ impl EffectSystemBuilder {
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
-            shared_transport_inbox: None,
+            shared_transport: None,
         }
     }
 
@@ -71,16 +71,13 @@ impl EffectSystemBuilder {
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
-            shared_transport_inbox: None,
+            shared_transport: None,
         }
     }
 
-    /// Set shared transport inbox for multi-agent simulations
-    pub fn with_shared_transport_inbox(
-        mut self,
-        inbox: std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>,
-    ) -> Self {
-        self.shared_transport_inbox = Some(inbox);
+    /// Set shared transport wiring for multi-agent simulations.
+    pub fn with_shared_transport(mut self, shared: SharedTransport) -> Self {
+        self.shared_transport = Some(shared);
         self
     }
 
@@ -164,12 +161,12 @@ impl EffectSystemBuilder {
             ExecutionMode::Simulation { seed } => {
                 let executor = EffectExecutor::simulation(authority_id, seed, registry.clone());
                 // Use shared transport inbox if provided, otherwise standard simulation mode
-                let system = if let Some(inbox) = self.shared_transport_inbox {
+                let system = if let Some(shared) = self.shared_transport {
                     super::AuraEffectSystem::simulation_with_shared_transport_for_authority(
                         &config,
                         seed,
                         authority_id,
-                        inbox,
+                        shared,
                     )
                     .map_err(|e| e.to_string())?
                 } else {

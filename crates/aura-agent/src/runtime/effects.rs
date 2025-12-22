@@ -45,6 +45,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 
+use super::shared_transport::SharedTransport;
+
 const DEFAULT_WINDOW: u32 = 1024;
 const TYPED_FACT_STORAGE_PREFIX: &str = "journal/facts";
 
@@ -70,6 +72,7 @@ pub struct AuraEffectSystem {
     sync_handler: LocalSyncHandler,
     transport_handler: aura_effects::transport::RealTransportHandler,
     transport_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    shared_transport: Option<SharedTransport>,
     transport_stats: Arc<RwLock<TransportStats>>,
     fact_registry: Arc<FactRegistry>,
     /// Reactive signal graph for UI-facing state.
@@ -125,14 +128,14 @@ impl AuraEffectSystem {
     /// When `crypto_seed` is provided, the crypto handler will use deterministic
     /// randomness for reproducible tests and simulations.
     ///
-    /// When `shared_transport_inbox` is provided (for simulation mode), all agents
-    /// will share the same transport inbox for message routing.
+    /// When `shared_transport` is provided (for simulation/demo mode), all agents
+    /// share a common in-memory transport network for routing.
     fn build_internal(
         config: AgentConfig,
         composite: CompositeHandlerAdapter,
         test_mode: bool,
         crypto_seed: Option<[u8; 32]>,
-        shared_transport_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
+        shared_transport: Option<SharedTransport>,
         authority_override: Option<AuthorityId>,
     ) -> Self {
         let authority =
@@ -154,9 +157,16 @@ impl AuraEffectSystem {
         let tree_handler = InMemoryTreeHandler::new(oplog.clone());
         let sync_handler = LocalSyncHandler::new(oplog);
         let transport_handler = aura_effects::transport::RealTransportHandler::default();
-        // Use shared inbox if provided (simulation mode), otherwise create new local inbox
-        let transport_inbox =
-            shared_transport_inbox.unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())));
+        // Use shared transport if provided (simulation mode), otherwise create new local inbox.
+        // Also register the authority as "online" in the shared network so transport stats
+        // can reflect currently running peer runtimes.
+        if let Some(shared) = &shared_transport {
+            shared.register(authority);
+        }
+        let transport_inbox = shared_transport
+            .as_ref()
+            .map(|shared| shared.inbox())
+            .unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())));
         let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
         let secure_storage_handler = RealSecureStorageHandler::default();
         // Create indexed journal with capacity for 100k facts
@@ -180,6 +190,7 @@ impl AuraEffectSystem {
             sync_handler,
             transport_handler,
             transport_inbox,
+            shared_transport,
             transport_stats,
             fact_registry: Arc::new(build_fact_registry()),
             reactive_handler: ReactiveHandler::new(),
@@ -333,7 +344,7 @@ impl AuraEffectSystem {
             composite,
             true,
             Some(Self::TEST_CRYPTO_SEED),
-            None, // No shared transport inbox
+            None, // No shared transport
             None, // Default authority derivation (legacy)
         ))
     }
@@ -355,18 +366,18 @@ impl AuraEffectSystem {
             composite,
             true,
             Some(Self::TEST_CRYPTO_SEED),
-            None, // No shared transport inbox
+            None, // No shared transport
             None, // Default authority derivation (legacy)
         ))
     }
 
-    /// Create effect system for testing with shared transport inbox.
+    /// Create effect system for testing with shared transport.
     ///
     /// This factory is used for tests that need to verify transport envelope routing,
     /// enabling loopback testing where an agent can send and receive messages from itself.
     pub fn testing_with_shared_transport(
         config: &AgentConfig,
-        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Ok(Self::build_internal(
@@ -374,7 +385,7 @@ impl AuraEffectSystem {
             composite,
             true,
             Some(Self::TEST_CRYPTO_SEED),
-            Some(shared_inbox),
+            Some(shared_transport),
             None, // Default authority derivation (legacy)
         ))
     }
@@ -390,20 +401,20 @@ impl AuraEffectSystem {
             composite,
             true,
             Some(crypto_seed),
-            None, // No shared transport inbox
+            None, // No shared transport
             None, // Default authority derivation (legacy)
         ))
     }
 
-    /// Create effect system for simulation with shared transport inbox.
+    /// Create effect system for simulation with shared transport.
     ///
     /// This factory is used for multi-agent simulations where all agents need to
-    /// communicate through a shared transport layer. The shared inbox enables
+    /// communicate through a shared transport layer. The shared transport enables
     /// message routing between Bob, Alice, and Carol in demo mode.
     pub fn simulation_with_shared_transport(
         config: &AgentConfig,
         seed: u64,
-        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         // Convert u64 seed to [u8; 32] for crypto handler
@@ -414,7 +425,7 @@ impl AuraEffectSystem {
             composite,
             true,
             Some(crypto_seed),
-            Some(shared_inbox),
+            Some(shared_transport),
             None, // Default authority derivation (legacy)
         ))
     }
@@ -470,12 +481,12 @@ impl AuraEffectSystem {
         ))
     }
 
-    /// Create effect system for simulation with shared transport inbox, overriding authority.
+    /// Create effect system for simulation with shared transport, overriding authority.
     pub fn simulation_with_shared_transport_for_authority(
         config: &AgentConfig,
         seed: u64,
         authority_id: AuthorityId,
-        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         let mut crypto_seed = [0u8; 32];
@@ -485,7 +496,7 @@ impl AuraEffectSystem {
             composite,
             true,
             Some(crypto_seed),
-            Some(shared_inbox),
+            Some(shared_transport),
             Some(authority_id),
         ))
     }
@@ -882,30 +893,25 @@ impl TransportEffects for AuraEffectSystem {
     }
 
     async fn is_channel_established(&self, context: ContextId, peer: AuthorityId) -> bool {
-        let has_local = {
-            let inbox = self
-                .transport_inbox
-                .read()
-                .expect("transport inbox poisoned");
-            inbox
-                .iter()
-                .any(|env| env.context == context && env.destination == peer)
-        };
-
-        if has_local {
-            return true;
+        if let Some(shared) = &self.shared_transport {
+            return shared.is_peer_online(peer);
         }
 
-        self.transport_handler
-            .is_channel_established(context, peer)
-            .await
+        self.transport_handler.is_channel_established(context, peer).await
     }
 
     async fn get_transport_stats(&self) -> TransportStats {
-        self.transport_stats
+        let mut stats = self
+            .transport_stats
             .read()
             .expect("transport stats poisoned")
-            .clone()
+            .clone();
+
+        if let Some(shared) = &self.shared_transport {
+            stats.active_channels = shared.connected_peer_count(self.authority_id) as u32;
+        }
+
+        stats
     }
 }
 

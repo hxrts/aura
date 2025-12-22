@@ -15,6 +15,6 @@ pub mod error;
 pub mod guardian;
 
 pub use api::{AgentBuilder, AuraAgent};
-pub use config::AgentConfig;
+pub use config::{default_storage_path, AgentConfig};
 pub use context::AuthorityContext;
 pub use error::{AgentError, AgentResult};

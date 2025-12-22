@@ -80,6 +80,8 @@ pub mod secure;
 #[cfg(feature = "simulation")]
 pub mod simulation;
 pub mod storage;
+/// Unified encrypted storage wrapper for transparent encryption at rest
+pub mod encrypted_storage;
 // sync_bridge removed - replaced by pure guard evaluation (ADR-014)
 pub mod system;
 pub mod time;
@@ -106,6 +108,8 @@ pub use simulation::FallbackSimulationHandler;
 pub use storage::{
     EncryptedStorageHandler, FilesystemStorageHandler, PathFilesystemStorageHandler,
 };
+// Re-export the new unified encrypted storage (Task 1.1)
+pub use encrypted_storage::{EncryptedStorage, EncryptedStorageConfig};
 // ProductionSyncExecutor removed - replaced by ProductionEffectInterpreter (ADR-014)
 pub use time::{
     LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler, TimeComparisonHandler,

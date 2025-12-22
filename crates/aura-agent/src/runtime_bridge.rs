@@ -12,8 +12,9 @@ use aura_app::runtime_bridge::{
 };
 use aura_app::IntentError;
 use aura_effects::ReactiveHandler;
-use aura_core::effects::{StorageEffects, ThresholdSigningEffects};
+use aura_core::effects::{StorageEffects, ThresholdSigningEffects, TransportEffects};
 use aura_core::identifiers::AuthorityId;
+use aura_core::EffectContext;
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::DeviceId;
@@ -142,18 +143,37 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn get_sync_status(&self) -> SyncStatus {
-        if let Some(sync) = self.agent.runtime().sync() {
-            SyncStatus {
-                is_running: sync.is_running().await,
-                connected_peers: sync.peers().await.len(),
-                last_sync_ms: None, // Would need to track this in SyncServiceManager
-                pending_facts: 0,   // Would need to track this in SyncServiceManager
-            }
+        // "Connected peers" is a UI-facing availability signal. It should reflect
+        // currently reachable peers (e.g., contacts/devices online), not merely the
+        // configured peer list.
+        //
+        // For now, we approximate this via TransportEffects active channel count, which
+        // is supported in shared-transport simulation/demos and can be implemented by
+        // production transports as they mature.
+        let effects = self.agent.runtime().effects();
+        let transport_stats = effects.get_transport_stats().await;
+
+        let is_running = if let Some(sync) = self.agent.runtime().sync() {
+            sync.is_running().await
         } else {
-            SyncStatus::default()
+            false
+        };
+
+        SyncStatus {
+            is_running,
+            connected_peers: transport_stats.active_channels as usize,
+            last_sync_ms: None, // Would need to track this in SyncServiceManager
+            pending_facts: 0,   // Would need to track this in SyncServiceManager
         }
     }
 
+
+
+    async fn is_peer_online(&self, peer: AuthorityId) -> bool {
+        let effects = self.agent.runtime().effects();
+        let context = EffectContext::with_authority(self.agent.authority_id()).context_id();
+        effects.is_channel_established(context, peer).await
+    }
     async fn get_sync_peers(&self) -> Vec<DeviceId> {
         if let Some(sync) = self.agent.runtime().sync() {
             sync.peers().await

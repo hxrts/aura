@@ -3,8 +3,8 @@
 //! Stateless single-party implementation of SecureStorageEffects from aura-core (Layer 1).
 //! This handler implements pure secure storage effect operations, delegating to platform APIs.
 //!
-//! **Layer Constraint**: NO mock handlers - those belong in aura-testkit (Layer 8).
-//! This module contains only production-grade stateless handlers.
+//! **Layer Constraint**: No mock handlers - those belong in aura-testkit (Layer 8).
+//! This module contains only production stateless handlers.
 
 use async_trait::async_trait;
 use aura_core::effects::{
@@ -23,12 +23,25 @@ pub struct RealSecureStorageHandler {
 }
 
 impl RealSecureStorageHandler {
-    /// Create a new real secure storage handler
+    /// Create a new real secure storage handler with default path
+    ///
+    /// **Note**: Prefer `with_base_path()` in production to ensure secure storage
+    /// is placed within the configured data directory.
     pub fn new() -> Result<Self, SecureStorageError> {
         Ok(Self {
             platform_config: "filesystem-fallback".to_string(),
             base_path: PathBuf::from("./secure_store"),
         })
+    }
+
+    /// Create a secure storage handler with a custom base path
+    ///
+    /// The secure storage files will be placed in `base_path/secure_store/`.
+    pub fn with_base_path(base_path: PathBuf) -> Self {
+        Self {
+            platform_config: "filesystem-fallback".to_string(),
+            base_path: base_path.join("secure_store"),
+        }
     }
 
     fn require_capability(

@@ -4442,7 +4442,7 @@ async fn test_account_backup_restore_flow() {
     println!("\nPhase 3: Importing backup to new location");
 
     let (restored_authority, restored_context) =
-        import_account_backup(&test_dir_b, &backup_code, false, TuiMode::Production)
+        import_account_backup(&test_dir_b, &backup_code, false)
             .await
             .expect("Failed to import backup");
     println!("  ✓ Backup imported to test_dir_b");
@@ -4506,13 +4506,12 @@ async fn test_account_backup_restore_flow() {
     std::fs::create_dir_all(&test_dir_c).expect("Failed to create test dir C");
 
     // Try to export from empty directory
-    let export_result = export_account_backup(&test_dir_c, None, TuiMode::Production).await;
+    let export_result = export_account_backup(&test_dir_c, None).await;
     assert!(export_result.is_err(), "Export should fail without account");
     println!("  ✓ Export correctly fails without account");
 
     // Try to import invalid backup code
-    let invalid_result =
-        import_account_backup(&test_dir_c, "invalid-code", false, TuiMode::Production).await;
+    let invalid_result = import_account_backup(&test_dir_c, "invalid-code", false).await;
     assert!(
         invalid_result.is_err(),
         "Import should fail with invalid code"
@@ -4520,8 +4519,7 @@ async fn test_account_backup_restore_flow() {
     println!("  ✓ Import correctly fails with invalid code");
 
     // Try to import without overwrite when account exists
-    let no_overwrite_result =
-        import_account_backup(&test_dir_b, &backup_code, false, TuiMode::Production).await;
+    let no_overwrite_result = import_account_backup(&test_dir_b, &backup_code, false).await;
     assert!(
         no_overwrite_result.is_err(),
         "Import should fail when account exists and overwrite=false"

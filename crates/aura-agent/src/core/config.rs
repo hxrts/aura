@@ -10,6 +10,23 @@ use aura_rendezvous::LanDiscoveryConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Resolve the default storage path for Aura agents.
+///
+/// This is the SINGLE SOURCE OF TRUTH for agent storage path resolution.
+///
+/// Priority:
+/// 1. `$AURA_PATH/.aura` if AURA_PATH is set
+/// 2. `~/.aura` (home directory)
+/// 3. `./.aura` (current directory fallback)
+pub fn default_storage_path() -> PathBuf {
+    std::env::var("AURA_PATH")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".aura")
+}
+
 /// Agent configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -68,7 +85,7 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            base_path: PathBuf::from("./.aura"),
+            base_path: default_storage_path(),
             cache_size: 50 * 1024 * 1024,
             enable_compression: true,
         }

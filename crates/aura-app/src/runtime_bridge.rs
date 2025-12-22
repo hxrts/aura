@@ -258,6 +258,21 @@ pub trait RuntimeBridge: Send + Sync {
     async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError>;
 
     // =========================================================================
+    // Peer Availability
+    // =========================================================================
+
+    /// Check whether a peer appears online/reachable.
+    ///
+    /// This is intentionally a best-effort signal intended for UI status (e.g. footer
+    /// peer count). Implementations may use transport channel health, rendezvous
+    /// reachability, or other heuristics.
+    ///
+    /// Default implementation returns `false`.
+    async fn is_peer_online(&self, _peer: AuthorityId) -> bool {
+        false
+    }
+
+    // =========================================================================
     // Peer Discovery
     // =========================================================================
 

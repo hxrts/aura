@@ -96,12 +96,29 @@ pub fn use_contacts_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) ->
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
         async move {
+            // CONNECTION_STATUS_SIGNAL depends on the current contacts list (peer count = online contacts).
+            // Ensure the footer updates when CONTACTS_SIGNAL changes by refreshing the derived status.
+            let refresh_in_flight = Arc::new(AtomicBool::new(false));
+            let app_core_for_refresh = app_core.clone();
+
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
                     contacts_state.contacts.iter().map(Contact::from).collect();
                 if let Ok(mut guard) = contacts.write() {
                     *guard = contact_list;
                 }
+
+                // Avoid spawning an unbounded number of refresh tasks if contacts update rapidly.
+                if refresh_in_flight.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+
+                let app_core_for_refresh = app_core_for_refresh.clone();
+                let refresh_in_flight = refresh_in_flight.clone();
+                tokio::spawn(async move {
+                    let _ = aura_app::workflows::system::refresh_account(app_core_for_refresh.raw()).await;
+                    refresh_in_flight.store(false, Ordering::SeqCst);
+                });
             })
             .await;
         }

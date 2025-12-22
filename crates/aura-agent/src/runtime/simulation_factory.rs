@@ -33,6 +33,8 @@ use std::sync::{Arc, RwLock};
 #[cfg(feature = "simulation")]
 use super::effects::AuraEffectSystem;
 #[cfg(feature = "simulation")]
+use super::shared_transport::SharedTransport;
+#[cfg(feature = "simulation")]
 use crate::core::AgentConfig;
 
 /// Factory for creating `AuraEffectSystem` instances for simulation
@@ -135,7 +137,7 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
             &agent_config,
             config.seed,
             authority_id,
-            shared_inbox,
+            SharedTransport::from_inbox(shared_inbox),
         )
         .map_err(|e| SimulationEnvironmentError::CreationFailed(e.to_string()))?;
 

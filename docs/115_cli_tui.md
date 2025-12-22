@@ -114,46 +114,79 @@ This diagram shows the main CLI path from parsing to rendering. Some handlers al
 
 ## Reactive data model
 
-The reactive system is owned by `aura-app`. Domain state is maintained in `ViewState` (`crates/aura-app/src/views/state.rs`), which uses `futures-signals` `Mutable<T>` for reactive updates. Signals are defined in `aura_app::signal_defs` and are automatically derived from ViewState changes via the signal forwarding infrastructure.
+The reactive system follows a fact-based architecture where typed facts are the source of truth for UI state.
 
-### ViewState as single source of truth
+### Signals as single source of truth
 
-ViewState is the canonical source for all domain state. ReactiveEffects signals (CHAT_SIGNAL, CONTACTS_SIGNAL, etc.) are automatically updated when ViewState changes. This pattern eliminates the dual-write bug class where ViewState and signals could become desynchronized.
+ReactiveEffects signals (CHAT_SIGNAL, CONTACTS_SIGNAL, RECOVERY_SIGNAL, etc.) are the canonical source for all UI state. They are updated by the `ReactiveScheduler` processing typed facts from the journal.
 
 ```mermaid
 flowchart LR
-  V[ViewState] -->|auto-forward| S[ReactiveEffects Signals]
-  S --> TUI[TUI Screens]
-  S --> CLI[CLI Commands]
+  F[Typed Facts] -->|commit| J[Journal]
+  J -->|publish| S[ReactiveScheduler]
+  S -->|emit| Sig[Signals]
+  Sig --> TUI[TUI Screens]
+  Sig --> CLI[CLI Commands]
 ```
 
-External code should update state through AppCore methods (like `add_contact()`, `set_contact_guardian_status()`) rather than emitting directly to signals. The SignalForwarder in `crates/aura-app/src/core/signal_sync.rs` subscribes to ViewState's Mutable signals and forwards changes to ReactiveEffects signals automatically.
+The data flow is:
+1. **Typed facts** (`aura_journal::fact::Fact`) are committed to the journal
+2. **ReactiveScheduler** processes committed facts via registered `ReactiveView` implementations
+3. **SignalViews** (e.g., `ContactsSignalView`, `ChatSignalView`) update their internal state and emit snapshots to signals
+4. **UI components** subscribe to signals and render the current state
+
+This architecture ensures a single source of truth and eliminates dual-write bugs. Code that needs to update UI state must commit facts (production) or emit directly to signals (demo/test).
+
+### ViewState is internal
+
+`AppCore` contains an internal `ViewState` used for legacy compatibility and non-signal use cases. However, **ViewState changes do not propagate to signals**. The signal forwarding infrastructure was removed in favor of scheduler-driven updates.
+
+For compile-time safety, there are no public methods on `AppCore` to mutate ViewState for UI-affecting state. Code that needs to update what the UI displays must:
+
+1. **Production**: Commit facts via `RuntimeBridge.commit_relational_facts()` — facts flow through the scheduler to signals
+2. **Demo/Test**: Emit directly to signals via `ReactiveEffects::emit()` — explicit and type-safe
+
+This design prevents the "dual-write" bug class where code updates ViewState expecting UI changes, but signals remain unchanged.
 
 The CLI usually reads state at a point in time. It can still use signals for watch-like commands or daemon commands. When a command needs continuous updates, it should subscribe to the relevant signals and render incremental output.
 
-### Two-phase subscription
+### Reading and subscribing to signals
 
-Subscriptions follow a two-phase pattern. Read the current value first. Then subscribe for updates.
+Signals are accessed through `AppCore`'s `ReactiveEffects` implementation. Read the current value with `read()` and subscribe for updates with `subscribe()`.
 
 ```rust
-let current = {
+// Read current state from signal
+let contacts = {
     let core = app_core.read().await;
-    core.views().snapshot().contacts  // Read from ViewState
+    core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
 };
 
+// Subscribe for ongoing updates
 let mut stream = {
     let core = app_core.read().await;
-    core.subscribe(&*CONTACTS_SIGNAL)  // Subscribe for updates
+    core.subscribe(&*CONTACTS_SIGNAL)
 };
+
+while let Ok(state) = stream.recv().await {
+    render_contacts(&state);
+}
 ```
 
-This pattern avoids an initial blank render and avoids missing updates between initial load and subscription. It is used heavily by screens, and it is also suitable for CLI commands that want a live stream.
+For initial render, read the current signal value first to avoid a blank frame. Then subscribe for updates. This pattern is used heavily by TUI screens.
 
 ### Subscriptions and ownership
 
 Long-lived subscriptions that drive global TUI elements live in `crates/aura-terminal/src/tui/screens/app/subscriptions.rs`. Screen-local subscriptions should live with the screen module.
 
 Subscriptions should be owned by the component that renders the data. A subscription should not mutate `TuiState` unless it is updating navigation, focus, or overlay state.
+
+### Connection status (peer count)
+
+The footer “connected peers” count is a UI convenience signal. It must represent **how many of your contacts are online**, not a seeded or configured peer list.
+
+- Source: `CONNECTION_STATUS_SIGNAL` (emitted by `aura_app::workflows::system::refresh_account()`).
+- Contact set: read from `CONTACTS_SIGNAL` (signal truth), not from `ViewState` snapshots.
+- Online check: `RuntimeBridge::is_peer_online(contact_id)` (best-effort; demo uses a shared in-memory transport, production can use real transport channel health).
 
 ## Deterministic UI model
 
@@ -210,11 +243,21 @@ The state machine owns navigation, focus, and overlay visibility. Screen compone
 
 The domain owns the reactive state. Avoid caching domain data in `TuiState`. Prefer subscribing to `aura-app` signals and deriving view props inside the screen component.
 
-Common pitfalls:
+### Single source of truth invariants
+
+- **Signals are the source of truth** for UI state, not ViewState
+- **Facts drive signals** in production — commit facts via RuntimeBridge
+- **Direct emission** is only for demo/test scenarios via `ReactiveEffects::emit()`
+- **No ViewState mutation for UI state** — AppCore has no public methods to mutate ViewState for UI-affecting state
+
+### Common pitfalls
+
 - Calling `println!` and `eprintln!` while fullscreen is active
 - Storing domain state in `TuiState` instead of subscribing to signals
 - Adding per-modal `visible` flags instead of using `QueuedModal` and the modal queue
 - Using `UiUpdate` as a general event bus instead of subscribing to signals
+- Expecting ViewState changes to appear in the UI — ViewState does not propagate to signals
+- Emitting directly to domain signals in production code — use fact commits instead
 
 ## Testing strategy
 
@@ -253,6 +296,18 @@ This map shows the primary module boundaries for the CLI and the TUI. CLI logic 
 ## Demo mode
 
 Demo mode is under `crates/aura-terminal/src/demo/`. It compiles only with `--features development`. Production builds should not require demo-only types or props.
+
+### Demo architecture
+
+Demo mode uses the same fact-based pipeline as production where possible:
+
+- **Guardian bindings**: Committed as `RelationalFact::GuardianBinding` facts through `RuntimeBridge.commit_relational_facts()`. These flow through the scheduler to update `CONTACTS_SIGNAL`.
+- **Chat messages**: Emitted directly to `CHAT_SIGNAL` via `ReactiveEffects::emit()`. Sealed message facts would require cryptographic infrastructure not available in demo.
+- **Recovery approvals**: Emitted directly to `RECOVERY_SIGNAL`. Production would use consensus-based `RecoveryGrant` facts.
+
+The `DemoSignalCoordinator` in `crates/aura-terminal/src/demo/signal_coordinator.rs` handles bidirectional event routing between the TUI and simulated agents (Alice and Carol).
+
+### Demo shortcuts
 
 Demo mode supports convenience shortcuts. Invite code entry supports `Ctrl+a` and `Ctrl+l` when demo codes are present.
 

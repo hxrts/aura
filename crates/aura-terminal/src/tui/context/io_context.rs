@@ -31,7 +31,7 @@ use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::error::TerminalError;
-use crate::handlers::tui::TuiMode;
+use crate::handlers::tui::{resolve_storage_path, TuiMode};
 use crate::tui::context::{
     AccountFilesHelper, DispatchHelper, InitializedAppCore, SnapshotHelper, ToastHelper,
 };
@@ -152,7 +152,10 @@ impl IoContextBuilder {
         let device_id = self
             .device_id
             .ok_or(ContextBuildError::MissingField("device_id"))?;
-        let mode = self
+        // Mode is required in the builder but no longer used here - mode isolation
+        // is achieved via mode-specific base_path directories. Keep the check to
+        // maintain the API contract.
+        let _mode = self
             .mode
             .ok_or(ContextBuildError::MissingField("mode"))?;
 
@@ -163,7 +166,7 @@ impl IoContextBuilder {
         let has_existing_account =
             Arc::new(std::sync::atomic::AtomicBool::new(self.has_existing_account));
         let account_files =
-            AccountFilesHelper::new(base_path, device_id, mode, has_existing_account.clone());
+            AccountFilesHelper::new(base_path, device_id, has_existing_account.clone());
 
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
         let current_context = Arc::new(RwLock::new(None));
@@ -328,11 +331,12 @@ impl IoContext {
             .block_on(InitializedAppCore::new(app_core))
             .expect("Failed to init signals for IoContext::with_defaults");
 
+        let mode = TuiMode::Production;
         IoContext::builder()
             .with_app_core(app_core)
-            .with_base_path(PathBuf::from("./aura-data"))
+            .with_base_path(resolve_storage_path(None, mode))
             .with_device_id("default-device".to_string())
-            .with_mode(TuiMode::Production)
+            .with_mode(mode)
             .with_existing_account(true)
             .build()
             .expect("IoContext::with_defaults: all required fields provided")
@@ -348,11 +352,12 @@ impl IoContext {
             .await
             .expect("Failed to init signals for IoContext::with_defaults_async");
 
+        let mode = TuiMode::Production;
         IoContext::builder()
             .with_app_core(app_core)
-            .with_base_path(PathBuf::from("./aura-data"))
+            .with_base_path(resolve_storage_path(None, mode))
             .with_device_id("default-device".to_string())
-            .with_mode(TuiMode::Production)
+            .with_mode(mode)
             .with_existing_account(true)
             .build()
             .expect("IoContext::with_defaults_async: all required fields provided")

@@ -668,94 +668,23 @@ impl AppCore {
 }
 
 // =============================================================================
-// ViewState Helper Methods (signals feature only)
+// ViewState Notes
 // =============================================================================
-// These methods update ViewState directly. With signal forwarding enabled,
-// changes automatically propagate to ReactiveEffects signals.
-// DO NOT call emit() on domain signals directly - use these methods instead.
-
-#[cfg(feature = "signals")]
-impl AppCore {
-    /// Add a contact to ViewState
-    ///
-    /// If a contact with the same ID already exists, it is not added again.
-    /// The signal forwarding infrastructure will automatically update
-    /// CONTACTS_SIGNAL for any subscribers.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let contact = Contact {
-    ///     id: authority_id,
-    ///     nickname: "Alice".to_string(),
-    ///     ..Default::default()
-    /// };
-    /// app_core.add_contact(contact);
-    /// // CONTACTS_SIGNAL is automatically updated
-    /// ```
-    pub fn add_contact(&self, contact: crate::views::contacts::Contact) {
-        let mut contacts = self.views.snapshot().contacts;
-        if !contacts.contacts.iter().any(|c| c.id == contact.id) {
-            contacts.contacts.push(contact);
-            self.views.set_contacts(contacts);
-        }
-    }
-
-    /// Set guardian status on a contact
-    ///
-    /// Updates the is_guardian flag for the contact with the given ID.
-    /// The signal forwarding infrastructure will automatically update
-    /// CONTACTS_SIGNAL for any subscribers.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// app_core.set_contact_guardian_status(&authority_id, true);
-    /// // CONTACTS_SIGNAL is automatically updated
-    /// ```
-    pub fn set_contact_guardian_status(&self, contact_id: &AuthorityId, is_guardian: bool) {
-        let mut contacts = self.views.snapshot().contacts;
-        if let Some(contact) = contacts.contacts.iter_mut().find(|c| &c.id == contact_id) {
-            contact.is_guardian = is_guardian;
-            self.views.set_contacts(contacts);
-        }
-    }
-
-    /// Add a guardian to the recovery state
-    ///
-    /// If a guardian with the same ID already exists, it is not added again.
-    /// The signal forwarding infrastructure will automatically update
-    /// RECOVERY_SIGNAL for any subscribers.
-    pub fn add_guardian(&self, guardian: crate::views::recovery::Guardian) {
-        let mut recovery = self.views.snapshot().recovery;
-        if !recovery.guardians.iter().any(|g| g.id == guardian.id) {
-            recovery.guardians.push(guardian);
-            recovery.guardian_count = recovery.guardians.len() as u32;
-            self.views.set_recovery(recovery);
-        }
-    }
-
-    /// Add a message to chat state
-    ///
-    /// The signal forwarding infrastructure will automatically update
-    /// CHAT_SIGNAL for any subscribers.
-    pub fn add_chat_message(&self, message: crate::views::chat::Message) {
-        let mut chat = self.views.snapshot().chat;
-        chat.messages.push(message);
-        self.views.set_chat(chat);
-    }
-
-    /// Update recovery approval status
-    ///
-    /// Adds an approval to the active recovery process if one exists.
-    /// The signal forwarding infrastructure will automatically update
-    /// RECOVERY_SIGNAL for any subscribers.
-    pub fn add_recovery_approval(&self, guardian_id: AuthorityId) {
-        let mut recovery = self.views.snapshot().recovery;
-        recovery.add_guardian_approval(guardian_id);
-        self.views.set_recovery(recovery);
-    }
-}
+// ViewState is now read-only for external consumers. UI updates flow through:
+//
+//   Facts → ReactiveScheduler → SignalViews → Signals (CONTACTS_SIGNAL, etc.)
+//
+// This ensures a single source of truth. Code that needs to update what the UI
+// displays must either:
+// 1. Commit facts through the runtime (production path)
+// 2. Emit directly to signals via ReactiveEffects::emit() (demo/test path)
+//
+// The legacy ViewState mutation methods (add_contact, set_contact_guardian_status,
+// add_guardian, add_chat_message, add_recovery_approval) have been removed because
+// ViewState changes no longer propagate to signals (signal forwarding was removed
+// in work/002.md C2.5).
+//
+// See work/reactive_unify.md and work/002.md for architectural history.
 
 // Legacy: AppCore async dispatch + local pending-fact commit pipeline removed.
 //

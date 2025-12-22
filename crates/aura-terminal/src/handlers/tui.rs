@@ -17,8 +17,6 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 // Import app types from aura-app (pure layer)
 use aura_app::{AppConfig, AppCore};
-#[cfg(feature = "development")]
-use aura_app::workflows::update_connection_status;
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
@@ -33,7 +31,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
-use crate::demo::{DemoSignalCoordinator, DemoSimulator};
+use crate::demo::DemoSimulator;
 use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
 use crate::tui::{
     context::{InitializedAppCore, IoContext},
@@ -80,22 +78,59 @@ pub enum AccountLoadResult {
 /// Account configuration filename
 ///
 /// Mode isolation is achieved through separate base directories:
-/// - Production: `./aura-data/account.json`
-/// - Demo: `./aura-demo-data/account.json`
+/// - Production: `$AURA_PATH/.aura/account.json` (default: `~/.aura/account.json`)
+/// - Demo: `$AURA_PATH/.aura-demo/account.json` (default: `~/.aura-demo/account.json`)
 const ACCOUNT_FILENAME: &str = "account.json";
 
 /// Journal filename
 ///
 /// Mode isolation is achieved through separate base directories:
-/// - Production: `./aura-data/journal.json`
-/// - Demo: `./aura-demo-data/journal.json`
+/// - Production: `$AURA_PATH/.aura/journal.json` (default: `~/.aura/journal.json`)
+/// - Demo: `$AURA_PATH/.aura-demo/journal.json` (default: `~/.aura-demo/journal.json`)
 const JOURNAL_FILENAME: &str = "journal.json";
+
+/// Resolve the storage base path for Aura.
+///
+/// This is the SINGLE SOURCE OF TRUTH for storage path resolution.
+///
+/// # Priority (highest to lowest):
+/// 1. Explicit override (from --data-dir flag) - uses the path as-is
+/// 2. $AURA_PATH environment variable + mode suffix
+/// 3. Home directory (~) + mode suffix
+///
+/// # Mode Suffixes:
+/// - Production: `.aura`
+/// - Demo: `.aura-demo`
+///
+/// # Examples:
+/// - Production with no override: `~/.aura`
+/// - Demo with $AURA_PATH=/project: `/project/.aura-demo`
+/// - Explicit override `./my-data`: uses `./my-data` exactly
+pub fn resolve_storage_path(explicit_override: Option<&str>, mode: TuiMode) -> PathBuf {
+    // If explicit override provided, use it directly (user knows what they want)
+    if let Some(path) = explicit_override {
+        return PathBuf::from(path);
+    }
+
+    // Determine base from $AURA_PATH or home directory
+    let aura_path = env::var("AURA_PATH")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // Append mode-specific suffix
+    match mode {
+        TuiMode::Production => aura_path.join(".aura"),
+        TuiMode::Demo { .. } => aura_path.join(".aura-demo"),
+    }
+}
 
 /// Clean up demo directory before starting demo mode
 ///
-/// Demo mode uses a dedicated directory (`./aura-demo-data/`) that is completely
-/// separate from production data. On startup, we delete the entire directory to
-/// ensure a clean slate for each demo session.
+/// Demo mode uses a dedicated directory (`.aura-demo`) that is completely
+/// separate from production data (`.aura`). On startup, we delete the entire
+/// directory to ensure a clean slate for each demo session.
 ///
 /// This is ONLY called in demo mode - production directory is NEVER touched.
 fn cleanup_demo_directory(base_path: &Path) {
@@ -203,7 +238,7 @@ async fn persist_account_config(
 /// Create a new account and save to disk
 ///
 /// Called when user completes the account setup modal.
-/// The base_path should be mode-specific (./aura-data or ./aura-demo-data).
+/// The base_path should be mode-specific (.aura or .aura-demo).
 pub async fn create_account(
     base_path: &Path,
     device_id_str: &str,
@@ -473,9 +508,8 @@ const DEMO_SEED: u64 = 2024;
 pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
     let stdio = PreFullscreenStdio::new();
 
-    // Demo mode: use simulation backend with deterministic seed
-    // The TUI code is IDENTICAL for demo and production - only the backend differs
-    if args.demo {
+    // Determine mode from args
+    let mode = if args.demo {
         stdio.println(format_args!("Starting Aura TUI (Demo Mode)"));
         stdio.println(format_args!("============================="));
         stdio.println(format_args!(
@@ -483,34 +517,22 @@ pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
         ));
         stdio.println(format_args!("Seed: {} (deterministic)", DEMO_SEED));
         stdio.newline();
+        TuiMode::Demo { seed: DEMO_SEED }
+    } else {
+        TuiMode::Production
+    };
 
-        // Use demo-specific data directory and device ID
-        let demo_data_dir = args
-            .data_dir
-            .clone()
-            .unwrap_or_else(|| "./aura-data".to_string());
-        let demo_device_id = args
-            .device_id
-            .clone()
-            .unwrap_or_else(|| "demo:bob".to_string());
+    // Default device ID for demo mode
+    let device_id = args.device_id.as_deref().or_else(|| {
+        if args.demo {
+            Some("demo:bob")
+        } else {
+            None
+        }
+    });
 
-        return handle_tui_launch(
-            stdio,
-            Some(&demo_data_dir),
-            Some(&demo_device_id),
-            TuiMode::Demo { seed: DEMO_SEED },
-        )
-        .await;
-    }
-
-    let data_dir = args.data_dir.clone().or_else(|| env::var("AURA_PATH").ok());
-    handle_tui_launch(
-        stdio,
-        data_dir.as_deref(),
-        args.device_id.as_deref(),
-        TuiMode::Production,
-    )
-    .await
+    // Path resolution happens in handle_tui_launch via resolve_storage_path
+    handle_tui_launch(stdio, args.data_dir.as_deref(), device_id, mode).await
 }
 
 /// Launch the TUI with the specified mode
@@ -527,20 +549,8 @@ async fn handle_tui_launch(
     stdio.println(format_args!("Starting Aura TUI ({})", mode_str));
     stdio.println(format_args!("================"));
 
-    // Determine data directory - mode-specific paths ensure complete isolation
-    // Priority: --data-dir flag > $AURA_PATH env > ~ (home directory)
-    let base_path = data_dir.map(PathBuf::from).unwrap_or_else(|| {
-        let aura_path = env::var("AURA_PATH")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir())
-            .unwrap_or_else(|| PathBuf::from("."));
-
-        match mode {
-            TuiMode::Production => aura_path.join(".aura"),
-            TuiMode::Demo { .. } => aura_path.join(".aura-demo"),
-        }
-    });
+    // Use the single source of truth for path resolution
+    let base_path = resolve_storage_path(data_dir, mode);
 
     // In demo mode, clean up entire directory so users go through account creation
     // This is ONLY done in demo mode - production directory is NEVER touched
@@ -600,14 +610,14 @@ async fn handle_tui_launch(
     };
     let effect_ctx = EffectContext::new(authority_id, context_id, execution_mode);
 
-    // In demo mode, create simulator first to get shared transport inbox
+    // In demo mode, create simulator first to get shared transport wiring (Bob + Alice + Carol).
     #[cfg(feature = "development")]
     let demo_simulator_for_bob = match mode {
         TuiMode::Demo { seed } => {
             stdio.println(format_args!(
                 "Creating demo simulator for shared transport..."
             ));
-            let sim = DemoSimulator::new(seed)
+            let sim = DemoSimulator::new(seed, base_path.clone())
                 .await
                 .map_err(|e| AuraError::internal(format!("Failed to create simulator: {}", e)))?;
             Some(sim)
@@ -631,10 +641,10 @@ async fn handle_tui_launch(
 
             #[cfg(feature = "development")]
             {
-                // Use shared transport inbox from simulator
-                let shared_inbox = demo_simulator_for_bob
+                // Use shared transport wiring from simulator
+                let shared_transport = demo_simulator_for_bob
                     .as_ref()
-                    .map(|sim| sim.shared_transport_inbox.clone())
+                    .map(|sim| sim.shared_transport())
                     .expect("Simulator should be created in demo mode");
 
                 stdio.println(format_args!(
@@ -643,7 +653,11 @@ async fn handle_tui_launch(
                 AgentBuilder::new()
                     .with_config(agent_config)
                     .with_authority(authority_id)
-                    .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_inbox)
+                    .build_simulation_async_with_shared_transport(
+                        seed,
+                        &effect_ctx,
+                        shared_transport,
+                    )
                     .await
                     .map_err(|e| {
                         AuraError::internal(format!(
@@ -693,53 +707,22 @@ async fn handle_tui_launch(
         "AppCore initialized (with runtime bridge and reactive signals)"
     ));
 
-    // In demo mode, start the simulator with Alice and Carol peer agents
-    // DemoSignalCoordinator handles bidirectional event routing via signals
     #[cfg(feature = "development")]
-    let (mut simulator, _coordinator_handles): (
-        Option<DemoSimulator>,
-        Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)>,
-    ) = match mode {
-        TuiMode::Demo { seed: _ } => {
-            // Use the simulator we already created for shared transport
+    let mut simulator: Option<DemoSimulator> = match mode {
+        TuiMode::Demo { .. } => {
             stdio.println(format_args!("Starting demo simulator..."));
             let mut sim = demo_simulator_for_bob.expect("Simulator should exist in demo mode");
-
             sim.start()
                 .await
                 .map_err(|e| AuraError::internal(format!("Failed to start simulator: {}", e)))?;
 
-            let alice_id = sim.alice_authority().await;
-            let carol_id = sim.carol_authority().await;
-            stdio.println(format_args!("Alice online: {}", alice_id));
-            stdio.println(format_args!("Carol online: {}", carol_id));
-            stdio.println(format_args!("Peers connected: {}", sim.peer_count()));
+            stdio.println(format_args!("Alice online: {}", sim.alice_authority()));
+            stdio.println(format_args!("Carol online: {}", sim.carol_authority()));
 
-            // Update the footer peer count via CONNECTION_STATUS_SIGNAL.
-            // In demo mode, "connected peers" are the simulated Alice/Carol agents.
-            if let Err(e) = update_connection_status(app_core.raw(), sim.peer_count()).await {
-                tracing::warn!("Demo: Failed to update connection status: {}", e);
+            // Refresh UI-facing signals from the runtime, including connection status.
+            if let Err(e) = aura_app::workflows::system::refresh_account(app_core.raw()).await {
+                tracing::warn!("Demo: Failed to refresh account state: {}", e);
             }
-
-            // Get the simulator's bridge and response receiver for signal coordinator
-            let sim_bridge = sim.bridge();
-            let response_rx = sim
-                .take_response_receiver()
-                .await
-                .ok_or_else(|| AuraError::internal("Response receiver already taken"))?;
-
-            // Create DemoSignalCoordinator - handles bidirectional event routing via signals
-            // This replaces the manual AuraEvent forwarding with signal subscriptions
-            let coordinator = Arc::new(DemoSignalCoordinator::new(
-                app_core.raw().clone(),
-                authority_id, // Bob's authority
-                sim_bridge,
-                response_rx,
-            ));
-
-            // Start coordinator tasks
-            let handles = coordinator.start();
-            stdio.println(format_args!("Demo signal coordinator started"));
 
             // Start background task to process ceremony acceptances
             let ceremony_agent = agent.clone();
@@ -765,9 +748,9 @@ async fn handle_tui_launch(
             });
             stdio.println(format_args!("Ceremony acceptance processor started"));
 
-            (Some(sim), Some(handles))
+            Some(sim)
         }
-        TuiMode::Production => (None, None),
+        TuiMode::Production => None,
     };
 
     // Create IoContext with AppCore integration
@@ -794,13 +777,6 @@ async fn handle_tui_launch(
                 .with_mode(mode)
                 .with_existing_account(has_existing_account)
                 .with_demo_hints(hints);
-
-            // Wire up the demo bridge so IoContext.dispatch() routes commands to simulated agents
-            // This allows Alice/Carol to respond to guardian invitations and other interactions
-            if let Some(ref sim) = simulator {
-                builder = builder.with_demo_bridge(sim.bridge());
-                stdio.println(format_args!("Demo bridge connected to IoContext"));
-            }
 
             builder
                 .build()

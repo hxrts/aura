@@ -6,6 +6,7 @@ use super::{AgentConfig, AgentError, AgentResult, AuthorityContext};
 use crate::handlers::{
     AuthService, ChatService, InvitationService, RecoveryService, SessionService,
 };
+use crate::runtime::services::SyncManagerConfig;
 use crate::runtime::services::ThresholdSigningService;
 use crate::runtime::system::RuntimeSystem;
 use crate::runtime::{EffectContext, EffectSystemBuilder};
@@ -249,6 +250,7 @@ impl AuraAgent {
 pub struct AgentBuilder {
     config: AgentConfig,
     authority_id: Option<AuthorityId>,
+    sync_config: Option<SyncManagerConfig>,
 }
 
 impl AgentBuilder {
@@ -257,12 +259,25 @@ impl AgentBuilder {
         Self {
             config: AgentConfig::default(),
             authority_id: None,
+            sync_config: None,
         }
     }
 
     /// Set the authority ID
     pub fn with_authority(mut self, authority_id: AuthorityId) -> Self {
         self.authority_id = Some(authority_id);
+        self
+    }
+
+    /// Enable the sync service with default configuration.
+    pub fn with_sync(mut self) -> Self {
+        self.sync_config = Some(SyncManagerConfig::default());
+        self
+    }
+
+    /// Enable the sync service with a custom configuration.
+    pub fn with_sync_config(mut self, config: SyncManagerConfig) -> Self {
+        self.sync_config = Some(config);
         self
     }
 
@@ -274,6 +289,7 @@ impl AgentBuilder {
 
     /// Build a production agent
     pub async fn build_production(self, _ctx: &EffectContext) -> AgentResult<AuraAgent> {
+        let sync_config = self.sync_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -286,58 +302,67 @@ impl AgentBuilder {
             aura_core::effects::ExecutionMode::Production,
         );
 
-        let runtime = EffectSystemBuilder::production()
+        let mut builder = EffectSystemBuilder::production()
             .with_config(self.config)
-            .with_authority(authority_id)
-            .build(&temp_context)
-            .await
-            .map_err(AgentError::runtime)?;
+            .with_authority(authority_id);
+        if let Some(sync_config) = sync_config {
+            builder = builder.with_sync_config(sync_config);
+        }
+        let runtime = builder.build(&temp_context).await.map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
 
     /// Build a testing agent
     pub fn build_testing(self) -> AgentResult<AuraAgent> {
+        let sync_config = self.sync_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        let runtime = EffectSystemBuilder::testing()
+        let mut builder = EffectSystemBuilder::testing()
             .with_config(self.config)
-            .with_authority(authority_id)
-            .build_sync()
-            .map_err(AgentError::runtime)?;
+            .with_authority(authority_id);
+        if let Some(sync_config) = sync_config {
+            builder = builder.with_sync_config(sync_config);
+        }
+        let runtime = builder.build_sync().map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
 
     /// Build a testing agent using an existing async runtime
     pub async fn build_testing_async(self, ctx: &EffectContext) -> AgentResult<AuraAgent> {
+        let sync_config = self.sync_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        let runtime = EffectSystemBuilder::testing()
+        let mut builder = EffectSystemBuilder::testing()
             .with_config(self.config)
-            .with_authority(authority_id)
-            .build(ctx)
-            .await
-            .map_err(AgentError::runtime)?;
+            .with_authority(authority_id);
+        if let Some(sync_config) = sync_config {
+            builder = builder.with_sync_config(sync_config);
+        }
+        let runtime = builder.build(ctx).await.map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
 
     /// Build a simulation agent
     pub fn build_simulation(self, seed: u64) -> AgentResult<AuraAgent> {
+        let sync_config = self.sync_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        let runtime = EffectSystemBuilder::simulation(seed)
+        let mut builder = EffectSystemBuilder::simulation(seed)
             .with_config(self.config)
-            .with_authority(authority_id)
-            .build_sync()
-            .map_err(AgentError::runtime)?;
+            .with_authority(authority_id);
+        if let Some(sync_config) = sync_config {
+            builder = builder.with_sync_config(sync_config);
+        }
+        let runtime = builder.build_sync().map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
@@ -348,16 +373,18 @@ impl AgentBuilder {
         seed: u64,
         ctx: &EffectContext,
     ) -> AgentResult<AuraAgent> {
+        let sync_config = self.sync_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        let runtime = EffectSystemBuilder::simulation(seed)
+        let mut builder = EffectSystemBuilder::simulation(seed)
             .with_config(self.config)
-            .with_authority(authority_id)
-            .build(ctx)
-            .await
-            .map_err(AgentError::runtime)?;
+            .with_authority(authority_id);
+        if let Some(sync_config) = sync_config {
+            builder = builder.with_sync_config(sync_config);
+        }
+        let runtime = builder.build(ctx).await.map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
@@ -370,19 +397,21 @@ impl AgentBuilder {
         self,
         seed: u64,
         ctx: &EffectContext,
-        shared_inbox: std::sync::Arc<std::sync::RwLock<Vec<aura_core::effects::TransportEnvelope>>>,
+        shared_transport: crate::SharedTransport,
     ) -> AgentResult<AuraAgent> {
+        let sync_config = self.sync_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        let runtime = EffectSystemBuilder::simulation(seed)
+        let mut builder = EffectSystemBuilder::simulation(seed)
             .with_config(self.config)
             .with_authority(authority_id)
-            .with_shared_transport_inbox(shared_inbox)
-            .build(ctx)
-            .await
-            .map_err(AgentError::runtime)?;
+            .with_shared_transport(shared_transport);
+        if let Some(sync_config) = sync_config {
+            builder = builder.with_sync_config(sync_config);
+        }
+        let runtime = builder.build(ctx).await.map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }

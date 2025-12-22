@@ -72,50 +72,25 @@ impl DemoHandler {
     ///
     /// Routes to the TUI handler with demo mode enabled.
     /// The TUI code is IDENTICAL for demo and production - only the backend differs.
+    ///
+    /// All scenarios use the standard `.aura-demo` directory (via `resolve_storage_path`).
+    /// The directory is cleaned up on each demo run, so scenario isolation isn't needed.
     async fn handle_tui_demo(scenario_arg: DemoScenarioArg) -> Result<(), AuraError> {
-        // Map scenario arg to appropriate demo configuration
-        // Each scenario configures different behavior for Alice/Carol peer agents
-        let (data_dir, device_id, scenario_name) = match scenario_arg {
-            DemoScenarioArg::HappyPath => {
-                // Happy path - guardians respond quickly
-                (
-                    "./aura-demo-happy".to_string(),
-                    "demo:bob:happy".to_string(),
-                    "happy_path",
-                )
-            }
-            DemoScenarioArg::SlowGuardian => {
-                // One guardian is slow to respond
-                (
-                    "./aura-demo-slow".to_string(),
-                    "demo:bob:slow".to_string(),
-                    "slow_guardian",
-                )
-            }
-            DemoScenarioArg::FailedRecovery => {
-                // Recovery fails (for error handling demo)
-                (
-                    "./aura-demo-failed".to_string(),
-                    "demo:bob:failed".to_string(),
-                    "failed_recovery",
-                )
-            }
-            DemoScenarioArg::Interactive => {
-                // Interactive demo for free-form exploration
-                (
-                    "./aura-demo-interactive".to_string(),
-                    "demo:bob:interactive".to_string(),
-                    "interactive",
-                )
-            }
+        // Map scenario arg to device ID for scenario-specific behavior
+        let (device_id, scenario_name) = match scenario_arg {
+            DemoScenarioArg::HappyPath => ("demo:bob:happy", "happy_path"),
+            DemoScenarioArg::SlowGuardian => ("demo:bob:slow", "slow_guardian"),
+            DemoScenarioArg::FailedRecovery => ("demo:bob:failed", "failed_recovery"),
+            DemoScenarioArg::Interactive => ("demo:bob:interactive", "interactive"),
         };
 
         println!("Starting demo scenario: {}", scenario_name);
 
         // Construct TuiArgs with demo mode enabled
+        // data_dir: None means resolve_storage_path will use $AURA_PATH/.aura-demo
         let tui_args = TuiArgs {
-            data_dir: Some(data_dir),
-            device_id: Some(device_id),
+            data_dir: None,
+            device_id: Some(device_id.to_string()),
             demo: true,
         };
 

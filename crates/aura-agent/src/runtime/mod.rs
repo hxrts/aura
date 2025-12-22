@@ -40,6 +40,9 @@ pub mod effects;
 
 pub mod system;
 
+// Shared in-memory transport wiring for simulations/demos
+pub mod shared_transport;
+
 // Simulation factory (feature-gated)
 #[cfg(feature = "simulation")]
 pub mod simulation_factory;
@@ -56,6 +59,7 @@ pub use builder::EffectSystemBuilder;
 pub use choreography_adapter::{AuraHandlerAdapter, ChoreographyAdapter};
 pub use context::EffectContext;
 pub use effects::AuraEffectSystem;
+pub use shared_transport::SharedTransport;
 
 // Runtime system type aliases for backwards compatibility
 pub type RuntimeSystem = AuraEffectSystem;

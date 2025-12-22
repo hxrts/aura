@@ -97,7 +97,7 @@ async fn setup_test_env(name: &str) -> TestEnv {
     let display_name = format!("DemoUser-{}", name);
 
     let (authority_id, context_id) =
-        create_account(&test_dir, &device_id_str, TuiMode::Production, &display_name)
+        create_account(&test_dir, &device_id_str, &display_name)
             .await
             .expect("Failed to create account");
 

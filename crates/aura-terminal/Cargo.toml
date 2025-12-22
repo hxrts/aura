@@ -24,6 +24,10 @@ required-features = ["terminal"]
 name = "itf_trace_replay"
 required-features = ["testing"]
 
+[[test]]
+name = "demo_peer_count"
+required-features = ["development"]
+
 [features]
 default = ["terminal"]
 terminal = []
@@ -94,6 +98,7 @@ uuid = { workspace = true }
 once_cell = { workspace = true }
 biscuit-auth = { workspace = true }
 nix = "0.26"
+dirs = "6"
 
 [dev-dependencies]
 # Testing infrastructure (Layer 7 can use testkit with full effect system)
