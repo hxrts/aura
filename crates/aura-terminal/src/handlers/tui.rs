@@ -17,6 +17,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 // Import app types from aura-app (pure layer)
 use aura_app::{AppConfig, AppCore};
+#[cfg(feature = "development")]
+use aura_app::workflows::update_connection_status;
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
@@ -75,44 +77,36 @@ pub enum AccountLoadResult {
     NotFound,
 }
 
-/// Get the account filename based on TUI mode
+/// Account configuration filename
 ///
-/// - Production mode: `account.json`
-/// - Demo mode: `demo-account.json`
-///
-/// This ensures demo mode never overwrites a real account file.
-fn account_filename(mode: TuiMode) -> &'static str {
-    match mode {
-        TuiMode::Production => "account.json",
-        TuiMode::Demo { .. } => "demo-account.json",
-    }
-}
+/// Mode isolation is achieved through separate base directories:
+/// - Production: `./aura-data/account.json`
+/// - Demo: `./aura-demo-data/account.json`
+const ACCOUNT_FILENAME: &str = "account.json";
 
-/// Get the journal filename based on TUI mode
+/// Journal filename
 ///
-/// - Production mode: `journal.json`
-/// - Demo mode: `demo-journal.json`
-///
-/// This ensures demo mode never overwrites a real journal file.
-fn journal_filename(mode: TuiMode) -> &'static str {
-    match mode {
-        TuiMode::Production => "journal.json",
-        TuiMode::Demo { .. } => "demo-journal.json",
-    }
-}
+/// Mode isolation is achieved through separate base directories:
+/// - Production: `./aura-data/journal.json`
+/// - Demo: `./aura-demo-data/journal.json`
+const JOURNAL_FILENAME: &str = "journal.json";
 
-/// Clean up demo files before starting demo mode
+/// Clean up demo directory before starting demo mode
 ///
-/// In demo mode, we want users to go through the account creation flow each time.
-/// This function deletes demo-account.json and demo-journal.json if they exist.
+/// Demo mode uses a dedicated directory (`./aura-demo-data/`) that is completely
+/// separate from production data. On startup, we delete the entire directory to
+/// ensure a clean slate for each demo session.
 ///
-/// This is ONLY called in demo mode - production files are NEVER deleted.
-async fn cleanup_demo_files(storage: &impl StorageEffects) {
-    for key in ["demo-account.json", "demo-journal.json"] {
-        match storage.remove(key).await {
-            Ok(true) => tracing::debug!(key = key, "Removed demo file"),
-            Ok(false) => {}
-            Err(e) => tracing::warn!(key = key, err = %e, "Failed to remove demo file"),
+/// This is ONLY called in demo mode - production directory is NEVER touched.
+fn cleanup_demo_directory(base_path: &Path) {
+    if base_path.exists() {
+        match std::fs::remove_dir_all(base_path) {
+            Ok(()) => tracing::info!(path = %base_path.display(), "Cleaned up demo directory"),
+            Err(e) => tracing::warn!(
+                path = %base_path.display(),
+                err = %e,
+                "Failed to clean up demo directory"
+            ),
         }
     }
 }
@@ -121,12 +115,9 @@ async fn cleanup_demo_files(storage: &impl StorageEffects) {
 ///
 /// Returns `Loaded` if account exists, `NotFound` otherwise.
 /// Does NOT auto-create accounts - this allows the TUI to show an account setup modal.
-async fn try_load_account(
-    storage: &impl StorageEffects,
-    mode: TuiMode,
-) -> Result<AccountLoadResult, AuraError> {
+async fn try_load_account(storage: &impl StorageEffects) -> Result<AccountLoadResult, AuraError> {
     let Some(bytes) = storage
-        .retrieve(account_filename(mode))
+        .retrieve(ACCOUNT_FILENAME)
         .await
         .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?
     else {
@@ -181,7 +172,6 @@ fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
 async fn persist_account_config(
     storage: &impl StorageEffects,
     time: &impl PhysicalTimeEffects,
-    mode: TuiMode,
     authority_id: AuthorityId,
     context_id: ContextId,
     display_name: Option<String>,
@@ -203,7 +193,7 @@ async fn persist_account_config(
         .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
 
     storage
-        .store(account_filename(mode), content.into_bytes())
+        .store(ACCOUNT_FILENAME, content.into_bytes())
         .await
         .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
 
@@ -213,10 +203,10 @@ async fn persist_account_config(
 /// Create a new account and save to disk
 ///
 /// Called when user completes the account setup modal.
+/// The base_path should be mode-specific (./aura-data or ./aura-demo-data).
 pub async fn create_account(
     base_path: &Path,
     device_id_str: &str,
-    mode: TuiMode,
     display_name: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
@@ -235,7 +225,6 @@ pub async fn create_account(
     persist_account_config(
         &storage,
         &time,
-        mode,
         authority_id,
         context_id,
         Some(display_name.to_string()),
@@ -253,7 +242,7 @@ pub async fn create_account(
 /// the cryptographically identical authority from before the loss.
 ///
 /// # Arguments
-/// * `base_path` - Data directory for account storage
+/// * `base_path` - Data directory for account storage (mode-specific)
 /// * `recovered_authority_id` - The ORIGINAL authority_id reconstructed by guardians
 /// * `recovered_context_id` - Optional context_id (generated deterministically if None)
 ///
@@ -263,7 +252,6 @@ pub async fn restore_recovered_account(
     base_path: &Path,
     recovered_authority_id: AuthorityId,
     recovered_context_id: Option<ContextId>,
-    mode: TuiMode,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
     let time = PhysicalTimeHandler::new();
@@ -283,7 +271,6 @@ pub async fn restore_recovered_account(
     persist_account_config(
         &storage,
         &time,
-        mode,
         recovered_authority_id,
         context_id,
         None,
@@ -328,22 +315,20 @@ pub struct AccountBackup {
 /// Format: `aura:backup:v1:<base64>`
 ///
 /// # Arguments
-/// * `base_path` - Data directory containing account and journal files
+/// * `base_path` - Data directory containing account and journal files (mode-specific)
 /// * `device_id` - Optional device ID to include in backup metadata
-/// * `mode` - TUI mode (determines which account/journal files to export)
 ///
 /// # Returns
 /// * Portable backup code string
 pub async fn export_account_backup(
     base_path: &Path,
     device_id: Option<&str>,
-    mode: TuiMode,
 ) -> Result<String, AuraError> {
     let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
     let time = PhysicalTimeHandler::new();
 
     let Some(account_bytes) = storage
-        .retrieve(account_filename(mode))
+        .retrieve(ACCOUNT_FILENAME)
         .await
         .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?
     else {
@@ -357,7 +342,7 @@ pub async fn export_account_backup(
         .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
 
     let journal = storage
-        .retrieve(journal_filename(mode))
+        .retrieve(JOURNAL_FILENAME)
         .await
         .map_err(|e| AuraError::internal(format!("Failed to read journal: {}", e)))?
         .and_then(|b| String::from_utf8(b).ok());
@@ -391,10 +376,9 @@ pub async fn export_account_backup(
 /// Import and restore account from backup code
 ///
 /// # Arguments
-/// * `base_path` - Data directory to restore account to
+/// * `base_path` - Data directory to restore account to (mode-specific)
 /// * `backup_code` - The backup code from `export_account_backup`
 /// * `overwrite` - If true, overwrite existing account; if false, fail if account exists
-/// * `mode` - TUI mode (determines which account file to import to)
 ///
 /// # Returns
 /// * The restored authority and context IDs
@@ -402,7 +386,6 @@ pub async fn import_account_backup(
     base_path: &Path,
     backup_code: &str,
     overwrite: bool,
-    mode: TuiMode,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let storage = PathFilesystemStorageHandler::new(base_path.to_path_buf());
 
@@ -453,7 +436,7 @@ pub async fn import_account_backup(
 
     // Check for existing account
     if storage
-        .exists(account_filename(mode))
+        .exists(ACCOUNT_FILENAME)
         .await
         .map_err(|e| AuraError::internal(format!("Failed to check account existence: {}", e)))?
         && !overwrite
@@ -468,14 +451,14 @@ pub async fn import_account_backup(
         .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
 
     storage
-        .store(account_filename(mode), account_content.into_bytes())
+        .store(ACCOUNT_FILENAME, account_content.into_bytes())
         .await
         .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
 
     // Write journal if present in backup
     if let Some(ref journal_content) = backup.journal {
         storage
-            .store(journal_filename(mode), journal_content.as_bytes().to_vec())
+            .store(JOURNAL_FILENAME, journal_content.as_bytes().to_vec())
             .await
             .map_err(|e| AuraError::internal(format!("Failed to write journal: {}", e)))?;
     }
@@ -544,22 +527,32 @@ async fn handle_tui_launch(
     stdio.println(format_args!("Starting Aura TUI ({})", mode_str));
     stdio.println(format_args!("================"));
 
-    // Determine data directory
-    let base_path = data_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("./aura-data"));
+    // Determine data directory - mode-specific paths ensure complete isolation
+    // Priority: --data-dir flag > $AURA_PATH env > ~ (home directory)
+    let base_path = data_dir.map(PathBuf::from).unwrap_or_else(|| {
+        let aura_path = env::var("AURA_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| dirs::home_dir())
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        match mode {
+            TuiMode::Production => aura_path.join(".aura"),
+            TuiMode::Demo { .. } => aura_path.join(".aura-demo"),
+        }
+    });
+
+    // In demo mode, clean up entire directory so users go through account creation
+    // This is ONLY done in demo mode - production directory is NEVER touched
+    if matches!(mode, TuiMode::Demo { .. }) {
+        cleanup_demo_directory(&base_path);
+    }
 
     // Initialize tracing for TUI into a file (avoid stderr corruption in fullscreen).
     // Safe to call multiple times; only the first init wins.
     init_tui_tracing(&base_path, mode);
 
     let storage = PathFilesystemStorageHandler::new(base_path.clone());
-
-    // In demo mode, clean up existing demo files so users go through account creation
-    // This is ONLY done in demo mode - production files are NEVER deleted
-    if matches!(mode, TuiMode::Demo { .. }) {
-        cleanup_demo_files(&storage).await;
-    }
 
     // Determine device ID
     let device_id = device_id_str
@@ -574,7 +567,7 @@ async fn handle_tui_launch(
 
     // Try to load existing account, or use placeholders if no account exists
     let (authority_id, context_id, has_existing_account) =
-        match try_load_account(&storage, mode).await? {
+        match try_load_account(&storage).await? {
             AccountLoadResult::Loaded { authority, context } => {
                 stdio.println(format_args!("Authority: {}", authority));
                 stdio.println(format_args!("Context: {}", context));
@@ -721,6 +714,12 @@ async fn handle_tui_launch(
             stdio.println(format_args!("Alice online: {}", alice_id));
             stdio.println(format_args!("Carol online: {}", carol_id));
             stdio.println(format_args!("Peers connected: {}", sim.peer_count()));
+
+            // Update the footer peer count via CONNECTION_STATUS_SIGNAL.
+            // In demo mode, "connected peers" are the simulated Alice/Carol agents.
+            if let Err(e) = update_connection_status(app_core.raw(), sim.peer_count()).await {
+                tracing::warn!("Demo: Failed to update connection status: {}", e);
+            }
 
             // Get the simulator's bridge and response receiver for signal coordinator
             let sim_bridge = sim.bridge();
