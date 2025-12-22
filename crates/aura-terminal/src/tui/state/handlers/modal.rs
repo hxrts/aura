@@ -471,9 +471,10 @@ fn handle_nickname_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
+                let nickname = modal_state.value.trim().to_string();
                 commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateNickname {
                     contact_id: modal_state.contact_id.clone(),
-                    nickname: modal_state.value.clone(),
+                    nickname,
                 }));
                 state.modal_queue.dismiss();
             }
@@ -891,7 +892,7 @@ fn handle_settings_threshold_key_queue(
                 }
             });
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Right => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsThreshold(ref mut s) = modal {
                     if s.active_field == 0 {
@@ -902,7 +903,7 @@ fn handle_settings_threshold_key_queue(
                 }
             });
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Left => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsThreshold(ref mut s) = modal {
                     if s.active_field == 0 {

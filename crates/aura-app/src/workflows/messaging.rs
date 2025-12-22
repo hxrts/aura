@@ -162,6 +162,31 @@ pub async fn create_channel(
     Ok(channel_id.to_string())
 }
 
+/// Close/archive a channel.
+///
+/// Today this is a UI-local operation that removes the channel from `CHAT_SIGNAL`.
+/// A fully persisted implementation will commit a `ChatFact::ChannelClosed` fact.
+pub async fn close_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel: &str,
+) -> Result<(), AuraError> {
+    let channel_id = parse_channel_id(channel);
+
+    let core = app_core.read().await;
+    let mut chat_state = core
+        .read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+
+    chat_state.remove_channel(&channel_id);
+
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
+
+    Ok(())
+}
+
 /// Send a message to a group/channel.
 ///
 /// **What it does**: Appends a message to the selected channel's message list

@@ -197,6 +197,22 @@ pub struct SettingsBridgeState {
     pub contact_count: usize,
 }
 
+/// Bridge-level device summary.
+///
+/// This is used to populate UI settings screens without requiring the UI layer
+/// to understand commitment-tree internals.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BridgeDeviceInfo {
+    /// Stable device identifier
+    pub id: String,
+    /// Human-friendly label (best effort)
+    pub name: String,
+    /// Whether this is the current device
+    pub is_current: bool,
+    /// Last-seen timestamp (ms since epoch), if known
+    pub last_seen: Option<u64>,
+}
+
 /// Bridge trait for runtime operations
 ///
 /// This trait defines the interface between the pure application core (`aura-app`)
@@ -494,6 +510,9 @@ pub trait RuntimeBridge: Send + Sync {
 
     /// Get current settings state
     async fn get_settings(&self) -> SettingsBridgeState;
+
+    /// List devices for the current account (best effort).
+    async fn list_devices(&self) -> Vec<BridgeDeviceInfo>;
 
     /// Update display name
     async fn set_display_name(&self, name: &str) -> Result<(), IntentError>;
@@ -806,6 +825,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn get_settings(&self) -> SettingsBridgeState {
         SettingsBridgeState::default()
+    }
+
+    async fn list_devices(&self) -> Vec<BridgeDeviceInfo> {
+        Vec::new()
     }
 
     async fn set_display_name(&self, _name: &str) -> Result<(), IntentError> {

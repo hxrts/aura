@@ -4,7 +4,7 @@
 //! It follows the reactive signal pattern and emits SETTINGS_SIGNAL updates.
 
 use crate::{
-    signal_defs::{SettingsState, SETTINGS_SIGNAL},
+    signal_defs::{DeviceInfo, SettingsState, SETTINGS_SIGNAL},
     AppCore,
 };
 use async_lock::RwLock;
@@ -18,6 +18,7 @@ async fn refresh_settings_signal_from_runtime(core: &AppCore) -> Result<(), Aura
     };
 
     let settings = runtime.get_settings().await;
+    let devices = runtime.list_devices().await;
     let mut state = core
         .read(&*SETTINGS_SIGNAL)
         .await
@@ -27,6 +28,15 @@ async fn refresh_settings_signal_from_runtime(core: &AppCore) -> Result<(), Aura
     state.threshold_k = settings.threshold_k as u8;
     state.threshold_n = settings.threshold_n as u8;
     state.contact_count = settings.contact_count;
+    state.devices = devices
+        .into_iter()
+        .map(|d| DeviceInfo {
+            id: d.id,
+            name: d.name,
+            is_current: d.is_current,
+            last_seen: d.last_seen,
+        })
+        .collect();
 
     core.emit(&*SETTINGS_SIGNAL, state)
         .await

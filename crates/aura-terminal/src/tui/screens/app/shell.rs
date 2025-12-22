@@ -1157,8 +1157,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.chat.on_set_topic)(channel_id, topic);
                                     }
                                     DispatchCommand::DeleteChannel { channel_id } => {
-                                        // TODO: Implement channel deletion callback
-                                        tracing::info!("Delete channel requested: {}", channel_id);
+                                        (cb.chat.on_close_channel)(channel_id);
                                     }
 
                                     // === Contacts Screen Commands ===
@@ -1181,8 +1180,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::RemoveContact { contact_id } => {
-                                        // TODO: Implement contact removal callback
-                                        tracing::info!("Remove contact requested: {}", contact_id);
+                                        (cb.contacts.on_remove_contact)(contact_id);
                                     }
                                     DispatchCommand::SelectContactByIndex { index } => {
                                         // Generic contact selection by index
@@ -1312,8 +1310,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::RevokeInvitation { invitation_id } => {
-                                        // TODO: Implement invitation revocation callback
-                                        tracing::info!("Revoke invitation requested: {}", invitation_id);
+                                        (cb.invitations.on_revoke)(invitation_id);
                                     }
 
                                     // === Recovery Screen Commands ===

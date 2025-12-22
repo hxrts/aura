@@ -5,7 +5,7 @@
 use iocraft::prelude::*;
 
 use super::modal::ModalContent;
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Spacing, Theme};
 
 /// Props for AccountSetupModal
 #[derive(Default, Props)]
@@ -53,23 +53,23 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         return element! {
             ModalContent(
                 flex_direction: FlexDirection::Column,
-                border_style: BorderStyle::Round,
+                border_style: Borders::PRIMARY,
                 border_color: Some(status_color),
                 justify_content: Some(JustifyContent::Center),
                 align_items: Some(AlignItems::Center),
             ) {
                 View(
-                    padding: 2,
+                    padding: Spacing::MODAL_PADDING,
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
                 ) {
-                    View(flex_direction: FlexDirection::Row, gap: 2) {
+                    View(flex_direction: FlexDirection::Row, gap: Spacing::SM) {
                         Text(content: status_icon, color: status_color, weight: Weight::Bold)
                         Text(content: status_text, color: status_color, weight: Weight::Bold)
                     }
                     #(if success {
                         Some(element! {
-                            View(margin_top: 2) {
+                            View(margin_top: Spacing::SM) {
                                 Text(
                                     content: format!("Welcome, {}!", display_name),
                                     color: Theme::TEXT_MUTED,
@@ -79,8 +79,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     } else {
                         None
                     })
-                    View(margin_top: 2, flex_direction: FlexDirection::Row, gap: 1) {
-                        Text(content: "Enter", color: Theme::SECONDARY)
+                    View(margin_top: Spacing::SM, flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                        Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
                         Text(
                             content: if success { "to continue" } else { "to try again" },
                             color: Theme::TEXT_MUTED,
@@ -120,13 +120,13 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     element! {
         ModalContent(
             flex_direction: FlexDirection::Column,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: Some(Theme::PRIMARY),
         ) {
             // Welcome header
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 border_style: BorderStyle::Single,
@@ -138,7 +138,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     weight: Weight::Bold,
                     color: Theme::PRIMARY,
                 )
-                View(margin_top: 1) {
+                View(margin_top: Spacing::XS) {
                     Text(
                         content: "Create your identity",
                         color: Theme::TEXT_MUTED,
@@ -151,11 +151,11 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 width: 100pct,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
-                padding: 2,
+                padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
             ) {
                 // Description
-                View(margin_bottom: 2) {
+                View(margin_bottom: Spacing::SM) {
                     Text(
                         content: "Your account uses Ed25519 signatures for security.",
                         color: Theme::TEXT_MUTED,
@@ -171,14 +171,14 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 )
 
                 // Display name input
-                View(margin_top: 2, flex_direction: FlexDirection::Column) {
+                View(margin_top: Spacing::SM, flex_direction: FlexDirection::Column) {
                     Text(content: "Display Name *", color: Theme::TEXT_MUTED)
                     View(
-                        margin_top: 1,
-                        border_style: BorderStyle::Round,
+                        margin_top: Spacing::XS,
+                        border_style: Borders::INPUT,
                         border_color: border_color,
-                        padding_left: 1,
-                        padding_right: 1,
+                        padding_left: Spacing::XS,
+                        padding_right: Spacing::XS,
                         padding_top: 0,
                         padding_bottom: 0,
                     ) {
@@ -193,7 +193,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
-                padding: 2,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
@@ -201,23 +201,23 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 #(if creating {
                     // Creating state - show spinner hint on left, spinner button on right
                     Some(element! {
-                        View(flex_direction: FlexDirection::Row, gap: 1) {
+                        View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                             Text(content: "Creating account...", color: Theme::TEXT_MUTED)
                         }
                     })
                 } else {
                     // Normal state - show Enter hint
                     Some(element! {
-                        View(flex_direction: FlexDirection::Row, gap: 1) {
-                            Text(content: "Enter", color: Theme::SECONDARY)
+                        View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                            Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
                             Text(content: "to create", color: Theme::TEXT_MUTED)
                         }
                     })
                 })
                 View(
-                    padding_left: 2,
-                    padding_right: 2,
-                    border_style: BorderStyle::Round,
+                    padding_left: Spacing::SM,
+                    padding_right: Spacing::SM,
+                    border_style: Borders::PRIMARY,
                     border_color: if creating { Theme::SECONDARY } else if can_submit { Theme::PRIMARY } else { Theme::BORDER },
                 ) {
                     #(if creating && props.show_spinner {

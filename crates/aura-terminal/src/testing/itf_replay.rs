@@ -188,6 +188,7 @@ impl ITFTraceReplayer {
             "Block" => Ok(Screen::Block),
             "Chat" => Ok(Screen::Chat),
             "Contacts" => Ok(Screen::Contacts),
+            "Invitations" => Ok(Screen::Contacts),
             "Neighborhood" => Ok(Screen::Neighborhood),
             "Settings" => Ok(Screen::Settings),
             "Recovery" => Ok(Screen::Recovery),

@@ -11,7 +11,7 @@ use iocraft::prelude::*;
 
 use crate::tui::layout::dim;
 use crate::tui::state_machine::{GuardianCeremonyResponse, GuardianSetupStep};
-use crate::tui::theme::{Icons, Spacing, Theme};
+use crate::tui::theme::{Borders, Icons, Spacing, Theme};
 
 /// Props for GuardianSetupModal
 #[derive(Default, Props)]
@@ -56,21 +56,18 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
 
     element! {
         View(
-            position: Position::Absolute,
-            top: 0u16,
-            left: 0u16,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
             flex_direction: FlexDirection::Column,
             background_color: Theme::BG_MODAL,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: Theme::BORDER_FOCUS,
             overflow: Overflow::Hidden,
         ) {
             // Title bar
             View(
                 width: 100pct,
-                padding: Spacing::SM,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
@@ -89,7 +86,7 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
             // Error message if any
             #(if !error.is_empty() {
                 Some(element! {
-                    View(width: 100pct, padding: Spacing::SM, background_color: Theme::ERROR) {
+                    View(width: 100pct, padding: Spacing::PANEL_PADDING, background_color: Theme::ERROR) {
                         Text(content: error.clone(), color: Theme::TEXT)
                     }
                 })
@@ -114,13 +111,13 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
             // Footer with key hints
             View(
                 width: 100pct,
-                padding: Spacing::SM,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
-                gap: 2,
+                gap: Spacing::LG,
             ) {
                 #(render_key_hints(&step))
             }
@@ -394,33 +391,47 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
 fn render_key_hints(step: &GuardianSetupStep) -> AnyElement<'static> {
     match step {
         GuardianSetupStep::SelectContacts => element! {
-            View(flex_direction: FlexDirection::Row, gap: 2) {
-                Text(content: "j/k", color: Theme::SECONDARY, weight: Weight::Bold)
-                Text(content: "navigate", color: Theme::TEXT_MUTED)
-                Text(content: "Space", color: Theme::SECONDARY, weight: Weight::Bold)
-                Text(content: "toggle", color: Theme::TEXT_MUTED)
-                Text(content: "Tab/Enter", color: Theme::SECONDARY, weight: Weight::Bold)
-                Text(content: "next", color: Theme::TEXT_MUTED)
-                Text(content: "Esc", color: Theme::SECONDARY, weight: Weight::Bold)
-                Text(content: "cancel", color: Theme::TEXT_MUTED)
+            View(flex_direction: FlexDirection::Row, gap: Spacing::LG) {
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "j/k", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Navigate", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Space", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Toggle", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Next", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
+                }
             }
         }
         .into_any(),
         GuardianSetupStep::ChooseThreshold => element! {
-            View(flex_direction: FlexDirection::Row, gap: 2) {
-                Text(content: "h/l", color: Theme::SECONDARY, weight: Weight::Bold)
-                Text(content: "adjust", color: Theme::TEXT_MUTED)
-                Text(content: "Enter", color: Theme::SECONDARY, weight: Weight::Bold)
-                Text(content: "start ceremony", color: Theme::TEXT_MUTED)
-                Text(content: "Esc", color: Theme::SECONDARY, weight: Weight::Bold)
-                Text(content: "back", color: Theme::TEXT_MUTED)
+            View(flex_direction: FlexDirection::Row, gap: Spacing::LG) {
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "←/→", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Adjust", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Confirm", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Back", color: Theme::TEXT_MUTED)
+                }
             }
         }
         .into_any(),
         GuardianSetupStep::CeremonyInProgress => element! {
-            View(flex_direction: FlexDirection::Row, gap: 2) {
-                Text(content: "Esc", color: Theme::SECONDARY, weight: Weight::Bold)
-                Text(content: "cancel ceremony", color: Theme::TEXT_MUTED)
+            View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
+                Text(content: "Cancel", color: Theme::TEXT_MUTED)
             }
         }
         .into_any(),

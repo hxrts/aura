@@ -64,6 +64,7 @@
 //! ```
 
 pub mod budget;
+pub mod contacts;
 pub mod context;
 pub mod invitation;
 #[cfg(feature = "signals")]
@@ -100,6 +101,7 @@ pub use budget::{
     NEIGHBORHOOD_DONATION,
     RESIDENT_ALLOCATION,
 };
+pub use contacts::update_contact_nickname;
 pub use context::{get_current_position, get_neighborhood_state, move_position, set_context};
 pub use invitation::{
     accept_invitation, accept_pending_block_invitation, cancel_invitation,

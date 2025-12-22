@@ -310,7 +310,9 @@ impl IntoIntent for EffectCommand {
             | EffectCommand::SendAction { .. }
             | EffectCommand::InviteUser { .. }
             | EffectCommand::ExportAccountBackup
-            | EffectCommand::ImportAccountBackup { .. } => None,
+            | EffectCommand::ImportAccountBackup { .. }
+            | EffectCommand::RemoveContact { .. }
+            | EffectCommand::CancelInvitation { .. } => None,
 
             #[cfg(test)]
             EffectCommand::UnknownCommandForTest => None,

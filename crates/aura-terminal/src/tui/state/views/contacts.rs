@@ -62,6 +62,8 @@ impl NicknameModalState {
     }
 
     pub fn can_submit(&self) -> bool {
-        !self.value.trim().is_empty()
+        // Allow empty nicknames as "clear nickname" so the suggested name can
+        // become visible again.
+        !self.contact_id.trim().is_empty() && self.value.trim().len() <= 100
     }
 }

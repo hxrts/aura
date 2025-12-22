@@ -5,7 +5,7 @@
 use iocraft::prelude::*;
 
 use crate::tui::layout::dim;
-use crate::tui::theme::{Spacing, Theme};
+use crate::tui::theme::{Borders, Spacing, Theme};
 
 /// State for threshold configuration modal
 #[derive(Clone, Debug, Default)]
@@ -151,21 +151,20 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
 
     element! {
         View(
-            position: Position::Absolute,
-            top: 0u16,
-            left: 0u16,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
             flex_direction: FlexDirection::Column,
             background_color: Theme::BG_MODAL,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: if props.focused { Theme::BORDER_FOCUS } else { Theme::BORDER },
             overflow: Overflow::Hidden,
         ) {
             // Title bar
             View(
                 width: 100pct,
-                padding: Spacing::SM,
+                padding: Spacing::PANEL_PADDING,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
@@ -183,139 +182,139 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
-                padding: Spacing::PANEL_PADDING,
-                gap: 1,
+                padding: Spacing::MODAL_PADDING,
+                gap: Spacing::XS,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 overflow: Overflow::Hidden,
             ) {
-                    // Threshold selector
+                // Threshold selector
+                View(
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    gap: Spacing::SM,
+                ) {
+                    // Decrement button
                     View(
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        gap: 2,
-                    ) {
-                        // Decrement button
-                        View(
-                            padding_left: 1,
-                            padding_right: 1,
-                            border_style: BorderStyle::Round,
-                            border_color: if can_decrement { Theme::SECONDARY } else { Theme::BORDER },
-                        ) {
-                            Text(
-                                content: "◄",
-                                color: if can_decrement { Theme::SECONDARY } else { Theme::TEXT_MUTED },
-                            )
-                        }
-
-                        // Current value display
-                        View(
-                            padding_left: 2,
-                            padding_right: 2,
-                            border_style: BorderStyle::Round,
-                            border_color: Theme::PRIMARY,
-                        ) {
-                            Text(
-                                content: format!("{}", k),
-                                weight: Weight::Bold,
-                                color: Theme::PRIMARY,
-                            )
-                        }
-
-                        Text(content: "of", color: Theme::TEXT_MUTED)
-
-                        View(
-                            padding_left: 2,
-                            padding_right: 2,
-                            border_style: BorderStyle::Round,
-                            border_color: Theme::BORDER,
-                        ) {
-                            Text(content: format!("{}", n), color: Theme::TEXT)
-                        }
-
-                        // Increment button
-                        View(
-                            padding_left: 1,
-                            padding_right: 1,
-                            border_style: BorderStyle::Round,
-                            border_color: if can_increment { Theme::SECONDARY } else { Theme::BORDER },
-                        ) {
-                            Text(
-                                content: "►",
-                                color: if can_increment { Theme::SECONDARY } else { Theme::TEXT_MUTED },
-                            )
-                        }
-                    }
-
-                    // Threshold description
-                    View(
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                    ) {
-                        Text(content: threshold_text, color: Theme::TEXT)
-                        Text(content: security_hint, color: Theme::TEXT_MUTED)
-                    }
-
-                    // Error display
-                    #(if has_error {
-                        Some(element! {
-                            View(
-                                padding_top: 1,
-                                justify_content: JustifyContent::Center,
-                            ) {
-                                Text(content: error, color: Theme::ERROR)
-                            }
-                        })
-                    } else {
-                        None
-                    })
-
-                    // Help text
-                    View(
-                        flex_direction: FlexDirection::Column,
-                        padding_top: 1,
+                        padding_left: Spacing::XS,
+                        padding_right: Spacing::XS,
+                        border_style: Borders::INPUT,
+                        border_color: if can_decrement { Theme::SECONDARY } else { Theme::BORDER },
                     ) {
                         Text(
-                            content: "The threshold determines how many guardians",
-                            color: Theme::TEXT_MUTED,
+                            content: "◄",
+                            color: if can_decrement { Theme::SECONDARY } else { Theme::TEXT_MUTED },
                         )
+                    }
+
+                    // Current value display
+                    View(
+                        padding_left: Spacing::SM,
+                        padding_right: Spacing::SM,
+                        border_style: Borders::INPUT,
+                        border_color: Theme::PRIMARY,
+                    ) {
                         Text(
-                            content: "must approve to recover your account.",
-                            color: Theme::TEXT_MUTED,
+                            content: format!("{}", k),
+                            weight: Weight::Bold,
+                            color: Theme::PRIMARY,
+                        )
+                    }
+
+                    Text(content: "of", color: Theme::TEXT_MUTED)
+
+                    View(
+                        padding_left: Spacing::SM,
+                        padding_right: Spacing::SM,
+                        border_style: Borders::INPUT,
+                        border_color: Theme::BORDER,
+                    ) {
+                        Text(content: format!("{}", n), color: Theme::TEXT)
+                    }
+
+                    // Increment button
+                    View(
+                        padding_left: Spacing::XS,
+                        padding_right: Spacing::XS,
+                        border_style: Borders::INPUT,
+                        border_color: if can_increment { Theme::SECONDARY } else { Theme::BORDER },
+                    ) {
+                        Text(
+                            content: "►",
+                            color: if can_increment { Theme::SECONDARY } else { Theme::TEXT_MUTED },
                         )
                     }
                 }
+
+                // Threshold description
+                View(
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                ) {
+                    Text(content: threshold_text, color: Theme::TEXT)
+                    Text(content: security_hint, color: Theme::TEXT_MUTED)
+                }
+
+                // Error display
+                #(if has_error {
+                    Some(element! {
+                        View(
+                            padding_top: Spacing::XS,
+                            justify_content: JustifyContent::Center,
+                        ) {
+                            Text(content: error, color: Theme::ERROR)
+                        }
+                    })
+                } else {
+                    None
+                })
+
+                // Help text
+                View(
+                    flex_direction: FlexDirection::Column,
+                    padding_top: Spacing::XS,
+                ) {
+                    Text(
+                        content: "The threshold determines how many guardians",
+                        color: Theme::TEXT_MUTED,
+                    )
+                    Text(
+                        content: "must approve to recover your account.",
+                        color: Theme::TEXT_MUTED,
+                    )
+                }
+            }
 
             // Key hints
             View(
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                padding: Spacing::SM,
+                justify_content: JustifyContent::Center,
+                padding: Spacing::PANEL_PADDING,
+                gap: Spacing::LG,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                View(flex_direction: FlexDirection::Row, gap: 1) {
-                    Text(content: "←/→", color: Theme::SECONDARY)
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "←/→", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Adjust", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 2) {
-                    View(flex_direction: FlexDirection::Row, gap: 1) {
-                        Text(content: "Esc", color: Theme::SECONDARY)
-                        Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                    }
-                    View(flex_direction: FlexDirection::Row, gap: 1) {
-                        Text(
-                            content: "Enter",
-                            color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
-                        )
-                        Text(
-                            content: "Save",
-                            color: if can_submit { Theme::TEXT } else { Theme::TEXT_MUTED },
-                        )
-                    }
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(
+                        content: "Enter",
+                        weight: Weight::Bold,
+                        color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                    )
+                    Text(
+                        content: "Save",
+                        color: if can_submit { Theme::TEXT } else { Theme::TEXT_MUTED },
+                    )
                 }
             }
         }

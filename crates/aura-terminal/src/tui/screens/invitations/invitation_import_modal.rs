@@ -6,7 +6,7 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::layout::dim;
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Spacing, Theme};
 
 /// Callback type for modal cancel
 pub type CancelCallback = Arc<dyn Fn() + Send + Sync>;
@@ -106,14 +106,14 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
             height: dim::MIDDLE_HEIGHT,
             flex_direction: FlexDirection::Column,
             background_color: Theme::BG_MODAL,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: border_color,
             overflow: Overflow::Hidden,
         ) {
             // Header
             View(
                 width: 100pct,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
                 border_style: BorderStyle::Single,
@@ -130,14 +130,14 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
             // Body - fills available space
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
                 // Instructions
-                View(margin_bottom: 1) {
+                View(margin_bottom: Spacing::XS) {
                     Text(
                         content: "Paste the invitation code you received:",
                         color: Theme::TEXT,
@@ -148,10 +148,10 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                 View(
                     width: 100pct,
                     flex_direction: FlexDirection::Column,
-                    border_style: BorderStyle::Round,
+                    border_style: Borders::INPUT,
                     border_color: if props.focused { Theme::PRIMARY } else { Theme::BORDER },
-                    padding: 1,
-                    margin_bottom: 1,
+                    padding: Spacing::PANEL_PADDING,
+                    margin_bottom: Spacing::XS,
                 ) {
                     Text(
                         content: code_display,
@@ -163,7 +163,7 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                 // Error message (if any)
                 #(if !error.is_empty() {
                     Some(element! {
-                        View(margin_bottom: 1) {
+                        View(margin_bottom: Spacing::XS) {
                             Text(content: error, color: Theme::ERROR)
                         }
                     })
@@ -174,7 +174,7 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                 // Status message
                 #(if importing {
                     Some(element! {
-                        View(margin_top: 1) {
+                        View(margin_top: Spacing::XS) {
                             Text(content: "Importing...", color: Theme::WARNING)
                         }
                     })
@@ -190,21 +190,21 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
-                padding: 1,
-                gap: 4,
+                padding: Spacing::PANEL_PADDING,
+                gap: Spacing::LG,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                View(flex_direction: FlexDirection::Row, gap: 1) {
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Cancel", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 1) {
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Ctrl+V", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Paste", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 1) {
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Import", color: Theme::TEXT_MUTED)
                 }

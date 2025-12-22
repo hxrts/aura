@@ -6,7 +6,7 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::layout::dim;
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Spacing, Theme};
 use crate::tui::types::InvitationType;
 
 /// Callback type for invitation creation
@@ -63,12 +63,6 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
         Theme::BORDER
     };
 
-    let submit_text = if creating {
-        "Creating...".to_string()
-    } else {
-        "Create Invitation".to_string()
-    };
-
     let can_submit = !creating;
 
     // Type selection display
@@ -109,14 +103,14 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
             height: dim::MIDDLE_HEIGHT,
             flex_direction: FlexDirection::Column,
             background_color: Theme::BG_MODAL,
-            border_style: BorderStyle::Round,
-            border_color: Theme::PRIMARY,
+            border_style: Borders::PRIMARY,
+            border_color: if props.focused { Theme::BORDER_FOCUS } else { Theme::BORDER },
             overflow: Overflow::Hidden,
         ) {
             // Header
             View(
                 width: 100pct,
-                padding: 1,
+                padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 border_style: BorderStyle::Single,
@@ -137,23 +131,23 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
             // Form content - fills available space
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
                 // Invitation Type selector
-                View(flex_direction: FlexDirection::Column, margin_bottom: 1) {
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
                     Text(content: "Type (Tab to change)", color: Theme::TEXT_MUTED)
                     View(
-                        margin_top: 1,
+                        margin_top: Spacing::XS,
                         flex_direction: FlexDirection::Row,
-                        gap: 1,
-                        border_style: BorderStyle::Round,
+                        gap: Spacing::XS,
+                        border_style: Borders::INPUT,
                         border_color: border_color,
-                        padding_left: 1,
-                        padding_right: 1,
+                        padding_left: Spacing::PANEL_PADDING,
+                        padding_right: Spacing::PANEL_PADDING,
                     ) {
                         Text(content: type_icon.to_string(), color: Theme::PRIMARY)
                         Text(content: type_label.to_string(), color: Theme::TEXT)
@@ -161,7 +155,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 }
 
                 // Type descriptions
-                View(margin_bottom: 1) {
+                View(margin_bottom: Spacing::XS) {
                     #(match invitation_type {
                         InvitationType::Contact => element! {
                             Text(
@@ -185,29 +179,29 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 }
 
                 // Optional message
-                View(flex_direction: FlexDirection::Column, margin_bottom: 1) {
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
                     Text(content: "Message (m to edit)", color: Theme::TEXT_MUTED)
                     View(
-                        margin_top: 1,
+                        margin_top: Spacing::XS,
                         width: 100pct,
-                        border_style: BorderStyle::Round,
+                        border_style: Borders::INPUT,
                         border_color: Theme::BORDER,
-                        padding_left: 1,
-                        padding_right: 1,
+                        padding_left: Spacing::PANEL_PADDING,
+                        padding_right: Spacing::PANEL_PADDING,
                     ) {
                         Text(content: message_display, color: message_color)
                     }
                 }
 
                 // TTL selector
-                View(flex_direction: FlexDirection::Column, margin_bottom: 1) {
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
                     Text(content: "Expiry (t to change)", color: Theme::TEXT_MUTED)
                     View(
-                        margin_top: 1,
-                        border_style: BorderStyle::Round,
+                        margin_top: Spacing::XS,
+                        border_style: Borders::INPUT,
                         border_color: Theme::BORDER,
-                        padding_left: 1,
-                        padding_right: 1,
+                        padding_left: Spacing::PANEL_PADDING,
+                        padding_right: Spacing::PANEL_PADDING,
                     ) {
                         Text(content: ttl_display, color: Theme::TEXT)
                     }
@@ -216,7 +210,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 // Error message
                 #(if has_error {
                     Some(element! {
-                        View(margin_top: 1) {
+                        View(margin_top: Spacing::XS) {
                             Text(content: error, color: Theme::ERROR)
                         }
                     })
@@ -231,27 +225,27 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                padding: 1,
-                gap: 3,
+                padding: Spacing::PANEL_PADDING,
+                gap: Spacing::LG,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                View(flex_direction: FlexDirection::Row, gap: 1) {
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Tab", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "type", color: Theme::TEXT_MUTED)
+                    Text(content: "Type", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 1) {
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "t", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "ttl", color: Theme::TEXT_MUTED)
+                    Text(content: "TTL", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 1) {
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "cancel", color: Theme::TEXT_MUTED)
+                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 1) {
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Enter", weight: Weight::Bold, color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED })
-                    Text(content: submit_text, color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED })
+                    Text(content: "Create", color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED })
                 }
             }
         }

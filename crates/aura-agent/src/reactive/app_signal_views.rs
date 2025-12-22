@@ -271,18 +271,34 @@ impl ReactiveView for ContactsSignalView {
                             added_at,
                             ..
                         } => {
-                            if state.contact(&contact_id).is_none() {
+                            let suggested_name = if nickname.trim().is_empty()
+                                || nickname == contact_id.to_string()
+                            {
+                                None
+                            } else {
+                                Some(nickname)
+                            };
+
+                            if let Some(contact) =
+                                state.contacts.iter_mut().find(|c| c.id == contact_id)
+                            {
+                                // Preserve any user-set nickname; only fill suggestion if missing.
+                                if contact.suggested_name.is_none() {
+                                    contact.suggested_name = suggested_name;
+                                }
+                                contact.last_interaction = Some(added_at.ts_ms);
+                            } else {
+                                // Contact invitations carry an optional nickname, which we treat as
+                                // a suggested name. The user's nickname is a separate local label.
                                 state.contacts.push(Contact {
                                     id: contact_id,
-                                    nickname,
-                                    suggested_name: None,
+                                    nickname: String::new(),
+                                    suggested_name,
                                     is_guardian: false,
                                     is_resident: false,
                                     last_interaction: Some(added_at.ts_ms),
                                     is_online: false,
                                 });
-                            } else {
-                                state.set_nickname(contact_id, nickname);
                             }
                             changed = true;
                         }

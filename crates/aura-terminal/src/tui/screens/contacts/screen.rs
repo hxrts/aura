@@ -59,7 +59,15 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
         ContactStatus::Blocked => crate::tui::components::Status::Error,
     };
 
-    let name = c.nickname.clone();
+    let name = if !c.nickname.is_empty() {
+        c.nickname.clone()
+    } else if let Some(suggested) = &c.suggested_name {
+        suggested.clone()
+    } else {
+        let id = c.id.clone();
+        let short = id.chars().take(8).collect::<String>();
+        format!("{short}...")
+    };
     let guardian_badge = if c.is_guardian { " [guardian]" } else { "" }.to_string();
 
     element! {
@@ -138,22 +146,31 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             ContactStatus::Blocked => "Blocked",
         };
         let guardian = if c.is_guardian { "Yes" } else { "No" };
-        let suggestion = c
-            .suggested_name
-            .clone()
-            .unwrap_or_else(|| "No suggestion".to_string());
+        let suggestion = c.suggested_name.clone();
 
-        vec![
+        let mut rows: Vec<AnyElement<'static>> = vec![
             element! { KeyValue(label: "Nickname".to_string(), value: c.nickname.clone()) }
                 .into_any(),
             element! { KeyValue(label: "Status".to_string(), value: status_label.to_string()) }
                 .into_any(),
             element! { KeyValue(label: "Guardian".to_string(), value: guardian.to_string()) }
                 .into_any(),
-            element! { View(height: 1) }.into_any(),
-            element! { KeyValue(label: "Suggested name".to_string(), value: suggestion) }
-                .into_any(),
-        ]
+        ];
+
+        // Only show the suggested name when the user hasn't set a nickname.
+        if c.nickname.is_empty() {
+            if let Some(suggestion) = suggestion {
+                if !suggestion.trim().is_empty() {
+                    rows.push(element! { View(height: 1) }.into_any());
+                    rows.push(
+                        element! { KeyValue(label: "Suggested name".to_string(), value: suggestion) }
+                            .into_any(),
+                    );
+                }
+            }
+        }
+
+        rows
     } else {
         vec![]
     };

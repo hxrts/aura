@@ -31,6 +31,7 @@
 //! - `messaging`: Direct messaging commands
 //! - `steward`: Steward role management commands
 
+mod contacts;
 mod context;
 mod invitations;
 mod messaging;
@@ -105,6 +106,11 @@ impl OperationalHandler {
 
         // Context commands
         if let Some(result) = context::handle_context(command, &self.app_core).await {
+            return Some(result);
+        }
+
+        // Contacts commands
+        if let Some(result) = contacts::handle_contacts(command, &self.app_core).await {
             return Some(result);
         }
 

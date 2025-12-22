@@ -145,14 +145,19 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
                 padding: Spacing::PANEL_PADDING,
+                gap: Spacing::LG,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                Text(content: " / ", color: Theme::TEXT_MUTED)
-                Text(content: "?", weight: Weight::Bold, color: Theme::SECONDARY)
-                Text(content: " close", color: Theme::TEXT_MUTED)
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Close", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "?", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Toggle", color: Theme::TEXT_MUTED)
+                }
             }
         }
     }

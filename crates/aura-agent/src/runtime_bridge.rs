@@ -7,18 +7,19 @@
 use crate::core::AuraAgent;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo, RendezvousStatus,
-    RuntimeBridge, SettingsBridgeState, SyncStatus,
+    BridgeDeviceInfo, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo,
+    RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::IntentError;
 use aura_core::effects::{StorageEffects, ThresholdSigningEffects, TransportEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
-use aura_core::tree::{AttestedOp, TreeOp};
+use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_effects::ReactiveHandler;
 use aura_journal::fact::RelationalFact;
+use aura_protocol::effects::TreeEffects;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -712,6 +713,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn get_settings(&self) -> SettingsBridgeState {
+        let device_count = self.list_devices().await.len();
+
         // Get threshold config if available
         let (threshold_k, threshold_n) = if let Some(config) = self.get_threshold_config().await {
             (config.threshold, config.total_participants)
@@ -755,9 +758,38 @@ impl RuntimeBridge for AgentRuntimeBridge {
             mfa_policy,
             threshold_k,
             threshold_n,
-            device_count: 1, // Requires device registry service
+            device_count,
             contact_count,
         }
+    }
+
+    async fn list_devices(&self) -> Vec<BridgeDeviceInfo> {
+        let effects = self.agent.runtime().effects();
+        let current_device = self.agent.context().device_id();
+
+        let state = match effects.get_current_state().await {
+            Ok(state) => state,
+            Err(e) => {
+                tracing::warn!("Failed to read commitment tree state for devices: {e}");
+                return Vec::new();
+            }
+        };
+
+        state
+            .leaves
+            .values()
+            .filter(|leaf| leaf.role == LeafRole::Device)
+            .map(|leaf| {
+                let id = leaf.device_id.to_string();
+                let short = id.chars().take(8).collect::<String>();
+                BridgeDeviceInfo {
+                    id: id.clone(),
+                    name: format!("Device {short}"),
+                    is_current: leaf.device_id == current_device,
+                    last_seen: None,
+                }
+            })
+            .collect()
     }
 
     async fn set_display_name(&self, name: &str) -> Result<(), IntentError> {

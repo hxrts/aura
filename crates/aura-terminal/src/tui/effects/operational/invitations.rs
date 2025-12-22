@@ -16,7 +16,8 @@ use super::EffectCommand;
 
 // Re-export workflows for convenience
 pub use aura_app::workflows::invitation::{
-    accept_invitation, decline_invitation, export_invitation, import_invitation_details,
+    accept_invitation, cancel_invitation, decline_invitation, export_invitation,
+    import_invitation_details,
 };
 
 /// Handle invitation commands
@@ -106,6 +107,16 @@ pub async fn handle_invitations(
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
                     "Failed to decline invitation: {}",
+                    e
+                )))),
+            }
+        }
+
+        EffectCommand::CancelInvitation { invitation_id } => {
+            match cancel_invitation(app_core, invitation_id).await {
+                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(OpError::Failed(format!(
+                    "Failed to cancel invitation: {}",
                     e
                 )))),
             }

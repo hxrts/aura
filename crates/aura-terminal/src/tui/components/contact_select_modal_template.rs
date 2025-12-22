@@ -6,7 +6,7 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use super::modal::ModalContent;
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Spacing, Theme};
 use crate::tui::types::Contact;
 
 /// Callback type for selecting a contact (contact_id: String)
@@ -59,13 +59,15 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     element! {
         ModalContent(
             flex_direction: FlexDirection::Column,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: Some(border_color),
         ) {
             // Header
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::PANEL_PADDING,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
@@ -80,7 +82,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
             // Body - contact list
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
@@ -107,7 +109,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
                                 key: id,
                                 flex_direction: FlexDirection::Row,
                                 background_color: bg,
-                                padding_left: 1,
+                                padding_left: Spacing::XS,
                             ) {
                                 Text(content: pointer, color: pointer_color)
                                 Text(content: name, color: text_color)
@@ -119,7 +121,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
                 // Error message (if any)
                 #(if !error.is_empty() {
                     Some(element! {
-                        View(margin_top: 1) {
+                        View(margin_top: Spacing::XS) {
                             Text(content: error.clone(), color: Theme::ERROR)
                         }
                     })
@@ -132,22 +134,23 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
             View(
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                padding: 2,
+                justify_content: JustifyContent::Center,
+                padding: Spacing::PANEL_PADDING,
+                gap: Spacing::LG,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                View(flex_direction: FlexDirection::Row, gap: 2) {
-                    Text(content: "Esc", color: Theme::SECONDARY)
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Cancel", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 2) {
-                    Text(content: "↑↓", color: Theme::SECONDARY)
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "↑↓", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Navigate", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 2) {
-                    Text(content: "Enter", color: Theme::SECONDARY)
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Select", color: Theme::TEXT_MUTED)
                 }
             }

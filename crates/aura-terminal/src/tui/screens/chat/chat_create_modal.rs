@@ -6,7 +6,7 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::layout::dim;
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Spacing, Theme};
 
 /// Callback type for modal cancel
 pub type CancelCallback = Arc<dyn Fn() + Send + Sync>;
@@ -88,21 +88,20 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
 
     element! {
         View(
-            position: Position::Absolute,
-            top: 0u16,
-            left: 0u16,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
             flex_direction: FlexDirection::Column,
             background_color: Theme::BG_MODAL,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: border_color,
             overflow: Overflow::Hidden,
         ) {
             // Header
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::PANEL_PADDING,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
@@ -117,23 +116,23 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
             // Body - fills available space
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
                 // Name field
-                View(margin_bottom: 1) {
+                View(margin_bottom: Spacing::XS) {
                     Text(content: "Group Name:", color: Theme::TEXT)
                 }
                 View(
                     width: 100pct,
                     flex_direction: FlexDirection::Column,
-                    border_style: BorderStyle::Round,
+                    border_style: Borders::INPUT,
                     border_color: if active_field == 0 { Theme::PRIMARY } else { Theme::BORDER },
-                    padding: 1,
-                    margin_bottom: 2,
+                    padding: Spacing::PANEL_PADDING,
+                    margin_bottom: Spacing::SM,
                 ) {
                     Text(
                         content: name_display,
@@ -142,16 +141,16 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                 }
 
                 // Topic field
-                View(margin_bottom: 1) {
+                View(margin_bottom: Spacing::XS) {
                     Text(content: "Topic (optional):", color: Theme::TEXT)
                 }
                 View(
                     width: 100pct,
                     flex_direction: FlexDirection::Column,
-                    border_style: BorderStyle::Round,
+                    border_style: Borders::INPUT,
                     border_color: if active_field == 1 { Theme::PRIMARY } else { Theme::BORDER },
-                    padding: 1,
-                    margin_bottom: 1,
+                    padding: Spacing::PANEL_PADDING,
+                    margin_bottom: Spacing::XS,
                 ) {
                     Text(
                         content: topic_display,
@@ -162,7 +161,7 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                 // Error message (if any)
                 #(if !error.is_empty() {
                     Some(element! {
-                        View(margin_bottom: 1) {
+                        View(margin_bottom: Spacing::XS) {
                             Text(content: error, color: Theme::ERROR)
                         }
                     })
@@ -173,7 +172,7 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                 // Status message
                 #(if creating {
                     Some(element! {
-                        View(margin_top: 1) {
+                        View(margin_top: Spacing::XS) {
                             Text(content: "Creating...", color: Theme::WARNING)
                         }
                     })
@@ -186,22 +185,23 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
             View(
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                padding: 2,
+                justify_content: JustifyContent::Center,
+                padding: Spacing::PANEL_PADDING,
+                gap: Spacing::LG,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                View(flex_direction: FlexDirection::Row, gap: 2) {
-                    Text(content: "Esc", color: Theme::SECONDARY)
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Cancel", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 2) {
-                    Text(content: "Tab", color: Theme::SECONDARY)
-                    Text(content: "Next field", color: Theme::TEXT_MUTED)
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Tab", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Next", color: Theme::TEXT_MUTED)
                 }
-                View(flex_direction: FlexDirection::Row, gap: 2) {
-                    Text(content: "Enter", color: Theme::SECONDARY)
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Create", color: Theme::TEXT_MUTED)
                 }
             }

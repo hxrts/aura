@@ -28,6 +28,7 @@ pub struct ChatCallbacks {
     pub on_channel_select: ChannelSelectCallback,
     pub on_create_channel: CreateChannelCallback,
     pub on_set_topic: SetTopicCallback,
+    pub on_close_channel: IdCallback,
 }
 
 impl ChatCallbacks {
@@ -42,7 +43,8 @@ impl ChatCallbacks {
             on_retry_message: Self::make_retry_message(ctx.clone(), tx.clone()),
             on_channel_select: Self::make_channel_select(app_core, tx.clone()),
             on_create_channel: Self::make_create_channel(ctx.clone(), tx.clone()),
-            on_set_topic: Self::make_set_topic(ctx, tx),
+            on_set_topic: Self::make_set_topic(ctx.clone(), tx.clone()),
+            on_close_channel: Self::make_close_channel(ctx, tx),
         }
     }
 
@@ -163,6 +165,17 @@ impl ChatCallbacks {
             });
         })
     }
+
+    fn make_close_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
+        Arc::new(move |channel_id: String| {
+            let ctx = ctx.clone();
+            let _tx = tx.clone();
+            let cmd = EffectCommand::CloseChannel { channel: channel_id };
+            tokio::spawn(async move {
+                let _ = ctx.dispatch(cmd).await;
+            });
+        })
+    }
 }
 
 // =============================================================================
@@ -176,6 +189,7 @@ pub struct ContactsCallbacks {
     pub on_start_chat: StartChatCallback,
     pub on_import_invitation: ImportInvitationCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
+    pub on_remove_contact: IdCallback,
 }
 
 impl ContactsCallbacks {
@@ -184,7 +198,8 @@ impl ContactsCallbacks {
             on_update_nickname: Self::make_update_nickname(ctx.clone(), tx.clone()),
             on_start_chat: Self::make_start_chat(ctx.clone(), tx.clone()),
             on_import_invitation: Self::make_import_invitation(ctx.clone(), tx.clone()),
-            on_invite_lan_peer: Self::make_invite_lan_peer(ctx, tx),
+            on_invite_lan_peer: Self::make_invite_lan_peer(ctx.clone(), tx.clone()),
+            on_remove_contact: Self::make_remove_contact(ctx, tx),
         }
     }
 
@@ -256,6 +271,17 @@ impl ContactsCallbacks {
         })
     }
 
+    fn make_remove_contact(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
+        Arc::new(move |contact_id: String| {
+            let ctx = ctx.clone();
+            let _tx = tx.clone();
+            let cmd = EffectCommand::RemoveContact { contact_id };
+            tokio::spawn(async move {
+                let _ = ctx.dispatch(cmd).await;
+            });
+        })
+    }
+
     fn make_invite_lan_peer(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
@@ -294,6 +320,7 @@ impl ContactsCallbacks {
 pub struct InvitationsCallbacks {
     pub on_accept: InvitationCallback,
     pub on_decline: InvitationCallback,
+    pub on_revoke: InvitationCallback,
     pub on_create: CreateInvitationCallback,
     pub on_export: ExportInvitationCallback,
     pub on_import: ImportInvitationCallback,
@@ -304,6 +331,7 @@ impl InvitationsCallbacks {
         Self {
             on_accept: Self::make_accept(ctx.clone(), tx.clone()),
             on_decline: Self::make_decline(ctx.clone(), tx.clone()),
+            on_revoke: Self::make_revoke(ctx.clone(), tx.clone()),
             on_create: Self::make_create(ctx.clone(), tx.clone()),
             on_export: Self::make_export(ctx.clone(), tx.clone()),
             on_import: Self::make_import(ctx, tx),
@@ -348,6 +376,17 @@ impl InvitationsCallbacks {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
                     }
                 }
+            });
+        })
+    }
+
+    fn make_revoke(ctx: Arc<IoContext>, tx: UiUpdateSender) -> InvitationCallback {
+        Arc::new(move |invitation_id: String| {
+            let ctx = ctx.clone();
+            let _tx = tx.clone();
+            let cmd = EffectCommand::CancelInvitation { invitation_id };
+            tokio::spawn(async move {
+                let _ = ctx.dispatch(cmd).await;
             });
         })
     }

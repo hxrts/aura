@@ -247,13 +247,13 @@ pub fn SettingsScreen(
         SettingsSection::Devices => {
             if devices.is_empty() {
                 vec![
-                    ("No devices registered".into(), Theme::TEXT_MUTED),
+                    ("No devices found".into(), Theme::TEXT_MUTED),
                     (String::new(), Theme::TEXT),
                     (
-                        "This device will be added when you create".into(),
+                        "Devices are derived from the commitment".into(),
                         Theme::TEXT_MUTED,
                     ),
-                    ("your first Block.".into(), Theme::TEXT_MUTED),
+                    ("tree state for your account.".into(), Theme::TEXT_MUTED),
                     (String::new(), Theme::TEXT),
                     ("[a] Add device".into(), Theme::SECONDARY),
                 ]

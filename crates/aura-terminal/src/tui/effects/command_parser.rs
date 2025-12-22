@@ -251,6 +251,11 @@ pub enum EffectCommand {
         /// New nickname
         nickname: String,
     },
+    /// Remove a contact
+    RemoveContact {
+        /// Contact ID
+        contact_id: String,
+    },
     /// Toggle guardian status for a contact
     ToggleContactGuardian {
         /// Contact ID
@@ -300,6 +305,11 @@ pub enum EffectCommand {
     },
     /// Decline an invitation
     DeclineInvitation {
+        /// Invitation ID
+        invitation_id: String,
+    },
+    /// Cancel/revoke a sent invitation
+    CancelInvitation {
         /// Invitation ID
         invitation_id: String,
     },
@@ -446,10 +456,12 @@ impl EffectCommand {
             | Self::ImportInvitation { .. }
             | Self::AcceptInvitation { .. }
             | Self::DeclineInvitation { .. }
+            | Self::CancelInvitation { .. }
             | Self::AcceptPendingBlockInvitation
             | Self::SendBlockInvitation { .. }
             | Self::InviteLanPeer { .. }
-            | Self::SetContext { .. } => CommandAuthorizationLevel::Basic,
+            | Self::SetContext { .. }
+            | Self::RemoveContact { .. } => CommandAuthorizationLevel::Basic,
 
             // CreateAccount is special - it's the bootstrapping command that creates an account
             // It requires Basic level since users need to create an account before they have one

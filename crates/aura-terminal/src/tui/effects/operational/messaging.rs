@@ -20,8 +20,8 @@ use super::EffectCommand;
 
 // Re-export workflow functions for convenience
 pub use aura_app::workflows::messaging::{
-    create_channel, invite_user_to_channel, send_action, send_direct_message, send_message,
-    start_direct_chat,
+    close_channel, create_channel, invite_user_to_channel, send_action, send_direct_message,
+    send_message, start_direct_chat,
 };
 
 /// Get current time in milliseconds since Unix epoch
@@ -132,6 +132,14 @@ pub async fn handle_messaging(
                 )))),
             }
         }
+
+        EffectCommand::CloseChannel { channel } => match close_channel(app_core, channel).await {
+            Ok(()) => Some(Ok(OpResponse::Ok)),
+            Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                "Failed to close channel: {}",
+                e
+            )))),
+        },
 
         _ => None,
     }

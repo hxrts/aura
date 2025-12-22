@@ -6,7 +6,7 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::layout::dim;
-use crate::tui::theme::Theme;
+use crate::tui::theme::{Borders, Spacing, Theme};
 
 /// Callback type for modal close
 pub type CloseCallback = Arc<dyn Fn() + Send + Sync>;
@@ -51,21 +51,18 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
 
     element! {
         View(
-            position: Position::Absolute,
-            top: 0u16,
-            left: 0u16,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
             flex_direction: FlexDirection::Column,
             background_color: Theme::BG_MODAL,
-            border_style: BorderStyle::Round,
+            border_style: Borders::PRIMARY,
             border_color: Theme::SUCCESS,
             overflow: Overflow::Hidden,
         ) {
             // Header
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 border_style: BorderStyle::Single,
@@ -77,7 +74,7 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
                     weight: Weight::Bold,
                     color: Theme::SUCCESS,
                 )
-                View(margin_top: 1) {
+                View(margin_top: Spacing::XS) {
                     Text(
                         content: format!("Type: {}", invitation_type),
                         color: Theme::TEXT_MUTED,
@@ -88,13 +85,13 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
             // Code display - fills available space
             View(
                 width: 100pct,
-                padding: 2,
+                padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
-                View(margin_bottom: 1) {
+                View(margin_bottom: Spacing::XS) {
                     Text(
                         content: "Share this code with the recipient:",
                         color: Theme::TEXT,
@@ -105,9 +102,9 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
                 View(
                     width: 100pct,
                     flex_direction: FlexDirection::Column,
-                    border_style: BorderStyle::Round,
+                    border_style: Borders::INPUT,
                     border_color: Theme::PRIMARY,
-                    padding: 2,
+                    padding: Spacing::MODAL_PADDING,
                 ) {
                     Text(
                         content: formatted_code,
@@ -116,7 +113,7 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
                     )
                 }
 
-                View(margin_top: 2) {
+                View(margin_top: Spacing::SM) {
                     Text(
                         content: "The recipient can import this code to accept your invitation.",
                         color: Theme::TEXT_MUTED,
@@ -129,13 +126,13 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
-                padding: 2,
+                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                View(flex_direction: FlexDirection::Row, gap: 2) {
-                    Text(content: "Esc", color: Theme::SECONDARY)
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Close", color: Theme::TEXT_MUTED)
                 }
             }

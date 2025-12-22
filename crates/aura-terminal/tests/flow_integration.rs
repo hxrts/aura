@@ -682,17 +682,25 @@ async fn test_social_graph_flow() {
     let bob_contacts = env.get_agent("bob").read_contacts().await;
     println!("  Bob's contacts: {}", bob_contacts.contacts.len());
     for c in &bob_contacts.contacts {
-        println!("    - {} (guardian: {})", c.nickname, c.is_guardian);
+        let name = if !c.nickname.is_empty() {
+            c.nickname.clone()
+        } else if let Some(s) = &c.suggested_name {
+            s.clone()
+        } else {
+            c.id.to_string()
+        };
+        println!("    - {} (guardian: {})", name, c.is_guardian);
     }
     env.track_signal("CONTACTS_SIGNAL", "contact_import");
 
     // Phase 3: Update nicknames for contacts
     println!("\nPhase 3: Updating nicknames...");
-    if let Some(alice_contact) = bob_contacts
-        .contacts
-        .iter()
-        .find(|c| c.nickname.to_lowercase() == "alice")
-    {
+    if let Some(alice_contact) = bob_contacts.contacts.iter().find(|c| {
+        (!c.nickname.is_empty() && c.nickname.to_lowercase() == "alice")
+            || c.suggested_name
+                .as_ref()
+                .is_some_and(|s| s.to_lowercase() == "alice")
+    }) {
         let nickname_result = env
             .get_agent("bob")
             .dispatch(EffectCommand::UpdateContactNickname {
@@ -714,7 +722,14 @@ async fn test_social_graph_flow() {
     // Read contacts again to verify nickname update
     let bob_contacts_after_nickname = env.get_agent("bob").read_contacts().await;
     for c in &bob_contacts_after_nickname.contacts {
-        println!("    - {} (id: {})", c.nickname, c.id);
+        let name = if !c.nickname.is_empty() {
+            c.nickname.clone()
+        } else if let Some(s) = &c.suggested_name {
+            s.clone()
+        } else {
+            c.id.to_string()
+        };
+        println!("    - {} (id: {})", name, c.id);
     }
 
     // Phase 4: Create a block for social organization
@@ -744,11 +759,12 @@ async fn test_social_graph_flow() {
 
     // Phase 5: Invite contact to block (SendBlockInvitation)
     println!("\nPhase 5: Inviting contact to block...");
-    if let Some(alice_contact) = bob_contacts
-        .contacts
-        .iter()
-        .find(|c| c.nickname.to_lowercase() == "alice")
-    {
+    if let Some(alice_contact) = bob_contacts.contacts.iter().find(|c| {
+        (!c.nickname.is_empty() && c.nickname.to_lowercase() == "alice")
+            || c.suggested_name
+                .as_ref()
+                .is_some_and(|s| s.to_lowercase() == "alice")
+    }) {
         let invite_result = env
             .get_agent("bob")
             .dispatch(EffectCommand::SendBlockInvitation {

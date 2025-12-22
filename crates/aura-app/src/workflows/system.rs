@@ -4,12 +4,11 @@
 //! These are mostly lightweight health-check and state refresh operations.
 
 use crate::signal_defs::{
-    ConnectionStatus, SettingsState, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, SETTINGS_SIGNAL,
+    ConnectionStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
 };
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::AuthorityId;
 use aura_core::AuraError;
 use std::sync::Arc;
 
@@ -46,7 +45,7 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     let _ = super::invitation::list_invitations(app_core).await;
 
     // Refresh settings state
-    let _ = super::settings::get_settings(app_core).await;
+    let _ = super::settings::refresh_settings_from_runtime(app_core).await;
 
     // Refresh recovery state (signals feature only)
     #[cfg(feature = "signals")]
@@ -61,26 +60,21 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     //
     // ConnectionStatus is intended to represent "how many of my contacts are online",
     // not merely "how many peers are configured".
-    let (runtime, contact_ids) = {
+    let (runtime, mut contacts_state) = {
         let core = app_core.read().await;
         let runtime = core.runtime().cloned();
-        let contact_ids: Vec<AuthorityId> = match core.read(&*CONTACTS_SIGNAL).await {
-            Ok(state) => state.contacts.iter().map(|c| c.id).collect(),
-            Err(_) => core
-                .snapshot()
-                .contacts
-                .contacts
-                .iter()
-                .map(|c| c.id)
-                .collect(),
+        let contacts_state = match core.read(&*CONTACTS_SIGNAL).await {
+            Ok(state) => state,
+            Err(_) => core.snapshot().contacts.clone(),
         };
-        (runtime, contact_ids)
+        (runtime, contacts_state)
     };
 
     if let Some(runtime) = runtime {
         let mut online_contacts = 0usize;
-        for contact_id in contact_ids {
-            if runtime.is_peer_online(contact_id).await {
+        for contact in &mut contacts_state.contacts {
+            contact.is_online = runtime.is_peer_online(contact.id).await;
+            if contact.is_online {
                 online_contacts += 1;
             }
         }
@@ -94,19 +88,8 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
         };
 
         let core = app_core.read().await;
+        let _ = core.emit(&*CONTACTS_SIGNAL, contacts_state).await;
         let _ = core.emit(&*CONNECTION_STATUS_SIGNAL, connection).await;
-
-        // Refresh settings from runtime
-        let settings = runtime.get_settings().await;
-        let settings_state = SettingsState {
-            display_name: settings.display_name,
-            mfa_policy: settings.mfa_policy,
-            threshold_k: settings.threshold_k as u8,
-            threshold_n: settings.threshold_n as u8,
-            devices: Vec::new(), // Devices list populated elsewhere
-            contact_count: settings.contact_count,
-        };
-        let _ = core.emit(&*SETTINGS_SIGNAL, settings_state).await;
     }
 
     Ok(())
