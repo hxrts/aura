@@ -1,74 +1,166 @@
--- Core definitions for contextual key derivation verification.
--- Proves isolation: different contexts always yield different keys.
+/-!
+# Contextual Key Derivation Proofs
+
+Proves that context-specific key derivation is injective, ensuring
+different contexts always yield different keys for relational isolation.
+
+## Quint Correspondence
+- File: verification/quint/protocol_dkd.qnt
+- Section: TYPE DEFINITIONS
+- Properties: Key derivation context isolation
+
+## Rust Correspondence
+- File: crates/aura-core/src/crypto/key_derivation.rs
+- Type: `RootKey`, `DerivedKey`
+- Function: `derive` - context-specific key derivation via HKDF
+
+## Expose
+
+**Types**:
+- `RootKey`: Account's master key held in threshold shares
+- `AppId`: Application identifier namespace
+- `CtxLabel`: Context label for specific relationship
+- `DerivedKey`: Output of key derivation
+
+**Operations** (stable):
+- `derive`: Derive context-specific key from root
+
+**Properties** (stable, theorem statements):
+- `contextual_isolation`: Different (app, context) pairs yield different keys
+
+**Internal helpers** (may change):
+- None
+-/
 
 namespace Aura.KeyDerivation
 
 /-!
-# Contextual Key Derivation
+## Core Types
 
-This module models the context-specific key derivation function and proves
-its isolation properties.
-
-Key property: derive(root, app_id, ctx) is unique across (app_id, ctx) pairs.
-
-**Why this matters**: Aura derives context-specific keys so that compromising
-one relationship's key doesn't reveal keys for other relationships. This is
-the cryptographic foundation for relational identity isolation.
+Key types for hierarchical derivation.
 -/
 
--- The account's root key, held in threshold shares across devices.
--- This is the master secret from which all context keys are derived.
+/-- The account's root key, held in threshold shares across devices.
+    Rust: aura-core/src/crypto/key_derivation.rs -/
 structure RootKey where
   id : Nat
   deriving BEq, Repr, DecidableEq
 
--- Application identifier (e.g., "chat", "storage", "recovery").
--- Different apps get different key namespaces even within the same context.
+/-- Application identifier (e.g., "chat", "storage", "recovery").
+    Rust: Corresponds to derivation path component -/
 structure AppId where
   id : String
   deriving BEq, Repr, DecidableEq
 
--- Context label identifying a specific relationship or usage.
--- Combined with AppId to form the full derivation path.
+/-- Context label identifying a specific relationship or usage.
+    Rust: Combined with AppId to form full derivation path -/
 structure CtxLabel where
   label : String
   deriving BEq, Repr, DecidableEq
 
--- The output of key derivation. Abstract here; in practice this is
--- a 32-byte key suitable for symmetric encryption or signing.
+/-- The output of key derivation.
+    Rust: 32-byte key for symmetric encryption or signing -/
 structure DerivedKey where
-  value : Nat  -- Abstract representation
+  value : Nat
   deriving BEq, Repr, DecidableEq
 
--- **Axiom**: Key derivation function exists but is left abstract.
--- The actual implementation uses HKDF or similar PRF-based construction.
+/-!
+## Key Derivation Function
+
+Abstract key derivation with cryptographic assumptions.
+-/
+
+/-- Key derivation function (abstract).
+    Rust: HKDF-based construction in aura-core -/
 axiom derive : RootKey → AppId → CtxLabel → DerivedKey
+
+/-!
+## Claims Bundle
+
+Key derivation isolation properties.
+-/
+
+/-- Claims bundle for KeyDerivation properties. -/
+structure KeyDerivationClaims where
+  /-- Contextual isolation: different (app, context) pairs yield different keys. -/
+  contextual_isolation : ∀ (root : RootKey) (app1 app2 : AppId) (ctx1 ctx2 : CtxLabel),
+    derive root app1 ctx1 = derive root app2 ctx2 →
+    app1 = app2 ∧ ctx1 = ctx2
+
+  /-- Root isolation: different roots with same context yield different keys. -/
+  root_isolation : ∀ (root1 root2 : RootKey) (app : AppId) (ctx : CtxLabel),
+    derive root1 app ctx = derive root2 app ctx →
+    root1 = root2
+
+  /-- Full isolation: equal derived keys require equal (root, app, ctx) triples. -/
+  full_isolation : ∀ (root1 root2 : RootKey) (app1 app2 : AppId) (ctx1 ctx2 : CtxLabel),
+    derive root1 app1 ctx1 = derive root2 app2 ctx2 →
+    root1 = root2 ∧ app1 = app2 ∧ ctx1 = ctx2
 
 /-!
 ## Cryptographic Assumption
 
 The KDF is injective on (app_id, ctx_label) pairs for a fixed root key.
-This models the PRF (Pseudorandom Function) security assumption:
-- A secure PRF is indistinguishable from a random function
-- Different inputs produce different outputs (with overwhelming probability)
-
-This is a standard cryptographic assumption satisfied by HKDF-SHA256.
+This models PRF (Pseudorandom Function) security.
 -/
 
--- **Security Axiom**: If two derived keys are equal, the inputs must be equal.
--- Contrapositive: different (app_id, ctx_label) pairs always give different keys.
+/-- Security axiom: If two derived keys are equal, the inputs must be equal.
+    Cryptographic justification: PRF security of HKDF-SHA256 -/
 axiom derive_injective :
   ∀ {root : RootKey} {app1 app2 : AppId} {ctx1 ctx2 : CtxLabel},
     derive root app1 ctx1 = derive root app2 ctx2 →
     app1 = app2 ∧ ctx1 = ctx2
 
--- **Main theorem: Contextual Isolation**
--- Derived keys are unique across (app, context) pairs. This means:
--- 1. Knowing key for (app1, ctx1) tells you nothing about key for (app2, ctx2)
--- 2. Different relationships cannot be correlated via their derived keys
+/-- Security axiom: Different root keys produce different derived keys.
+    Cryptographic justification: PRF security with unique key material -/
+axiom derive_root_injective :
+  ∀ {root1 root2 : RootKey} {app : AppId} {ctx : CtxLabel},
+    derive root1 app ctx = derive root2 app ctx →
+    root1 = root2
+
+/-- Combined security axiom: derive is fully injective across all three arguments.
+    If two derived keys are equal, all three inputs (root, app, ctx) must be equal.
+    Cryptographic justification: PRF collision resistance over the full domain -/
+axiom derive_full_injective :
+  ∀ {root1 root2 : RootKey} {app1 app2 : AppId} {ctx1 ctx2 : CtxLabel},
+    derive root1 app1 ctx1 = derive root2 app2 ctx2 →
+    root1 = root2 ∧ app1 = app2 ∧ ctx1 = ctx2
+
+/-!
+## Proofs
+
+Main isolation theorem.
+-/
+
+/-- Contextual isolation: Derived keys are unique across (app, context) pairs.
+    This ensures compromising one relationship's key doesn't reveal others. -/
 theorem contextual_isolation (root : RootKey) (app1 app2 : AppId) (ctx1 ctx2 : CtxLabel) :
   derive root app1 ctx1 = derive root app2 ctx2 →
   app1 = app2 ∧ ctx1 = ctx2 :=
   derive_injective
+
+/-- Root isolation: Different roots with same context yield different keys.
+    Prevents cross-account key collision. -/
+theorem root_isolation (root1 root2 : RootKey) (app : AppId) (ctx : CtxLabel) :
+    derive root1 app ctx = derive root2 app ctx →
+    root1 = root2 :=
+  derive_root_injective
+
+/-- Full isolation: Equal derived keys require equal (root, app, ctx) triples.
+    This is the strongest isolation property, combining root and context isolation. -/
+theorem full_isolation (root1 root2 : RootKey) (app1 app2 : AppId) (ctx1 ctx2 : CtxLabel) :
+    derive root1 app1 ctx1 = derive root2 app2 ctx2 →
+    root1 = root2 ∧ app1 = app2 ∧ ctx1 = ctx2 :=
+  derive_full_injective
+
+/-!
+## Claims Bundle Construction
+-/
+
+/-- The claims bundle, proving key derivation isolation. -/
+def keyDerivationClaims : KeyDerivationClaims where
+  contextual_isolation := contextual_isolation
+  root_isolation := root_isolation
+  full_isolation := full_isolation
 
 end Aura.KeyDerivation

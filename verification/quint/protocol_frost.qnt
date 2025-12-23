@@ -10,9 +10,25 @@
 //
 // Safety: Only signed messages with threshold shares can produce valid signatures.
 // Liveness: Progress requires threshold honest participants with valid key shares.
+//
+// == Lean Correspondence ==
+// Module: Aura.Frost (verification/lean/Aura/Frost.lean)
+// - SessionId: Aura.Frost.SessionId
+// - Round: Aura.Frost.Round
+// - Share: Aura.Frost.Share
+// - canAggregate: Aura.Frost.canAggregate
+// - aggregate: Aura.Frost.aggregate
+// - aggregate_same_session_round: Aura.Frost.aggregate_same_session_round
+//
+// == Rust Correspondence ==
+// - File: crates/aura-core/src/crypto/tree_signing.rs
+// - Types: SigningSession, Share, SignatureShare
+// - Functions: aggregate
+//
+// See: docs/116_crypto.md
 
-module FROSTProtocol {
-    // ========== FROST Types ==========
+module protocol_frost {
+    // ==================== TYPE DEFINITIONS ====================
 
     type SessionId = str
     type Identifier = int    // FROST participant index (1..n)
@@ -63,14 +79,14 @@ module FROSTProtocol {
         hasSigned: bool
     }
 
-    // ========== State Variables ==========
+    // ==================== STATE VARIABLES ====================
     // Global mutable state tracked by the model checker.
 
     var frostSessions: SessionId -> FROSTSession                      // Active signing sessions
     var frostParticipants: (SessionId, Identifier) -> FROSTParticipant  // Per-participant state
     var keyPackages: Identifier -> FROSTKeyShare                       // Long-lived key shares from DKG
 
-    // ========== Helper Functions ==========
+    // ==================== HELPER FUNCTIONS ====================
     // Abstracted cryptographic operations (real impl uses curve arithmetic).
 
     // Generate nonce and commitment (Round 1).
@@ -123,7 +139,7 @@ module FROSTProtocol {
     pure def hasThresholdShares(session: FROSTSession): bool =
         session.signatureShares.keys().size() >= session.threshold
 
-    // ========== Actions ==========
+    // ==================== ACTIONS ====================
     // These model the FROST signing protocol's message handlers.
 
     // Initialize a signing session. All participants must have key shares.
@@ -277,11 +293,12 @@ module FROSTProtocol {
         }
     }
 
-    // ========== Invariants ==========
+    // ==================== INVARIANTS ====================
     // Safety properties that must hold in every reachable state.
 
+    // Lean: Aura.Frost.aggregate_same_session_round (threshold requirement)
     // Completion requires threshold participants in both rounds.
-    val thresholdInvariant = frostSessions.keys().forall(sid =>
+    val InvariantThreshold = frostSessions.keys().forall(sid =>
         val session = frostSessions.get(sid)
         session.currentRound == FrostComplete implies (
             session.commitments.keys().size() >= session.threshold and
@@ -289,26 +306,29 @@ module FROSTProtocol {
         )
     )
 
+    // Lean: Aura.Frost.commitment_before_signing
     // Participants must commit before signing (Round 1 before Round 2).
-    val commitmentBeforeSigning = frostParticipants.keys().forall(key =>
+    val InvariantCommitmentBeforeSigning = frostParticipants.keys().forall(key =>
         val participant = frostParticipants.get(key)
         participant.hasSigned implies participant.hasCommitted
     )
 
+    // Lean: Aura.Frost.shares_from_committed
     // Signature shares only from participants who committed.
-    val sharesFromCommitted = frostSessions.keys().forall(sid =>
+    val InvariantSharesFromCommitted = frostSessions.keys().forall(sid =>
         val session = frostSessions.get(sid)
         session.signatureShares.keys().subseteq(session.commitments.keys())
     )
 
+    // Lean: Aura.Frost.valid_signature
     // Completed sessions have valid signatures.
-    val validSignatureInvariant = frostSessions.keys().forall(sid =>
+    val InvariantValidSignature = frostSessions.keys().forall(sid =>
         val session = frostSessions.get(sid)
         session.currentRound == FrostComplete implies
             verifySignature(session.message, session.finalSignature, session.groupVerifyingKey)
     )
 
-    // ========== Initial State ==========
+    // ==================== INITIALISATION ====================
     // Pre-populate key shares (normally from DKG).
 
     action init = all {
@@ -321,7 +341,7 @@ module FROSTProtocol {
             .put(3, { identifier: 3, signingShare: "share3", verifyingKey: "vk3" })
     }
 
-    // ========== Step Relation (for trace generation) ==========
+    // ==================== STEP RELATION ====================
     // Nondeterministically choose any enabled action.
 
     action step = any {

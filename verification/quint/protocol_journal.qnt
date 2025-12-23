@@ -9,10 +9,24 @@
 // - Reduce is deterministic (same events → same derived state)
 // - Lamport timestamps monotonically increase
 //
-// See: docs/102_journal.md, verification/lean/Aura/Journal.lean
+// == Lean Correspondence ==
+// Module: Aura.Journal (verification/lean/Aura/Journal.lean)
+// - Types: Aura.Journal.Fact, Aura.Journal.FactId, Aura.Journal.Journal
+// - Merge: Aura.Journal.merge (set union with deduplication)
+// - Reduce: Aura.Journal.reduce (deterministic state derivation)
+// - Semilattice: Aura.Journal.merge_comm, merge_assoc, merge_idem
+//
+// == Rust Correspondence ==
+// - File: crates/aura-journal/src/lib.rs
+// - Types: Fact, FactId, Journal
+// - Functions: merge, reduce
+//
+// See: docs/102_journal.md
 
 module protocol_journal {
+  // ==================== TYPE DEFINITIONS ====================
   // Base types for journal entries and state.
+
   type Option[a] = Some(a) | None
   type AccountId = str
   type AuthorityId = str  // Opaque authority (was DeviceId)
@@ -50,7 +64,7 @@ module protocol_journal {
   // Lifecycle status for external coordination.
   type JournalStatus = JournalPending | JournalCompleted
 
-  // ============ STATE VARIABLES ============
+  // ==================== STATE VARIABLES ====================
   // Mutable state tracked by the model checker.
 
   var ledgerStates: AccountId -> LedgerState      // Derived state per account
@@ -58,7 +72,7 @@ module protocol_journal {
   var usedNonces: AccountId -> Set[int]           // Consumed nonces (replay protection)
   var lifecycleStatus: JournalStatus              // External lifecycle coordination
 
-  // ============ HELPERS ============
+  // ==================== HELPER FUNCTIONS ====================
   // Pure functions for safe map/option access.
 
   pure def getOrDefaultLedger(m: AccountId -> LedgerState, key: AccountId): Option[LedgerState] =
@@ -79,7 +93,7 @@ module protocol_journal {
     if (eventList.length() == 0) None
     else Some(eventList[eventList.length() - 1].id)
 
-  // ============ INITIALISATION ============
+  // ==================== INITIALISATION ====================
   // Start with empty state (no accounts).
 
   action init: bool = all {
@@ -89,7 +103,7 @@ module protocol_journal {
     lifecycleStatus' = JournalPending
   }
 
-  // ============ ACTIONS ============
+  // ==================== ACTIONS ====================
   // These model journal mutations (event appends).
 
   // Create a new account with initial authority and guardian.
@@ -265,7 +279,7 @@ module protocol_journal {
     }
   }
 
-  // ==================== STEP ACTION ====================
+  // ==================== STEP RELATION ====================
   // Nondeterministically choose any enabled action.
 
   action step: bool = any {
@@ -286,6 +300,7 @@ module protocol_journal {
 
   // ==================== CRDT MERGE OPERATIONS ====================
   // These implement the state-based CRDT merge for journal synchronization.
+  // Lean: Aura.Journal.merge, Aura.Journal.Semilattice
 
   // Merge two event lists (union with deduplication by id).
   // This is the core CRDT operation for eventual consistency.
@@ -317,7 +332,7 @@ module protocol_journal {
 
   // ==================== CRDT PROPERTIES ====================
   // These properties verify the CRDT semilattice laws.
-  // Proved formally in verification/lean/Aura/Journal.lean.
+  // Lean: Aura.Journal.merge_comm, merge_assoc, merge_idem
 
   // Commutativity: merge(a, b) == merge(b, a)
   pure def propNonceMergeCommutative(a: Set[int], b: Set[int]): bool =
@@ -347,7 +362,7 @@ module protocol_journal {
 
   // ==================== REDUCE DETERMINISM ====================
   // Reduce computes derived state from the event log.
-  // Determinism: same events always yield same derived state.
+  // Lean: Aura.Journal.reduce_deterministic
 
   // Compute authority set from event list by replaying events.
   pure def reduceAuthorities(eventList: List[EventRecord], initial: Set[AuthorityId]): Set[AuthorityId] =
@@ -382,6 +397,7 @@ module protocol_journal {
   pure def allEventsMatch(eventList: List[EventRecord], pred: EventRecord => bool): bool =
     eventList.foldl(true, (acc, event) => acc and pred(event))
 
+  // Lean: Aura.Journal.nonce_unique
   // Nonces are unique within each account (replay protection).
   val InvariantNonceUnique =
     usedNonces.keys().forall(account =>
@@ -390,19 +406,22 @@ module protocol_journal {
       )
     )
 
+  // Lean: Aura.Journal.events_ordered
   // Events have positive timestamps.
   val InvariantEventsOrdered =
     events.keys().forall(account =>
       allEventsMatch(events.get(account), event => event.timestamp > 0)
     )
 
+  // Lean: Aura.Journal.events_match_account
   // Events are scoped to their account.
   val InvariantEventsMatchAccount =
     events.keys().forall(account =>
       allEventsMatch(events.get(account), event => event.account == account)
     )
 
-  // Completed lifecycle implies stable state (placeholder).
+  // Lean: Aura.Journal.lifecycle_completed_stable
+  // Completed lifecycle implies stable state.
   val InvariantLifecycleCompletedImpliesStable = {
     val isCompleted = match lifecycleStatus { | JournalCompleted => true | _ => false }
     isCompleted implies true
@@ -411,6 +430,7 @@ module protocol_journal {
   // ==================== CRDT INVARIANTS ====================
   // These ensure the CRDT semilattice properties hold at runtime.
 
+  // Lean: Aura.Journal.merge_comm
   // Nonce merge is commutative (concurrent additions converge).
   val InvariantNonceMergeCommutative =
     usedNonces.keys().forall(acc1 =>
@@ -422,36 +442,18 @@ module protocol_journal {
       )
     )
 
+  // Lean: Aura.Journal.lamport_monotonic
   // Lamport timestamps are non-negative.
   val InvariantLamportMonotonic =
     ledgerStates.keys().forall(account =>
       ledgerStates.get(account).lamport >= 0
     )
 
-  // Invariant: Event list reduce is deterministic
-  // Running reduce twice on same events yields same result
+  // Lean: Aura.Journal.reduce_deterministic
+  // Event list reduce is deterministic.
   val InvariantReduceDeterministic =
     events.keys().forall(account =>
       propReduceLamportDeterministic(getOrDefaultEvents(events, account))
     )
 
-  // ==================== LEAN PROOF CONNECTION ====================
-  //
-  // The CRDT properties defined above correspond to Lean 4 theorems in:
-  //   verification/lean/Aura/Semilattice.lean
-  //
-  // Key correspondences:
-  //   - propNonceMergeCommutative  ↔ Semilattice.join_comm
-  //   - propNonceMergeAssociative  ↔ Semilattice.join_assoc
-  //   - propNonceMergeIdempotent   ↔ Semilattice.join_idem
-  //   - propLamportJoin            ↔ Max.instJoinSemilattice
-  //   - propReduceLamportDeterministic ↔ Reduce.deterministic
-  //
-  // The Quint spec provides model-checkable properties while Lean
-  // provides formal proofs. Together they ensure:
-  //   1. CRDT merge is commutative, associative, idempotent (Quint + Lean)
-  //   2. Reduce operations are deterministic (Quint + Lean)
-  //   3. Eventual consistency via monotonic semilattice (Lean theorem)
-  //
-  // See docs/809_generative_testing_guide.md for integration details.
 }

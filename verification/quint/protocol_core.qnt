@@ -11,6 +11,17 @@
 // - State transitions are validated against an allowed transition graph
 // - Evidence records enable protocol checkpoint/rehydration after crash
 //
+// == Lean Correspondence ==
+// Module: Aura.Protocol.Core (foundational types shared across proofs)
+// - ProtocolState lifecycle: Aura.Protocol.Core.ProtocolState
+// - Transition graph: Aura.Protocol.Core.transitionAllowed
+// - Effect validation: Aura.Protocol.Core.effectAllowed
+//
+// == Rust Correspondence ==
+// - Types: crates/aura-protocol/src/types.rs
+// - Effects: crates/aura-core/src/effects/*.rs
+// - State machine: crates/aura-protocol/src/runtime.rs
+//
 // See: docs/100_authority_and_identity.md, docs/103_relational_contexts.md
 
 module protocol_core {
@@ -628,12 +639,14 @@ module protocol_core {
   // These properties must hold in every reachable state.
   // The model checker explores all executions to verify them.
 
+  // Lean: Aura.Protocol.Core.descriptor_state_alignment
   // All protocol maps are consistently keyed.
   val InvariantDescriptorStateAlignment =
     descriptors.keys() == lifecycleStates.keys() and
     descriptors.keys() == outputs.keys() and
     descriptors.keys() == participants.keys()
 
+  // Lean: Aura.Protocol.Core.session_index_covers
   // Every protocol is indexed by its session.
   val InvariantSessionIndexCoversProtocols =
     descriptors.keys().forall(pid =>
@@ -642,6 +655,7 @@ module protocol_core {
       )
     )
 
+  // Lean: Aura.Protocol.Core.session_index_accurate
   // Session index is accurate: indexed protocols actually have that session.
   val InvariantSessionIndexAccurate =
     sessionIndex.keys().forall(session =>
@@ -650,6 +664,7 @@ module protocol_core {
       )
     )
 
+  // Lean: Aura.Protocol.Core.outputs_only_when_terminable
   // Outputs are only set when protocol can terminate.
   val InvariantOutputsOnlyWhenTerminable =
     outputs.keys().forall(pid =>
@@ -660,6 +675,7 @@ module protocol_core {
       }
     )
 
+  // Lean: Aura.Protocol.Core.success_implies_completed
   // Success output ⟹ state is Completed.
   val InvariantSuccessImpliesCompleted =
     outputs.keys().forall(pid =>
@@ -669,6 +685,7 @@ module protocol_core {
       }
     )
 
+  // Lean: Aura.Protocol.Core.failure_implies_failure_state
   // Failure output ⟹ state is Failed or Cancelled.
   val InvariantFailureImpliesFailureState =
     outputs.keys().forall(pid =>
@@ -678,10 +695,12 @@ module protocol_core {
       }
     )
 
+  // Lean: Aura.Protocol.Core.effect_protocols_registered
   // All logged effects come from registered protocols.
   val InvariantEffectProtocolsRegistered =
     effectLog.forall(record => record.protocol.in(descriptors.keys()))
 
+  // Lean: Aura.Protocol.Core.transitions_allowed
   // All logged transitions follow the allowed transition graph.
   val InvariantTransitionsAllowed =
     transitionLog.forall(t =>
@@ -689,18 +708,21 @@ module protocol_core {
       transitionAllowed(t.prevState, t.nextState)
     )
 
+  // Lean: Aura.Protocol.Core.no_transitions_after_final
   // Final states are absorbing: no transition changes them.
   val InvariantNoTransitionsAfterFinal =
     transitionLog.forall(t =>
       isFinal(t.prevState) implies t.prevState == t.nextState
     )
 
+  // Lean: Aura.Protocol.Core.timers_belong_to_protocols
   // Every timer is owned by a registered protocol.
   val InvariantTimersBelongToProtocols =
     timers.keys().forall(timer =>
       timers.get(timer).protocol.in(descriptors.keys())
     )
 
+  // Lean: Aura.Protocol.Core.timer_ownership_matches
   // Ownership set matches active timers for each protocol.
   val InvariantTimerOwnershipMatchesTimers =
     descriptors.keys().forall(pid =>
@@ -710,6 +732,7 @@ module protocol_core {
         )
     )
 
+  // Lean: Aura.Protocol.Core.no_active_timers_in_final
   // No active timers for protocols in final states (cleanup guarantee).
   val InvariantNoActiveTimersInFinalState =
     descriptors.keys().forall(pid =>
@@ -717,6 +740,7 @@ module protocol_core {
         getOrDefault(timerOwnership, pid, Set()).size() == 0
     )
 
+  // Lean: Aura.Protocol.Core.journal_requires_output
   // Journal writes only happen after output is set (charge-before-send).
   val InvariantJournalRequiresOutput =
     effectLog.forall(record =>
@@ -724,6 +748,7 @@ module protocol_core {
         outputs.get(record.protocol) != NotReady
     )
 
+  // Lean: Aura.Protocol.Core.messages_respect_participants
   // Messages only go to registered participants (no message leakage).
   val InvariantMessagesRespectParticipants =
     effectLog.forall(record =>
@@ -739,6 +764,7 @@ module protocol_core {
         }
     )
 
+  // Lean: Aura.Protocol.Core.journal_effects_match_session
   // Journal effects are scoped to their protocol's session.
   val InvariantJournalEffectsMatchSession =
     journalEffects.keys().forall(pid =>
@@ -747,6 +773,7 @@ module protocol_core {
       )
     )
 
+  // Lean: Aura.Protocol.Core.evidence_terminates_state
   // Evidence can only be captured in terminable states.
   val InvariantEvidenceTerminatesState =
     evidence.keys().forall(pid =>
@@ -758,6 +785,7 @@ module protocol_core {
       }
     )
 
+  // Lean: Aura.Protocol.Core.valid_evidence_has_witness
   // Valid evidence requires a valid witness (external confirmation).
   val InvariantValidEvidenceHasWitness =
     evidence.keys().forall(pid =>
@@ -768,6 +796,7 @@ module protocol_core {
       }
     )
 
+  // Lean: Aura.Protocol.Core.rehydrated_have_valid_evidence
   // Rehydrated protocols have valid evidence matching current state.
   val InvariantRehydratedProtocolsHaveValidEvidence =
     rehydrated.forall(pid =>
@@ -780,6 +809,7 @@ module protocol_core {
       }
     )
 
+  // Lean: Aura.Protocol.Core.counter_effects_restricted
   // Counter updates only allowed for Recovery/Locking protocols.
   val InvariantCounterEffectsRestricted =
     effectLog.forall(record =>
