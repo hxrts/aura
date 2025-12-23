@@ -9,8 +9,11 @@
 //! - Emits a full snapshot into the corresponding signal (eventual consistency)
 
 use aura_app::errors::AppError;
-use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL};
+use aura_app::signal_defs::{
+    BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
+};
 use aura_app::views::{
+    block::{BanRecord, BlockState, BlocksState, KickRecord, MuteRecord},
     chat::{Channel, ChannelType, ChatState, Message},
     contacts::{Contact, ContactsState},
     invitations::{
@@ -28,6 +31,14 @@ use super::scheduler::ReactiveView;
 
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
+use aura_protocol::moderation::facts::{
+    BlockPinFact, BlockUnpinFact, BLOCK_PIN_FACT_TYPE_ID, BLOCK_UNPIN_FACT_TYPE_ID,
+};
+use aura_protocol::moderation::{
+    BlockBanFact, BlockKickFact, BlockMuteFact, BlockUnbanFact, BlockUnmuteFact,
+    BLOCK_BAN_FACT_TYPE_ID, BLOCK_KICK_FACT_TYPE_ID, BLOCK_MUTE_FACT_TYPE_ID,
+    BLOCK_UNBAN_FACT_TYPE_ID, BLOCK_UNMUTE_FACT_TYPE_ID,
+};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
@@ -351,6 +362,152 @@ impl ReactiveView for ContactsSignalView {
 
     fn view_id(&self) -> &str {
         "signals:contacts"
+    }
+}
+
+// =============================================================================
+// Blocks (Moderation + Pins)
+// =============================================================================
+
+pub struct BlockSignalView {
+    reactive: ReactiveHandler,
+}
+
+impl BlockSignalView {
+    pub fn new(reactive: ReactiveHandler) -> Self {
+        Self { reactive }
+    }
+
+    fn block_for_context<'a>(
+        blocks: &'a mut BlocksState,
+        context_id: &str,
+    ) -> Option<&'a mut BlockState> {
+        blocks
+            .blocks
+            .values_mut()
+            .find(|block| block.context_id == context_id)
+    }
+}
+
+impl ReactiveView for BlockSignalView {
+    async fn update(&self, facts: &[Fact]) {
+        let mut blocks = match self.reactive.read(&*BLOCKS_SIGNAL).await {
+            Ok(state) => state,
+            Err(e) => {
+                emit_internal_error(&self.reactive, format!("Failed to read BLOCKS_SIGNAL: {e}"))
+                    .await;
+                return;
+            }
+        };
+
+        let mut changed = false;
+
+        for fact in facts {
+            let FactContent::Relational(RelationalFact::Generic {
+                context_id,
+                binding_type,
+                binding_data,
+            }) = &fact.content
+            else {
+                continue;
+            };
+
+            let context_key = context_id.to_string();
+            let Some(block) = Self::block_for_context(&mut blocks, &context_key) else {
+                continue;
+            };
+
+            match binding_type.as_str() {
+                BLOCK_BAN_FACT_TYPE_ID => {
+                    if let Some(ban) = BlockBanFact::from_bytes(binding_data) {
+                        let record = BanRecord {
+                            authority_id: ban.banned_authority,
+                            reason: ban.reason,
+                            actor: ban.actor_authority,
+                            banned_at: ban.banned_at.ts_ms,
+                        };
+                        block.add_ban(record);
+                        let _ = block.remove_resident(&ban.banned_authority);
+                        changed = true;
+                    }
+                }
+                BLOCK_UNBAN_FACT_TYPE_ID => {
+                    if let Some(unban) = BlockUnbanFact::from_bytes(binding_data) {
+                        if block.remove_ban(&unban.unbanned_authority).is_some() {
+                            changed = true;
+                        }
+                    }
+                }
+                BLOCK_MUTE_FACT_TYPE_ID => {
+                    if let Some(mute) = BlockMuteFact::from_bytes(binding_data) {
+                        let record = MuteRecord {
+                            authority_id: mute.muted_authority,
+                            duration_secs: mute.duration_secs,
+                            muted_at: mute.muted_at.ts_ms,
+                            expires_at: mute.expires_at.as_ref().map(|t| t.ts_ms),
+                            actor: mute.actor_authority,
+                        };
+                        block.add_mute(record);
+                        changed = true;
+                    }
+                }
+                BLOCK_UNMUTE_FACT_TYPE_ID => {
+                    if let Some(unmute) = BlockUnmuteFact::from_bytes(binding_data) {
+                        if block.remove_mute(&unmute.unmuted_authority).is_some() {
+                            changed = true;
+                        }
+                    }
+                }
+                BLOCK_KICK_FACT_TYPE_ID => {
+                    if let Some(kick) = BlockKickFact::from_bytes(binding_data) {
+                        let record = KickRecord {
+                            authority_id: kick.kicked_authority,
+                            channel: kick.channel_id,
+                            reason: kick.reason,
+                            actor: kick.actor_authority,
+                            kicked_at: kick.kicked_at.ts_ms,
+                        };
+                        block.add_kick(record);
+                        let _ = block.remove_resident(&kick.kicked_authority);
+                        changed = true;
+                    }
+                }
+                BLOCK_PIN_FACT_TYPE_ID => {
+                    if let Some(pin) = BlockPinFact::from_bytes(binding_data) {
+                        block.pin_message(pin.message_id);
+                        changed = true;
+                    }
+                }
+                BLOCK_UNPIN_FACT_TYPE_ID => {
+                    if let Some(unpin) = BlockUnpinFact::from_bytes(binding_data) {
+                        if block.unpin_message(&unpin.message_id) {
+                            changed = true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !changed {
+            return;
+        }
+
+        let snapshot = blocks.clone();
+        drop(blocks);
+
+        if let Err(e) = self.reactive.emit(&*BLOCKS_SIGNAL, snapshot.clone()).await {
+            emit_internal_error(&self.reactive, format!("Failed to emit BLOCKS_SIGNAL: {e}")).await;
+        }
+
+        let block_snapshot = snapshot.current_block().cloned().unwrap_or_default();
+        if let Err(e) = self.reactive.emit(&*BLOCK_SIGNAL, block_snapshot).await {
+            emit_internal_error(&self.reactive, format!("Failed to emit BLOCK_SIGNAL: {e}")).await;
+        }
+    }
+
+    fn view_id(&self) -> &str {
+        "signals:blocks"
     }
 }
 

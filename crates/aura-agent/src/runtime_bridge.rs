@@ -28,6 +28,7 @@ use aura_effects::ReactiveHandler;
 use aura_journal::fact::RelationalFact;
 use aura_journal::DomainFact;
 use aura_protocol::effects::TreeEffects;
+use aura_protocol::moderation::facts::{BlockPinFact, BlockUnpinFact};
 use aura_protocol::moderation::{
     BlockBanFact, BlockKickFact, BlockMuteFact, BlockUnbanFact, BlockUnmuteFact,
 };
@@ -51,7 +52,6 @@ impl AgentRuntimeBridge {
 }
 
 const ACCOUNT_CONFIG_KEYS: [&str; 2] = ["account.json", "demo-account.json"];
-
 
 fn map_amp_error(err: AmpChannelError) -> IntentError {
     IntentError::internal_error(format!("AMP error: {err}"))
@@ -324,25 +324,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
         channel_id: ChannelId,
         message_id: String,
     ) -> Result<(), IntentError> {
-        #[derive(Serialize, Deserialize)]
-        struct PinFact {
-            channel_id: ChannelId,
-            message_id: String,
-            actor_id: AuthorityId,
-        }
+        let effects = self.agent.runtime().effects();
+        let now = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
 
-        let payload = PinFact {
+        let fact = BlockPinFact::new_ms(
+            context_id,
             channel_id,
             message_id,
-            actor_id: self.agent.authority_id(),
-        };
-
-        let fact = RelationalFact::Generic {
-            context_id,
-            binding_type: "moderation:block-pin".to_string(),
-            binding_data: serde_json::to_vec(&payload)
-                .map_err(|e| IntentError::internal_error(format!("Pin fact encode: {e}")))?,
-        };
+            self.agent.authority_id(),
+            now.ts_ms,
+        )
+        .to_generic();
 
         self.commit_relational_facts(&[fact]).await
     }
@@ -353,25 +348,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
         channel_id: ChannelId,
         message_id: String,
     ) -> Result<(), IntentError> {
-        #[derive(Serialize, Deserialize)]
-        struct UnpinFact {
-            channel_id: ChannelId,
-            message_id: String,
-            actor_id: AuthorityId,
-        }
+        let effects = self.agent.runtime().effects();
+        let now = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
 
-        let payload = UnpinFact {
+        let fact = BlockUnpinFact::new_ms(
+            context_id,
             channel_id,
             message_id,
-            actor_id: self.agent.authority_id(),
-        };
-
-        let fact = RelationalFact::Generic {
-            context_id,
-            binding_type: "moderation:block-unpin".to_string(),
-            binding_data: serde_json::to_vec(&payload)
-                .map_err(|e| IntentError::internal_error(format!("Unpin fact encode: {e}")))?,
-        };
+            self.agent.authority_id(),
+            now.ts_ms,
+        )
+        .to_generic();
 
         self.commit_relational_facts(&[fact]).await
     }
@@ -395,7 +385,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         self.commit_relational_facts(&[fact]).await
     }
-
 
     // =========================================================================
     // Sync Operations
@@ -906,7 +895,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
 
         // Compute a best-effort prestate-bound ceremony id.
-        let prestate_input = serde_json::to_vec(&( 
+        let prestate_input = serde_json::to_vec(&(
             tree_state.epoch,
             tree_state.root_commitment,
             participant_device_ids.clone(),
@@ -914,7 +903,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
         let prestate_hash = aura_core::Hash32(hash(&prestate_input));
 
-        let op_input = serde_json::to_vec(&( 
+        let op_input = serde_json::to_vec(&(
             new_device_id,
             pending_epoch,
             threshold_k,
@@ -971,7 +960,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 h.update(ceremony_id.as_bytes());
                 h.finalize()
             };
-            let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+            let ceremony_context =
+                aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
 
             for device_id in &other_device_ids {
                 let Some(key_package) = key_package_by_device.get(device_id).cloned() else {

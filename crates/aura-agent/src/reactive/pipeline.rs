@@ -16,7 +16,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
 use super::ViewUpdate;
-use super::{ChatSignalView, ContactsSignalView, InvitationsSignalView};
+use super::{BlockSignalView, ChatSignalView, ContactsSignalView, InvitationsSignalView};
 use super::{FactSource, ReactiveScheduler, SchedulerConfig};
 
 /// Owns the running scheduler + the single fact publication mechanism.
@@ -55,7 +55,8 @@ impl ReactivePipeline {
             own_authority,
             reactive.clone(),
         )));
-        scheduler.register_view(Arc::new(ContactsSignalView::new(reactive)));
+        scheduler.register_view(Arc::new(ContactsSignalView::new(reactive.clone())));
+        scheduler.register_view(Arc::new(BlockSignalView::new(reactive)));
 
         let updates = scheduler.subscribe();
 

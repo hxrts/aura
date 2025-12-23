@@ -14,6 +14,9 @@ pub const BLOCK_KICK_FACT_TYPE_ID: &str = "moderation:block-kick";
 pub const BLOCK_GRANT_STEWARD_FACT_TYPE_ID: &str = "moderation:block-grant-steward";
 pub const BLOCK_REVOKE_STEWARD_FACT_TYPE_ID: &str = "moderation:block-revoke-steward";
 
+pub const BLOCK_PIN_FACT_TYPE_ID: &str = "moderation:block-pin";
+pub const BLOCK_UNPIN_FACT_TYPE_ID: &str = "moderation:block-unpin";
+
 /// Fact representing a block-wide mute or channel-specific mute.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockMuteFact {
@@ -320,6 +323,106 @@ impl DomainFact for BlockKickFact {
     }
 }
 
+/// Fact representing a pinned message in a block/channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockPinFact {
+    pub context_id: ContextId,
+    pub channel_id: ChannelId,
+    pub message_id: String,
+    pub actor_authority: AuthorityId,
+    pub pinned_at: PhysicalTime,
+}
+
+impl BlockPinFact {
+    /// Backward-compat constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        actor_authority: AuthorityId,
+        pinned_at_ms: u64,
+    ) -> Self {
+        Self {
+            context_id,
+            channel_id,
+            message_id,
+            actor_authority,
+            pinned_at: PhysicalTime {
+                ts_ms: pinned_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+}
+
+impl DomainFact for BlockPinFact {
+    fn type_id(&self) -> &'static str {
+        BLOCK_PIN_FACT_TYPE_ID
+    }
+
+    fn context_id(&self) -> ContextId {
+        self.context_id
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("serialize block pin fact")
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        serde_json::from_slice(bytes).ok()
+    }
+}
+
+/// Fact representing an unpinned message in a block/channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockUnpinFact {
+    pub context_id: ContextId,
+    pub channel_id: ChannelId,
+    pub message_id: String,
+    pub actor_authority: AuthorityId,
+    pub unpinned_at: PhysicalTime,
+}
+
+impl BlockUnpinFact {
+    /// Backward-compat constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        actor_authority: AuthorityId,
+        unpinned_at_ms: u64,
+    ) -> Self {
+        Self {
+            context_id,
+            channel_id,
+            message_id,
+            actor_authority,
+            unpinned_at: PhysicalTime {
+                ts_ms: unpinned_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+}
+
+impl DomainFact for BlockUnpinFact {
+    fn type_id(&self) -> &'static str {
+        BLOCK_UNPIN_FACT_TYPE_ID
+    }
+
+    fn context_id(&self) -> ContextId {
+        self.context_id
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("serialize block unpin fact")
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        serde_json::from_slice(bytes).ok()
+    }
+}
+
 /// Fact representing granting steward (admin) privileges to a user.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockGrantStewardFact {
@@ -562,6 +665,58 @@ impl FactReducer for BlockKickFactReducer {
     }
 }
 
+struct BlockPinFactReducer;
+
+impl FactReducer for BlockPinFactReducer {
+    fn handles_type(&self) -> &'static str {
+        BLOCK_PIN_FACT_TYPE_ID
+    }
+
+    fn reduce(
+        &self,
+        context_id: ContextId,
+        binding_type: &str,
+        binding_data: &[u8],
+    ) -> Option<RelationalBinding> {
+        if binding_type != BLOCK_PIN_FACT_TYPE_ID {
+            return None;
+        }
+
+        let fact = BlockPinFact::from_bytes(binding_data)?;
+        Some(RelationalBinding {
+            binding_type: RelationalBindingType::Generic(BLOCK_PIN_FACT_TYPE_ID.to_string()),
+            context_id,
+            data: fact.to_bytes(),
+        })
+    }
+}
+
+struct BlockUnpinFactReducer;
+
+impl FactReducer for BlockUnpinFactReducer {
+    fn handles_type(&self) -> &'static str {
+        BLOCK_UNPIN_FACT_TYPE_ID
+    }
+
+    fn reduce(
+        &self,
+        context_id: ContextId,
+        binding_type: &str,
+        binding_data: &[u8],
+    ) -> Option<RelationalBinding> {
+        if binding_type != BLOCK_UNPIN_FACT_TYPE_ID {
+            return None;
+        }
+
+        let fact = BlockUnpinFact::from_bytes(binding_data)?;
+        Some(RelationalBinding {
+            binding_type: RelationalBindingType::Generic(BLOCK_UNPIN_FACT_TYPE_ID.to_string()),
+            context_id,
+            data: fact.to_bytes(),
+        })
+    }
+}
+
 /// Register moderation domain facts with the journal registry.
 pub fn register_moderation_facts(registry: &mut FactRegistry) {
     registry.register::<BlockMuteFact>(BLOCK_MUTE_FACT_TYPE_ID, Box::new(BlockMuteFactReducer));
@@ -570,6 +725,8 @@ pub fn register_moderation_facts(registry: &mut FactRegistry) {
     registry.register::<BlockBanFact>(BLOCK_BAN_FACT_TYPE_ID, Box::new(BlockBanFactReducer));
     registry.register::<BlockUnbanFact>(BLOCK_UNBAN_FACT_TYPE_ID, Box::new(BlockUnbanFactReducer));
     registry.register::<BlockKickFact>(BLOCK_KICK_FACT_TYPE_ID, Box::new(BlockKickFactReducer));
+    registry.register::<BlockPinFact>(BLOCK_PIN_FACT_TYPE_ID, Box::new(BlockPinFactReducer));
+    registry.register::<BlockUnpinFact>(BLOCK_UNPIN_FACT_TYPE_ID, Box::new(BlockUnpinFactReducer));
 }
 
 #[cfg(test)]
@@ -601,6 +758,8 @@ mod tests {
 
         assert!(registry.is_registered(BLOCK_MUTE_FACT_TYPE_ID));
         assert!(registry.is_registered(BLOCK_UNMUTE_FACT_TYPE_ID));
+        assert!(registry.is_registered(BLOCK_PIN_FACT_TYPE_ID));
+        assert!(registry.is_registered(BLOCK_UNPIN_FACT_TYPE_ID));
 
         let context_id = test_context_id();
         let block_mute = BlockMuteFact {

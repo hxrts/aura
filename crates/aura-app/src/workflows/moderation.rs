@@ -4,32 +4,15 @@
 //! portable across all frontends.
 //!
 //! These operations delegate to the RuntimeBridge to commit moderation facts.
-//! UI state is updated locally as an optimistic projection of those facts.
+//! UI state is updated by reactive views driven from the journal.
 
-use crate::{
-    views::block::{BanRecord, KickRecord, MuteRecord},
-    AppCore,
-};
+use crate::AppCore;
 use async_lock::RwLock;
-use aura_core::{identifiers::{AuthorityId, ChannelId, ContextId}, AuraError};
+use aura_core::{
+    identifiers::{AuthorityId, ChannelId, ContextId},
+    AuraError,
+};
 use std::sync::Arc;
-
-async fn with_current_block_mut<T>(
-    app_core: &Arc<RwLock<AppCore>>,
-    f: impl FnOnce(&mut crate::views::BlocksState) -> Result<T, AuraError>,
-) -> Result<T, AuraError> {
-    let mut core = app_core.write().await;
-    let mut blocks = core.views().get_blocks().clone();
-
-    let out = f(&mut blocks)?;
-
-    if let Some(block) = blocks.current_block() {
-        core.views_mut().set_block(block.clone());
-    }
-    core.views_mut().set_blocks(blocks);
-
-    Ok(out)
-}
 
 fn parse_authority(target: &str) -> Result<AuthorityId, AuraError> {
     target
@@ -66,7 +49,7 @@ pub async fn kick_user(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
     reason: Option<&str>,
-    kicked_at_ms: u64,
+    _kicked_at_ms: u64,
 ) -> Result<(), AuraError> {
     let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
     if !is_admin {
@@ -83,7 +66,6 @@ pub async fn kick_user(
     };
 
     let target_id = parse_authority(target)?;
-    let actor_id = runtime.authority_id();
     runtime
         .moderation_kick(
             context_id,
@@ -94,27 +76,7 @@ pub async fn kick_user(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to kick user: {}", e)))?;
 
-    with_current_block_mut(app_core, |blocks| {
-        let block = blocks
-            .current_block_mut()
-            .ok_or_else(|| AuraError::not_found("No current block selected"))?;
-
-        let removed = block
-            .remove_resident(&target_id)
-            .ok_or_else(|| AuraError::not_found(format!("Resident not found: {}", target)))?;
-
-        let record = KickRecord {
-            authority_id: removed.id,
-            channel: block.id,
-            reason: reason.unwrap_or("").to_string(),
-            actor: actor_id,
-            kicked_at: kicked_at_ms,
-        };
-        block.add_kick(record);
-
-        Ok(())
-    })
-    .await
+    Ok(())
 }
 
 /// Ban a user from the current block.
@@ -122,7 +84,7 @@ pub async fn ban_user(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
     reason: Option<&str>,
-    banned_at_ms: u64,
+    _banned_at_ms: u64,
 ) -> Result<(), AuraError> {
     let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
     if !is_admin {
@@ -139,7 +101,6 @@ pub async fn ban_user(
     };
 
     let target_id = parse_authority(target)?;
-    let actor_id = runtime.authority_id();
     runtime
         .moderation_ban(
             context_id,
@@ -150,24 +111,7 @@ pub async fn ban_user(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to ban user: {}", e)))?;
 
-    with_current_block_mut(app_core, |blocks| {
-        let block = blocks
-            .current_block_mut()
-            .ok_or_else(|| AuraError::not_found("No current block selected"))?;
-
-        let record = BanRecord {
-            authority_id: target_id,
-            reason: reason.unwrap_or("").to_string(),
-            actor: actor_id,
-            banned_at: banned_at_ms,
-        };
-        block.add_ban(record);
-
-        let _ = block.remove_resident(&target_id);
-
-        Ok(())
-    })
-    .await
+    Ok(())
 }
 
 /// Unban a user from the current block.
@@ -192,21 +136,7 @@ pub async fn unban_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result
         .await
         .map_err(|e| AuraError::agent(format!("Failed to unban user: {}", e)))?;
 
-    with_current_block_mut(app_core, |blocks| {
-        let block = blocks
-            .current_block_mut()
-            .ok_or_else(|| AuraError::not_found("No current block selected"))?;
-
-        if block.remove_ban(&target_id).is_none() {
-            return Err(AuraError::not_found(format!(
-                "User is not banned: {}",
-                target
-            )));
-        }
-
-        Ok(())
-    })
-    .await
+    Ok(())
 }
 
 /// Mute a user in the current block.
@@ -214,7 +144,7 @@ pub async fn mute_user(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
     duration_secs: Option<u64>,
-    muted_at_ms: u64,
+    _muted_at_ms: u64,
 ) -> Result<(), AuraError> {
     let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
     if !is_admin {
@@ -231,30 +161,12 @@ pub async fn mute_user(
     };
 
     let target_id = parse_authority(target)?;
-    let actor_id = runtime.authority_id();
     runtime
         .moderation_mute(context_id, channel_id, target_id, duration_secs)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to mute user: {}", e)))?;
 
-    with_current_block_mut(app_core, |blocks| {
-        let block = blocks
-            .current_block_mut()
-            .ok_or_else(|| AuraError::not_found("No current block selected"))?;
-
-        let expires_at = duration_secs.map(|s| muted_at_ms.saturating_add(s.saturating_mul(1000)));
-        let record = MuteRecord {
-            authority_id: target_id,
-            duration_secs,
-            muted_at: muted_at_ms,
-            expires_at,
-            actor: actor_id,
-        };
-        block.add_mute(record);
-
-        Ok(())
-    })
-    .await
+    Ok(())
 }
 
 /// Unmute a user in the current block.
@@ -279,21 +191,7 @@ pub async fn unmute_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Resul
         .await
         .map_err(|e| AuraError::agent(format!("Failed to unmute user: {}", e)))?;
 
-    with_current_block_mut(app_core, |blocks| {
-        let block = blocks
-            .current_block_mut()
-            .ok_or_else(|| AuraError::not_found("No current block selected"))?;
-
-        if block.remove_mute(&target_id).is_none() {
-            return Err(AuraError::not_found(format!(
-                "User is not muted: {}",
-                target
-            )));
-        }
-
-        Ok(())
-    })
-    .await
+    Ok(())
 }
 
 /// Pin a message in the current block.
@@ -320,14 +218,7 @@ pub async fn pin_message(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to pin message: {}", e)))?;
 
-    with_current_block_mut(app_core, |blocks| {
-        let block = blocks
-            .current_block_mut()
-            .ok_or_else(|| AuraError::not_found("No current block selected"))?;
-        block.pin_message(message_id.to_string());
-        Ok(())
-    })
-    .await
+    Ok(())
 }
 
 /// Unpin a message in the current block.
@@ -354,19 +245,7 @@ pub async fn unpin_message(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to unpin message: {}", e)))?;
 
-    with_current_block_mut(app_core, |blocks| {
-        let block = blocks
-            .current_block_mut()
-            .ok_or_else(|| AuraError::not_found("No current block selected"))?;
-        if !block.unpin_message(message_id) {
-            return Err(AuraError::not_found(format!(
-                "Message is not pinned: {}",
-                message_id
-            )));
-        }
-        Ok(())
-    })
-    .await
+    Ok(())
 }
 
 #[cfg(test)]
