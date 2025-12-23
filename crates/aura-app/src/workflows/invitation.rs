@@ -217,7 +217,8 @@ pub async fn accept_invitation(
             .clone()
     };
 
-    let _initial_contact_count = {
+    #[cfg(feature = "signals")]
+    let initial_contact_count = {
         let core = app_core.read().await;
         core.read(&*crate::signal_defs::CONTACTS_SIGNAL)
             .await
