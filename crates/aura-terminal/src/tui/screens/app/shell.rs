@@ -61,9 +61,12 @@ use crate::tui::updates::{ui_update_channel, UiUpdate, UiUpdateReceiver, UiUpdat
 use std::sync::Mutex;
 
 /// Props for IoApp
+///
+/// These values are initial seeds only. Screens subscribe to `aura_app` signals
+/// for live data and will overwrite these props immediately on mount.
 #[derive(Default, Props)]
 pub struct IoAppProps {
-    // Screen data - populated from IoContext via reactive views
+    // Screen data - initial seeds only (live data comes from signal subscriptions)
     pub channels: Vec<Channel>,
     pub messages: Vec<Message>,
     pub invitations: Vec<Invitation>,
@@ -2107,7 +2110,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let show_account_setup = !ctx_arc.has_account();
 
     // ========================================================================
-    // Reactive Pattern: All data is provided via signals, not polling
+    // Reactive Pattern: All data is provided via signals, not polling.
+    // Props below are intentionally empty seeds that are overwritten on mount.
     // ========================================================================
     // Screens subscribe to their respective signals and update reactively:
     // - ChatScreen subscribes to CHAT_SIGNAL

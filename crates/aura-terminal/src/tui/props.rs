@@ -23,6 +23,7 @@ use crate::tui::state_machine::{
     BlockFocus, ChatFocus, GuardianCeremonyResponse, GuardianSetupStep, QueuedModal, TuiState,
 };
 use crate::tui::types::TraversalDepth;
+use tracing::warn;
 
 // ============================================================================
 // Block Screen Props Extraction
@@ -429,7 +430,13 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     ) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsDeviceEnrollment(s)) => (
             true,
-            s.ceremony.ceremony_id.clone().unwrap_or_default(),
+            s.ceremony
+                .ceremony_id
+                .clone()
+                .unwrap_or_else(|| {
+                    warn!("Device enrollment modal missing ceremony id");
+                    String::new()
+                }),
             s.device_name.clone(),
             s.enrollment_code.clone(),
             s.ceremony.accepted_count,

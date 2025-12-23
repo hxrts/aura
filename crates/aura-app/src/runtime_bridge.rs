@@ -808,8 +808,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn commit_relational_facts(&self, _facts: &[RelationalFact]) -> Result<(), IntentError> {
-        // In offline mode, there is no canonical runtime journal.
-        Ok(())
+        Err(IntentError::no_agent(
+            "Relational fact commit not available in offline mode",
+        ))
     }
 
     async fn amp_create_channel(

@@ -108,11 +108,26 @@ pub fn use_nav_status_signals(
 
 /// Shared contacts state that can be read by closures without re-rendering.
 ///
-/// This uses Arc<RwLock<Vec<Contact>>> instead of State<T> because:
+/// This wraps Arc<RwLock<Vec<Contact>>> instead of State<T> because:
 /// 1. Dispatch handler closures need to read current contacts at invocation time.
 /// 2. We do not want every contacts update to trigger shell re-renders.
 /// 3. The closure captures the Arc, not the data, so it always reads fresh data.
-pub type SharedContacts = Arc<RwLock<Vec<Contact>>>;
+#[derive(Clone, Default)]
+pub struct SharedContacts(Arc<RwLock<Vec<Contact>>>);
+
+impl SharedContacts {
+    pub fn new() -> Self {
+        Self(Arc::new(RwLock::new(Vec::new())))
+    }
+
+    pub fn read(&self) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<Contact>>> {
+        self.0.read()
+    }
+
+    pub fn write(&self) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<Contact>>> {
+        self.0.write()
+    }
+}
 
 /// Create a shared contacts holder and subscribe it to CONTACTS_SIGNAL.
 ///
@@ -122,7 +137,7 @@ pub type SharedContacts = Arc<RwLock<Vec<Contact>>>;
 /// Uses std::sync::RwLock so dispatch handlers can read synchronously.
 pub fn use_contacts_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> SharedContacts {
     // Create the shared contacts holder - use_ref ensures it persists across renders.
-    let shared_contacts_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
+    let shared_contacts_ref = hooks.use_ref(SharedContacts::new);
     let shared_contacts: SharedContacts = shared_contacts_ref.read().clone();
 
     hooks.use_future({
