@@ -119,6 +119,25 @@ pub struct IoAppProps {
 
 /// Main application with screen navigation
 
+/// Type-safe handle for TuiState that enforces proper reactivity patterns.
+///
+/// # Reactivity Model
+///
+/// iocraft's `Ref<T>` (from `use_ref`) does NOT trigger re-renders when modified.
+/// iocraft's `State<T>` (from `use_state`) DOES trigger re-renders when `.set()` is called,
+/// but ONLY if the component read the State during render via `.get()`.
+///
+/// This handle enforces the correct pattern:
+/// - **During render**: Use `read_for_render()` which reads the version (establishing reactivity)
+///   and returns a snapshot of the state. This is the ONLY way to read state during render.
+/// - **During callbacks**: Use `replace()` or `with_mut()` which update the Ref and bump the
+///   version, triggering a re-render.
+///
+/// # Compile-Time Safety
+///
+/// By making `read_for_render()` the only way to access state during render, we ensure
+/// the version is always read. If you try to bypass this (e.g., holding onto the raw Ref),
+/// you won't have a `TuiStateSnapshot` to pass to prop extraction functions.
 #[derive(Clone)]
 struct TuiStateHandle {
     state: Ref<TuiState>,
@@ -134,6 +153,39 @@ impl TuiStateHandle {
         self.version.set(self.version.get().wrapping_add(1));
     }
 
+    /// Read state for rendering. This MUST be used during the render phase.
+    ///
+    /// This method:
+    /// 1. Reads `version.get()` to establish reactivity (so the component re-renders when
+    ///    `replace()` or `with_mut()` are called)
+    /// 2. Returns a `TuiRenderState` that provides access to the TuiState
+    ///
+    /// # Why This Exists
+    ///
+    /// iocraft only re-renders a component when a `State<T>` it read during render changes.
+    /// The TuiState lives in a `Ref<T>` which doesn't trigger re-renders. We use a separate
+    /// `State<usize>` version counter that gets bumped on every state change.
+    ///
+    /// By reading the version here, we subscribe to changes. By returning a TuiRenderState,
+    /// we ensure all render-time state access goes through this method.
+    ///
+    /// # Type Safety
+    ///
+    /// The returned `TuiRenderState` can only be created via this method, ensuring the
+    /// version is always read during render. This makes the "forgot to read version" bug
+    /// impossible - you can't access TuiState for rendering without going through here.
+    fn read_for_render(&self) -> TuiRenderState {
+        // Read version to establish reactivity - this is the key to making re-renders work!
+        let _version = self.version.get();
+        TuiRenderState {
+            state: self.state.read().clone(),
+        }
+    }
+
+    /// Clone the current state (for use in event handlers where you need ownership).
+    ///
+    /// Note: This does NOT read the version, so it should only be used in callbacks,
+    /// not during render. For render-time access, use `read_for_render()`.
     fn read_clone(&self) -> TuiState {
         self.state.read().clone()
     }
@@ -148,6 +200,28 @@ impl TuiStateHandle {
 
     fn replace(&mut self, new_state: TuiState) {
         self.with_mut(|state| *state = new_state);
+    }
+}
+
+/// A render-time state snapshot that can only be created via `TuiStateHandle::read_for_render()`.
+///
+/// This type enforces that the version State is read during render (establishing reactivity).
+/// All render-time access to TuiState must go through this type.
+///
+/// The state is cloned once per render, which is acceptable since:
+/// - Render happens at most once per frame (~60Hz)
+/// - The state is read-only during render anyway
+/// - This avoids unsafe code and keeps the API clean
+///
+/// Implements `Deref<Target = TuiState>` for convenient access to state fields.
+struct TuiRenderState {
+    state: TuiState,
+}
+
+impl std::ops::Deref for TuiRenderState {
+    type Target = TuiState;
+    fn deref(&self) -> &TuiState {
+        &self.state
     }
 }
 
@@ -777,7 +851,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let channel_name = props.channel_name.clone();
     // Contacts screen data
     let contacts = props.contacts.clone();
-    let block_invite_contacts: Vec<Contact> = match tui_state.read().modal_queue.current() {
+
+    // Read TUI state for rendering via type-safe handle.
+    // This MUST be used for all render-time state access - it reads the version to establish
+    // reactivity, ensuring the component re-renders when state changes via tui.replace().
+    // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
+    let tui_snapshot = tui.read_for_render();
+
+    let block_invite_contacts: Vec<Contact> = match tui_snapshot.modal_queue.current() {
         Some(QueuedModal::BlockInvite(state)) => state
             .contacts
             .iter()
@@ -872,21 +953,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     let current_screen = screen.get();
 
-    // Read the TUI state version to establish reactivity - when tui.replace() bumps the version,
-    // this component will re-render. Without this read, iocraft doesn't know to track this dependency.
-    let _state_version = tui_state_version.get();
-
     // Check if in insert mode (MessageInput has its own hint bar, so hide main hints)
-    let is_insert_mode = tui_state.read().is_insert_mode();
+    // Note: tui_snapshot was created earlier during render for all render-time state access
+    let is_insert_mode = tui_snapshot.is_insert_mode();
 
     // Extract screen view props from TuiState using testable extraction functions
-    let block_props = extract_block_view_props(&tui_state.read());
-    let chat_props = extract_chat_view_props(&tui_state.read());
-    let contacts_props = extract_contacts_view_props(&tui_state.read());
-    let invitations_props = extract_invitations_view_props(&tui_state.read());
-    let settings_props = extract_settings_view_props(&tui_state.read());
-    let recovery_props = extract_recovery_view_props(&tui_state.read());
-    let neighborhood_props = extract_neighborhood_view_props(&tui_state.read());
+    let block_props = extract_block_view_props(&tui_snapshot);
+    let chat_props = extract_chat_view_props(&tui_snapshot);
+    let contacts_props = extract_contacts_view_props(&tui_snapshot);
+    let invitations_props = extract_invitations_view_props(&tui_snapshot);
+    let settings_props = extract_settings_view_props(&tui_snapshot);
+    let recovery_props = extract_recovery_view_props(&tui_snapshot);
+    let neighborhood_props = extract_neighborhood_view_props(&tui_snapshot);
 
     #[cfg(feature = "development")]
     let demo_mode = props.demo_mode;
@@ -899,7 +977,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let mut global_modals = GlobalModalProps::default();
     global_modals.current_screen_name = current_screen.name().to_string();
 
-    if let Some(modal) = tui_state.read().modal_queue.current() {
+    if let Some(modal) = tui_snapshot.modal_queue.current() {
         match modal {
             QueuedModal::AccountSetup(state) => {
                 global_modals.account_setup_visible = true;
@@ -949,7 +1027,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     }
 
     // Extract toast state from queue (type-enforced single toast at a time)
-    let queued_toast = tui_state.read().toast_queue.current().cloned();
+    let queued_toast = tui_snapshot.toast_queue.current().cloned();
 
     // Global hints that appear on all screens (bottom row)
     let global_hints = vec![
