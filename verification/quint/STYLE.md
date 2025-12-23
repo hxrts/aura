@@ -303,7 +303,7 @@ action step = any {
 | `InvariantCommitRequiresThreshold` | `Aura.Consensus.Validity.commit_has_threshold` |
 | `InvariantEquivocatorsExcluded` | `Aura.Consensus.Equivocation.exclusion_correctness` |
 | `InvariantSignatureBindsToCommitFact` | `Aura.Consensus.Frost.share_binding` |
-| `InvariantByzantineThreshold` | `Aura.Core.Assumptions.byzantine_threshold` |
+| `InvariantByzantineThreshold` | `Aura.Assumptions.byzantine_threshold` |
 
 ## Module Dependencies
 

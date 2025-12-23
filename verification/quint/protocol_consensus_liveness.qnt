@@ -14,7 +14,7 @@
 //   - Aura.Consensus.Agreement.agreement (unique commit per instance)
 //   - Aura.Consensus.Validity.honest_participation (honest majority can commit)
 //   - Aura.Consensus.Frost.aggregation_threshold (threshold requirement)
-// - Byzantine threshold: Aura.Core.Assumptions.byzantine_threshold
+// - Byzantine threshold: Aura.Assumptions.byzantine_threshold
 //
 // == Rust Correspondence ==
 // - Timeout handling: crates/aura-protocol/src/consensus/coordinator.rs
@@ -447,7 +447,7 @@ module protocol_consensus_liveness {
         })
 
     // Byzantine tolerance: < threshold Byzantine witnesses cannot prevent termination
-    // Lean: Aura.Core.Assumptions.byzantine_threshold
+    // Lean: Aura.Assumptions.byzantine_threshold
     val InvariantByzantineTolerance =
         core::instances.keys().forall(cid => {
             val inst = core::instances.get(cid)

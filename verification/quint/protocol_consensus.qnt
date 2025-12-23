@@ -20,7 +20,7 @@
 // - Evidence proofs: Aura.Consensus.Evidence
 // - Equivocation proofs: Aura.Consensus.Equivocation
 // - FROST proofs: Aura.Consensus.Frost
-// - Axioms: Aura.Core.Assumptions
+// - Axioms: Aura.Assumptions
 //
 // == Rust Correspondence ==
 // - Types: crates/aura-protocol/src/consensus/types.rs
@@ -746,7 +746,7 @@ module protocol_consensus {
 
     // Signature threshold: All committed signatures have valid threshold.
     // Ensures k-of-n security requirement is met.
-    // Lean: Aura.Consensus.Frost.aggregation_threshold, Aura.Core.Assumptions.byzantine_threshold
+    // Lean: Aura.Consensus.Frost.aggregation_threshold, Aura.Assumptions.byzantine_threshold
     val InvariantSignatureThreshold =
         instances.keys().forall(cid => {
             val inst = instances.get(cid)

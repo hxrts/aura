@@ -8,8 +8,7 @@ This guide establishes conventions for Lean 4 proof development in the Aura veri
 
 ```
 Aura/
-├── Core/
-│   └── Assumptions.lean    # Centralized axioms and assumptions
+├── Assumptions.lean        # Centralized axioms and assumptions
 ├── Consensus/
 │   ├── Types.lean          # Domain types
 │   ├── Agreement.lean      # Agreement proofs
@@ -17,8 +16,14 @@ Aura/
 │   ├── Evidence.lean       # Evidence CRDT proofs
 │   ├── Equivocation.lean   # Equivocation detection proofs
 │   ├── Frost.lean          # FROST integration proofs
-│   └── Proofs.lean         # Re-export summary
-└── ...
+│   └── Proofs.lean         # Claims bundle aggregation
+├── Journal.lean            # Journal CRDT proofs
+├── KeyDerivation.lean      # Key derivation isolation
+├── GuardChain.lean         # Guard chain cost proofs
+├── FlowBudget.lean         # Budget charging proofs
+├── Frost.lean              # FROST state machine proofs
+├── TimeSystem.lean         # Timestamp ordering proofs
+└── Runner.lean             # CLI for differential testing
 ```
 
 ### Module Template
@@ -27,7 +32,7 @@ Each proof module should follow this structure:
 
 ```lean
 import Aura.Consensus.Types
-import Aura.Core.Assumptions
+import Aura.Assumptions
 
 /-!
 # Module Title
@@ -56,7 +61,7 @@ namespace Aura.Module.Name
 
 -- Imports and opens
 open Aura.Consensus.Types
-open Aura.Core.Assumptions
+open Aura.Assumptions
 
 /-!
 ## Section: Predicates
@@ -268,7 +273,7 @@ Prefer ASCII when Unicode causes issues:
 ## Axiom Management
 
 ### Centralized Assumptions
-All axioms live in `Aura/Core/Assumptions.lean`:
+All axioms live in `Aura/Assumptions.lean`:
 
 ```lean
 -- FROST threshold unforgeability

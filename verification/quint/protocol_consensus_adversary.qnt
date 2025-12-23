@@ -19,7 +19,7 @@
 // - Detection completeness: Aura.Consensus.Equivocation.detection_completeness
 // - Exclusion correctness: Aura.Consensus.Equivocation.exclusion_correctness
 // - Honest protection: Aura.Consensus.Equivocation.honest_never_detected
-// Axioms: Aura.Core.Assumptions (byzantine_threshold)
+// Axioms: Aura.Assumptions (byzantine_threshold)
 //
 // == Rust Correspondence ==
 // - Types: crates/aura-protocol/src/consensus/types.rs::ConflictFact
@@ -308,10 +308,10 @@ module protocol_consensus_adversary {
 
     // ==================== ADVERSARY INVARIANTS ====================
     // Safety properties for Byzantine fault tolerance.
-    // Lean correspondence: Aura.Consensus.Equivocation, Aura.Core.Assumptions
+    // Lean correspondence: Aura.Consensus.Equivocation, Aura.Assumptions
 
     // Safety: Byzantine count never exceeds f < k bound.
-    // Lean: Aura.Core.Assumptions.byzantine_threshold (threshold > maxByzantine)
+    // Lean: Aura.Assumptions.byzantine_threshold (threshold > maxByzantine)
     val InvariantByzantineThreshold =
         core::instances.keys().forall(cid => {
             val inst = core::instances.get(cid)
