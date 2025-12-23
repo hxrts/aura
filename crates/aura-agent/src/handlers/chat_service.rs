@@ -159,6 +159,7 @@ impl ChatService {
             match &chat_fact {
                 aura_chat::ChatFact::ChannelCreated { channel_id: c, .. }
                 | aura_chat::ChatFact::ChannelClosed { channel_id: c, .. }
+                | aura_chat::ChatFact::ChannelUpdated { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageSentSealed { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageRead { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageDelivered { channel_id: c, .. }

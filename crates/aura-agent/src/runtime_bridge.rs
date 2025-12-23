@@ -11,15 +11,26 @@ use aura_app::runtime_bridge::{
     RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::IntentError;
-use aura_core::effects::{StorageEffects, ThresholdSigningEffects, TransportEffects};
-use aura_core::identifiers::AuthorityId;
+use aura_core::effects::{
+    amp::{
+        AmpChannelEffects, AmpChannelError, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
+        ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
+    },
+    time::PhysicalTimeEffects,
+    StorageEffects, ThresholdSigningEffects, TransportEffects,
+};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_effects::ReactiveHandler;
 use aura_journal::fact::RelationalFact;
+use aura_journal::DomainFact;
 use aura_protocol::effects::TreeEffects;
+use aura_protocol::moderation::{
+    BlockBanFact, BlockKickFact, BlockMuteFact, BlockUnbanFact, BlockUnmuteFact,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -40,6 +51,11 @@ impl AgentRuntimeBridge {
 }
 
 const ACCOUNT_CONFIG_KEYS: [&str; 2] = ["account.json", "demo-account.json"];
+
+
+fn map_amp_error(err: AmpChannelError) -> IntentError {
+    IntentError::internal_error(format!("AMP error: {err}"))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct StoredAccountConfig {
@@ -135,6 +151,251 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         Ok(())
     }
+    // AMP Channel Operations
+    // =========================================================================
+
+    async fn amp_create_channel(
+        &self,
+        params: ChannelCreateParams,
+    ) -> Result<ChannelId, IntentError> {
+        let effects = self.agent.runtime().effects();
+        effects.create_channel(params).await.map_err(map_amp_error)
+    }
+
+    async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        effects.close_channel(params).await.map_err(map_amp_error)
+    }
+
+    async fn amp_join_channel(&self, params: ChannelJoinParams) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        effects.join_channel(params).await.map_err(map_amp_error)
+    }
+
+    async fn amp_leave_channel(&self, params: ChannelLeaveParams) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        effects.leave_channel(params).await.map_err(map_amp_error)
+    }
+
+    async fn amp_send_message(
+        &self,
+        params: ChannelSendParams,
+    ) -> Result<AmpCiphertext, IntentError> {
+        let effects = self.agent.runtime().effects();
+        effects.send_message(params).await.map_err(map_amp_error)
+    }
+
+    // =========================================================================
+    // Moderation Operations
+    // =========================================================================
+
+    async fn moderation_kick(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        target: AuthorityId,
+        reason: Option<String>,
+    ) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        let now = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+
+        let fact = BlockKickFact::new_ms(
+            context_id,
+            channel_id,
+            target,
+            self.agent.authority_id(),
+            reason.unwrap_or_default(),
+            now.ts_ms,
+        )
+        .to_generic();
+
+        self.commit_relational_facts(&[fact]).await
+    }
+
+    async fn moderation_ban(
+        &self,
+        context_id: ContextId,
+        _channel_id: ChannelId,
+        target: AuthorityId,
+        reason: Option<String>,
+    ) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        let now = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+
+        let fact = BlockBanFact::new_ms(
+            context_id,
+            None,
+            target,
+            self.agent.authority_id(),
+            reason.unwrap_or_default(),
+            now.ts_ms,
+            None,
+        )
+        .to_generic();
+
+        self.commit_relational_facts(&[fact]).await
+    }
+
+    async fn moderation_unban(
+        &self,
+        context_id: ContextId,
+        _channel_id: ChannelId,
+        target: AuthorityId,
+    ) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        let now = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+
+        let fact = BlockUnbanFact::new_ms(
+            context_id,
+            None,
+            target,
+            self.agent.authority_id(),
+            now.ts_ms,
+        )
+        .to_generic();
+
+        self.commit_relational_facts(&[fact]).await
+    }
+
+    async fn moderation_mute(
+        &self,
+        context_id: ContextId,
+        _channel_id: ChannelId,
+        target: AuthorityId,
+        duration_secs: Option<u64>,
+    ) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        let now = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+        let expires_at = duration_secs.map(|s| now.ts_ms.saturating_add(s.saturating_mul(1000)));
+
+        let fact = BlockMuteFact::new_ms(
+            context_id,
+            None,
+            target,
+            self.agent.authority_id(),
+            duration_secs,
+            now.ts_ms,
+            expires_at,
+        )
+        .to_generic();
+
+        self.commit_relational_facts(&[fact]).await
+    }
+
+    async fn moderation_unmute(
+        &self,
+        context_id: ContextId,
+        _channel_id: ChannelId,
+        target: AuthorityId,
+    ) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        let now = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+
+        let fact = BlockUnmuteFact::new_ms(
+            context_id,
+            None,
+            target,
+            self.agent.authority_id(),
+            now.ts_ms,
+        )
+        .to_generic();
+
+        self.commit_relational_facts(&[fact]).await
+    }
+
+    async fn moderation_pin(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+    ) -> Result<(), IntentError> {
+        #[derive(Serialize, Deserialize)]
+        struct PinFact {
+            channel_id: ChannelId,
+            message_id: String,
+            actor_id: AuthorityId,
+        }
+
+        let payload = PinFact {
+            channel_id,
+            message_id,
+            actor_id: self.agent.authority_id(),
+        };
+
+        let fact = RelationalFact::Generic {
+            context_id,
+            binding_type: "moderation:block-pin".to_string(),
+            binding_data: serde_json::to_vec(&payload)
+                .map_err(|e| IntentError::internal_error(format!("Pin fact encode: {e}")))?,
+        };
+
+        self.commit_relational_facts(&[fact]).await
+    }
+
+    async fn moderation_unpin(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+    ) -> Result<(), IntentError> {
+        #[derive(Serialize, Deserialize)]
+        struct UnpinFact {
+            channel_id: ChannelId,
+            message_id: String,
+            actor_id: AuthorityId,
+        }
+
+        let payload = UnpinFact {
+            channel_id,
+            message_id,
+            actor_id: self.agent.authority_id(),
+        };
+
+        let fact = RelationalFact::Generic {
+            context_id,
+            binding_type: "moderation:block-unpin".to_string(),
+            binding_data: serde_json::to_vec(&payload)
+                .map_err(|e| IntentError::internal_error(format!("Unpin fact encode: {e}")))?,
+        };
+
+        self.commit_relational_facts(&[fact]).await
+    }
+
+    async fn channel_set_topic(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        topic: String,
+        timestamp_ms: u64,
+    ) -> Result<(), IntentError> {
+        let fact = aura_chat::ChatFact::channel_updated_ms(
+            context_id,
+            channel_id,
+            None,
+            Some(topic),
+            timestamp_ms,
+            self.agent.authority_id(),
+        )
+        .to_generic();
+
+        self.commit_relational_facts(&[fact]).await
+    }
+
 
     // =========================================================================
     // Sync Operations
@@ -166,6 +427,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn is_peer_online(&self, peer: AuthorityId) -> bool {
+        // Drive inbox processing opportunistically so background-less runtimes
+        // still respond to key-rotation/device-enrollment messages.
+        if let Err(e) = self.agent.process_ceremony_acceptances().await {
+            tracing::debug!("Failed to process ceremony acceptances: {}", e);
+        }
+
         let effects = self.agent.runtime().effects();
         let context = EffectContext::with_authority(self.agent.authority_id()).context_id();
         effects.is_channel_established(context, peer).await
@@ -504,6 +771,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 total_n,
                 participants,
                 new_epoch,
+                None,
             )
             .await
             .map_err(|e| {
@@ -581,20 +849,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
             device_ids.push(current_device_id);
         }
 
-        // For now, only support enrolling a second device (single existing device → 2 devices).
-        //
-        // Enrolling a third+ device requires securely distributing fresh key packages to all
-        // existing devices, which is not yet wired end-to-end in the runtime.
-        let existing_other_devices = device_ids
-            .iter()
-            .filter(|id| **id != current_device_id)
-            .count();
-        if existing_other_devices > 0 {
-            return Err(IntentError::validation_failed(
-                "Device enrollment for multi-device accounts is not yet supported".to_string(),
-            ));
-        }
-
         // Generate a new device id to enroll.
         let entropy = effects.random_bytes(32).await;
         let mut entropy_bytes = [0u8; 32];
@@ -603,14 +857,30 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Prepare new key material for the updated participant set.
         //
-        // With 2 devices, we use a 2-of-2 threshold so the new device can hold a share without
-        // relying on a single-device signing fast path (which would replicate secrets).
-        let participants: Vec<ParticipantIdentity> = vec![
-            ParticipantIdentity::device(current_device_id),
-            ParticipantIdentity::device(new_device_id),
-        ];
-        let total_n = 2u16;
-        let threshold_k = 2u16;
+        // Threshold policy (current):
+        // - single device: 1-of-1
+        // - two devices: 2-of-2
+        // - three+ devices: 2-of-n (avoid single-signer fast path, keep usability)
+        let mut other_device_ids: Vec<aura_core::DeviceId> = device_ids
+            .into_iter()
+            .filter(|id| *id != current_device_id)
+            .collect();
+        other_device_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+
+        let mut participant_device_ids: Vec<aura_core::DeviceId> =
+            Vec::with_capacity(other_device_ids.len() + 2);
+        participant_device_ids.push(current_device_id);
+        participant_device_ids.extend(other_device_ids.iter().copied());
+        participant_device_ids.push(new_device_id);
+
+        let participants: Vec<ParticipantIdentity> = participant_device_ids
+            .iter()
+            .copied()
+            .map(ParticipantIdentity::device)
+            .collect();
+
+        let total_n = participants.len() as u16;
+        let threshold_k: u16 = if total_n <= 2 { total_n } else { 2 };
 
         let (pending_epoch, key_packages, _public_key) = effects
             .rotate_keys(&authority_id, threshold_k, total_n, &participants)
@@ -619,22 +889,32 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to prepare device rotation: {e}"))
             })?;
 
-        let Some(invited_key_package) = key_packages.last().cloned() else {
+        let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
+            std::collections::HashMap::new();
+        for (device_id, key_package) in participant_device_ids
+            .iter()
+            .copied()
+            .zip(key_packages.iter())
+        {
+            key_package_by_device.insert(device_id, key_package.clone());
+        }
+
+        let Some(invited_key_package) = key_package_by_device.get(&new_device_id).cloned() else {
             return Err(IntentError::internal_error(
                 "Key rotation returned no key package for invited device".to_string(),
             ));
         };
 
         // Compute a best-effort prestate-bound ceremony id.
-        let prestate_input = serde_json::to_vec(&(
+        let prestate_input = serde_json::to_vec(&( 
             tree_state.epoch,
             tree_state.root_commitment,
-            vec![current_device_id, new_device_id],
+            participant_device_ids.clone(),
         ))
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
         let prestate_hash = aura_core::Hash32(hash(&prestate_input));
 
-        let op_input = serde_json::to_vec(&(
+        let op_input = serde_json::to_vec(&( 
             new_device_id,
             pending_epoch,
             threshold_k,
@@ -653,21 +933,88 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
         let ceremony_id = format!("ceremony:{}", hex::encode(ceremony_hash.as_bytes()));
 
-        // Register ceremony (acceptance required from the invited device).
+        // Register ceremony (acceptance required from all non-initiator devices).
+        let acceptor_device_ids: Vec<aura_core::DeviceId> = other_device_ids
+            .iter()
+            .copied()
+            .chain(std::iter::once(new_device_id))
+            .collect();
+        let acceptors: Vec<ParticipantIdentity> = acceptor_device_ids
+            .iter()
+            .copied()
+            .map(ParticipantIdentity::device)
+            .collect();
+        let acceptance_n = acceptors.len() as u16;
+
         let tracker = self.agent.ceremony_tracker().await;
         tracker
             .register(
                 ceremony_id.clone(),
                 aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
-                1,
-                1,
-                vec![ParticipantIdentity::device(new_device_id)],
+                acceptance_n,
+                acceptance_n,
+                acceptors,
                 pending_epoch,
+                Some(new_device_id),
             )
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to register ceremony: {e}"))
             })?;
+
+        // Distribute new-epoch key packages to existing devices (so they are not bricked).
+        if !other_device_ids.is_empty() {
+            let context_entropy = {
+                let mut h = aura_core::hash::hasher();
+                h.update(b"DEVICE_ENROLLMENT_CONTEXT");
+                h.update(&authority_id.to_bytes());
+                h.update(ceremony_id.as_bytes());
+                h.finalize()
+            };
+            let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+
+            for device_id in &other_device_ids {
+                let Some(key_package) = key_package_by_device.get(device_id).cloned() else {
+                    return Err(IntentError::internal_error(format!(
+                        "Missing key package for existing device {}",
+                        device_id
+                    )));
+                };
+
+                let mut metadata = std::collections::HashMap::new();
+                metadata.insert(
+                    "content-type".to_string(),
+                    "application/aura-device-enrollment-key-package".to_string(),
+                );
+                metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+                metadata.insert("pending-epoch".to_string(), pending_epoch.to_string());
+                metadata.insert(
+                    "initiator-device-id".to_string(),
+                    current_device_id.to_string(),
+                );
+                metadata.insert("participant-device-id".to_string(), device_id.to_string());
+                metadata.insert(
+                    "aura-destination-device-id".to_string(),
+                    device_id.to_string(),
+                );
+
+                let envelope = aura_core::effects::TransportEnvelope {
+                    destination: authority_id,
+                    source: authority_id,
+                    context: ceremony_context,
+                    payload: key_package,
+                    metadata,
+                    receipt: None,
+                };
+
+                effects.send_envelope(envelope).await.map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to send device enrollment key package to {}: {e}",
+                        device_id
+                    ))
+                })?;
+            }
+        }
 
         // Create a shareable device enrollment invitation (out-of-band transfer).
         let invitation_service = self.agent.invitations().map_err(|e| {
@@ -818,6 +1165,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 0,
                 Vec::new(),
                 pending_epoch,
+                None,
             )
             .await
             .map_err(|e| {

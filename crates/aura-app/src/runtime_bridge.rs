@@ -35,7 +35,11 @@
 
 use crate::core::IntentError;
 use async_trait::async_trait;
-use aura_core::identifiers::AuthorityId;
+use aura_core::effects::amp::{
+    AmpCiphertext, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
+    ChannelLeaveParams, ChannelSendParams,
+};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{
     ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
 };
@@ -316,6 +320,91 @@ pub trait RuntimeBridge: Send + Sync {
     /// - Persisting the committed facts
     /// - Publishing them to the ReactiveScheduler for UI signal updates
     async fn commit_relational_facts(&self, facts: &[RelationalFact]) -> Result<(), IntentError>;
+
+
+    // =========================================================================
+    // AMP Channel Operations
+    // =========================================================================
+
+    async fn amp_create_channel(
+        &self,
+        params: ChannelCreateParams,
+    ) -> Result<ChannelId, IntentError>;
+
+    async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError>;
+
+    async fn amp_join_channel(&self, params: ChannelJoinParams) -> Result<(), IntentError>;
+
+    async fn amp_leave_channel(&self, params: ChannelLeaveParams) -> Result<(), IntentError>;
+
+    async fn amp_send_message(
+        &self,
+        params: ChannelSendParams,
+    ) -> Result<AmpCiphertext, IntentError>;
+
+    // =========================================================================
+    // Moderation Operations
+    // =========================================================================
+
+    async fn moderation_kick(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        target: AuthorityId,
+        reason: Option<String>,
+    ) -> Result<(), IntentError>;
+
+    async fn moderation_ban(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        target: AuthorityId,
+        reason: Option<String>,
+    ) -> Result<(), IntentError>;
+
+    async fn moderation_unban(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        target: AuthorityId,
+    ) -> Result<(), IntentError>;
+
+    async fn moderation_mute(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        target: AuthorityId,
+        duration_secs: Option<u64>,
+    ) -> Result<(), IntentError>;
+
+    async fn moderation_unmute(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        target: AuthorityId,
+    ) -> Result<(), IntentError>;
+
+    async fn moderation_pin(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+    ) -> Result<(), IntentError>;
+
+    async fn moderation_unpin(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+    ) -> Result<(), IntentError>;
+
+    async fn channel_set_topic(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        topic: String,
+        timestamp_ms: u64,
+    ) -> Result<(), IntentError>;
 
     // =========================================================================
     // Sync Operations
@@ -721,6 +810,109 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn commit_relational_facts(&self, _facts: &[RelationalFact]) -> Result<(), IntentError> {
         // In offline mode, there is no canonical runtime journal.
         Ok(())
+    }
+
+
+    async fn amp_create_channel(
+        &self,
+        _params: ChannelCreateParams,
+    ) -> Result<ChannelId, IntentError> {
+        Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn amp_close_channel(&self, _params: ChannelCloseParams) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn amp_join_channel(&self, _params: ChannelJoinParams) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn amp_leave_channel(&self, _params: ChannelLeaveParams) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn amp_send_message(
+        &self,
+        _params: ChannelSendParams,
+    ) -> Result<AmpCiphertext, IntentError> {
+        Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn moderation_kick(
+        &self,
+        _context_id: ContextId,
+        _channel_id: ChannelId,
+        _target: AuthorityId,
+        _reason: Option<String>,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("Moderation not available in offline mode"))
+    }
+
+    async fn moderation_ban(
+        &self,
+        _context_id: ContextId,
+        _channel_id: ChannelId,
+        _target: AuthorityId,
+        _reason: Option<String>,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("Moderation not available in offline mode"))
+    }
+
+    async fn moderation_unban(
+        &self,
+        _context_id: ContextId,
+        _channel_id: ChannelId,
+        _target: AuthorityId,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("Moderation not available in offline mode"))
+    }
+
+    async fn moderation_mute(
+        &self,
+        _context_id: ContextId,
+        _channel_id: ChannelId,
+        _target: AuthorityId,
+        _duration_secs: Option<u64>,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("Moderation not available in offline mode"))
+    }
+
+    async fn moderation_unmute(
+        &self,
+        _context_id: ContextId,
+        _channel_id: ChannelId,
+        _target: AuthorityId,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("Moderation not available in offline mode"))
+    }
+
+    async fn moderation_pin(
+        &self,
+        _context_id: ContextId,
+        _channel_id: ChannelId,
+        _message_id: String,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("Moderation not available in offline mode"))
+    }
+
+    async fn moderation_unpin(
+        &self,
+        _context_id: ContextId,
+        _channel_id: ChannelId,
+        _message_id: String,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("Moderation not available in offline mode"))
+    }
+
+    async fn channel_set_topic(
+        &self,
+        _context_id: ContextId,
+        _channel_id: ChannelId,
+        _topic: String,
+        _timestamp_ms: u64,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent("Channel metadata not available in offline mode"))
     }
 
     async fn get_sync_status(&self) -> SyncStatus {

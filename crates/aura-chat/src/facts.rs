@@ -80,6 +80,21 @@ pub enum ChatFact {
         /// Authority that closed the channel
         actor_id: AuthorityId,
     },
+    /// Channel metadata updated (name/topic)
+    ChannelUpdated {
+        /// Relational context where the channel exists
+        context_id: ContextId,
+        /// Channel being updated
+        channel_id: ChannelId,
+        /// Updated channel name (optional)
+        name: Option<String>,
+        /// Updated channel topic (optional)
+        topic: Option<String>,
+        /// Timestamp when channel was updated (uses unified time system)
+        updated_at: PhysicalTime,
+        /// Authority that updated the channel
+        actor_id: AuthorityId,
+    },
     /// Message sent with an opaque/sealed payload.
     ///
     /// The payload is treated as **opaque bytes** by default. Higher layers may
@@ -157,6 +172,7 @@ impl ChatFact {
         match self {
             ChatFact::ChannelCreated { created_at, .. } => created_at.ts_ms,
             ChatFact::ChannelClosed { closed_at, .. } => closed_at.ts_ms,
+            ChatFact::ChannelUpdated { updated_at, .. } => updated_at.ts_ms,
             ChatFact::MessageSentSealed { sent_at, .. } => sent_at.ts_ms,
             ChatFact::MessageRead { read_at, .. } => read_at.ts_ms,
             ChatFact::MessageDelivered { delivered_at, .. } => delivered_at.ts_ms,
@@ -202,6 +218,28 @@ impl ChatFact {
             channel_id,
             closed_at: PhysicalTime {
                 ts_ms: closed_at_ms,
+                uncertainty: None,
+            },
+            actor_id,
+        }
+    }
+
+    /// Create a ChannelUpdated fact with millisecond timestamp.
+    pub fn channel_updated_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        name: Option<String>,
+        topic: Option<String>,
+        updated_at_ms: u64,
+        actor_id: AuthorityId,
+    ) -> Self {
+        Self::ChannelUpdated {
+            context_id,
+            channel_id,
+            name,
+            topic,
+            updated_at: PhysicalTime {
+                ts_ms: updated_at_ms,
                 uncertainty: None,
             },
             actor_id,
@@ -343,6 +381,8 @@ impl DomainFact for ChatFact {
         match self {
             ChatFact::ChannelCreated { context_id, .. } => *context_id,
             ChatFact::ChannelClosed { context_id, .. } => *context_id,
+            ChatFact::ChannelUpdated { context_id, .. } => *context_id,
+            ChatFact::ChannelUpdated { context_id, .. } => *context_id,
             ChatFact::MessageSentSealed { context_id, .. } => *context_id,
             ChatFact::MessageRead { context_id, .. } => *context_id,
             ChatFact::MessageDelivered { context_id, .. } => *context_id,
@@ -388,6 +428,7 @@ impl FactReducer for ChatFactReducer {
         let fact_context_id = match &fact {
             ChatFact::ChannelCreated { context_id, .. } => *context_id,
             ChatFact::ChannelClosed { context_id, .. } => *context_id,
+            ChatFact::ChannelUpdated { context_id, .. } => *context_id,
             ChatFact::MessageSentSealed { context_id, .. } => *context_id,
             ChatFact::MessageRead { context_id, .. } => *context_id,
             ChatFact::MessageDelivered { context_id, .. } => *context_id,
@@ -404,6 +445,10 @@ impl FactReducer for ChatFactReducer {
             ),
             ChatFact::ChannelClosed { channel_id, .. } => (
                 "channel-closed".to_string(),
+                channel_id.to_string().into_bytes(),
+            ),
+            ChatFact::ChannelUpdated { channel_id, .. } => (
+                "channel-updated".to_string(),
                 channel_id.to_string().into_bytes(),
             ),
             ChatFact::MessageSentSealed { message_id, .. } => {

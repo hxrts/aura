@@ -437,6 +437,24 @@ impl ReactiveView for ChatSignalView {
                     state.remove_channel(&channel_id);
                     changed = true;
                 }
+                ChatFact::ChannelUpdated {
+                    channel_id,
+                    name,
+                    topic,
+                    updated_at,
+                    ..
+                } => {
+                    if let Some(channel) = state.channel_mut(&channel_id) {
+                        if let Some(name) = name {
+                            channel.name = name;
+                        }
+                        if topic.is_some() {
+                            channel.topic = topic;
+                        }
+                        channel.last_activity = updated_at.ts_ms;
+                    }
+                    changed = true;
+                }
                 ChatFact::MessageSentSealed {
                     channel_id,
                     message_id,

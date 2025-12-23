@@ -21,8 +21,8 @@ use super::EffectCommand;
 
 // Re-export workflow functions for convenience
 pub use aura_app::workflows::messaging::{
-    close_channel, create_channel, invite_user_to_channel, send_action, send_direct_message,
-    send_message, set_topic, start_direct_chat,
+    close_channel, create_channel, invite_user_to_channel, join_channel, leave_channel, send_action,
+    send_direct_message, send_message, set_topic, start_direct_chat,
 };
 
 /// Get current time in milliseconds since Unix epoch
@@ -104,7 +104,7 @@ pub async fn handle_messaging(
         }
 
         EffectCommand::SetTopic { channel, text } => {
-            match set_topic(app_core, channel, text).await {
+            match set_topic(app_core, channel, text, current_time_ms()).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to set topic: {}",
@@ -141,21 +141,15 @@ pub async fn handle_messaging(
             }
         }
 
-        EffectCommand::JoinChannel { channel } => {
-            let timestamp = current_time_ms();
-            match create_channel(app_core, channel, None, &[], timestamp).await {
-                Ok(channel_id) => Some(Ok(OpResponse::Data(format!(
-                    "Joined channel: {}",
-                    channel_id
-                )))),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to join channel: {}",
-                    e
-                )))),
-            }
-        }
+        EffectCommand::JoinChannel { channel } => match join_channel(app_core, channel).await {
+            Ok(()) => Some(Ok(OpResponse::Data(format!("Joined channel: {}", channel)))),
+            Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                "Failed to join channel: {}",
+                e
+            )))),
+        },
 
-        EffectCommand::LeaveChannel { channel } => match close_channel(app_core, channel).await {
+        EffectCommand::LeaveChannel { channel } => match leave_channel(app_core, channel).await {
             Ok(()) => Some(Ok(OpResponse::Ok)),
             Err(e) => Some(Err(super::types::OpError::Failed(format!(
                 "Failed to leave channel: {}",
@@ -163,7 +157,7 @@ pub async fn handle_messaging(
             )))),
         },
 
-        EffectCommand::CloseChannel { channel } => match close_channel(app_core, channel).await {
+        EffectCommand::CloseChannel { channel } => match close_channel(app_core, channel, current_time_ms()).await {
             Ok(()) => Some(Ok(OpResponse::Ok)),
             Err(e) => Some(Err(super::types::OpError::Failed(format!(
                 "Failed to close channel: {}",

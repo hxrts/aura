@@ -181,6 +181,17 @@ impl ViewDeltaReducer for ChatViewReducer {
             ChatFact::ChannelClosed { channel_id, .. } => Some(ChatDelta::ChannelRemoved {
                 channel_id: channel_id.to_string(),
             }),
+            ChatFact::ChannelUpdated {
+                channel_id,
+                name,
+                topic,
+                ..
+            } => Some(ChatDelta::ChannelUpdated {
+                channel_id: channel_id.to_string(),
+                name,
+                topic,
+                member_count: None,
+            }),
             ChatFact::MessageSentSealed {
                 channel_id,
                 message_id,
