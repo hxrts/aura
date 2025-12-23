@@ -1,3 +1,5 @@
+//! TUI command toast wiring tests
+
 #![allow(clippy::expect_used)]
 
 use std::sync::Arc;

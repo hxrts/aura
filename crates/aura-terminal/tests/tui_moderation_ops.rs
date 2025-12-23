@@ -1,3 +1,5 @@
+//! TUI moderation dispatch smoke tests
+
 #![allow(clippy::expect_used)]
 
 use std::sync::Arc;

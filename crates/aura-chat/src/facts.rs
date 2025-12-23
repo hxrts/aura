@@ -382,7 +382,6 @@ impl DomainFact for ChatFact {
             ChatFact::ChannelCreated { context_id, .. } => *context_id,
             ChatFact::ChannelClosed { context_id, .. } => *context_id,
             ChatFact::ChannelUpdated { context_id, .. } => *context_id,
-            ChatFact::ChannelUpdated { context_id, .. } => *context_id,
             ChatFact::MessageSentSealed { context_id, .. } => *context_id,
             ChatFact::MessageRead { context_id, .. } => *context_id,
             ChatFact::MessageDelivered { context_id, .. } => *context_id,
