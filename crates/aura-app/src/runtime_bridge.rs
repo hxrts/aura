@@ -484,7 +484,6 @@ pub trait RuntimeBridge: Send + Sync {
     ) -> Result<DeviceEnrollmentStart, IntentError>;
 
     /// Initiate a device removal ("remove device") ceremony.
-
     ///
     /// The runtime is responsible for rotating threshold keys and updating the
     /// account commitment tree to remove the specified device leaf.

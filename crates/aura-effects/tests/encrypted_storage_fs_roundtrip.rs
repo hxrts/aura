@@ -27,7 +27,8 @@ async fn encrypted_storage_fs_round_trip_is_not_plaintext_on_disk() {
     let crypto = Arc::new(RealCryptoHandler::new());
     let secure = Arc::new(RealSecureStorageHandler::with_base_path(secure_root));
 
-    let encrypted = EncryptedStorage::new(storage, crypto, secure, EncryptedStorageConfig::default());
+    let encrypted =
+        EncryptedStorage::new(storage, crypto, secure, EncryptedStorageConfig::default());
 
     let key = "fs-roundtrip";
     let marker = b"AURA_PLAINTEXT_MARKER__DO_NOT_LEAK__AURA_PLAINTEXT_MARKER";

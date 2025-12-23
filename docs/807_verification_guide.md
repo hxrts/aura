@@ -368,15 +368,119 @@ The `aura-simulator::quint` module provides property evaluation during simulatio
 
 ```
 crates/aura-simulator/src/quint/
+├── action_registry.rs      # ActionHandler trait and registry
+├── domain_handlers.rs      # Handlers for protocol_capability_properties.qnt
+├── aura_state_extractors.rs # QuintSimulationState for capability testing
+├── itf_loader.rs           # ITF trace loading
+├── itf_fuzzer.rs           # ITF-based fuzz testing
+├── trace_converter.rs      # ITF trace conversion
 ├── properties.rs           # Property extraction and monitoring
-├── itf_fuzzer.rs          # ITF-based fuzz testing
-├── trace_converter.rs     # ITF trace conversion
 ├── simulation_evaluator.rs # Property evaluation engine
-├── chaos_generator.rs     # Byzantine scenario generation
-└── byzantine_mapper.rs    # Byzantine role mapping
+├── chaos_generator.rs      # Byzantine scenario generation
+└── byzantine_mapper.rs     # Byzantine role mapping
 ```
 
 The property evaluator validates properties in real-time during simulation runs. The ITF fuzzer generates test cases from formal specifications. The chaos generator injects Byzantine scenarios for fault tolerance testing.
+
+## Conformance Testing Patterns
+
+There are two approaches for verifying Rust implementations against Quint specifications:
+
+### Approach 1: Direct Conformance Testing (Recommended)
+
+ITF traces from `quint run` contain expected states computed by Quint. For conformance testing, compare production Rust code output directly against these expected states:
+
+```rust
+use aura_core::effects::QuintMappable;
+
+#[test]
+fn test_consensus_matches_quint() {
+    let trace = ITFLoader::load("consensus_fast_path.itf.json")?;
+
+    for (i, states) in trace.states.windows(2).enumerate() {
+        // 1. Parse Quint pre-state into Rust types
+        let rust_state = ConsensusState::from_quint(&states[0].variables)?;
+
+        // 2. Apply action using PRODUCTION code (no simulation handlers)
+        let action = states[1].action_taken.as_ref().unwrap();
+        let new_state = consensus::core::apply_action(&rust_state, action)?;
+
+        // 3. Compare Rust result to Quint expected post-state
+        assert_eq!(
+            new_state.to_quint(),
+            states[1].variables,
+            "Divergence at step {}: action {}", i, action
+        );
+    }
+}
+```
+
+**Key insight**: Quint already computed the expected states - no need to re-implement Quint logic in Rust handlers.
+
+**Requirements for Direct Conformance:**
+1. **Pure Core Extraction**: Protocol state machine must be effect-free
+2. **QuintMappable Implementation**: All state types implement bidirectional conversion
+3. **ITF Trace Generation**: Generate traces covering relevant scenarios
+
+### Approach 2: Generative Exploration
+
+For state space exploration where Rust drives non-deterministic choices, use `ActionRegistry` with domain handlers. This pattern re-implements Quint actions in Rust:
+
+```rust
+// Generative pattern - handlers mirror Quint actions
+let mut registry = ActionRegistry::new();
+registry.register(InitContextHandler);
+registry.register(TransportOpHandler);
+
+let result = registry.execute("initContext", &params, &state).await?;
+```
+
+**When to use generative exploration:**
+- Large state spaces requiring guided exploration
+- Testing Rust-specific edge cases not in Quint traces
+- Fuzzing with real effect execution
+
+**Current implementation**: `domain_handlers.rs` implements handlers for `protocol_capability_properties.qnt` only. For new protocols, prefer direct conformance testing.
+
+### QuintMappable Trait
+
+The `QuintMappable` trait in `aura-core/src/effects/quint.rs` provides bidirectional conversion between Rust types and Quint JSON:
+
+```rust
+pub trait QuintMappable: Sized {
+    fn to_quint(&self) -> Value;
+    fn from_quint(value: &Value) -> Result<Self>;
+    fn quint_type_name() -> &'static str;
+}
+```
+
+**Already implemented for:**
+- `AuthorityId`, `ContextId`, `Epoch`, `FlowBudget`
+- Collections: `Vec<T>`, `HashSet<T>`, `HashMap<K, V>`
+
+**To add new protocol types**, implement `QuintMappable` and include roundtrip tests:
+
+```rust
+#[test]
+fn test_consensus_state_roundtrip() {
+    let state = ConsensusState { /* ... */ };
+    let quint = state.to_quint();
+    let restored = ConsensusState::from_quint(&quint).unwrap();
+    assert_eq!(state, restored);
+}
+```
+
+### Choosing an Approach
+
+| Scenario | Recommended Approach |
+|----------|---------------------|
+| Verifying new protocol matches spec | Direct Conformance |
+| Adding coverage for existing spec | Direct Conformance |
+| Exploring edge cases beyond traces | Generative Exploration |
+| Fuzzing with effect execution | Generative Exploration |
+| Protocol-specific state space | Generative Exploration |
+
+For most verification tasks, **direct conformance testing** is simpler and avoids duplicating Quint logic in Rust.
 
 ### ITF Trace Format
 

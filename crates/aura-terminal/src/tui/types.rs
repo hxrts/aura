@@ -1191,6 +1191,14 @@ impl TraversalDepth {
             Self::Interior => "⌂",
         }
     }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Street => Self::Frontage,
+            Self::Frontage => Self::Interior,
+            Self::Interior => Self::Street,
+        }
+    }
 }
 
 /// Block summary for neighborhood view

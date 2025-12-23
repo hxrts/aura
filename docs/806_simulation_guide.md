@@ -8,8 +8,71 @@ Aura's simulation approach is built on four key principles:
 
 1. **Production Code Testing** - Run actual protocol implementations through real effect handlers
 2. **Effect System Control** - All impure operations (time, randomness, I/O) controlled via effect traits
-3. **Middleware Pattern** - Fault injection and monitoring via middleware layer  
+3. **Middleware Pattern** - Fault injection and monitoring via middleware layer
 4. **Deterministic Execution** - Controlled effects enable fully reproducible simulations
+
+## Two Simulation Systems
+
+Aura has **two separate simulation systems** that serve complementary purposes:
+
+### 1. TOML Scenario System (Human-Written Integration Tests)
+
+```
+scenarios/*.toml → aura-terminal/handlers/scenarios/execution.rs → SimulationScenarioHandler
+```
+
+| Aspect | Description |
+|--------|-------------|
+| **Location** | `scenarios/` directory (e.g., `scenarios/core_protocols/dkd_basic.toml`) |
+| **Parser** | `aura-terminal/src/handlers/scenarios/execution.rs` |
+| **Executor** | `SimulationScenarioHandler` in `aura-simulator/src/handlers/scenario.rs` |
+| **Actions** | `run_choreography`, `verify_property`, `simulate_data_loss`, `apply_network_condition` |
+| **Purpose** | Human-readable end-to-end integration tests with fault injection |
+
+Example TOML scenario:
+```toml
+[metadata]
+name = "dkd_basic_derivation"
+description = "Basic P2P deterministic key derivation scenario"
+
+[[phases]]
+name = "key_derivation"
+actions = [
+    { type = "run_choreography", choreography = "p2p_dkd", participants = ["alice", "bob"] }
+]
+
+[[properties]]
+name = "derived_keys_match"
+property_type = "safety"
+```
+
+### 2. Quint Action System (Model-Based Testing)
+
+```
+verification/quint/*.qnt → ITF traces → ActionRegistry → domain_handlers.rs
+```
+
+| Aspect | Description |
+|--------|-------------|
+| **Location** | `crates/aura-simulator/src/quint/` |
+| **Registry** | `action_registry.rs` with `ActionHandler` trait |
+| **Handlers** | `domain_handlers.rs` (implements `protocol_capability_properties.qnt` actions) |
+| **State** | `aura_state_extractors.rs` with `QuintSimulationState` |
+| **Actions** | `initContext`, `initAuthority`, `completeTransportOp`, `attenuateToken` |
+| **Purpose** | Quint-driven generative exploration and conformance testing |
+
+### When to Use Each System
+
+| Use Case | System |
+|----------|--------|
+| Human-readable integration tests | TOML Scenarios |
+| End-to-end choreography testing | TOML Scenarios |
+| Fault injection with named scenarios | TOML Scenarios |
+| Model-based testing from formal specs | Quint Actions |
+| ITF trace conformance testing | Quint Actions |
+| Generative state space exploration | Quint Actions |
+
+These systems are **not redundant** - TOML scenarios provide high-level integration tests while Quint actions enable formal verification-driven testing.
 
 **Critical**: Simulation determinism depends on [effect system](106_effect_system_and_runtime.md) compliance. Protocol code must use effect traits (`TimeEffects`, `RandomEffects`, etc.) instead of direct system calls (`SystemTime::now()`, `thread_rng()`, etc.). This enables controlled time, seeded randomness, and predictable I/O for reliable simulation results.
 
@@ -444,6 +507,73 @@ async fn test_with_quint_verification() {
 ## Generative Simulation
 
 Generative simulation bridges Quint formal specifications with actual Aura effect execution. Unlike basic Quint integration that only verifies abstract properties, generative simulation executes Quint actions through real effect handlers with full state synchronization.
+
+### Two Approaches to Model-Based Testing
+
+There are two distinct approaches for testing Rust code against Quint specifications:
+
+#### Approach 1: Direct Conformance Testing (Recommended for New Protocols)
+
+ITF traces from `quint run` contain **expected states** at each step. For conformance testing, we don't need Rust handlers that re-implement Quint logic - we simply:
+
+1. Load ITF trace with expected states
+2. Parse Quint state via `QuintMappable` into Rust types
+3. Apply action using **production Rust code**
+4. Compare Rust result to Quint expected state
+
+```rust
+// Direct conformance pattern
+#[test]
+fn test_protocol_matches_quint() {
+    let trace = ITFLoader::load("protocol_fast_path.itf.json")?;
+
+    for (i, states) in trace.states.windows(2).enumerate() {
+        let pre_state = ProtocolState::from_quint(&states[0])?;
+        let action = states[1].action_taken.as_ref().unwrap();
+
+        // Apply action using PRODUCTION code
+        let new_state = protocol::core::apply_action(&pre_state, action)?;
+
+        // Compare to Quint expected state
+        assert_eq!(new_state.to_quint(), states[1].variables);
+    }
+}
+```
+
+**Advantages:**
+- Tests production code directly
+- No logic duplication (Quint is single source of truth)
+- Simple implementation
+
+#### Approach 2: Generative Exploration (For State Space Exploration)
+
+For exploring state spaces where Rust drives non-deterministic choices, use the `ActionRegistry` pattern with domain handlers. This requires handlers that re-implement Quint logic in Rust.
+
+```rust
+// Generative exploration pattern
+let mut registry = ActionRegistry::new();
+registry.register(InitContextHandler);  // Re-implements Quint's initContext
+
+let result = registry.execute("initContext", &params, &state).await?;
+```
+
+**When to use:**
+- Exploring large state spaces with seeded randomness
+- Testing Rust-specific edge cases not in Quint traces
+- Fuzzing with effect execution
+
+### Current Infrastructure
+
+The existing `domain_handlers.rs` implements handlers for `protocol_capability_properties.qnt` specifically:
+
+| File | Purpose | Extend for New Protocols? |
+|------|---------|---------------------------|
+| `itf_loader.rs` | Load ITF traces | **Reuse** |
+| `aura-core/effects/quint.rs` | `QuintMappable` trait | **Extend** with new types |
+| `domain_handlers.rs` | Capability property handlers | **Do not extend** - protocol-specific |
+| `aura_state_extractors.rs` | `QuintSimulationState` | **Do not extend** - protocol-specific |
+
+For new protocols (e.g., consensus), prefer **Direct Conformance Testing** to avoid duplicating Quint logic in Rust.
 
 ### Architecture Overview
 

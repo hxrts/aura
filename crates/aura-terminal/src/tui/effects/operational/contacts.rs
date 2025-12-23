@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::AppCore;
+use aura_effects::time::PhysicalTimeHandler;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
@@ -16,10 +17,7 @@ pub use aura_app::workflows::contacts::{remove_contact, update_contact_nickname}
 
 /// Get current time in milliseconds since Unix epoch
 fn current_time_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    PhysicalTimeHandler::new().physical_time_now_ms()
 }
 
 /// Handle contact commands

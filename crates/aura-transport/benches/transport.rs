@@ -5,9 +5,11 @@
 //! - Message serialization/deserialization
 //! - Privacy level operations
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use aura_transport::{Envelope, ScopedEnvelope, PrivacyLevel};
-use aura_core::{identifiers::DeviceId, RelationshipId};
+
+#![allow(missing_docs)]
+use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_transport::{Envelope, ScopedEnvelope};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 /// Benchmark envelope creation
 fn bench_envelope_creation(c: &mut Criterion) {
@@ -23,20 +25,28 @@ fn bench_envelope_creation(c: &mut Criterion) {
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("new_blinded", size), &payload, |b, payload| {
-            b.iter(|| {
-                let envelope = Envelope::new_blinded(payload.clone());
-                black_box(envelope);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("new_blinded", size),
+            &payload,
+            |b, payload| {
+                b.iter(|| {
+                    let envelope = Envelope::new_blinded(payload.clone());
+                    black_box(envelope);
+                });
+            },
+        );
 
-        let relationship_id = RelationshipId::new([3u8; 32]);
-        group.bench_with_input(BenchmarkId::new("new_scoped", size), &payload, |b, payload| {
-            b.iter(|| {
-                let envelope = Envelope::new_scoped(payload.clone(), relationship_id, None);
-                black_box(envelope);
-            });
-        });
+        let context_id = ContextId::new_from_entropy([3u8; 32]);
+        group.bench_with_input(
+            BenchmarkId::new("new_scoped", size),
+            &payload,
+            |b, payload| {
+                b.iter(|| {
+                    let envelope = Envelope::new_scoped(payload.clone(), context_id, None);
+                    black_box(envelope);
+                });
+            },
+        );
     }
 
     group.finish();
@@ -52,18 +62,22 @@ fn bench_envelope_serialization(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("serialize", size), &envelope, |b, env| {
             b.iter(|| {
-                let serialized = serde_json::to_vec(env).unwrap();
+                let serialized = serde_json::to_vec(env).unwrap_or_default();
                 black_box(serialized);
             });
         });
 
-        let serialized = serde_json::to_vec(&envelope).unwrap();
-        group.bench_with_input(BenchmarkId::new("deserialize", size), &serialized, |b, data| {
-            b.iter(|| {
-                let env: Envelope = serde_json::from_slice(data).unwrap();
-                black_box(env);
-            });
-        });
+        let serialized = serde_json::to_vec(&envelope).unwrap_or_default();
+        group.bench_with_input(
+            BenchmarkId::new("deserialize", size),
+            &serialized,
+            |b, data| {
+                b.iter(|| {
+                    let env: Envelope = serde_json::from_slice(data).unwrap_or_else(|_| Envelope::new(Vec::new()));
+                    black_box(env);
+                });
+            },
+        );
     }
 
     group.finish();
@@ -72,33 +86,39 @@ fn bench_envelope_serialization(c: &mut Criterion) {
 /// Benchmark scoped envelope operations
 fn bench_scoped_envelope(c: &mut Criterion) {
     let payload = vec![0u8; 1024];
-    let relationship_id = RelationshipId::new([1u8; 32]);
-    let sender = DeviceId::from_bytes([2u8; 32]);
-    let recipient = DeviceId::from_bytes([3u8; 32]);
+    let context_id = ContextId::new_from_entropy([1u8; 32]);
+    let sender = AuthorityId::new_from_entropy([2u8; 32]);
+    let recipient = AuthorityId::new_from_entropy([3u8; 32]);
 
     c.bench_function("scoped_envelope_creation", |b| {
         b.iter(|| {
             let envelope = Envelope::new(payload.clone());
-            let scoped = ScopedEnvelope::new(envelope, relationship_id, sender, recipient);
+            let scoped = ScopedEnvelope::new(envelope, context_id, sender, recipient).ok();
             black_box(scoped);
         });
     });
 
     let envelope = Envelope::new(payload.clone());
-    let scoped = ScopedEnvelope::new(envelope, relationship_id, sender, recipient);
+    let scoped = ScopedEnvelope::new(envelope, context_id, sender, recipient).ok();
 
     c.bench_function("scoped_envelope_verify_sender", |b| {
         b.iter(|| {
-            let result = scoped.verify_sender(sender);
+            let result = scoped
+                .as_ref()
+                .map(|s| s.verify_sender(sender))
+                .unwrap_or(false);
             black_box(result);
         });
     });
 
     c.bench_function("scoped_envelope_into_envelope", |b| {
         b.iter(|| {
-            let cloned = scoped.clone();
-            let envelope = cloned.into_envelope();
-            black_box(envelope);
+            if let Some(cloned) = scoped.clone() {
+                let envelope = cloned.into_envelope();
+                black_box(envelope);
+            } else {
+                black_box(Envelope::new(Vec::new()));
+            }
         });
     });
 }
@@ -107,11 +127,8 @@ fn bench_scoped_envelope(c: &mut Criterion) {
 fn bench_privacy_operations(c: &mut Criterion) {
     let clear_envelope = Envelope::new(vec![0u8; 1024]);
     let blinded_envelope = Envelope::new_blinded(vec![0u8; 1024]);
-    let scoped_envelope = Envelope::new_scoped(
-        vec![0u8; 1024],
-        RelationshipId::new([1u8; 32]),
-        None
-    );
+    let scoped_envelope =
+        Envelope::new_scoped(vec![0u8; 1024], ContextId::new_from_entropy([1u8; 32]), None);
 
     c.bench_function("privacy_level_clear", |b| {
         b.iter(|| {
@@ -134,9 +151,9 @@ fn bench_privacy_operations(c: &mut Criterion) {
         });
     });
 
-    c.bench_function("requires_relationship_scope", |b| {
+    c.bench_function("requires_context_scope", |b| {
         b.iter(|| {
-            let result = scoped_envelope.requires_relationship_scope();
+            let result = scoped_envelope.requires_context_scope();
             black_box(result);
         });
     });

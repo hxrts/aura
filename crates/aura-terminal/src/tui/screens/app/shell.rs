@@ -1836,7 +1836,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 // Default to Street-level traversal depth
                                                 (cb.neighborhood.on_enter_block)(
                                                     block_id.clone(),
-                                                    TraversalDepth::default(),
+                                                    new_state.neighborhood.enter_depth,
                                                 );
                                             } else {
                                                 new_state.toast_error("No block selected");

@@ -120,11 +120,13 @@ pub use messaging::{
     create_channel, get_chat_state, invite_user_to_channel, send_action, send_direct_message,
     send_message, start_direct_chat,
 };
+pub use moderation::{
+    ban_user, kick_user, mute_user, pin_message, unban_user, unmute_user, unpin_message,
+};
 pub use network::{
     discover_peers, get_discovered_peers, list_lan_peers, list_peers, update_connection_status,
 };
 pub use query::{get_user_info, list_contacts, list_participants};
-pub use moderation::{ban_user, kick_user, mute_user, pin_message, unban_user, unmute_user, unpin_message};
 #[cfg(feature = "signals")]
 pub use recovery::{approve_recovery, dispute_recovery, get_recovery_status, start_recovery};
 pub use settings::{get_settings, set_channel_mode, update_mfa_policy, update_nickname};

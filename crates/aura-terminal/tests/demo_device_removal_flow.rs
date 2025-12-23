@@ -50,7 +50,8 @@ async fn setup_test_env() -> TestEnv {
 
     let shared_transport = SharedTransport::new();
     let seed = 2030u64;
-    let effect_ctx = EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
+    let effect_ctx =
+        EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
     let mut agent_config = AgentConfig::default();
     agent_config.device_id = ids::device_id(&device_id_str);
@@ -208,7 +209,10 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
     .await
     .expect("monitor_key_rotation_ceremony should complete");
 
-    assert!(status.is_complete, "enrollment ceremony should be committed");
+    assert!(
+        status.is_complete,
+        "enrollment ceremony should be committed"
+    );
 
     wait_for_device_present(&env.app_core_a, &start.device_id).await;
 
@@ -229,7 +233,10 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
     .await
     .expect("monitor_key_rotation_ceremony should complete for removal");
 
-    assert!(removal_status.is_complete, "removal ceremony should be committed");
+    assert!(
+        removal_status.is_complete,
+        "removal ceremony should be committed"
+    );
     assert_eq!(
         removal_status.kind,
         aura_app::runtime_bridge::CeremonyKind::DeviceRemoval

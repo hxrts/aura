@@ -22,8 +22,8 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
 use aura_terminal::demo::{DemoHints, DemoSimulator};
-use aura_terminal::tui::context::InitializedAppCore;
 use aura_terminal::handlers::tui::create_account;
+use aura_terminal::tui::context::InitializedAppCore;
 use aura_terminal::{handlers::tui::TuiMode, ids};
 
 mod support;
@@ -170,7 +170,6 @@ async fn demo_refresh_account_reports_two_online_contacts() {
         .expect("Failed to stop demo simulator");
 }
 
-
 #[tokio::test]
 async fn demo_accepting_contact_invites_updates_peer_count() {
     let seed = 2024u64;
@@ -207,7 +206,11 @@ async fn demo_accepting_contact_invites_updates_peer_count() {
     let agent = AgentBuilder::new()
         .with_config(agent_config)
         .with_authority(authority_id)
-        .build_simulation_async_with_shared_transport(seed, &effect_ctx, simulator.shared_transport())
+        .build_simulation_async_with_shared_transport(
+            seed,
+            &effect_ctx,
+            simulator.shared_transport(),
+        )
         .await
         .expect("Failed to build demo simulation agent");
     let agent = Arc::new(agent);
@@ -224,17 +227,26 @@ async fn demo_accepting_contact_invites_updates_peer_count() {
         .expect("init signals");
 
     // Import + accept demo contact invite codes (the same path the TUI uses).
+    let alice_id = simulator.alice_authority();
+    let carol_id = simulator.carol_authority();
+
     let hints = DemoHints::new(seed);
 
     for code in [&hints.alice_invite_code, &hints.carol_invite_code] {
-        let invitation = aura_app::workflows::invitation::import_invitation_details(initialized.raw(), code)
-            .await
-            .expect("import_invitation_details should succeed");
+        let invitation =
+            aura_app::workflows::invitation::import_invitation_details(initialized.raw(), code)
+                .await
+                .expect("import_invitation_details should succeed");
 
-        aura_app::workflows::invitation::accept_invitation(initialized.raw(), &invitation.invitation_id)
-            .await
-            .expect("accept_invitation should succeed");
+        aura_app::workflows::invitation::accept_invitation(
+            initialized.raw(),
+            &invitation.invitation_id,
+        )
+        .await
+        .expect("accept_invitation should succeed");
     }
+
+    wait_for_contacts(initialized.raw(), &[alice_id, carol_id]).await;
 
     // `accept_invitation` should have refreshed signals; verify peer count is 2.
     let status = {

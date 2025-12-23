@@ -6,7 +6,10 @@
 //! Note: These operations currently update view state directly. In the full
 //! architecture, moderation should commit facts through the guard chain.
 
-use crate::{views::block::{BanRecord, KickRecord, MuteRecord}, AppCore};
+use crate::{
+    views::block::{BanRecord, KickRecord, MuteRecord},
+    AppCore,
+};
 use async_lock::RwLock;
 use aura_core::{identifiers::AuthorityId, AuraError};
 use std::sync::Arc;
@@ -127,7 +130,10 @@ pub async fn unban_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result
         let target_id = parse_authority(target)?;
 
         if block.remove_ban(&target_id).is_none() {
-            return Err(AuraError::not_found(format!("User is not banned: {}", target)));
+            return Err(AuraError::not_found(format!(
+                "User is not banned: {}",
+                target
+            )));
         }
 
         Ok(())
@@ -186,7 +192,10 @@ pub async fn unmute_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Resul
         let target_id = parse_authority(target)?;
 
         if block.remove_mute(&target_id).is_none() {
-            return Err(AuraError::not_found(format!("User is not muted: {}", target)));
+            return Err(AuraError::not_found(format!(
+                "User is not muted: {}",
+                target
+            )));
         }
 
         Ok(())
@@ -195,7 +204,10 @@ pub async fn unmute_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Resul
 }
 
 /// Pin a message in the current block.
-pub async fn pin_message(app_core: &Arc<RwLock<AppCore>>, message_id: &str) -> Result<(), AuraError> {
+pub async fn pin_message(
+    app_core: &Arc<RwLock<AppCore>>,
+    message_id: &str,
+) -> Result<(), AuraError> {
     with_current_block_mut(app_core, |blocks| {
         let block = blocks
             .current_block_mut()
@@ -251,9 +263,14 @@ mod tests {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
-        assert!(ban_user(&app_core, "authority-00000000-0000-0000-0000-000000000000", None, 0)
-            .await
-            .is_err());
+        assert!(ban_user(
+            &app_core,
+            "authority-00000000-0000-0000-0000-000000000000",
+            None,
+            0
+        )
+        .await
+        .is_err());
         assert!(kick_user(
             &app_core,
             "authority-00000000-0000-0000-0000-000000000000",

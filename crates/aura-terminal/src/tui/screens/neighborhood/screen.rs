@@ -172,18 +172,22 @@ pub fn BlockGrid(props: &BlockGridProps) -> impl Into<AnyElement<'static>> {
 /// Props for TraversalInfo
 #[derive(Default, Props)]
 pub struct TraversalInfoProps {
-    pub depth: TraversalDepth,
+    pub position_depth: TraversalDepth,
+    pub enter_depth: TraversalDepth,
     pub neighborhood_name: String,
 }
 
 /// Traversal info panel
 #[component]
 pub fn TraversalInfo(props: &TraversalInfoProps) -> impl Into<AnyElement<'static>> {
-    let depth_label = props.depth.label().to_string();
-    let depth_icon = props.depth.icon().to_string();
     let neighborhood = props.neighborhood_name.clone();
 
-    let depth_description = match props.depth {
+    let position_label = props.position_depth.label().to_string();
+    let position_icon = props.position_depth.icon().to_string();
+    let enter_label = props.enter_depth.label().to_string();
+    let enter_icon = props.enter_depth.icon().to_string();
+
+    let position_description = match props.position_depth {
         TraversalDepth::Street => "Passing by - can see block frontage only",
         TraversalDepth::Frontage => "At the door - can view public info",
         TraversalDepth::Interior => "Inside - full access as resident",
@@ -203,10 +207,16 @@ pub fn TraversalInfo(props: &TraversalInfoProps) -> impl Into<AnyElement<'static
             }
             View(flex_direction: FlexDirection::Row, gap: 1) {
                 Text(content: "Position:", color: Theme::TEXT_MUTED)
-                Text(content: depth_icon, color: Theme::TEXT)
-                Text(content: depth_label, color: Theme::SECONDARY)
+                Text(content: position_icon, color: Theme::TEXT)
+                Text(content: position_label, color: Theme::SECONDARY)
             }
-            Text(content: depth_description, color: Theme::TEXT_MUTED)
+            View(flex_direction: FlexDirection::Row, gap: 1) {
+                Text(content: "Enter as:", color: Theme::TEXT_MUTED)
+                Text(content: enter_icon, color: Theme::TEXT)
+                Text(content: enter_label, color: Theme::SECONDARY)
+                Text(content: "(press d)", color: Theme::TEXT_MUTED)
+            }
+            Text(content: position_description, color: Theme::TEXT_MUTED)
         }
     }
 }
@@ -361,7 +371,7 @@ pub fn NeighborhoodScreen(
         ) {
             // Traversal info panel (6 rows: 2 border + 4 content)
             View(height: 6) {
-                TraversalInfo(depth: depth, neighborhood_name: neighborhood_name)
+                TraversalInfo(position_depth: depth, enter_depth: props.view.enter_depth, neighborhood_name: neighborhood_name)
             }
 
             // Block grid (remaining 19 rows)

@@ -22,6 +22,7 @@ use crate::tui::screens::{BlockFocus as ScreenBlockFocus, ChatFocus as ScreenCha
 use crate::tui::state_machine::{
     BlockFocus, ChatFocus, GuardianCeremonyResponse, GuardianSetupStep, QueuedModal, TuiState,
 };
+use crate::tui::types::TraversalDepth;
 
 // ============================================================================
 // Block Screen Props Extraction
@@ -511,6 +512,7 @@ pub struct NeighborhoodViewProps {
     pub selected_index: usize,
     pub grid_row: usize,
     pub grid_col: usize,
+    pub enter_depth: TraversalDepth,
 }
 
 /// Extract NeighborhoodScreen view props from TuiState
@@ -519,6 +521,7 @@ pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProp
         selected_index: state.neighborhood.grid.current(),
         grid_row: state.neighborhood.grid.row(),
         grid_col: state.neighborhood.grid.col(),
+        enter_depth: state.neighborhood.enter_depth,
     }
 }
 

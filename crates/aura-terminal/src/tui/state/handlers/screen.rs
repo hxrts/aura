@@ -269,6 +269,13 @@ pub fn handle_neighborhood_key(
         KeyCode::Right | KeyCode::Char('l') => {
             state.neighborhood.grid.navigate(NavKey::Right);
         }
+        KeyCode::Char('d') => {
+            state.neighborhood.enter_depth = state.neighborhood.enter_depth.next();
+            state.toast_info(format!(
+                "Enter as: {}",
+                state.neighborhood.enter_depth.label()
+            ));
+        }
         KeyCode::Enter => {
             commands.push(TuiCommand::Dispatch(DispatchCommand::EnterBlock));
         }

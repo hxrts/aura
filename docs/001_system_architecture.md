@@ -171,6 +171,8 @@ Aura treats `StorageEffects` as the *single* persistence interface. All applicat
 
 Master-key initialization is **lazy** (first storage operation), so runtime assembly remains synchronous. No automatic migration from legacy plaintext blobs is performed in this pre-launch iteration.
 
+To sanity-check encryption-at-rest behavior, see `crates/aura-effects/tests/encrypted_storage_fs_roundtrip.rs` (run `cargo test -p aura-effects --tests` inside `nix develop`).
+
 The registration system enables composition without runtime overhead:
 
 ```
