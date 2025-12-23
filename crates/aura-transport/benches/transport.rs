@@ -5,7 +5,6 @@
 //! - Message serialization/deserialization
 //! - Privacy level operations
 
-
 #![allow(missing_docs)]
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_transport::{Envelope, ScopedEnvelope};
@@ -73,7 +72,8 @@ fn bench_envelope_serialization(c: &mut Criterion) {
             &serialized,
             |b, data| {
                 b.iter(|| {
-                    let env: Envelope = serde_json::from_slice(data).unwrap_or_else(|_| Envelope::new(Vec::new()));
+                    let env: Envelope =
+                        serde_json::from_slice(data).unwrap_or_else(|_| Envelope::new(Vec::new()));
                     black_box(env);
                 });
             },
@@ -127,8 +127,11 @@ fn bench_scoped_envelope(c: &mut Criterion) {
 fn bench_privacy_operations(c: &mut Criterion) {
     let clear_envelope = Envelope::new(vec![0u8; 1024]);
     let blinded_envelope = Envelope::new_blinded(vec![0u8; 1024]);
-    let scoped_envelope =
-        Envelope::new_scoped(vec![0u8; 1024], ContextId::new_from_entropy([1u8; 32]), None);
+    let scoped_envelope = Envelope::new_scoped(
+        vec![0u8; 1024],
+        ContextId::new_from_entropy([1u8; 32]),
+        None,
+    );
 
     c.bench_function("privacy_level_clear", |b| {
         b.iter(|| {

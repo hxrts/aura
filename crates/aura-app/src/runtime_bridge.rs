@@ -36,8 +36,8 @@
 use crate::core::IntentError;
 use async_trait::async_trait;
 use aura_core::effects::amp::{
-    AmpCiphertext, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
-    ChannelLeaveParams, ChannelSendParams,
+    AmpCiphertext, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
+    ChannelSendParams,
 };
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{
@@ -320,7 +320,6 @@ pub trait RuntimeBridge: Send + Sync {
     /// - Persisting the committed facts
     /// - Publishing them to the ReactiveScheduler for UI signal updates
     async fn commit_relational_facts(&self, facts: &[RelationalFact]) -> Result<(), IntentError>;
-
 
     // =========================================================================
     // AMP Channel Operations
@@ -812,7 +811,6 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Ok(())
     }
 
-
     async fn amp_create_channel(
         &self,
         _params: ChannelCreateParams,
@@ -846,7 +844,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _target: AuthorityId,
         _reason: Option<String>,
     ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("Moderation not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Moderation not available in offline mode",
+        ))
     }
 
     async fn moderation_ban(
@@ -856,7 +856,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _target: AuthorityId,
         _reason: Option<String>,
     ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("Moderation not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Moderation not available in offline mode",
+        ))
     }
 
     async fn moderation_unban(
@@ -865,7 +867,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _channel_id: ChannelId,
         _target: AuthorityId,
     ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("Moderation not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Moderation not available in offline mode",
+        ))
     }
 
     async fn moderation_mute(
@@ -875,7 +879,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _target: AuthorityId,
         _duration_secs: Option<u64>,
     ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("Moderation not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Moderation not available in offline mode",
+        ))
     }
 
     async fn moderation_unmute(
@@ -884,7 +890,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _channel_id: ChannelId,
         _target: AuthorityId,
     ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("Moderation not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Moderation not available in offline mode",
+        ))
     }
 
     async fn moderation_pin(
@@ -893,7 +901,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _channel_id: ChannelId,
         _message_id: String,
     ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("Moderation not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Moderation not available in offline mode",
+        ))
     }
 
     async fn moderation_unpin(
@@ -902,7 +912,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _channel_id: ChannelId,
         _message_id: String,
     ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("Moderation not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Moderation not available in offline mode",
+        ))
     }
 
     async fn channel_set_topic(
@@ -912,7 +924,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _topic: String,
         _timestamp_ms: u64,
     ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("Channel metadata not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Channel metadata not available in offline mode",
+        ))
     }
 
     async fn get_sync_status(&self) -> SyncStatus {

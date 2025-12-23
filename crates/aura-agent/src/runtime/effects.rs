@@ -42,7 +42,9 @@ use aura_protocol::handlers::{InMemoryTreeHandler, LocalSyncHandler};
 use aura_wot::{BiscuitAuthorizationBridge, FlowBudgetHandler};
 use biscuit_auth::{Biscuit, KeyPair, PublicKey};
 use rand::rngs::StdRng;
-use rand::{Rng, RngCore, SeedableRng};
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
@@ -60,6 +62,7 @@ pub struct AuraEffectSystem {
     composite: CompositeHandlerAdapter,
     flow_budget: FlowBudgetHandler,
     crypto_handler: aura_effects::crypto::RealCryptoHandler,
+    random_rng: parking_lot::Mutex<StdRng>,
     storage_handler: Arc<
         EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
     >,
@@ -187,6 +190,10 @@ impl AuraEffectSystem {
             Some(seed) => RealCryptoHandler::seeded(seed),
             None => RealCryptoHandler::new(),
         };
+        let random_rng = match crypto_seed {
+            Some(seed) => StdRng::from_seed(seed),
+            None => StdRng::from_entropy(),
+        };
         let authorization_handler =
             Self::init_authorization_handler(authority, &crypto_handler, &journal_verifying_key);
         let secure_storage_handler = Arc::new(RealSecureStorageHandler::with_base_path(
@@ -231,6 +238,7 @@ impl AuraEffectSystem {
             composite,
             flow_budget: FlowBudgetHandler::new(authority),
             crypto_handler,
+            random_rng: parking_lot::Mutex::new(random_rng),
             storage_handler,
             time_handler: PhysicalTimeHandler::new(),
             logical_clock: LogicalClockHandler::new(),
@@ -270,6 +278,14 @@ impl AuraEffectSystem {
     /// This is called during runtime startup when the ReactivePipeline is started.
     pub fn attach_fact_sink(&self, tx: mpsc::Sender<crate::reactive::FactSource>) {
         *self.fact_publish_tx.lock() = Some(tx);
+    }
+
+    pub(crate) fn requeue_envelope(&self, envelope: TransportEnvelope) {
+        let mut inbox = self
+            .transport_inbox
+            .write()
+            .expect("transport inbox poisoned");
+        inbox.push(envelope);
     }
 
     async fn publish_typed_facts(&self, facts: Vec<TypedFact>) -> Result<(), AuraError> {
@@ -780,35 +796,35 @@ impl aura_protocol::effects::TreeEffects for AuraEffectSystem {
 impl RandomEffects for AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut rng = StdRng::from_seed([7u8; 32]);
         let mut bytes = vec![0u8; len];
-        rng.fill_bytes(&mut bytes);
+        self.random_rng.lock().fill_bytes(&mut bytes);
         bytes
     }
 
     #[allow(clippy::disallowed_methods)]
     async fn random_bytes_32(&self) -> [u8; 32] {
-        let mut rng = StdRng::from_seed([11u8; 32]);
         let mut bytes = [0u8; 32];
-        rng.fill_bytes(&mut bytes);
+        self.random_rng.lock().fill_bytes(&mut bytes);
         bytes
     }
 
     #[allow(clippy::disallowed_methods)]
     async fn random_u64(&self) -> u64 {
-        let mut rng = StdRng::from_seed([19u8; 32]);
-        rng.gen()
+        self.random_rng.lock().next_u64()
     }
 
     #[allow(clippy::disallowed_methods)]
     async fn random_range(&self, min: u64, max: u64) -> u64 {
-        let mut rng = StdRng::from_seed([23u8; 32]);
-        rng.gen_range(min..=max)
+        self.random_rng.lock().gen_range(min..=max)
     }
 
     #[allow(clippy::disallowed_methods)]
     async fn random_uuid(&self) -> uuid::Uuid {
-        uuid::Uuid::new_v4()
+        let mut bytes = [0u8; 16];
+        self.random_rng.lock().fill_bytes(&mut bytes);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        uuid::Uuid::from_bytes(bytes)
     }
 }
 

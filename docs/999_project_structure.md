@@ -1,6 +1,6 @@
 # Aura Crate Structure and Dependency Graph
 
-This document provides a comprehensive overview of the Aura project's crate organization and dependencies.
+This document provides an overview of the Aura project's crate organization and dependencies.
 
 ## 8-Layer Architecture
 

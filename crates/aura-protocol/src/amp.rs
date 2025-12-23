@@ -175,6 +175,11 @@ fn fact_context(fact: &RelationalFact) -> Result<ContextId> {
         RelationalFact::AmpProposedChannelEpochBump(b) => Ok(b.context),
         RelationalFact::AmpCommittedChannelEpochBump(b) => Ok(b.context),
         RelationalFact::AmpChannelPolicy(p) => Ok(p.context),
+        RelationalFact::Generic {
+            context_id,
+            binding_type,
+            ..
+        } if binding_type.starts_with("amp-") => Ok(*context_id),
         _ => Err(AuraError::invalid("fact not AMP-context scoped")),
     }
 }

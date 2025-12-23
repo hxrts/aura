@@ -20,6 +20,7 @@
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
 use aura_core::threshold::ParticipantIdentity;
+use aura_core::DeviceId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -51,6 +52,9 @@ pub struct CeremonyState {
 
     /// New epoch for the key rotation
     pub new_epoch: u64,
+
+    /// Device being enrolled (DeviceEnrollment ceremonies only).
+    pub enrollment_device_id: Option<DeviceId>,
 
     /// When the ceremony was initiated
     pub started_at: Instant,
@@ -92,6 +96,7 @@ impl CeremonyTracker {
         total_n: u16,
         participants: Vec<ParticipantIdentity>,
         new_epoch: u64,
+        enrollment_device_id: Option<DeviceId>,
     ) -> Result<(), IntentError> {
         let mut ceremonies = self.ceremonies.write().await;
 
@@ -109,6 +114,7 @@ impl CeremonyTracker {
             participants,
             accepted_participants: Vec::new(),
             new_epoch,
+            enrollment_device_id,
             started_at: Instant::now(),
             has_failed: false,
             is_committed: false,
@@ -361,6 +367,7 @@ mod tests {
                     ParticipantIdentity::guardian(c),
                 ],
                 100,
+                None,
             )
             .await
             .unwrap();
@@ -392,6 +399,7 @@ mod tests {
                     ParticipantIdentity::guardian(c),
                 ],
                 100,
+                None,
             )
             .await
             .unwrap();
@@ -440,6 +448,7 @@ mod tests {
                     ParticipantIdentity::guardian(c),
                 ],
                 100,
+                None,
             )
             .await
             .unwrap();
@@ -484,6 +493,7 @@ mod tests {
                     ParticipantIdentity::guardian(c),
                 ],
                 100,
+                None,
             )
             .await
             .unwrap();
@@ -522,6 +532,7 @@ mod tests {
                     ParticipantIdentity::guardian(c),
                 ],
                 100,
+                None,
             )
             .await
             .unwrap();
@@ -549,6 +560,7 @@ mod tests {
                 1,
                 vec![ParticipantIdentity::device(device)],
                 42,
+                Some(device),
             )
             .await
             .unwrap();

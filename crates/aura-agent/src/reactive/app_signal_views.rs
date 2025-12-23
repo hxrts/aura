@@ -715,7 +715,6 @@ impl ReactiveView for ChatSignalView {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,7 +739,10 @@ mod tests {
 
         let mut blocks = BlocksState::new();
         blocks.add_block(block);
-        reactive.emit(&*BLOCKS_SIGNAL, blocks.clone()).await.unwrap();
+        reactive
+            .emit(&*BLOCKS_SIGNAL, blocks.clone())
+            .await
+            .unwrap();
         blocks
     }
 

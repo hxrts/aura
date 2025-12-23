@@ -20,7 +20,7 @@ use aura_core::{
         reactive::ReactiveEffects,
     },
     identifiers::{AuthorityId, ChannelId, ContextId},
-    AuraError,
+    AuraError, EffectContext,
 };
 use aura_journal::DomainFact;
 use std::sync::Arc;
@@ -58,29 +58,38 @@ fn parse_context_id(context_id: &str) -> Result<ContextId, AuraError> {
         .map_err(|_| AuraError::invalid(format!("Invalid context ID: {}", trimmed)))
 }
 
-async fn current_block_context_id(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<ContextId, AuraError> {
+async fn current_block_context_id(app_core: &Arc<RwLock<AppCore>>) -> Result<ContextId, AuraError> {
     let core = app_core.read().await;
     let blocks = core.views().get_blocks();
-    let block = blocks
-        .current_block()
-        .ok_or_else(|| AuraError::not_found("No current block selected"))?;
+    if let Some(block) = blocks.current_block() {
+        return parse_context_id(&block.context_id);
+    }
 
-    parse_context_id(&block.context_id)
+    // Fallback: when no block is selected yet (common in demos/tests), use a
+    // deterministic per-authority context id so messaging can still function.
+    if let Some(runtime) = core.runtime() {
+        return Ok(EffectContext::with_authority(runtime.authority_id()).context_id());
+    }
+
+    Err(AuraError::not_found("No current block selected"))
 }
 
 async fn context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
 ) -> Result<ContextId, AuraError> {
-    let core = app_core.read().await;
-    let blocks = core.views().get_blocks();
-    let block = blocks.block(&channel_id).ok_or_else(|| {
-        AuraError::not_found(format!("Block not found for channel: {}", channel_id))
-    })?;
+    {
+        let core = app_core.read().await;
+        let blocks = core.views().get_blocks();
+        if let Some(block) = blocks.block(&channel_id) {
+            return parse_context_id(&block.context_id);
+        }
+    }
 
-    parse_context_id(&block.context_id)
+    // Not all channels correspond to a "block" entry in the blocks view yet
+    // (e.g. AMP-created channels in demos/tests). Fall back to the currently
+    // selected block context (or per-authority demo context).
+    current_block_context_id(app_core).await
 }
 
 /// Send a direct message to a contact
@@ -174,7 +183,7 @@ pub async fn create_channel(
     app_core: &Arc<RwLock<AppCore>>,
     name: &str,
     topic: Option<String>,
-    _members: &[String],
+    members: &[String],
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
     let runtime = {
@@ -185,8 +194,7 @@ pub async fn create_channel(
     };
 
     let context_id = current_block_context_id(app_core).await?;
-
-    let channel_hint = normalize_channel_str(name).parse::<ChannelId>().ok();
+    let channel_hint = (!name.trim().is_empty()).then(|| parse_channel_id(name));
     let params = ChannelCreateParams {
         context: context_id,
         channel: channel_hint,
@@ -212,7 +220,7 @@ pub async fn create_channel(
         context_id,
         channel_id,
         name.to_string(),
-        topic,
+        topic.clone(),
         false,
         timestamp_ms,
         runtime.authority_id(),
@@ -224,15 +232,38 @@ pub async fn create_channel(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to persist channel: {}", e)))?;
 
+    // Update UI state for responsiveness; reactive reductions may also update this later.
+    let core = app_core.read().await;
+    let mut chat_state = core
+        .read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+
+    let channel = Channel {
+        id: channel_id,
+        name: name.to_string(),
+        topic,
+        channel_type: ChannelType::Block,
+        unread_count: 0,
+        is_dm: false,
+        member_count: (members.len() + 1) as u32,
+        last_message: None,
+        last_message_time: None,
+        last_activity: timestamp_ms,
+    };
+
+    chat_state.add_channel(channel);
+    chat_state.selected_channel_id = Some(channel_id);
+
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
+
     Ok(channel_id.to_string())
 }
 
-
 /// Join an existing channel.
-pub async fn join_channel(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel: &str,
-) -> Result<(), AuraError> {
+pub async fn join_channel(app_core: &Arc<RwLock<AppCore>>, channel: &str) -> Result<(), AuraError> {
     let runtime = {
         let core = app_core.read().await;
         core.runtime()
@@ -309,13 +340,9 @@ pub async fn close_channel(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to close channel: {}", e)))?;
 
-    let fact = ChatFact::channel_closed_ms(
-        context_id,
-        channel_id,
-        timestamp_ms,
-        runtime.authority_id(),
-    )
-    .to_generic();
+    let fact =
+        ChatFact::channel_closed_ms(context_id, channel_id, timestamp_ms, runtime.authority_id())
+            .to_generic();
 
     runtime
         .commit_relational_facts(&[fact])
@@ -405,6 +432,48 @@ pub async fn send_message(
         .commit_relational_facts(&[fact])
         .await
         .map_err(|e| AuraError::agent(format!("Failed to persist message: {}", e)))?;
+
+    // Update UI state for responsiveness.
+    let core = app_core.read().await;
+    let mut chat_state = core
+        .read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+
+    if !chat_state.channels.iter().any(|c| c.id == channel_id) {
+        chat_state.add_channel(Channel {
+            id: channel_id,
+            name: channel.to_string(),
+            topic: None,
+            channel_type: ChannelType::Block,
+            unread_count: 0,
+            is_dm: false,
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: timestamp_ms,
+        });
+    }
+
+    chat_state.selected_channel_id = Some(channel_id);
+    chat_state.apply_message(
+        channel_id,
+        Message {
+            id: message_id.clone(),
+            channel_id,
+            sender_id: runtime.authority_id(),
+            sender_name: "You".to_string(),
+            content: content.to_string(),
+            timestamp: timestamp_ms,
+            reply_to: None,
+            is_own: true,
+            is_read: true,
+        },
+    );
+
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
 
     Ok(message_id)
 }

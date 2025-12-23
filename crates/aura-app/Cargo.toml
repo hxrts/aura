@@ -90,6 +90,7 @@ aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
+aura-chat = { path = "../aura-chat" }
 
 # Always required
 serde = { version = "1", features = ["derive"] }
