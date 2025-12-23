@@ -24,8 +24,31 @@ module protocol_consensus {
     type ResultId = str         // H(Op, prestate) - deterministic result binding
     type PrestateHash = str     // H(prestate) - ensures witnesses agree on starting state
     type AuthorityId = str      // Participant identity (device or threshold group)
-    type ShareData = str        // FROST signature share (partial signature)
-    type ThresholdSignature = str  // Aggregated k-of-n signature
+    // ==================== THRESHOLD SIGNATURE TYPES ====================
+    // Data binding structure for share verification
+    type DataBinding = {
+        bindCid: ConsensusId,
+        bindRid: ResultId,
+        bindPHash: PrestateHash
+    }
+
+    // FROST signature share (partial signature) with nonce binding.
+    // Models: (share_value, nonce_commitment_binding, signed_data_binding)
+    type ShareData = {
+        shareValue: str,            // The actual share bytes (σ_i)
+        nonceBinding: str,          // Binding to nonce commitment (D_i, E_i)
+        dataBinding: DataBinding    // Binding to signed data (cid, rid, pHash)
+    }
+
+    // Aggregated k-of-n threshold signature with provenance.
+    // Models: (signature_value, binding_context, participant_set)
+    type ThresholdSignature = {
+        sigValue: str,              // Aggregated signature σ
+        boundCid: ConsensusId,      // Consensus instance bound to signature
+        boundRid: ResultId,         // Result ID bound to signature
+        boundPHash: PrestateHash,   // Prestate hash bound to signature
+        signerSet: Set[AuthorityId] // Witnesses whose shares were aggregated
+    }
     type OperationData = str    // Abstract operation being agreed upon
 
     // ==================== NONCE CACHING TYPES ====================
@@ -70,10 +93,11 @@ module protocol_consensus {
         share: ShareData
     }
 
-    // The commit fact output
+    // The commit fact output - contains the aggregated threshold signature
     type CommitFact = {
         cid: ConsensusId,
         rid: ResultId,
+        prestateHash: PrestateHash,     // Include prestate for full binding
         signature: ThresholdSignature,
         attesters: Set[AuthorityId]
     }
@@ -99,7 +123,7 @@ module protocol_consensus {
     var committedFacts: Set[CommitFact]
     var globalWitnesses: Set[AuthorityId]
 
-    // ==================== NONCE STATE (T1.1) ====================
+    // ==================== NONCE STATE ====================
     // Global epoch and per-witness nonce cache for FROST pipelining.
 
     var currentEpoch: Epoch                                     // Global epoch counter
@@ -129,17 +153,92 @@ module protocol_consensus {
     pure def detectEquivocation(proposals: Set[ShareProposal], witness: AuthorityId, newRid: ResultId): bool =
         proposals.exists(p => p.witness == witness and p.resultId != newRid)
 
-    // Generate deterministic threshold signature from share set
-    pure def aggregateShares(proposals: Set[ShareProposal], rid: ResultId, pHash: PrestateHash): ThresholdSignature =
-        if (proposals.filter(p => p.resultId == rid and p.prestateHash == pHash).size() >= 2)
-            "sig_" // Simplified: real impl would combine shares
-        else ""
+    // ==================== THRESHOLD SIGNATURE FUNCTIONS ====================
+    // FROST share aggregation and verification.
 
-    // Verify threshold signature (simplified)
-    pure def verifySignature(sig: ThresholdSignature, rid: ResultId, attesters: Set[AuthorityId], threshold: int): bool =
-        sig != "" and attesters.size() >= threshold
+    // Compute expected data binding for share verification
+    // Models: H(cid || rid || pHash) - deterministic binding hash
+    pure def computeDataBinding(cid: ConsensusId, rid: ResultId, pHash: PrestateHash): DataBinding =
+        { bindCid: cid, bindRid: rid, bindPHash: pHash }
 
-    // ==================== NONCE HELPERS (T1.1) ====================
+    // Create empty data binding for initialization
+    pure def emptyDataBinding: DataBinding =
+        { bindCid: "", bindRid: "", bindPHash: "" }
+
+    // Check if data binding is valid (non-empty)
+    pure def isValidDataBinding(db: DataBinding): bool =
+        db.bindCid != "" or db.bindRid != "" or db.bindPHash != ""
+
+    // Verify a single share is well-formed and bound to correct data
+    pure def verifyShare(
+        share: ShareData,
+        cid: ConsensusId,
+        rid: ResultId,
+        pHash: PrestateHash,
+        nonceCommitment: NonceCommitment
+    ): bool = all {
+        // Share must bind to correct data
+        share.dataBinding == computeDataBinding(cid, rid, pHash),
+        // Share must bind to witness's nonce commitment
+        share.nonceBinding == nonceCommitment,
+        // Share value must be non-empty
+        share.shareValue != ""
+    }
+
+    // Verify shares are consistent (all bind to same data)
+    pure def sharesConsistent(proposals: Set[ShareProposal], rid: ResultId, pHash: PrestateHash): bool =
+        val matchingProps = proposals.filter(p => p.resultId == rid and p.prestateHash == pHash)
+        // All shares have valid data binding (non-empty)
+        matchingProps.forall(p => isValidDataBinding(p.share.dataBinding))
+
+    // Generate aggregated threshold signature from k valid shares
+    // Models FROST signature aggregation: σ = Σ σ_i
+    pure def aggregateShares(
+        cid: ConsensusId,
+        proposals: Set[ShareProposal],
+        rid: ResultId,
+        pHash: PrestateHash
+    ): ThresholdSignature = {
+        val matchingProps = proposals.filter(p => p.resultId == rid and p.prestateHash == pHash)
+        val signers = matchingProps.map(p => p.witness)
+        val shareValues = matchingProps.map(p => p.share.shareValue)
+        // Simplified aggregation: concatenate share values (real FROST does point addition)
+        val aggValue = if (matchingProps.size() >= 2) "agg_sig_" else ""
+        {
+            sigValue: aggValue,
+            boundCid: cid,
+            boundRid: rid,
+            boundPHash: pHash,
+            signerSet: signers
+        }
+    }
+
+    // Verify threshold signature against public key and message binding
+    // Models: verify(pk_group, σ, msg) where msg = (cid || rid || pHash)
+    pure def verifySignature(
+        sig: ThresholdSignature,
+        cid: ConsensusId,
+        rid: ResultId,
+        pHash: PrestateHash,
+        threshold: int
+    ): bool = all {
+        // Signature value is valid (non-empty)
+        sig.sigValue != "",
+        // Signature binds to correct consensus instance
+        sig.boundCid == cid,
+        // Signature binds to correct result
+        sig.boundRid == rid,
+        // Signature binds to correct prestate
+        sig.boundPHash == pHash,
+        // Signature has at least threshold signers
+        sig.signerSet.size() >= threshold
+    }
+
+    // Check if signature can be verified (helper for invariants)
+    pure def isValidSignature(sig: ThresholdSignature, threshold: int): bool =
+        sig.sigValue != "" and sig.signerSet.size() >= threshold
+
+    // ==================== NONCE HELPERS ====================
 
     // Check if a cached nonce is valid (not expired, not used)
     pure def isNonceValid(nonceOpt: Option[CachedNonce], epoch: Epoch, validityWindow: int): bool =
@@ -159,7 +258,7 @@ module protocol_consensus {
             w.in(nonces.keys()) and isNonceValid(nonces.get(w), epoch, validityWindow)
         )
 
-    // Determine path selection based on nonce availability (T1.2)
+    // Determine path selection based on nonce availability
     pure def selectPath(
         witnesses: Set[AuthorityId],
         nonces: AuthorityId -> Option[CachedNonce],
@@ -190,13 +289,13 @@ module protocol_consensus {
         instances' = Map(),
         committedFacts' = Set(),
         globalWitnesses' = Set("w1", "w2", "w3", "w4", "w5"),
-        // Initialize nonce state (T1.1)
+        // Initialize nonce state
         currentEpoch' = 0,
         witnessNonces' = Map()
     }
 
     // Initiator starts a consensus instance.
-    // Path selection (T1.1/T1.2): FastPath if all witnesses have valid nonces, else SlowPath.
+    // Path selection: FastPath if all witnesses have valid nonces, else SlowPath.
     action startConsensus(
         cid: ConsensusId,
         initiator: AuthorityId,
@@ -205,7 +304,7 @@ module protocol_consensus {
         witnesses: Set[AuthorityId],
         threshold: int
     ): bool = {
-        // T1.2: Determine path based on nonce availability
+        // Determine path based on nonce availability
         val pathChoice = selectPath(witnesses, witnessNonces, currentEpoch, NONCE_VALIDITY_WINDOW)
         val initialPhase = match pathChoice {
             | FastPath => FastPathActive
@@ -237,7 +336,7 @@ module protocol_consensus {
 
     // Witness submits share (fast path response).
     // Share binds witness to (resultId, prestateHash). Equivocation detected.
-    // T1.1: Consumes witness's cached nonce on fast path.
+    // Consumes witness's cached nonce on fast path.
     action submitWitnessShare(
         cid: ConsensusId,
         witness: AuthorityId,
@@ -258,7 +357,7 @@ module protocol_consensus {
         val isWitness = inst.witnesses.contains(witness)
         val notVoted = not(hasProposal(inst.proposals, witness))
         val isActive = inst.phase == FastPathActive or inst.phase == FallbackActive
-        // T1.1: Fast path requires valid nonce
+        // Fast path requires valid nonce
         val isFastPath = inst.phase == FastPathActive
         val hasValidNonce = isNonceValid(
             if (witness.in(witnessNonces.keys())) witnessNonces.get(witness) else None,
@@ -274,14 +373,16 @@ module protocol_consensus {
         val reachedThreshold = matchingCount >= inst.threshold
         val newPhase = if (reachedThreshold) ConsensusCommitted else inst.phase
         val attesters = getMatchingWitnesses(newProposals, rid, inst.prestateHash)
-        val newSig = if (reachedThreshold) aggregateShares(newProposals, rid, inst.prestateHash) else ""
+        val emptySig: ThresholdSignature = { sigValue: "", boundCid: "", boundRid: "", boundPHash: "", signerSet: Set() }
+        val newSig = if (reachedThreshold) aggregateShares(cid, newProposals, rid, inst.prestateHash) else emptySig
         val newCommitFact = if (reachedThreshold) Some({
             cid: cid,
             rid: rid,
+            prestateHash: inst.prestateHash,
             signature: newSig,
             attesters: attesters
         }) else None
-        // T1.1: Mark nonce as used on fast path
+        // Mark nonce as used on fast path
         val updatedNonces = if (isFastPath and hasValidNonce and not(isEquivocating)) {
             val oldNonce = witnessNonces.get(witness)
             match oldNonce {
@@ -305,7 +406,7 @@ module protocol_consensus {
             }),
             committedFacts' = if (reachedThreshold)
                 committedFacts.union(Set({
-                    cid: cid, rid: rid, signature: newSig, attesters: attesters
+                    cid: cid, rid: rid, prestateHash: inst.prestateHash, signature: newSig, attesters: attesters
                 }))
                 else committedFacts,
             globalWitnesses' = globalWitnesses,
@@ -346,7 +447,7 @@ module protocol_consensus {
 
     // Gossip shares during fallback (AggregateShare message).
     // Witnesses exchange shares via gossip to overcome network partitions.
-    // T1.1: Fallback path doesn't consume cached nonces (generates fresh nonces inline).
+    // Fallback path doesn't consume cached nonces (generates fresh nonces inline).
     action gossipShares(cid: ConsensusId, shareSet: Set[ShareProposal]): bool = {
         val instOpt = getOrDefaultInstance(instances, cid)
         val hasInstance = match instOpt { | Some(_) => true | None => false }
@@ -407,7 +508,7 @@ module protocol_consensus {
         val matchingCount = countMatchingProposals(inst.proposals, winningRid, inst.prestateHash)
         val reachedThreshold = matchingCount >= inst.threshold
         val attesters = getMatchingWitnesses(inst.proposals, winningRid, inst.prestateHash)
-        val sig = aggregateShares(inst.proposals, winningRid, inst.prestateHash)
+        val sig = aggregateShares(cid, inst.proposals, winningRid, inst.prestateHash)
         all {
             hasInstance,
             isFallback,
@@ -418,12 +519,13 @@ module protocol_consensus {
                 commitFact: Some({
                     cid: cid,
                     rid: winningRid,
+                    prestateHash: inst.prestateHash,
                     signature: sig,
                     attesters: attesters
                 })
             }),
             committedFacts' = committedFacts.union(Set({
-                cid: cid, rid: winningRid, signature: sig, attesters: attesters
+                cid: cid, rid: winningRid, prestateHash: inst.prestateHash, signature: sig, attesters: attesters
             })),
             globalWitnesses' = globalWitnesses,
             currentEpoch' = currentEpoch,
@@ -459,7 +561,7 @@ module protocol_consensus {
         }
     }
 
-    // ==================== NONCE MANAGEMENT ACTIONS (T1.1) ====================
+    // ==================== NONCE MANAGEMENT ACTIONS ====================
 
     // Witness caches a fresh nonce commitment for future fast-path signing.
     // Called proactively by witnesses to enable pipelining.
@@ -556,9 +658,9 @@ module protocol_consensus {
             }
         )
 
-    // ==================== NONCE INVARIANTS (T1.1) ====================
+    // ==================== NONCE INVARIANTS ====================
 
-    // T1.1: Used nonces cannot be reused (no nonce reuse attack).
+    // Used nonces cannot be reused (no nonce reuse attack).
     // Once a nonce is marked used, it must be refreshed before reuse.
     val InvariantUsedNoncesNotReusable =
         witnessNonces.keys().forall(w => {
@@ -569,7 +671,7 @@ module protocol_consensus {
             }
         })
 
-    // T1.1: Fast path only selected when all witnesses have valid nonces.
+    // Fast path only selected when all witnesses have valid nonces.
     // Ensures fast path precondition is met.
     val InvariantFastPathRequiresValidNonces =
         instances.keys().forall(cid => {
@@ -578,13 +680,54 @@ module protocol_consensus {
                 allWitnessesHaveValidNonces(inst.witnesses, witnessNonces, currentEpoch, NONCE_VALIDITY_WINDOW)
         })
 
-    // T1.1: Nonces have bounded epoch age.
+    // Nonces have bounded epoch age.
     // Cached nonces expire after NONCE_VALIDITY_WINDOW epochs.
     val InvariantNonceEpochBounded =
         witnessNonces.keys().forall(w => {
             val nonceOpt = witnessNonces.get(w)
             match nonceOpt {
                 | Some(n) => n.epoch <= currentEpoch
+                | None => true
+            }
+        })
+
+    // ==================== SIGNATURE BINDING INVARIANTS ====================
+    // Safety properties ensuring threshold signatures are correctly bound.
+
+    // Signature binding: CommitFact signature binds to correct cid/rid/pHash.
+    // Ensures aggregated signature cannot be replayed for different consensus.
+    val InvariantSignatureBindsToCommitFact =
+        committedFacts.forall(cf =>
+            cf.signature.boundCid == cf.cid and
+            cf.signature.boundRid == cf.rid and
+            cf.signature.boundPHash == cf.prestateHash
+        )
+
+    // Signature attesters match: signerSet in signature equals attesters.
+    // Ensures signature provenance is correctly tracked.
+    val InvariantSignatureAttesters =
+        committedFacts.forall(cf =>
+            cf.signature.signerSet == cf.attesters
+        )
+
+    // Signature threshold: All committed signatures have valid threshold.
+    // Ensures k-of-n security requirement is met.
+    val InvariantSignatureThreshold =
+        instances.keys().forall(cid => {
+            val inst = instances.get(cid)
+            match inst.commitFact {
+                | Some(cf) => isValidSignature(cf.signature, inst.threshold)
+                | None => true
+            }
+        })
+
+    // Signature verifiability: Committed signatures pass verification.
+    // Ensures all commits have cryptographically valid signatures.
+    val InvariantSignatureVerifiable =
+        instances.keys().forall(cid => {
+            val inst = instances.get(cid)
+            match inst.commitFact {
+                | Some(cf) => verifySignature(cf.signature, cf.cid, cf.rid, cf.prestateHash, inst.threshold)
                 | None => true
             }
         })
@@ -624,8 +767,13 @@ module protocol_consensus {
         nondet threshold = oneOf(Set(2, 3))
         nondet witness = oneOf(Set("w1", "w2", "w3", "w4"))
         nondet rid = oneOf(Set("rid_op1", "rid_op2"))
-        nondet share = oneOf(Set("share_a", "share_b", "share_c"))
-        // T1.1: Nonce commitment values
+        // ShareData now a structured record with nonce binding and data binding
+        nondet shareValue = oneOf(Set("share_a", "share_b", "share_c"))
+        nondet nonceBinding = oneOf(Set("nonce_commit_1", "nonce_commit_2", "nonce_commit_3"))
+        // Construct share with data binding computed from (cid, rid, pHash)
+        val dataBinding = computeDataBinding(cid, rid, pHash)
+        val share: ShareData = { shareValue: shareValue, nonceBinding: nonceBinding, dataBinding: dataBinding }
+        // Nonce commitment values
         nondet commitment = oneOf(Set("nonce_commit_1", "nonce_commit_2", "nonce_commit_3"))
         any {
             startConsensus(cid, initiator, op, pHash, witnesses, threshold),
@@ -633,7 +781,7 @@ module protocol_consensus {
             triggerFallback(cid),
             completeViaFallback(cid, rid),
             failConsensus(cid),
-            // T1.1: Nonce management actions
+            // Nonce management actions
             cacheNonce(witness, commitment),
             advanceEpoch,
         }
