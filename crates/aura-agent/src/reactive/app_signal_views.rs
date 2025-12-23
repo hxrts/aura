@@ -714,3 +714,111 @@ impl ReactiveView for ChatSignalView {
         "signals:chat"
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_app::signal_defs::{register_app_signals, BLOCKS_SIGNAL};
+    use aura_core::effects::reactive::ReactiveEffects;
+    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+    use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
+    use aura_journal::fact::{Fact, FactContent, RelationalFact};
+    use aura_protocol::moderation::{BlockBanFact, BlockPinFact, BlockUnpinFact};
+
+    async fn setup_blocks(reactive: &ReactiveHandler, context: ContextId) -> BlocksState {
+        register_app_signals(reactive).await.unwrap();
+
+        let block_id = ChannelId::from_bytes([7u8; 32]);
+        let block = BlockState::new(
+            block_id,
+            Some("test-block".to_string()),
+            AuthorityId::default(),
+            0,
+            context.to_string(),
+        );
+
+        let mut blocks = BlocksState::new();
+        blocks.add_block(block);
+        reactive.emit(&*BLOCKS_SIGNAL, blocks.clone()).await.unwrap();
+        blocks
+    }
+
+    fn fact_from_relational(relational: RelationalFact) -> Fact {
+        Fact {
+            order: OrderTime([0u8; 32]),
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            }),
+            content: FactContent::Relational(relational),
+        }
+    }
+
+    #[tokio::test]
+    async fn block_signal_view_updates_pins() {
+        let reactive = ReactiveHandler::new();
+        let context_id = ContextId::default();
+        let blocks = setup_blocks(&reactive, context_id).await;
+        let block_id = blocks.current_block().unwrap().id;
+
+        let view = BlockSignalView::new(reactive.clone());
+
+        let pin = BlockPinFact::new_ms(
+            context_id,
+            block_id,
+            "msg-1".to_string(),
+            AuthorityId::default(),
+            123,
+        )
+        .to_generic();
+        view.update(&[fact_from_relational(pin)]).await;
+
+        let updated = reactive.read(&*BLOCKS_SIGNAL).await.unwrap();
+        let block = updated.current_block().unwrap();
+        assert!(block.pinned_messages.contains(&"msg-1".to_string()));
+
+        let unpin = BlockUnpinFact::new_ms(
+            context_id,
+            block_id,
+            "msg-1".to_string(),
+            AuthorityId::default(),
+            124,
+        )
+        .to_generic();
+        view.update(&[fact_from_relational(unpin)]).await;
+
+        let updated = reactive.read(&*BLOCKS_SIGNAL).await.unwrap();
+        let block = updated.current_block().unwrap();
+        assert!(!block.pinned_messages.contains(&"msg-1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn block_signal_view_updates_bans() {
+        let reactive = ReactiveHandler::new();
+        let context_id = ContextId::default();
+        let blocks = setup_blocks(&reactive, context_id).await;
+        let block_id = blocks.current_block().unwrap().id;
+        let target = AuthorityId::new_from_entropy([9u8; 32]);
+
+        let view = BlockSignalView::new(reactive.clone());
+
+        let ban = BlockBanFact::new_ms(
+            context_id,
+            None,
+            target,
+            AuthorityId::default(),
+            "spamming".to_string(),
+            999,
+            None,
+        )
+        .to_generic();
+        view.update(&[fact_from_relational(ban)]).await;
+
+        let updated = reactive.read(&*BLOCKS_SIGNAL).await.unwrap();
+        let block = updated.current_block().unwrap();
+        assert!(block.ban_list.contains_key(&target));
+        assert_eq!(block.ban_list.get(&target).unwrap().reason, "spamming");
+        assert_eq!(block.id, block_id);
+    }
+}
