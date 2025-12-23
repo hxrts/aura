@@ -1631,13 +1631,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // Time Operations
     // =========================================================================
 
-    fn current_time_ms(&self) -> u64 {
-        // RuntimeBridge currently exposes a synchronous time accessor.
-        //
-        // Aura's unified time system is effect-injected and async; until this bridge is
-        // updated to support an async time call (or to return an explicitly provided
-        // timestamp), return a deterministic value.
-        0
+    async fn current_time_ms(&self) -> Result<u64, IntentError> {
+        let effects = self.agent.runtime().effects();
+        let time = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::service_error(format!("Physical time unavailable: {e}")))?;
+        Ok(time.ts_ms)
     }
 
     // =========================================================================

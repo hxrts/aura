@@ -5,6 +5,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use iocraft::prelude::*;
 
@@ -13,7 +14,6 @@ use aura_app::signal_defs::{
     CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
     RECOVERY_SIGNAL, SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
-use aura_effects::time::PhysicalTimeHandler;
 
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Invitation, Message, PendingRequest, Resident};
@@ -22,6 +22,7 @@ pub struct NavStatusSignals {
     pub syncing: State<bool>,
     pub peer_count: State<usize>,
     pub last_sync_time: State<Option<u64>>,
+    pub now_ms: State<Option<u64>>,
 }
 
 pub fn use_nav_status_signals(
@@ -34,17 +35,31 @@ pub fn use_nav_status_signals(
     let syncing = hooks.use_state(|| initial_syncing);
     let peer_count = hooks.use_state(|| initial_peer_count);
     let last_sync_time = hooks.use_state(|| initial_last_sync_time);
+    let now_ms = hooks.use_state(|| None::<u64>);
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut syncing = syncing.clone();
-        let mut last_sync_time = last_sync_time.clone();
+        let last_sync_time = last_sync_time.clone();
+        let app_core_for_time = app_core.clone();
+        let last_sync_time_for_time = last_sync_time.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SYNC_STATUS_SIGNAL, move |status| {
                 syncing.set(matches!(status, SyncStatus::Syncing { .. }));
 
                 if matches!(status, SyncStatus::Synced) {
-                    last_sync_time.set(Some(now_millis()));
+                    {
+                        let app_core = app_core_for_time.clone();
+                        let mut last_sync_time = last_sync_time_for_time.clone();
+                        tokio::spawn(async move {
+                            let runtime = app_core.raw().read().await.runtime().cloned();
+                            if let Some(runtime) = runtime {
+                                if let Ok(now_ms) = runtime.current_time_ms().await {
+                                    last_sync_time.set(Some(now_ms));
+                                }
+                            }
+                        });
+                    }
                 }
             })
             .await;
@@ -66,10 +81,28 @@ pub fn use_nav_status_signals(
         }
     });
 
+    // Keep a best-effort physical clock for relative-time UI formatting.
+    // This must come from the runtime/effects system (not OS clock).
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut now_ms = now_ms.clone();
+        async move {
+            loop {
+                let runtime = app_core.raw().read().await.runtime().cloned();
+                if let Some(runtime) = runtime {
+                    if let Ok(ts) = runtime.current_time_ms().await {
+                        now_ms.set(Some(ts));
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+            }
+        }
+    });
     NavStatusSignals {
         syncing,
         peer_count,
         last_sync_time,
+        now_ms,
     }
 }
 
@@ -190,10 +223,6 @@ pub fn use_residents_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
     });
 
     shared_residents
-}
-
-fn now_millis() -> u64 {
-    PhysicalTimeHandler::new().physical_time_now_ms()
 }
 
 /// Shared messages state that can be read by closures without re-rendering.

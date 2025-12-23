@@ -8,17 +8,11 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::AppCore;
-use aura_effects::time::PhysicalTimeHandler;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 pub use aura_app::workflows::contacts::{remove_contact, update_contact_nickname};
-
-/// Get current time in milliseconds since Unix epoch
-fn current_time_ms() -> u64 {
-    PhysicalTimeHandler::new().physical_time_now_ms()
-}
 
 /// Handle contact commands
 pub async fn handle_contacts(
@@ -30,7 +24,7 @@ pub async fn handle_contacts(
             contact_id,
             nickname,
         } => {
-            let now = current_time_ms();
+            let now = super::time::current_time_ms(app_core).await;
             match update_contact_nickname(app_core, contact_id, nickname, now).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
@@ -40,7 +34,7 @@ pub async fn handle_contacts(
             }
         }
         EffectCommand::RemoveContact { contact_id } => {
-            let now = current_time_ms();
+            let now = super::time::current_time_ms(app_core).await;
             match remove_contact(app_core, contact_id, now).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(

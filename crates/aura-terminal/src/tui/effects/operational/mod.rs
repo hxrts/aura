@@ -42,6 +42,7 @@ mod settings;
 mod steward;
 mod sync;
 mod system;
+mod time;
 pub mod types;
 
 use std::collections::HashSet;

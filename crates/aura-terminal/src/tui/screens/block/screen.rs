@@ -23,7 +23,7 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::BlockViewProps;
 use crate::tui::theme::{Spacing, Theme};
-use crate::tui::types::{BlockBudget, Contact, Message, Resident};
+use crate::tui::types::{format_timestamp, BlockBudget, Contact, Message, Resident};
 
 /// Which panel is focused
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -167,6 +167,71 @@ pub struct StorageBudgetPanelProps {
     pub budget: BlockBudget,
 }
 
+/// Props for PinnedMessagesPanel
+#[derive(Default, Props)]
+pub struct PinnedMessagesPanelProps {
+    pub pinned: Vec<PinnedMessageRow>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PinnedMessageRow {
+    pub message_id: String,
+    pub pinned_by: String,
+    pub pinned_at: String,
+}
+
+/// Pinned messages panel
+#[component]
+pub fn PinnedMessagesPanel(props: &PinnedMessagesPanelProps) -> impl Into<AnyElement<'static>> {
+    let pinned = props.pinned.clone();
+
+    element! {
+        View(
+            flex_direction: FlexDirection::Column,
+            flex_shrink: 1.0,
+            border_style: BorderStyle::Round,
+            border_color: Theme::BORDER,
+            padding_left: 1,
+            padding_right: 1,
+        ) {
+            View(padding_left: 0) {
+                Text(content: "Pinned", weight: Weight::Bold, color: Theme::PRIMARY)
+            }
+            View(
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                padding_top: 1,
+                overflow: Overflow::Scroll,
+            ) {
+                #(if pinned.is_empty() {
+                    vec![element! {
+                        View {
+                            Text(content: "No pinned messages", color: Theme::TEXT_MUTED)
+                        }
+                    }]
+                } else {
+                    pinned.iter().map(|item| {
+                        let message_id = item.message_id.clone();
+                        let pinned_by = item.pinned_by.clone();
+                        let pinned_at = item.pinned_at.clone();
+                        element! {
+                            View(
+                                flex_direction: FlexDirection::Column,
+                                margin_bottom: 1,
+                                padding_left: 0,
+                            ) {
+                                Text(content: format!("• {}", message_id), color: Theme::TEXT)
+                                Text(content: format!("{} @ {}", pinned_by, pinned_at), color: Theme::TEXT_MUTED)
+                            }
+                        }
+                    }).collect()
+                })
+            }
+        }
+    }
+}
+
 /// Storage budget panel
 #[component]
 pub fn StorageBudgetPanel(props: &StorageBudgetPanelProps) -> impl Into<AnyElement<'static>> {
@@ -276,6 +341,29 @@ fn convert_budget(storage: &aura_app::BlockFlowBudget, resident_count: u32) -> B
     }
 }
 
+fn format_contact_name(authority_id: &str, contacts: &[Contact]) -> String {
+    if let Some(contact) = contacts.iter().find(|c| c.id == authority_id) {
+        if !contact.nickname.is_empty() {
+            return contact.nickname.clone();
+        }
+        if let Some(name) = contact.suggested_name.as_ref() {
+            if !name.is_empty() {
+                return name.clone();
+            }
+        }
+    }
+    short_id(authority_id, 8)
+}
+
+fn short_id(id: &str, len: usize) -> String {
+    let trimmed = id.trim();
+    if trimmed.len() <= len {
+        trimmed.to_string()
+    } else {
+        trimmed.chars().take(len).collect()
+    }
+}
+
 /// The block screen (homepage)
 ///
 /// ## Pure View Component
@@ -308,6 +396,7 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
         let initial = props.budget.clone();
         move || initial
     });
+    let reactive_pins = hooks.use_state(|| Vec::<PinnedMessageRow>::new());
 
     // Subscribe to block signal updates if AppCoreContext is available
     if let Some(ctx) = app_ctx {
@@ -315,23 +404,46 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
             let mut reactive_block_name = reactive_block_name.clone();
             let mut reactive_residents = reactive_residents.clone();
             let mut reactive_budget = reactive_budget.clone();
+            let mut reactive_pins = reactive_pins.clone();
+            let contacts = props.contacts.clone();
             let app_core = ctx.app_core.clone();
             async move {
                 // Helper closure to convert BlockState to TUI types
-                let convert_block_state = |block_state: &aura_app::views::BlockState| {
+                let convert_block_state = move |block_state: &aura_app::views::BlockState| {
                     let residents: Vec<Resident> =
                         block_state.residents.iter().map(convert_resident).collect();
 
                     let budget = convert_budget(&block_state.storage, block_state.resident_count);
 
-                    (block_state.name.clone(), residents, budget)
+                    let mut pinned = Vec::new();
+                    for message_id in &block_state.pinned_messages {
+                        if let Some(meta) = block_state.pinned_metadata.get(message_id) {
+                            pinned.push(PinnedMessageRow {
+                                message_id: short_id(&meta.message_id, 10),
+                                pinned_by: format_contact_name(
+                                    &meta.pinned_by.to_string(),
+                                    &contacts,
+                                ),
+                                pinned_at: format_timestamp(meta.pinned_at),
+                            });
+                        } else {
+                            pinned.push(PinnedMessageRow {
+                                message_id: short_id(message_id, 10),
+                                pinned_by: "unknown".to_string(),
+                                pinned_at: "--:--".to_string(),
+                            });
+                        }
+                    }
+
+                    (block_state.name.clone(), residents, budget, pinned)
                 };
 
                 subscribe_signal_with_retry(app_core, &*BLOCK_SIGNAL, move |block_state| {
-                    let (name, residents, budget) = convert_block_state(&block_state);
+                    let (name, residents, budget, pinned) = convert_block_state(&block_state);
                     reactive_block_name.set(name);
                     reactive_residents.set(residents);
                     reactive_budget.set(budget);
+                    reactive_pins.set(pinned);
                 })
                 .await;
             }
@@ -341,6 +453,7 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     // Use reactive state for rendering
     let residents = reactive_residents.read().clone();
     let budget = reactive_budget.read().clone();
+    let pinned = reactive_pins.read().clone();
 
     // Messages come from props
     let messages = props.messages.clone();
@@ -375,6 +488,7 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                 View(width: 24, flex_direction: FlexDirection::Column, overflow: Overflow::Scroll, gap: 0) {
                     ResidentList(residents: residents, selected_index: current_resident_index)
                     StorageBudgetPanel(budget: budget)
+                    PinnedMessagesPanel(pinned: pinned)
                 }
                 // Messages (remaining width ~55 chars)
                 View(flex_grow: 1.0, height: 22, overflow: Overflow::Hidden) {

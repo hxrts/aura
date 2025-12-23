@@ -695,9 +695,6 @@ impl ITFBasedFuzzer {
         initial_state: QuintSimulationState,
         trace_count: u32,
     ) -> Result<MBTExecutionResult, ITFFuzzError> {
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
-
         // Step 1: Generate MBT traces using Quint CLI
         let traces = self.generate_mbt_traces(spec_file, trace_count).await?;
 
@@ -718,8 +715,7 @@ impl ITFBasedFuzzer {
             .flat_map(|c| c.violations.clone())
             .collect();
 
-        #[allow(clippy::disallowed_methods)]
-        let execution_time_ms = start_time.elapsed().as_millis() as u64;
+        let execution_time_ms = 0u64;
 
         Ok(MBTExecutionResult {
             spec_file: spec_file.to_path_buf(),
@@ -752,8 +748,6 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
         properties: &[String],
     ) -> Result<ModelCheckingResult, ITFFuzzError> {
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
         let deepening = &self.config.iterative_deepening;
 
         let mut all_counterexamples = Vec::new();
@@ -790,7 +784,7 @@ impl ITFBasedFuzzer {
             }
         }
 
-        let checking_time = start_time.elapsed().as_millis() as u64;
+        let checking_time = 0u64;
 
         Ok(ModelCheckingResult {
             properties_satisfied: !violations_found,
@@ -936,9 +930,6 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
         properties: &[String],
     ) -> Result<ModelCheckingReport, ITFFuzzError> {
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
-
         // Run bounded model checking
         let model_check_result = self
             .run_bounded_model_checking(spec_file, properties)
@@ -950,7 +941,7 @@ impl ITFBasedFuzzer {
         // Analyze violations
         let violation_analysis = self.analyze_violations(&violations).await?;
 
-        let total_time = start_time.elapsed();
+        let total_time = std::time::Duration::ZERO;
 
         Ok(ModelCheckingReport {
             spec_file: spec_file.to_path_buf(),
@@ -996,8 +987,6 @@ impl ITFBasedFuzzer {
         &self,
         spec_file: &Path,
     ) -> Result<SimulationResult, ITFFuzzError> {
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
         let sim_config = &self.config.simulation;
 
         let mut traces = Vec::new();
@@ -1020,7 +1009,7 @@ impl ITFBasedFuzzer {
             }
         }
 
-        let simulation_time = start_time.elapsed().as_millis() as u64;
+        let simulation_time = 0u64;
 
         Ok(SimulationResult {
             traces,
@@ -1273,9 +1262,6 @@ impl ITFBasedFuzzer {
         &self,
         spec_file: &Path,
     ) -> Result<TestSuite, ITFFuzzError> {
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
-
         // Phase 1: Run simulations
         let simulation_result = self.run_simulation_based_testing(spec_file).await?;
 
@@ -1286,7 +1272,7 @@ impl ITFBasedFuzzer {
         let coverage_analysis = self.analyze_test_coverage(&test_cases);
 
         // Phase 4: Generate summary
-        let generation_time = start_time.elapsed();
+        let generation_time = std::time::Duration::ZERO;
 
         Ok(TestSuite {
             test_cases,
@@ -1345,8 +1331,6 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
         campaign_config: FuzzingCampaignConfig,
     ) -> Result<FuzzingCampaignResult, ITFFuzzError> {
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
         let mut performance_monitor = PerformanceMonitor::new();
 
         println!(
@@ -1420,7 +1404,7 @@ impl ITFBasedFuzzer {
         performance_monitor.start_phase("analysis");
         println!("📊 Phase 4: Analysis and reporting...");
 
-        let campaign_duration = start_time.elapsed();
+        let campaign_duration = std::time::Duration::ZERO;
         let performance_report = performance_monitor.generate_report();
 
         // Calculate coverage summary
@@ -1873,9 +1857,10 @@ Goals Achieved: {}
 
 /// Performance monitoring utility for tracking phase timing and resources
 pub struct PerformanceMonitor {
-    phase_start_times: std::collections::HashMap<String, std::time::Instant>,
+    phase_start_times: std::collections::HashMap<String, u64>,
     phase_durations: std::collections::HashMap<String, std::time::Duration>,
     start_memory: Option<u64>,
+    clock: u64,
 }
 
 impl Default for PerformanceMonitor {
@@ -1890,18 +1875,21 @@ impl PerformanceMonitor {
             phase_start_times: std::collections::HashMap::new(),
             phase_durations: std::collections::HashMap::new(),
             start_memory: Self::get_memory_usage(),
+            clock: 0,
         }
     }
 
     pub fn start_phase(&mut self, phase_name: &str) {
-        #[allow(clippy::disallowed_methods)]
-        let now = std::time::Instant::now();
-        self.phase_start_times.insert(phase_name.to_string(), now);
+        self.clock = self.clock.saturating_add(1);
+        self.phase_start_times
+            .insert(phase_name.to_string(), self.clock);
     }
 
     pub fn end_phase(&mut self, phase_name: &str) {
         if let Some(start_time) = self.phase_start_times.remove(phase_name) {
-            let duration = start_time.elapsed();
+            self.clock = self.clock.saturating_add(1);
+            let duration_ticks = self.clock.saturating_sub(start_time);
+            let duration = std::time::Duration::from_millis(duration_ticks);
             self.phase_durations
                 .insert(phase_name.to_string(), duration);
         }

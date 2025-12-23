@@ -392,8 +392,6 @@ impl ComposedSimulationEnvironment {
 
         // Execute simulation ticks
         for tick in 1..=config.max_ticks {
-            let tick_start = std::time::Instant::now();
-
             // Execute tick operations through scenario handler
             let mut tick_data = std::collections::HashMap::new();
             tick_data.insert("tick".to_string(), tick.to_string());
@@ -403,7 +401,7 @@ impl ComposedSimulationEnvironment {
                 .await
                 .map_err(|e| SimulationComposerError::EffectOperationFailed(e.to_string()))?;
 
-            let execution_time = tick_start.elapsed();
+            let execution_time = std::time::Duration::ZERO;
             let simulation_elapsed = config.tick_duration * tick as u32;
 
             let tick_result = SimulationTickResult {
@@ -515,8 +513,6 @@ impl ComposedSimulationEnvironment {
 
         // Execute each ITF state as a simulation tick
         for (tick, itf_state) in itf_trace.states.iter().enumerate() {
-            let tick_start = std::time::Instant::now();
-
             // Record state variables
             let mut tick_data = std::collections::HashMap::new();
             tick_data.insert("tick".to_string(), tick.to_string());
@@ -537,7 +533,7 @@ impl ComposedSimulationEnvironment {
                 .await
                 .map_err(|e| SimulationComposerError::EffectOperationFailed(e.to_string()))?;
 
-            let execution_time = tick_start.elapsed();
+            let execution_time = std::time::Duration::ZERO;
 
             let tick_result = SimulationTickResult {
                 tick_number: (tick + 1) as u64,

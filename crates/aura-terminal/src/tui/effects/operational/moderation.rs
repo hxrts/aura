@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::AppCore;
-use aura_effects::time::PhysicalTimeHandler;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
@@ -16,10 +15,6 @@ use super::EffectCommand;
 pub use aura_app::workflows::moderation::{
     ban_user, kick_user, mute_user, pin_message, unban_user, unmute_user, unpin_message,
 };
-
-fn current_time_ms() -> u64 {
-    PhysicalTimeHandler::new().physical_time_now_ms()
-}
 
 /// Handle moderation commands.
 pub async fn handle_moderation(
@@ -32,7 +27,7 @@ pub async fn handle_moderation(
             target,
             reason,
         } => {
-            let ts = current_time_ms();
+            let ts = super::time::current_time_ms(app_core).await;
             match kick_user(app_core, target, reason.as_deref(), ts).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
@@ -40,7 +35,7 @@ pub async fn handle_moderation(
         }
 
         EffectCommand::BanUser { target, reason } => {
-            let ts = current_time_ms();
+            let ts = super::time::current_time_ms(app_core).await;
             match ban_user(app_core, target, reason.as_deref(), ts).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
@@ -56,7 +51,7 @@ pub async fn handle_moderation(
             target,
             duration_secs,
         } => {
-            let ts = current_time_ms();
+            let ts = super::time::current_time_ms(app_core).await;
             match mute_user(app_core, target, *duration_secs, ts).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),

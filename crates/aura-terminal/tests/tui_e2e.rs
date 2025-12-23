@@ -5943,11 +5943,8 @@ fn report_freeze_diagnostics(
 
 /// Get current time as a string for logging
 fn chrono_now() -> String {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap();
-    let secs = now.as_secs() % 86400; // Time within day
+    let now_ms = aura_effects::time::PhysicalTimeHandler::new().physical_time_now_ms();
+    let secs = (now_ms / 1000) % 86400;
     let hours = secs / 3600;
     let mins = (secs % 3600) / 60;
     let secs = secs % 60;

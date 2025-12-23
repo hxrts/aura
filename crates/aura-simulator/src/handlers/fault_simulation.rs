@@ -8,7 +8,8 @@
 use async_trait::async_trait;
 use aura_core::effects::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 /// Simulation-specific fault injection handler
 ///
@@ -21,13 +22,17 @@ pub struct SimulationFaultHandler {
     seed: u64,
     /// Maximum concurrent faults
     max_concurrent_faults: usize,
+    /// Deterministic tick counter for fault timing
+    clock: AtomicU64,
+    /// Deterministic counter for fault IDs
+    fault_counter: AtomicU64,
 }
 
 #[derive(Debug, Clone)]
 struct ActiveFault {
     fault_type: String,
-    start_time: Instant,
-    duration: Option<Duration>,
+    start_tick: u64,
+    duration_ms: Option<u64>,
     parameters: HashMap<String, String>,
 }
 
@@ -40,6 +45,8 @@ impl SimulationFaultHandler {
             active_faults: std::sync::Mutex::new(HashMap::new()),
             seed,
             max_concurrent_faults: 10,
+            clock: AtomicU64::new(0),
+            fault_counter: AtomicU64::new(0),
         }
     }
 
@@ -49,6 +56,8 @@ impl SimulationFaultHandler {
             active_faults: std::sync::Mutex::new(HashMap::new()),
             seed,
             max_concurrent_faults: max_faults,
+            clock: AtomicU64::new(0),
+            fault_counter: AtomicU64::new(0),
         }
     }
 
@@ -69,12 +78,22 @@ impl SimulationFaultHandler {
         random_value < rate
     }
 
+    fn next_tick(&self) -> u64 {
+        self.clock.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn next_fault_id(&self, prefix: &str) -> String {
+        let id = self.fault_counter.fetch_add(1, Ordering::SeqCst);
+        format!("{}_{}", prefix, id)
+    }
+
     /// Add fault to active tracking
     fn track_fault(&self, fault_id: String, fault_type: String, duration: Option<Duration>) {
+        let duration_ms = duration.map(|d| d.as_millis() as u64);
         let fault = ActiveFault {
             fault_type,
-            start_time: Instant::now(),
-            duration,
+            start_tick: self.next_tick(),
+            duration_ms,
             parameters: HashMap::new(),
         };
 
@@ -85,11 +104,11 @@ impl SimulationFaultHandler {
     /// Remove expired faults
     fn cleanup_expired_faults(&self) {
         let mut active_faults = self.active_faults.lock().unwrap();
-        let now = Instant::now();
+        let now_tick = self.next_tick();
 
         active_faults.retain(|_, fault| {
-            match fault.duration {
-                Some(duration) => now.duration_since(fault.start_time) < duration,
+            match fault.duration_ms {
+                Some(duration_ms) => now_tick.saturating_sub(fault.start_tick) < duration_ms,
                 None => true, // Permanent faults stay active
             }
         });
@@ -132,7 +151,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("corruption_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = self.next_fault_id("corruption");
         self.track_fault(
             fault_id,
             format!("MessageCorruption({:?})", corruption_type),
@@ -162,7 +181,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("delay_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = self.next_fault_id("delay");
         let peers_desc = match affected_peers {
             Some(ref peers) => format!("peers: {:?}", peers),
             None => "all peers".to_string(),
@@ -197,7 +216,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("partition_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = self.next_fault_id("partition");
         self.track_fault(
             fault_id,
             format!("NetworkPartition({} groups)", partition_groups.len()),
@@ -227,7 +246,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("byzantine_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = self.next_fault_id("byzantine");
         self.track_fault(
             fault_id,
             format!(
@@ -261,7 +280,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("resource_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = self.next_fault_id("resource");
         self.track_fault(
             fault_id,
             format!(
@@ -294,7 +313,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("timing_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = self.next_fault_id("timing");
         self.track_fault(
             fault_id,
             format!(

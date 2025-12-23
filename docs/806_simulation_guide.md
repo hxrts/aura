@@ -78,6 +78,12 @@ These systems are **not redundant** - TOML scenarios provide high-level integrat
 
 The simulation system leverages Aura's stateless effect architecture, providing simulation capabilities through specialized handlers rather than a separate simulation runtime.
 
+## Time system constraints
+
+Simulation must never read OS clocks (`SystemTime::now()`, `Instant::now()`). All time must be supplied by effect handlers (for example, `SimulationTimeHandler` implementing `PhysicalTimeEffects`) so runs are deterministic and reproducible. Use the correct time domain for each purpose: `PhysicalClock` for wall-time semantics, `LogicalClock` for causality, `OrderClock` for privacy-preserving ordering, and `Range` for validity windows. When attested time is required, prefer `ProvenancedTime`/`TimeAttestationEffects` rather than embedding OS timestamps in simulation state.
+
+When simulations must compare timestamps across domains, use `TimeStamp::compare(policy)` so the ordering policy is explicit and deterministic.
+
 ## Effect System Foundation
 
 Simulation determinism requires that all simulated code uses effect traits instead of direct system calls:

@@ -90,6 +90,14 @@ The frontends use `AppCore` in two ways:
 
 This split keeps domain semantics centralized. It also makes it possible to reuse the same workflows in multiple user interfaces.
 
+## Time system in UI
+
+UI code must never read OS clocks (for example, `SystemTime::now()` or `Instant::now()`). All wall-clock needs must flow through the runtime via `RuntimeBridge::current_time_ms` (or `PhysicalTimeEffects` inside handlers). Demo mode and relative-time UI (e.g., “Synced Xm ago”) must be driven by runtime time so simulations remain deterministic.
+
+Aura time domains are: `PhysicalClock` (wall time), `LogicalClock` (causality), `OrderClock` (privacy-preserving ordering), and `Range` (validity windows). When attested time is required, use `ProvenancedTime`/`TimeAttestationEffects` rather than embedding OS timestamps in UI state.
+
+Ordering across domains must be explicit: use `TimeStamp::compare(policy)` (never compare raw ms) when you need deterministic ordering across mixed time domains.
+
 ## Shared infrastructure in `aura-terminal`
 
 CLI commands are parsed in `crates/aura-terminal/src/cli/commands.rs` and routed through `crates/aura-terminal/src/main.rs`. Implementations live under `crates/aura-terminal/src/handlers/` and use `HandlerContext` from `crates/aura-terminal/src/handlers/handler_context.rs`. Handler functions typically return `CliOutput` for testable rendering.

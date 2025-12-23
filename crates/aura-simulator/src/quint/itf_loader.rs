@@ -284,10 +284,7 @@ impl ITFTraceBuilder {
                 source: self.source,
                 status: "ok".to_string(),
                 description: self.description,
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64,
+                timestamp: 0,
             },
             params: Vec::new(),
             vars: self.vars,

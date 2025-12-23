@@ -444,20 +444,13 @@ impl PropertyMonitor {
     /// lightweight interpreter for common expression forms (boolean variable lookup
     /// and simple equality checks). This keeps the simulator deterministic without
     /// invoking the full Quint evaluator while still providing real signal.
-    // SAFETY: timing measurement for property validation
-    #[allow(clippy::disallowed_methods)]
     pub fn evaluate_properties(&mut self, _state: &dyn SimulationState) -> ValidationResult {
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
         let mut validation_result = ValidationResult::new();
 
         for property in &self.monitored_properties {
-            #[allow(clippy::disallowed_methods)]
-            let eval_start = std::time::Instant::now();
-
             // Evaluate using the lightweight interpreter defined in evaluate_single_property
             let holds = self.evaluate_single_property(property, _state);
-            let eval_time = eval_start.elapsed().as_millis() as u64;
+            let eval_time = 0u64;
 
             let result = PropertyEvaluationResult {
                 property_name: property.name.clone(),
@@ -480,7 +473,7 @@ impl PropertyMonitor {
             validation_result.add_result(result);
         }
 
-        validation_result.total_time_ms = start_time.elapsed().as_millis() as u64;
+        validation_result.total_time_ms = 0;
         validation_result
     }
 

@@ -1070,10 +1070,7 @@ impl SimulatedBridge {
                             member_count: (members.len() as u32).saturating_add(1),
                             last_message: None,
                             last_message_time: None,
-                            last_activity: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as u64,
+                            last_activity: PhysicalTimeHandler::new().physical_time_now_ms(),
                         };
                         let _ = self
                             .tui_event_tx
@@ -1139,10 +1136,7 @@ impl SimulatedBridge {
                         channel,
                         from: authority_id.to_string(),
                         content,
-                        timestamp: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64,
+                        timestamp: PhysicalTimeHandler::new().physical_time_now_ms(),
                     };
                     let _ = self.tui_event_tx.send(event);
                 }

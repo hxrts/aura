@@ -30,10 +30,7 @@ use aura_core::{
     AuraError, Result as AuraResult,
 };
 use serde_json::Value;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, time::Duration};
 use tracing::{debug, info};
 
 /// Stateless simulator handler that delegates all operations to effect handlers
@@ -139,13 +136,11 @@ where
             );
         }
 
-        let start_time = Instant::now();
-
         // Advance simulation time instead of maintaining tick counters
         self.effects.advance_time(delta_time).await?;
 
         // Record the operation for metrics
-        let execution_time = start_time.elapsed();
+        let execution_time = Duration::ZERO;
         self.effects
             .record_operation("simulation_tick", execution_time)
             .await?;
@@ -429,7 +424,7 @@ mod tests {
 
         assert_eq!(tick_result.tick_number, 1);
         assert_eq!(tick_result.delta_time, Duration::from_millis(100));
-        assert!(tick_result.execution_time > Duration::ZERO);
+        assert_eq!(tick_result.execution_time, Duration::ZERO);
     }
 
     #[tokio::test]

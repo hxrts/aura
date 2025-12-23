@@ -108,6 +108,18 @@ pub struct KickRecord {
     pub kicked_at: u64,
 }
 
+/// Pinned message metadata
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct PinnedMessageMeta {
+    /// Message identifier
+    pub message_id: String,
+    /// Authority who pinned the message
+    pub pinned_by: AuthorityId,
+    /// Timestamp when pin occurred (ms since epoch)
+    pub pinned_at: u64,
+}
+
 // =============================================================================
 // Block State
 // =============================================================================
@@ -136,6 +148,9 @@ pub struct BlockState {
     pub topic: Option<String>,
     /// Pinned messages (message IDs)
     pub pinned_messages: Vec<String>,
+    /// Pinned message metadata keyed by message ID
+    #[serde(default)]
+    pub pinned_metadata: HashMap<String, PinnedMessageMeta>,
     /// Channel mode flags (e.g., "moderated", "invite-only")
     pub mode_flags: Option<String>,
     /// Persistent ban list (keyed by authority ID)
@@ -193,6 +208,7 @@ impl BlockState {
             is_primary: false,
             topic: None,
             pinned_messages: Vec::new(),
+            pinned_metadata: HashMap::new(),
             mode_flags: None,
             ban_list: HashMap::new(),
             mute_list: HashMap::new(),
@@ -295,7 +311,15 @@ impl BlockState {
         self.kick_log.push(record);
     }
 
-    /// Add a pinned message
+    /// Add a pinned message with metadata
+    pub fn pin_message_with_meta(&mut self, meta: PinnedMessageMeta) {
+        if !self.pinned_messages.contains(&meta.message_id) {
+            self.pinned_messages.push(meta.message_id.clone());
+        }
+        self.pinned_metadata.insert(meta.message_id.clone(), meta);
+    }
+
+    /// Add a pinned message (metadata optional)
     pub fn pin_message(&mut self, message_id: String) {
         if !self.pinned_messages.contains(&message_id) {
             self.pinned_messages.push(message_id);
@@ -304,12 +328,15 @@ impl BlockState {
 
     /// Remove a pinned message
     pub fn unpin_message(&mut self, message_id: &str) -> bool {
-        if let Some(pos) = self.pinned_messages.iter().position(|id| id == message_id) {
-            self.pinned_messages.remove(pos);
-            true
-        } else {
-            false
-        }
+        let had_entry =
+            if let Some(pos) = self.pinned_messages.iter().position(|id| id == message_id) {
+                self.pinned_messages.remove(pos);
+                true
+            } else {
+                false
+            };
+        self.pinned_metadata.remove(message_id);
+        had_entry
     }
 
     /// Clean up expired mutes

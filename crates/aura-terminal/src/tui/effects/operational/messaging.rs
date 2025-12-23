@@ -14,7 +14,6 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::AppCore;
-use aura_effects::time::PhysicalTimeHandler;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
@@ -24,13 +23,6 @@ pub use aura_app::workflows::messaging::{
     close_channel, create_channel, invite_user_to_channel, join_channel, leave_channel,
     send_action, send_direct_message, send_message, set_topic, start_direct_chat,
 };
-
-/// Get current time in milliseconds since Unix epoch
-///
-/// Used to provide timestamps to pure workflow functions.
-fn current_time_ms() -> u64 {
-    PhysicalTimeHandler::new().physical_time_now_ms()
-}
 
 /// Handle messaging commands
 ///
@@ -46,7 +38,7 @@ pub async fn handle_messaging(
             topic,
             members,
         } => {
-            let timestamp = current_time_ms();
+            let timestamp = super::time::current_time_ms(app_core).await;
             match create_channel(app_core, name, topic.clone(), members, timestamp).await {
                 Ok(channel_id) => Some(Ok(OpResponse::Data(format!(
                     "Channel created: {}",
@@ -60,7 +52,7 @@ pub async fn handle_messaging(
         }
 
         EffectCommand::SendMessage { channel, content } => {
-            let timestamp = current_time_ms();
+            let timestamp = super::time::current_time_ms(app_core).await;
             match send_message(app_core, channel, content, timestamp).await {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!(
                     "Message sent: {}",
@@ -75,7 +67,7 @@ pub async fn handle_messaging(
 
         EffectCommand::SendDirectMessage { target, content } => {
             // Use workflow for business logic
-            let timestamp = current_time_ms();
+            let timestamp = super::time::current_time_ms(app_core).await;
             match send_direct_message(app_core, target, content, timestamp).await {
                 Ok(dm_channel_id) => Some(Ok(OpResponse::Data(format!(
                     "Message sent to DM channel: {}",
@@ -90,7 +82,7 @@ pub async fn handle_messaging(
 
         EffectCommand::StartDirectChat { contact_id } => {
             // Use workflow for business logic
-            let timestamp = current_time_ms();
+            let timestamp = super::time::current_time_ms(app_core).await;
             match start_direct_chat(app_core, contact_id, timestamp).await {
                 Ok(dm_channel_id) => Some(Ok(OpResponse::Data(format!(
                     "Started DM chat: {}",
@@ -104,7 +96,14 @@ pub async fn handle_messaging(
         }
 
         EffectCommand::SetTopic { channel, text } => {
-            match set_topic(app_core, channel, text, current_time_ms()).await {
+            match set_topic(
+                app_core,
+                channel,
+                text,
+                super::time::current_time_ms(app_core).await,
+            )
+            .await
+            {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to set topic: {}",
@@ -115,7 +114,7 @@ pub async fn handle_messaging(
 
         EffectCommand::SendAction { channel, action } => {
             // IRC-style /me action - use workflow
-            let timestamp = current_time_ms();
+            let timestamp = super::time::current_time_ms(app_core).await;
             match send_action(app_core, channel, action, timestamp).await {
                 Ok(message_id) => {
                     Some(Ok(OpResponse::Data(format!("Action sent: {}", message_id))))
@@ -158,7 +157,13 @@ pub async fn handle_messaging(
         },
 
         EffectCommand::CloseChannel { channel } => {
-            match close_channel(app_core, channel, current_time_ms()).await {
+            match close_channel(
+                app_core,
+                channel,
+                super::time::current_time_ms(app_core).await,
+            )
+            .await
+            {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to close channel: {}",
@@ -172,7 +177,7 @@ pub async fn handle_messaging(
             channel,
             content,
         } => {
-            let timestamp = current_time_ms();
+            let timestamp = super::time::current_time_ms(app_core).await;
             match send_message(app_core, channel, content, timestamp).await {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!(
                     "Message retried: {}",

@@ -1897,6 +1897,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Nav bar status is updated reactively from signals.
     let syncing = nav_signals.syncing.get();
     let last_sync = nav_signals.last_sync_time.get();
+    let now_ms = nav_signals.now_ms.get();
     let peers = nav_signals.peer_count.get();
 
     // Layout: NavBar (3 rows) + Content (25 rows) + Footer (3 rows) = 31 = TOTAL_HEIGHT
@@ -2025,6 +2026,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 disabled: is_insert_mode,
                 syncing: syncing,
                 last_sync_time: last_sync,
+                now_ms: now_ms,
                 peer_count: peers,
             )
 

@@ -13,7 +13,7 @@ use aura_app::signal_defs::{
     BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
 };
 use aura_app::views::{
-    block::{BanRecord, BlockState, BlocksState, KickRecord, MuteRecord},
+    block::{BanRecord, BlockState, BlocksState, KickRecord, MuteRecord, PinnedMessageMeta},
     chat::{Channel, ChannelType, ChatState, Message},
     contacts::{Contact, ContactsState},
     invitations::{
@@ -474,7 +474,11 @@ impl ReactiveView for BlockSignalView {
                 }
                 BLOCK_PIN_FACT_TYPE_ID => {
                     if let Some(pin) = BlockPinFact::from_bytes(binding_data) {
-                        block.pin_message(pin.message_id);
+                        block.pin_message_with_meta(PinnedMessageMeta {
+                            message_id: pin.message_id,
+                            pinned_by: pin.actor_authority,
+                            pinned_at: pin.pinned_at.ts_ms,
+                        });
                         changed = true;
                     }
                 }

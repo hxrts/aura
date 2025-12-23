@@ -92,6 +92,20 @@ impl DemoSignalCoordinator {
         (action_detector, response_handler)
     }
 
+    /// Best-effort current time (ms) sourced from the runtime/effects system.
+    async fn runtime_now_ms(&self) -> u64 {
+        let runtime = {
+            let core = self.app_core.read().await;
+            core.runtime().cloned()
+        };
+
+        let Some(runtime) = runtime else {
+            return 0;
+        };
+
+        runtime.current_time_ms().await.unwrap_or(0)
+    }
+
     /// Run the action detector loop
     ///
     /// Subscribes to signals and detects Bob's actions to forward to agents.
@@ -228,10 +242,7 @@ impl DemoSignalCoordinator {
                     sender_id: authority_id,
                     sender_name: self.get_agent_name(&authority_id),
                     content,
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
+                    timestamp: self.runtime_now_ms().await,
                     is_own: false,
                     reply_to: None,
                     is_read: false,
@@ -310,10 +321,7 @@ impl DemoSignalCoordinator {
                             // (scheduler doesn't update RECOVERY_SIGNAL for bindings)
                             let mut recovery =
                                 core.read(&*RECOVERY_SIGNAL).await.unwrap_or_default();
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as u64;
+                            let now = self.runtime_now_ms().await;
 
                             if !recovery.guardians.iter().any(|g| g.id == authority_id) {
                                 recovery.guardians.push(Guardian {

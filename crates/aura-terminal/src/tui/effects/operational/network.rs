@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::AppCore;
-use aura_effects::time::PhysicalTimeHandler;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
@@ -54,7 +53,7 @@ pub async fn handle_network(
         }
 
         EffectCommand::ListPeers => {
-            let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
+            let now_ms = super::time::current_time_ms(app_core).await;
             match aura_app::workflows::network::list_peers(app_core, now_ms).await {
                 Ok(peer_list) => {
                     tracing::info!("Listed {} peers", peer_list.len());
@@ -65,7 +64,7 @@ pub async fn handle_network(
         }
 
         EffectCommand::DiscoverPeers => {
-            let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
+            let now_ms = super::time::current_time_ms(app_core).await;
             match aura_app::workflows::network::discover_peers(app_core, now_ms).await {
                 Ok(discovered) => {
                     tracing::info!("Peer discovery triggered");
@@ -79,7 +78,7 @@ pub async fn handle_network(
         }
 
         EffectCommand::ListLanPeers => {
-            let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
+            let now_ms = super::time::current_time_ms(app_core).await;
             match aura_app::workflows::network::list_lan_peers(app_core, now_ms).await {
                 Ok(peer_list) => {
                     tracing::info!("Found {} LAN peers", peer_list.len());

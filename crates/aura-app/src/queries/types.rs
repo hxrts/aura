@@ -920,6 +920,7 @@ impl Query for BlocksQuery {
                     is_primary: get_bool(&row, "is_primary"),
                     topic: get_optional_string(&row, "topic"),
                     pinned_messages: Vec::new(),
+                    pinned_metadata: Default::default(),
                     mode_flags: None,
                     ban_list: Default::default(),
                     mute_list: Default::default(),

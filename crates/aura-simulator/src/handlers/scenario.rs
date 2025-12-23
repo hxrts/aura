@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration;
-use std::time::Instant;
+
+type SimTimestamp = u64;
 
 fn run_sync<F: Future>(fut: F) -> F::Output {
     let waker = noop_waker();
@@ -246,8 +247,8 @@ pub enum TriggerCondition {
 #[derive(Debug)]
 struct ActiveInjection {
     scenario_id: String,
-    start_time: Instant,
-    duration: Option<Duration>,
+    start_tick: SimTimestamp,
+    duration_ms: Option<u64>,
     actions_applied: Vec<String>,
 }
 
@@ -279,7 +280,7 @@ struct ChatGroup {
     name: String,
     creator: String,
     members: Vec<String>,
-    created_at: Instant,
+    created_at: SimTimestamp,
 }
 
 #[derive(Debug, Clone)]
@@ -288,14 +289,14 @@ struct ChatMessage {
     group_id: String,
     sender: String,
     content: String,
-    timestamp: Instant,
+    timestamp: SimTimestamp,
 }
 
 #[derive(Debug, Clone)]
 struct DataLossInfo {
     participant: String,
     loss_type: String,
-    occurred_at: Instant,
+    occurred_at: SimTimestamp,
     recovery_required: bool,
     pre_loss_message_count: usize,
 }
@@ -305,7 +306,7 @@ struct RecoveryInfo {
     target: String,
     guardians: Vec<String>,
     threshold: usize,
-    initiated_at: Instant,
+    initiated_at: SimTimestamp,
     completed: bool,
     validation_steps: Vec<String>,
 }
@@ -314,14 +315,14 @@ struct RecoveryInfo {
 struct ScenarioCheckpoint {
     id: String,
     label: String,
-    timestamp: Instant,
+    timestamp: SimTimestamp,
     state_snapshot: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
 struct SimulationEvent {
     event_type: String,
-    timestamp: Instant,
+    timestamp: SimTimestamp,
     data: HashMap<String, String>,
 }
 
@@ -329,7 +330,7 @@ struct SimulationEvent {
 struct MetricValue {
     value: f64,
     unit: String,
-    timestamp: Instant,
+    timestamp: SimTimestamp,
 }
 
 #[derive(Debug, Clone)]
@@ -414,8 +415,8 @@ impl SimulationScenarioHandler {
 
         let injection = ActiveInjection {
             scenario_id: scenario_id.to_string(),
-            start_time: Instant::now(),
-            duration: scenario.duration,
+            start_tick: state.current_tick,
+            duration_ms: scenario.duration.map(|d| d.as_millis() as u64),
             actions_applied: Vec::new(),
         };
 
@@ -435,7 +436,7 @@ impl SimulationScenarioHandler {
         let current_tick = state.current_tick;
         state.events.push(SimulationEvent {
             event_type: "wait_ticks".to_string(),
-            timestamp: Instant::now(),
+            timestamp: current_tick,
             data: HashMap::from([
                 ("ticks".to_string(), ticks.to_string()),
                 ("current_tick".to_string(), current_tick.to_string()),
@@ -468,9 +469,10 @@ impl SimulationScenarioHandler {
             expires_at_tick,
         });
 
+        let current_tick = state.current_tick;
         state.events.push(SimulationEvent {
             event_type: "network_condition".to_string(),
-            timestamp: Instant::now(),
+            timestamp: current_tick,
             data: HashMap::from([
                 ("condition".to_string(), condition.to_string()),
                 ("participants".to_string(), format!("{:?}", participants)),
@@ -502,7 +504,7 @@ impl SimulationScenarioHandler {
         let checkpoint = ScenarioCheckpoint {
             id: checkpoint_id.clone(),
             label: label.to_string(),
-            timestamp: Instant::now(),
+            timestamp: state.current_tick,
             state_snapshot: HashMap::new(),
         };
         state.checkpoints.insert(checkpoint_id.clone(), checkpoint);
@@ -1308,10 +1310,10 @@ impl SimulationScenarioHandler {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
-        let now = Instant::now();
+        let now_tick = state.current_tick;
         state.active_injections.retain(|injection| {
-            match injection.duration {
-                Some(duration) => now.duration_since(injection.start_time) < duration,
+            match injection.duration_ms {
+                Some(duration_ms) => now_tick.saturating_sub(injection.start_tick) < duration_ms,
                 None => true, // Permanent injections stay active
             }
         });
@@ -1377,7 +1379,7 @@ impl SimulationScenarioHandler {
             name: group_name.to_string(),
             creator: creator.to_string(),
             members,
-            created_at: Instant::now(),
+            created_at: state.current_tick,
         };
 
         state.chat_groups.insert(group_id.clone(), chat_group);
@@ -1423,7 +1425,7 @@ impl SimulationScenarioHandler {
             group_id: group_id.to_string(),
             sender: sender.to_string(),
             content: message.to_string(),
-            timestamp: Instant::now(),
+            timestamp: state.current_tick,
         };
 
         #[allow(clippy::unwrap_used)]
@@ -1466,7 +1468,7 @@ impl SimulationScenarioHandler {
         let data_loss_info = DataLossInfo {
             participant: target_participant.to_string(),
             loss_type: loss_type.to_string(),
-            occurred_at: Instant::now(),
+            occurred_at: state.current_tick,
             recovery_required,
             pre_loss_message_count: pre_loss_count,
         };
@@ -1545,7 +1547,7 @@ impl SimulationScenarioHandler {
             target: target.to_string(),
             guardians,
             threshold,
-            initiated_at: Instant::now(),
+            initiated_at: state.current_tick,
             completed: false,
             validation_steps: Vec::new(),
         };
@@ -1641,7 +1643,7 @@ impl TestingEffects for SimulationScenarioHandler {
         let checkpoint = ScenarioCheckpoint {
             id: checkpoint_id.to_string(),
             label: label.to_string(),
-            timestamp: Instant::now(),
+            timestamp: state.current_tick,
             state_snapshot: {
                 let mut snapshot = HashMap::new();
                 snapshot.insert("current_tick".to_string(), state.current_tick.to_string());
@@ -1815,7 +1817,7 @@ impl TestingEffects for SimulationScenarioHandler {
         let metric = MetricValue {
             value,
             unit: unit.to_string(),
-            timestamp: Instant::now(),
+            timestamp: state.current_tick,
         };
 
         state.metrics.insert(metric_name.to_string(), metric);
@@ -1835,7 +1837,7 @@ impl SimulationScenarioHandler {
 
         let event = SimulationEvent {
             event_type: event_type.to_string(),
-            timestamp: Instant::now(),
+            timestamp: state.current_tick,
             data: event_data,
         };
 

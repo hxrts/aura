@@ -4,7 +4,7 @@ use crate::compat::SimulatorHandler;
 use crate::types::{Result, SimulatorContext, SimulatorOperation};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Core simulator handler implementation
 #[allow(dead_code)]
@@ -185,7 +185,7 @@ impl SimulatorHandler for CoreSimulatorHandler {
 #[allow(dead_code)]
 struct ScenarioState {
     id: String,
-    start_time: Instant,
+    start_time: u64,
     tick_count: u64,
     participants: Vec<String>,
     status: ScenarioStatus,
@@ -212,7 +212,7 @@ struct CheckpointData {
     timestamp: Duration,
     tick: u64,
     description: Option<String>,
-    created_at: Instant,
+    created_at: u64,
     scenario_id: String,
 }
 

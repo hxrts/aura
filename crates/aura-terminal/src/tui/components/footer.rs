@@ -29,17 +29,14 @@ pub struct FooterProps {
     pub syncing: bool,
     /// Last sync time (ms since epoch), None if never synced
     pub last_sync_time: Option<u64>,
+    /// Current time (ms since epoch) from runtime, for relative formatting
+    pub now_ms: Option<u64>,
     /// Number of known peers
     pub peer_count: usize,
 }
 
 /// Format a timestamp as relative time (e.g., "2m ago", "1h ago")
-fn format_relative_time(ts_ms: u64) -> String {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-
+fn format_relative_time(now_ms: u64, ts_ms: u64) -> String {
     let elapsed_ms = now_ms.saturating_sub(ts_ms);
     let elapsed_secs = elapsed_ms / 1000;
 
@@ -97,8 +94,10 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
     // Build sync status text
     let sync_status = if props.syncing {
         "Syncing...".to_string()
-    } else if let Some(ts) = props.last_sync_time {
-        format!("Synced {}", format_relative_time(ts))
+    } else if let (Some(now_ms), Some(ts)) = (props.now_ms, props.last_sync_time) {
+        format!("Synced {}", format_relative_time(now_ms, ts))
+    } else if props.last_sync_time.is_some() {
+        "Synced".to_string()
     } else {
         "Not synced".to_string()
     };
@@ -258,24 +257,21 @@ mod tests {
 
     #[test]
     fn test_format_relative_time() {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+        let now_ms = 1_000_000;
 
         // Test "just now"
-        assert_eq!(format_relative_time(now_ms), "just now");
+        assert_eq!(format_relative_time(now_ms, now_ms), "just now");
 
         // Test minutes ago
         let two_min_ago = now_ms - 120_000;
-        assert_eq!(format_relative_time(two_min_ago), "2m ago");
+        assert_eq!(format_relative_time(now_ms, two_min_ago), "2m ago");
 
         // Test hours ago
         let two_hr_ago = now_ms - 7_200_000;
-        assert_eq!(format_relative_time(two_hr_ago), "2h ago");
+        assert_eq!(format_relative_time(now_ms, two_hr_ago), "2h ago");
 
         // Test days ago
         let two_days_ago = now_ms - 172_800_000;
-        assert_eq!(format_relative_time(two_days_ago), "2d ago");
+        assert_eq!(format_relative_time(now_ms, two_days_ago), "2d ago");
     }
 }

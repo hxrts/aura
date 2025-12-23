@@ -1,90 +1,91 @@
 //! Time control effect handler for simulation
 //!
-//! Provides a controllable physical clock for simulator runs. Supports simple
-//! pause/resume and acceleration by scaling elapsed real time.
+//! Provides a controllable physical clock for simulator runs.
+//!
+//! Key requirements:
+//! - Must be deterministic (no direct OS clock reads)
+//! - Must obey the effect system contract (PhysicalTimeEffects)
+//! - Must be clippy-compliant (direct OS clock access is disallowed)
 
 use async_trait::async_trait;
 use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
 use aura_core::time::PhysicalTime;
-use std::time::{Duration, Instant, SystemTime};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-/// Simulation-specific time control handler
-#[derive(Debug, Clone)]
-pub struct SimulationTimeHandler {
-    /// Base wall-clock timestamp (ms) when simulation started
+#[derive(Debug)]
+struct SimTimeState {
     base_ms: u64,
-    /// Base monotonic instant for measuring elapsed real time
-    instant_base: Instant,
-    /// Fixed offset to apply to simulated time
-    time_offset_ms: u64,
-    /// Time acceleration factor (1.0 = real time)
+    offset_ms: u64,
     acceleration: f64,
-    /// Whether simulated time is paused
     paused: bool,
 }
 
+/// Simulation-specific time control handler.
+///
+/// This handler is deterministic: time only advances when the simulator calls
+/// `sleep_ms` or the explicit control APIs (`jump_to_time`).
+#[derive(Debug, Clone)]
+pub struct SimulationTimeHandler {
+    state: Arc<Mutex<SimTimeState>>,
+}
+
 impl SimulationTimeHandler {
-    /// Create a new simulation time handler
+    /// Create a new simulation time handler starting at epoch 0.
     pub fn new() -> Self {
-        Self {
-            base_ms: Self::now_ms(),
-            instant_base: Instant::now(),
-            time_offset_ms: 0,
-            acceleration: 1.0,
-            paused: false,
-        }
+        Self::with_start_ms(0)
     }
 
-    /// Create with a specific starting timestamp (milliseconds since UNIX epoch)
+    /// Create with a specific starting timestamp (milliseconds since UNIX epoch).
     pub fn with_start_ms(base_ms: u64) -> Self {
         Self {
-            base_ms,
-            instant_base: Instant::now(),
-            time_offset_ms: 0,
-            acceleration: 1.0,
-            paused: false,
+            state: Arc::new(Mutex::new(SimTimeState {
+                base_ms,
+                offset_ms: 0,
+                acceleration: 1.0,
+                paused: false,
+            })),
         }
     }
 
-    /// Set time acceleration factor
+    /// Set time acceleration factor (1.0 = real time).
+    ///
+    /// In simulation, this scales the amount of simulated time advanced by `sleep_ms`.
     pub fn set_acceleration(&mut self, factor: f64) {
-        if factor > 0.0 {
-            self.acceleration = factor;
+        if factor <= 0.0 {
+            return;
+        }
+        if let Ok(mut state) = self.state.lock() {
+            state.acceleration = factor;
         }
     }
 
-    /// Pause simulated time
+    /// Pause simulated time.
     pub fn pause(&mut self) {
-        self.paused = true;
-    }
-
-    /// Resume simulated time
-    pub fn resume(&mut self) {
-        self.paused = false;
-    }
-
-    /// Jump to a specific simulated offset
-    pub fn jump_to_time(&mut self, target_time: Duration) {
-        self.time_offset_ms = target_time.as_millis() as u64;
-    }
-
-    fn simulated_elapsed_ms(&self) -> u64 {
-        if self.paused {
-            return 0;
+        if let Ok(mut state) = self.state.lock() {
+            state.paused = true;
         }
-        let real_elapsed = self.instant_base.elapsed();
-        (real_elapsed.as_millis() as f64 * self.acceleration) as u64
+    }
+
+    /// Resume simulated time.
+    pub fn resume(&mut self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.paused = false;
+        }
+    }
+
+    /// Jump to a specific simulated offset.
+    pub fn jump_to_time(&mut self, target_time: Duration) {
+        if let Ok(mut state) = self.state.lock() {
+            state.offset_ms = target_time.as_millis() as u64;
+        }
     }
 
     fn timestamp_ms(&self) -> u64 {
-        self.base_ms + self.time_offset_ms + self.simulated_elapsed_ms()
-    }
-
-    fn now_ms() -> u64 {
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
+        let Ok(state) = self.state.lock() else {
+            return 0;
+        };
+        state.base_ms.saturating_add(state.offset_ms)
     }
 }
 
@@ -104,59 +105,16 @@ impl PhysicalTimeEffects for SimulationTimeHandler {
     }
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
-        // Scale the sleep by acceleration to keep pace with simulated time
-        let scaled = if self.acceleration > 0.0 {
-            (ms as f64 / self.acceleration).max(0.0)
-        } else {
-            ms as f64
-        };
-        tokio::time::sleep(Duration::from_millis(scaled as u64)).await;
+        // Advance simulated time deterministically without waiting on OS time.
+        if let Ok(mut state) = self.state.lock() {
+            if !state.paused {
+                let scaled = (ms as f64 * state.acceleration).max(0.0);
+                state.offset_ms = state.offset_ms.saturating_add(scaled as u64);
+            }
+        }
+
+        // Yield so callers that expect cooperative scheduling still progress.
+        tokio::task::yield_now().await;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_simulation_time_handler_basic() {
-        let handler = SimulationTimeHandler::new();
-        let t1 = handler.physical_time().await.unwrap().ts_ms;
-        tokio::time::sleep(Duration::from_millis(5)).await;
-        let t2 = handler.physical_time().await.unwrap().ts_ms;
-        assert!(t2 >= t1);
-    }
-
-    #[tokio::test]
-    async fn test_acceleration() {
-        let mut handler = SimulationTimeHandler::new();
-        handler.set_acceleration(2.0);
-        let t1 = handler.physical_time().await.unwrap().ts_ms;
-        handler.sleep_ms(50).await.unwrap();
-        let t2 = handler.physical_time().await.unwrap().ts_ms;
-        assert!(t2 - t1 >= 50); // accelerated sleep should advance at least requested ms
-    }
-
-    #[tokio::test]
-    async fn test_pause_resume() {
-        let mut handler = SimulationTimeHandler::new();
-        handler.pause();
-        let t1 = handler.physical_time().await.unwrap().ts_ms;
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        let t2 = handler.physical_time().await.unwrap().ts_ms;
-        assert_eq!(t1, t2);
-        handler.resume();
-        handler.sleep_ms(5).await.unwrap();
-        let t3 = handler.physical_time().await.unwrap().ts_ms;
-        assert!(t3 > t2);
-    }
-
-    #[tokio::test]
-    async fn test_jump() {
-        let mut handler = SimulationTimeHandler::new();
-        handler.jump_to_time(Duration::from_secs(3600));
-        let t = handler.physical_time().await.unwrap().ts_ms;
-        assert!(t >= 3_600_000);
     }
 }

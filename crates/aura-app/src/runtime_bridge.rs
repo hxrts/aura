@@ -45,6 +45,7 @@ use aura_core::threshold::{
 };
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::DeviceId;
+use aura_effects::PhysicalTimeHandler;
 use aura_effects::ReactiveHandler;
 use aura_journal::fact::RelationalFact;
 use std::sync::Arc;
@@ -761,7 +762,7 @@ pub trait RuntimeBridge: Send + Sync {
     /// This provides a deterministic time source for simulation and testing.
     /// Production implementations use wall-clock time; test implementations
     /// can provide controlled time for reproducible tests.
-    fn current_time_ms(&self) -> u64;
+    async fn current_time_ms(&self) -> Result<u64, IntentError>;
 
     /// Get overall runtime status
     async fn get_status(&self) -> RuntimeStatus {
@@ -1190,10 +1191,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         false
     }
 
-    fn current_time_ms(&self) -> u64 {
-        // Offline bridge returns constant time (no runtime available)
-        // Production implementations should use PhysicalTimeEffects
-        0
+    async fn current_time_ms(&self) -> Result<u64, IntentError> {
+        // Offline bridge uses best-effort physical time for UI surfaces.
+        let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
+        Ok(now_ms)
     }
 }
 

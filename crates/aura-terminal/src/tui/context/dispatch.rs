@@ -363,20 +363,19 @@ mod tests {
     use crate::tui::effects::EffectCommand;
 
     async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::AppError {
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
-        loop {
-            {
-                let core = app_core.read().await;
-                if let Ok(Some(err)) = core.read(&*ERROR_SIGNAL).await {
-                    return err;
+        tokio::time::timeout(std::time::Duration::from_millis(500), async {
+            loop {
+                {
+                    let core = app_core.read().await;
+                    if let Ok(Some(err)) = core.read(&*ERROR_SIGNAL).await {
+                        return err;
+                    }
                 }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
-
-            if tokio::time::Instant::now() >= deadline {
-                panic!("Timed out waiting for ERROR_SIGNAL to become Some");
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+        })
+        .await
+        .expect("Timed out waiting for ERROR_SIGNAL to become Some")
     }
 
     #[tokio::test]
