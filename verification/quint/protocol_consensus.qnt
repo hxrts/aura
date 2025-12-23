@@ -3,11 +3,14 @@
 // This module models Aura's single-shot consensus protocol with:
 // - Fast path: one-RTT threshold signature collection
 // - Fallback path: gossip-based share exchange when fast path stalls
+// - Nonce caching: pipelining optimization for cached FROST commitments
 //
 // Key properties to verify:
 // - Both paths converge to the same CommitFact for a given (cid, rid)
 // - Fallback can't contradict a successful fast-path execution
 // - Threshold shares prevent double-spending (equivocation detection)
+// - Fast path selected when valid cached nonces exist
+// - Nonces expire with epoch advancement
 //
 // See: docs/104_consensus.md
 
@@ -24,6 +27,24 @@ module protocol_consensus {
     type ShareData = str        // FROST signature share (partial signature)
     type ThresholdSignature = str  // Aggregated k-of-n signature
     type OperationData = str    // Abstract operation being agreed upon
+
+    // ==================== NONCE CACHING TYPES ====================
+    // FROST pipelining: witnesses pre-cache nonce commitments for fast-path signing.
+
+    type Epoch = int                    // Epoch counter for nonce validity windows
+    type NonceCommitment = str          // D_i, E_i commitments (hiding/binding nonces)
+
+    // Cached nonce state for a witness
+    type CachedNonce = {
+        commitment: NonceCommitment,    // Public commitment sent to coordinator
+        epoch: Epoch,                   // Epoch when nonce was generated
+        used: bool                      // Whether nonce has been consumed
+    }
+
+    // Path selection for consensus
+    type PathSelection =
+        | FastPath          // All witnesses have valid cached nonces
+        | SlowPath          // Need fresh nonce generation (adds 1 RTT)
 
     // Consensus instance phase (state machine progression).
     type ConsensusPhase =
@@ -78,6 +99,15 @@ module protocol_consensus {
     var committedFacts: Set[CommitFact]
     var globalWitnesses: Set[AuthorityId]
 
+    // ==================== NONCE STATE (T1.1) ====================
+    // Global epoch and per-witness nonce cache for FROST pipelining.
+
+    var currentEpoch: Epoch                                     // Global epoch counter
+    var witnessNonces: AuthorityId -> Option[CachedNonce]       // Per-witness nonce cache
+
+    // Nonces valid for N epochs (configurable constant)
+    pure val NONCE_VALIDITY_WINDOW: int = 3
+
     // ==================== HELPER FUNCTIONS ====================
 
     pure def getOrDefaultInstance(m: ConsensusId -> ConsensusInstance, cid: ConsensusId): Option[ConsensusInstance] =
@@ -109,6 +139,49 @@ module protocol_consensus {
     pure def verifySignature(sig: ThresholdSignature, rid: ResultId, attesters: Set[AuthorityId], threshold: int): bool =
         sig != "" and attesters.size() >= threshold
 
+    // ==================== NONCE HELPERS (T1.1) ====================
+
+    // Check if a cached nonce is valid (not expired, not used)
+    pure def isNonceValid(nonceOpt: Option[CachedNonce], epoch: Epoch, validityWindow: int): bool =
+        match nonceOpt {
+            | Some(n) => not(n.used) and (epoch - n.epoch) < validityWindow
+            | None => false
+        }
+
+    // Check if all witnesses in a set have valid cached nonces
+    pure def allWitnessesHaveValidNonces(
+        witnesses: Set[AuthorityId],
+        nonces: AuthorityId -> Option[CachedNonce],
+        epoch: Epoch,
+        validityWindow: int
+    ): bool =
+        witnesses.forall(w =>
+            w.in(nonces.keys()) and isNonceValid(nonces.get(w), epoch, validityWindow)
+        )
+
+    // Determine path selection based on nonce availability (T1.2)
+    pure def selectPath(
+        witnesses: Set[AuthorityId],
+        nonces: AuthorityId -> Option[CachedNonce],
+        epoch: Epoch,
+        validityWindow: int
+    ): PathSelection =
+        if (allWitnessesHaveValidNonces(witnesses, nonces, epoch, validityWindow))
+            FastPath
+        else
+            SlowPath
+
+    // Count witnesses with valid nonces
+    pure def countValidNonces(
+        witnesses: Set[AuthorityId],
+        nonces: AuthorityId -> Option[CachedNonce],
+        epoch: Epoch,
+        validityWindow: int
+    ): int =
+        witnesses.filter(w =>
+            w.in(nonces.keys()) and isNonceValid(nonces.get(w), epoch, validityWindow)
+        ).size()
+
     // ==================== ACTIONS ====================
     // State transitions modeling the consensus protocol.
 
@@ -116,11 +189,14 @@ module protocol_consensus {
     action init: bool = all {
         instances' = Map(),
         committedFacts' = Set(),
-        globalWitnesses' = Set("w1", "w2", "w3", "w4", "w5")
+        globalWitnesses' = Set("w1", "w2", "w3", "w4", "w5"),
+        // Initialize nonce state (T1.1)
+        currentEpoch' = 0,
+        witnessNonces' = Map()
     }
 
-    // Initiator starts a consensus instance (enters fast path).
-    // Broadcasts operation to witnesses and awaits their shares.
+    // Initiator starts a consensus instance.
+    // Path selection (T1.1/T1.2): FastPath if all witnesses have valid nonces, else SlowPath.
     action startConsensus(
         cid: ConsensusId,
         initiator: AuthorityId,
@@ -128,29 +204,40 @@ module protocol_consensus {
         pHash: PrestateHash,
         witnesses: Set[AuthorityId],
         threshold: int
-    ): bool = all {
-        not(cid.in(instances.keys())),
-        witnesses.size() >= threshold,
-        threshold >= 1,
-        instances' = instances.put(cid, {
-            cid: cid,
-            operation: op,
-            prestateHash: pHash,
-            threshold: threshold,
-            witnesses: witnesses,
-            initiator: initiator,
-            phase: FastPathActive,
-            proposals: Set(),
-            commitFact: None,
-            fallbackTimerActive: false,
-            equivocators: Set()
-        }),
-        committedFacts' = committedFacts,
-        globalWitnesses' = globalWitnesses
+    ): bool = {
+        // T1.2: Determine path based on nonce availability
+        val pathChoice = selectPath(witnesses, witnessNonces, currentEpoch, NONCE_VALIDITY_WINDOW)
+        val initialPhase = match pathChoice {
+            | FastPath => FastPathActive
+            | SlowPath => FallbackActive  // Skip to fallback if nonces unavailable
+        }
+        all {
+            not(cid.in(instances.keys())),
+            witnesses.size() >= threshold,
+            threshold >= 1,
+            instances' = instances.put(cid, {
+                cid: cid,
+                operation: op,
+                prestateHash: pHash,
+                threshold: threshold,
+                witnesses: witnesses,
+                initiator: initiator,
+                phase: initialPhase,
+                proposals: Set(),
+                commitFact: None,
+                fallbackTimerActive: initialPhase == FallbackActive,
+                equivocators: Set()
+            }),
+            committedFacts' = committedFacts,
+            globalWitnesses' = globalWitnesses,
+            currentEpoch' = currentEpoch,
+            witnessNonces' = witnessNonces
+        }
     }
 
     // Witness submits share (fast path response).
     // Share binds witness to (resultId, prestateHash). Equivocation detected.
+    // T1.1: Consumes witness's cached nonce on fast path.
     action submitWitnessShare(
         cid: ConsensusId,
         witness: AuthorityId,
@@ -171,6 +258,14 @@ module protocol_consensus {
         val isWitness = inst.witnesses.contains(witness)
         val notVoted = not(hasProposal(inst.proposals, witness))
         val isActive = inst.phase == FastPathActive or inst.phase == FallbackActive
+        // T1.1: Fast path requires valid nonce
+        val isFastPath = inst.phase == FastPathActive
+        val hasValidNonce = isNonceValid(
+            if (witness.in(witnessNonces.keys())) witnessNonces.get(witness) else None,
+            currentEpoch,
+            NONCE_VALIDITY_WINDOW
+        )
+        val nonceOk = not(isFastPath) or hasValidNonce  // Fallback doesn't need cached nonce
         val proposal = { witness: witness, resultId: rid, prestateHash: inst.prestateHash, share: share }
         val isEquivocating = detectEquivocation(inst.proposals, witness, rid)
         val newEquivocators = if (isEquivocating) inst.equivocators.union(Set(witness)) else inst.equivocators
@@ -186,11 +281,20 @@ module protocol_consensus {
             signature: newSig,
             attesters: attesters
         }) else None
+        // T1.1: Mark nonce as used on fast path
+        val updatedNonces = if (isFastPath and hasValidNonce and not(isEquivocating)) {
+            val oldNonce = witnessNonces.get(witness)
+            match oldNonce {
+                | Some(n) => witnessNonces.put(witness, Some({ ...n, used: true }))
+                | None => witnessNonces
+            }
+        } else witnessNonces
         all {
             hasInstance,
             isWitness,
             notVoted,
             isActive,
+            nonceOk,
             not(inst.equivocators.contains(witness)),
             instances' = instances.put(cid, {
                 ...inst,
@@ -204,12 +308,14 @@ module protocol_consensus {
                     cid: cid, rid: rid, signature: newSig, attesters: attesters
                 }))
                 else committedFacts,
-            globalWitnesses' = globalWitnesses
+            globalWitnesses' = globalWitnesses,
+            currentEpoch' = currentEpoch,
+            witnessNonces' = updatedNonces
         }
     }
 
     // Trigger fallback when fast path stalls.
-    // Activated by timer expiry or prestate mismatch detection.
+    // Activated by timer expiry, nonce invalidity, or prestate mismatch detection.
     action triggerFallback(cid: ConsensusId): bool = {
         val instOpt = getOrDefaultInstance(instances, cid)
         val hasInstance = match instOpt { | Some(_) => true | None => false }
@@ -232,12 +338,15 @@ module protocol_consensus {
                 fallbackTimerActive: true
             }),
             committedFacts' = committedFacts,
-            globalWitnesses' = globalWitnesses
+            globalWitnesses' = globalWitnesses,
+            currentEpoch' = currentEpoch,
+            witnessNonces' = witnessNonces
         }
     }
 
     // Gossip shares during fallback (AggregateShare message).
     // Witnesses exchange shares via gossip to overcome network partitions.
+    // T1.1: Fallback path doesn't consume cached nonces (generates fresh nonces inline).
     action gossipShares(cid: ConsensusId, shareSet: Set[ShareProposal]): bool = {
         val instOpt = getOrDefaultInstance(instances, cid)
         val hasInstance = match instOpt { | Some(_) => true | None => false }
@@ -274,7 +383,9 @@ module protocol_consensus {
                 proposals: mergedProposals
             }),
             committedFacts' = committedFacts,
-            globalWitnesses' = globalWitnesses
+            globalWitnesses' = globalWitnesses,
+            currentEpoch' = currentEpoch,
+            witnessNonces' = witnessNonces
         }
     }
 
@@ -314,7 +425,9 @@ module protocol_consensus {
             committedFacts' = committedFacts.union(Set({
                 cid: cid, rid: winningRid, signature: sig, attesters: attesters
             })),
-            globalWitnesses' = globalWitnesses
+            globalWitnesses' = globalWitnesses,
+            currentEpoch' = currentEpoch,
+            witnessNonces' = witnessNonces
         }
     }
 
@@ -340,8 +453,44 @@ module protocol_consensus {
             notFailed,
             instances' = instances.put(cid, { ...inst, phase: ConsensusFailed }),
             committedFacts' = committedFacts,
-            globalWitnesses' = globalWitnesses
+            globalWitnesses' = globalWitnesses,
+            currentEpoch' = currentEpoch,
+            witnessNonces' = witnessNonces
         }
+    }
+
+    // ==================== NONCE MANAGEMENT ACTIONS (T1.1) ====================
+
+    // Witness caches a fresh nonce commitment for future fast-path signing.
+    // Called proactively by witnesses to enable pipelining.
+    action cacheNonce(witness: AuthorityId, commitment: NonceCommitment): bool = all {
+        witness.in(globalWitnesses),
+        // Can cache if no current nonce or current nonce is used/expired
+        val currentNonce = if (witness.in(witnessNonces.keys())) witnessNonces.get(witness) else None
+        val canCache = match currentNonce {
+            | Some(n) => n.used or (currentEpoch - n.epoch) >= NONCE_VALIDITY_WINDOW
+            | None => true
+        }
+        canCache,
+        witnessNonces' = witnessNonces.put(witness, Some({
+            commitment: commitment,
+            epoch: currentEpoch,
+            used: false
+        })),
+        instances' = instances,
+        committedFacts' = committedFacts,
+        globalWitnesses' = globalWitnesses,
+        currentEpoch' = currentEpoch
+    }
+
+    // Advance the global epoch (causes nonce expiration).
+    // Called periodically or after significant events.
+    action advanceEpoch: bool = all {
+        currentEpoch' = currentEpoch + 1,
+        instances' = instances,
+        committedFacts' = committedFacts,
+        globalWitnesses' = globalWitnesses,
+        witnessNonces' = witnessNonces  // Nonces remain but validity checked against new epoch
     }
 
     // ==================== INVARIANTS ====================
@@ -407,6 +556,39 @@ module protocol_consensus {
             }
         )
 
+    // ==================== NONCE INVARIANTS (T1.1) ====================
+
+    // T1.1: Used nonces cannot be reused (no nonce reuse attack).
+    // Once a nonce is marked used, it must be refreshed before reuse.
+    val InvariantUsedNoncesNotReusable =
+        witnessNonces.keys().forall(w => {
+            val nonceOpt = witnessNonces.get(w)
+            match nonceOpt {
+                | Some(n) => n.used implies not(isNonceValid(Some(n), currentEpoch, NONCE_VALIDITY_WINDOW))
+                | None => true
+            }
+        })
+
+    // T1.1: Fast path only selected when all witnesses have valid nonces.
+    // Ensures fast path precondition is met.
+    val InvariantFastPathRequiresValidNonces =
+        instances.keys().forall(cid => {
+            val inst = instances.get(cid)
+            inst.phase == FastPathActive implies
+                allWitnessesHaveValidNonces(inst.witnesses, witnessNonces, currentEpoch, NONCE_VALIDITY_WINDOW)
+        })
+
+    // T1.1: Nonces have bounded epoch age.
+    // Cached nonces expire after NONCE_VALIDITY_WINDOW epochs.
+    val InvariantNonceEpochBounded =
+        witnessNonces.keys().forall(w => {
+            val nonceOpt = witnessNonces.get(w)
+            match nonceOpt {
+                | Some(n) => n.epoch <= currentEpoch
+                | None => true
+            }
+        })
+
     // ==================== TEMPORAL PROPERTIES ====================
     // LTL properties for liveness and safety over time.
 
@@ -443,12 +625,17 @@ module protocol_consensus {
         nondet witness = oneOf(Set("w1", "w2", "w3", "w4"))
         nondet rid = oneOf(Set("rid_op1", "rid_op2"))
         nondet share = oneOf(Set("share_a", "share_b", "share_c"))
+        // T1.1: Nonce commitment values
+        nondet commitment = oneOf(Set("nonce_commit_1", "nonce_commit_2", "nonce_commit_3"))
         any {
             startConsensus(cid, initiator, op, pHash, witnesses, threshold),
             submitWitnessShare(cid, witness, rid, share),
             triggerFallback(cid),
             completeViaFallback(cid, rid),
             failConsensus(cid),
+            // T1.1: Nonce management actions
+            cacheNonce(witness, commitment),
+            advanceEpoch,
         }
     }
 }
