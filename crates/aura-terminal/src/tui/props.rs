@@ -317,83 +317,6 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
 }
 
 // ============================================================================
-// Invitations Screen Props Extraction
-// ============================================================================
-
-use crate::tui::types::InvitationFilter;
-
-/// View state extracted from TuiState for InvitationsScreen
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct InvitationsViewProps {
-    pub focus: TwoPanelFocus,
-    pub selected_index: usize,
-    pub filter: InvitationFilter,
-    // Create modal
-    pub create_modal_visible: bool,
-    pub create_modal_type_index: usize,
-    pub create_modal_message: String,
-    pub create_modal_ttl_hours: u64,
-    pub create_modal_step: usize,
-    // Import modal
-    pub import_modal_visible: bool,
-    pub import_modal_code: String,
-    pub import_modal_importing: bool,
-    // Code display modal
-    pub code_modal_visible: bool,
-    pub code_modal_invitation_id: String,
-    pub code_modal_code: String,
-    pub code_modal_loading: bool,
-}
-
-/// Extract InvitationsScreen view props from TuiState
-pub fn extract_invitations_view_props(state: &TuiState) -> InvitationsViewProps {
-    let focus = state.invitations.focus;
-
-    // Extract modal state from queue (all modals now use queue system)
-    let (create_visible, create_type_index, create_message, create_ttl, create_step) =
-        match state.modal_queue.current() {
-            Some(QueuedModal::InvitationsCreate(s)) => {
-                (true, s.type_index, s.message.clone(), s.ttl_hours, s.step)
-            }
-            _ => (false, 0, String::new(), 24, 0),
-        };
-
-    let (import_visible, import_code, import_importing) = match state.modal_queue.current() {
-        Some(QueuedModal::InvitationsImport(s)) => (true, s.code.clone(), s.importing),
-        _ => (false, String::new(), false),
-    };
-
-    let (code_visible, code_invitation_id, code_code, code_loading) =
-        match state.modal_queue.current() {
-            Some(QueuedModal::InvitationsCode(s)) => {
-                (true, s.invitation_id.clone(), s.code.clone(), s.loading)
-            }
-            _ => (false, String::new(), String::new(), false),
-        };
-
-    InvitationsViewProps {
-        focus,
-        selected_index: state.invitations.selected_index,
-        filter: state.invitations.filter,
-        // Create modal (from queue)
-        create_modal_visible: create_visible,
-        create_modal_type_index: create_type_index,
-        create_modal_message: create_message,
-        create_modal_ttl_hours: create_ttl,
-        create_modal_step: create_step,
-        // Import modal (from queue)
-        import_modal_visible: import_visible,
-        import_modal_code: import_code,
-        import_modal_importing: import_importing,
-        // Code display modal (from queue)
-        code_modal_visible: code_visible,
-        code_modal_invitation_id: code_invitation_id,
-        code_modal_code: code_code,
-        code_modal_loading: code_loading,
-    }
-}
-
-// ============================================================================
 // Recovery Screen Props Extraction
 // ============================================================================
 
@@ -642,29 +565,6 @@ mod tests {
         assert!(props.nickname_modal_visible);
         assert_eq!(props.nickname_modal_contact_id, "contact-123");
         assert_eq!(props.nickname_modal_value, "new-name");
-    }
-
-    #[test]
-    fn test_invitations_view_props_extraction() {
-        use crate::tui::state_machine::ImportInvitationModalState;
-
-        let mut state = TuiState::new();
-        state.invitations.selected_index = 3;
-        state.invitations.filter = InvitationFilter::Sent;
-        // Use queue for modal visibility (only one modal at a time)
-        let import_modal = ImportInvitationModalState::with_code("ABC123");
-        state
-            .modal_queue
-            .enqueue(QueuedModal::InvitationsImport(import_modal));
-
-        let props = extract_invitations_view_props(&state);
-
-        assert_eq!(props.selected_index, 3);
-        assert_eq!(props.filter, InvitationFilter::Sent);
-        // Only import modal is active (not create)
-        assert!(!props.create_modal_visible);
-        assert!(props.import_modal_visible);
-        assert_eq!(props.import_modal_code, "ABC123");
     }
 
     #[test]

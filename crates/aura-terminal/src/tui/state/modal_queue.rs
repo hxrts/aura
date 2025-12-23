@@ -81,18 +81,6 @@ pub enum QueuedModal {
     GuardianSetup(GuardianSetupModalState),
 
     // ========================================================================
-    // Invitations Screen Modals
-    // ========================================================================
-    /// Create invitation
-    InvitationsCreate(CreateInvitationModalState),
-
-    /// Import invitation
-    InvitationsImport(ImportInvitationModalState),
-
-    /// Show invitation code
-    InvitationsCode(InvitationCodeModalState),
-
-    // ========================================================================
     // Settings Screen Modals
     // ========================================================================
     /// Edit display name

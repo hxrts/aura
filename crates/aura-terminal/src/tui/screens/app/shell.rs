@@ -13,11 +13,11 @@
 use super::modal_overlays::{
     render_account_setup_modal, render_add_device_modal, render_block_invite_modal,
     render_channel_info_modal, render_chat_create_modal, render_confirm_modal,
-    render_contact_modal, render_contacts_create_modal, render_contacts_import_modal,
+    render_contact_modal, render_contacts_code_modal, render_contacts_create_modal,
+    render_contacts_import_modal,
     render_display_name_modal, render_guardian_modal, render_guardian_setup_modal,
-    render_help_modal, render_invitation_code_modal, render_invitations_create_modal,
-    render_invitations_import_modal, render_nickname_modal, render_remove_device_modal,
-    render_threshold_modal, render_topic_modal, GlobalModalProps,
+    render_help_modal, render_nickname_modal, render_remove_device_modal, render_threshold_modal,
+    render_topic_modal, GlobalModalProps,
 };
 
 use iocraft::prelude::*;
@@ -35,9 +35,9 @@ use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
 use crate::tui::screens::app::subscriptions::{
-    use_channels_subscription, use_contacts_subscription, use_invitations_subscription,
-    use_messages_subscription, use_nav_status_signals, use_neighborhood_blocks_subscription,
-    use_pending_requests_subscription, use_residents_subscription, use_threshold_subscription,
+    use_channels_subscription, use_contacts_subscription, use_messages_subscription,
+    use_nav_status_signals, use_neighborhood_blocks_subscription, use_pending_requests_subscription,
+    use_residents_subscription, use_threshold_subscription,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
@@ -52,8 +52,7 @@ use crate::tui::types::{
 use crate::tui::iocraft_adapter::convert_iocraft_event;
 use crate::tui::props::{
     extract_block_view_props, extract_chat_view_props, extract_contacts_view_props,
-    extract_invitations_view_props, extract_neighborhood_view_props, extract_recovery_view_props,
-    extract_settings_view_props,
+    extract_neighborhood_view_props, extract_recovery_view_props, extract_settings_view_props,
 };
 use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{ui_update_channel, UiUpdate, UiUpdateReceiver, UiUpdateSender};
@@ -250,9 +249,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Set demo mode codes for import modal shortcuts (on contacts screen)
             state.contacts.demo_alice_code = demo_alice.clone();
             state.contacts.demo_carol_code = demo_carol.clone();
-            // Also keep them on invitations for backwards compatibility
-            state.invitations.demo_alice_code = demo_alice.clone();
-            state.invitations.demo_carol_code = demo_carol.clone();
             state
         }
 
@@ -325,11 +321,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Channels subscription: SharedChannels for dispatch handlers to read
     // =========================================================================
     let shared_channels = use_channels_subscription(&mut hooks, &app_ctx);
-
-    // =========================================================================
-    // Invitations subscription: SharedInvitations for dispatch handlers to read
-    // =========================================================================
-    let shared_invitations = use_invitations_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
     // Neighborhood blocks subscription: SharedNeighborhoodBlocks for dispatch handlers to read
@@ -835,7 +826,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Clone props for use
     let channels = props.channels.clone();
     let messages = props.messages.clone();
-    let _invitations = props.invitations.clone();
     let guardians = props.guardians.clone();
     let devices = props.devices.clone();
     // Use reactively updated display_name from UiUpdate channel - State<T> triggers re-renders
@@ -961,15 +951,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let block_props = extract_block_view_props(&tui_snapshot);
     let chat_props = extract_chat_view_props(&tui_snapshot);
     let contacts_props = extract_contacts_view_props(&tui_snapshot);
-    let invitations_props = extract_invitations_view_props(&tui_snapshot);
     let settings_props = extract_settings_view_props(&tui_snapshot);
     let recovery_props = extract_recovery_view_props(&tui_snapshot);
     let neighborhood_props = extract_neighborhood_view_props(&tui_snapshot);
-
-    #[cfg(feature = "development")]
-    let demo_mode = props.demo_mode;
-    #[cfg(not(feature = "development"))]
-    let demo_mode = false;
 
     // =========================================================================
     // Global modal overlays
@@ -1088,7 +1072,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let callbacks = callbacks.clone();
         // Clone shared contacts Arc for guardian setup dispatch
         let shared_channels_for_dispatch = shared_channels.clone();
-        let shared_invitations_for_dispatch = shared_invitations.clone();
         let shared_neighborhood_blocks_for_dispatch = shared_neighborhood_blocks.clone();
         let shared_pending_requests_for_dispatch = shared_pending_requests.clone();
         // Clone shared threshold for opening threshold modal with current values
@@ -1302,76 +1285,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                     // === Invitations Screen Commands ===
                                     DispatchCommand::AcceptInvitation => {
-                                        let idx = new_state.invitations.selected_index;
-                                        let filter = new_state.invitations.filter;
-
-                                        if let Ok(guard) = shared_invitations_for_dispatch.read() {
-                                            let mut selected: Option<String> = None;
-                                            let mut seen = 0usize;
-                                            for inv in guard.iter() {
-                                                let include = match filter {
-                                                    crate::tui::types::InvitationFilter::All => true,
-                                                    crate::tui::types::InvitationFilter::Sent => {
-                                                        inv.direction == crate::tui::types::InvitationDirection::Outbound
-                                                    }
-                                                    crate::tui::types::InvitationFilter::Received => {
-                                                        inv.direction == crate::tui::types::InvitationDirection::Inbound
-                                                    }
-                                                };
-                                                if !include {
-                                                    continue;
-                                                }
-                                                if seen == idx {
-                                                    selected = Some(inv.id.clone());
-                                                    break;
-                                                }
-                                                seen += 1;
-                                            }
-
-                                            if let Some(inv_id) = selected {
-                                                (cb.invitations.on_accept)(inv_id);
-                                            } else {
-                                                new_state.toast_error("No invitation selected");
-                                            }
-                                        } else {
-                                            new_state.toast_error("Failed to read invitations");
-                                        }
+                                        new_state.toast_error(
+                                            "Invitation list is not available; use Contacts to import codes",
+                                        );
                                     }
                                     DispatchCommand::DeclineInvitation => {
-                                        let idx = new_state.invitations.selected_index;
-                                        let filter = new_state.invitations.filter;
-
-                                        if let Ok(guard) = shared_invitations_for_dispatch.read() {
-                                            let mut selected: Option<String> = None;
-                                            let mut seen = 0usize;
-                                            for inv in guard.iter() {
-                                                let include = match filter {
-                                                    crate::tui::types::InvitationFilter::All => true,
-                                                    crate::tui::types::InvitationFilter::Sent => {
-                                                        inv.direction == crate::tui::types::InvitationDirection::Outbound
-                                                    }
-                                                    crate::tui::types::InvitationFilter::Received => {
-                                                        inv.direction == crate::tui::types::InvitationDirection::Inbound
-                                                    }
-                                                };
-                                                if !include {
-                                                    continue;
-                                                }
-                                                if seen == idx {
-                                                    selected = Some(inv.id.clone());
-                                                    break;
-                                                }
-                                                seen += 1;
-                                            }
-
-                                            if let Some(inv_id) = selected {
-                                                (cb.invitations.on_decline)(inv_id);
-                                            } else {
-                                                new_state.toast_error("No invitation selected");
-                                            }
-                                        } else {
-                                            new_state.toast_error("Failed to read invitations");
-                                        }
+                                        new_state.toast_error(
+                                            "Invitation list is not available; use Contacts to import codes",
+                                        );
                                     }
                                     DispatchCommand::CreateInvitation {
                                         invitation_type,
@@ -1384,40 +1305,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.invitations.on_import)(code);
                                     }
                                     DispatchCommand::ExportInvitation => {
-                                        let idx = new_state.invitations.selected_index;
-                                        let filter = new_state.invitations.filter;
-
-                                        if let Ok(guard) = shared_invitations_for_dispatch.read() {
-                                            let mut selected: Option<String> = None;
-                                            let mut seen = 0usize;
-                                            for inv in guard.iter() {
-                                                let include = match filter {
-                                                    crate::tui::types::InvitationFilter::All => true,
-                                                    crate::tui::types::InvitationFilter::Sent => {
-                                                        inv.direction == crate::tui::types::InvitationDirection::Outbound
-                                                    }
-                                                    crate::tui::types::InvitationFilter::Received => {
-                                                        inv.direction == crate::tui::types::InvitationDirection::Inbound
-                                                    }
-                                                };
-                                                if !include {
-                                                    continue;
-                                                }
-                                                if seen == idx {
-                                                    selected = Some(inv.id.clone());
-                                                    break;
-                                                }
-                                                seen += 1;
-                                            }
-
-                                            if let Some(inv_id) = selected {
-                                                (cb.invitations.on_export)(inv_id);
-                                            } else {
-                                                new_state.toast_error("No invitation selected");
-                                            }
-                                        } else {
-                                            new_state.toast_error("Failed to read invitations");
-                                        }
+                                        new_state.toast_error(
+                                            "Invitation list is not available; use Contacts to create codes",
+                                        );
                                     }
                                     DispatchCommand::RevokeInvitation { invitation_id } => {
                                         (cb.invitations.on_revoke)(invitation_id);
@@ -1911,6 +1801,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             #(render_nickname_modal(&contacts_props))
             #(render_contacts_import_modal(&contacts_props))
             #(render_contacts_create_modal(&contacts_props))
+            #(render_contacts_code_modal(&contacts_props))
             #(render_guardian_setup_modal(&contacts_props))
 
             // === CHAT SCREEN MODALS ===
@@ -1929,12 +1820,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // === BLOCK SCREEN MODALS ===
             // Rendered via modal_overlays module for maintainability
             #(render_block_invite_modal(&block_props, &block_invite_contacts))
-
-            // === INVITATIONS SCREEN MODALS ===
-            // Rendered via modal_overlays module for maintainability
-            #(render_invitations_create_modal(&invitations_props))
-            #(render_invitation_code_modal(&invitations_props))
-            #(render_invitations_import_modal(&invitations_props, demo_mode))
 
             // === TOAST OVERLAY ===
             // Toast notifications overlay the footer when active

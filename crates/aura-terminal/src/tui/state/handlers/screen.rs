@@ -284,54 +284,6 @@ pub fn handle_neighborhood_key(
     }
 }
 
-/// Handle invitations screen key events (deprecated - handled via Contacts)
-#[allow(dead_code)]
-pub fn handle_invitations_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
-    match key.code {
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.invitations.selected_index = navigate_list(
-                state.invitations.selected_index,
-                state.invitations.invitation_count,
-                NavKey::Up,
-            );
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.invitations.selected_index = navigate_list(
-                state.invitations.selected_index,
-                state.invitations.invitation_count,
-                NavKey::Down,
-            );
-        }
-        KeyCode::Char('f') => {
-            state.invitations.filter = state.invitations.filter.next();
-        }
-        KeyCode::Char('a') | KeyCode::Enter => {
-            // Accept invitation
-            commands.push(TuiCommand::Dispatch(DispatchCommand::AcceptInvitation));
-        }
-        KeyCode::Char('d') => {
-            commands.push(TuiCommand::Dispatch(DispatchCommand::DeclineInvitation));
-        }
-        KeyCode::Char('n') => {
-            // Open create invitation modal via queue
-            state.modal_queue.enqueue(QueuedModal::InvitationsCreate(
-                CreateInvitationModalState::default(),
-            ));
-        }
-        KeyCode::Char('i') => {
-            // Open import modal via queue
-            state.modal_queue.enqueue(QueuedModal::InvitationsImport(
-                ImportInvitationModalState::default(),
-            ));
-        }
-        KeyCode::Char('e') => {
-            // Export invitation
-            commands.push(TuiCommand::Dispatch(DispatchCommand::ExportInvitation));
-        }
-        _ => {}
-    }
-}
-
 /// Handle settings screen key events
 pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
     match key.code {

@@ -88,19 +88,6 @@ pub fn handle_queued_modal_key(
         QueuedModal::GuardianSetup(modal_state) => {
             handle_guardian_setup_key_queue(state, commands, key, modal_state);
         }
-        // Invitations screen modals (invitations are under Contacts screen)
-        QueuedModal::InvitationsCreate(modal_state) => {
-            handle_create_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
-        }
-        QueuedModal::InvitationsImport(modal_state) => {
-            handle_import_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
-        }
-        QueuedModal::InvitationsCode(_) => {
-            // Code display modal is read-only - just Esc to dismiss
-            if key.code == KeyCode::Esc {
-                state.modal_queue.dismiss();
-            }
-        }
         // Settings screen modals
         QueuedModal::SettingsDisplayName(modal_state) => {
             handle_settings_display_name_key_queue(state, commands, key, modal_state);
@@ -508,8 +495,7 @@ fn handle_import_invitation_key_queue(
     // Demo shortcuts: Ctrl+A / Ctrl+L fill Alice/Carol invite codes.
     //
     // These are handled at the state machine layer so they work consistently
-    // across ContactsImport and InvitationsImport modals. In production builds
-    // the codes are typically empty unless explicitly provided.
+    // for the Contacts invitation import workflow.
     let is_ctrl_a = (key.modifiers.ctrl()
         && matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A')))
         // Some terminals report Ctrl+a as the control character (SOH, 0x01) with no modifiers.
@@ -520,29 +506,19 @@ fn handle_import_invitation_key_queue(
         || matches!(key.code, KeyCode::Char('\u{c}'));
 
     if is_ctrl_a {
-        let code = if !state.contacts.demo_alice_code.is_empty() {
-            state.contacts.demo_alice_code.clone()
-        } else {
-            state.invitations.demo_alice_code.clone()
-        };
+        let code = state.contacts.demo_alice_code.clone();
         if !code.is_empty() {
             state.modal_queue.update_active(|modal| match modal {
                 QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
-                QueuedModal::InvitationsImport(ref mut s) => s.code = code.clone(),
                 _ => {}
             });
             return;
         }
     } else if is_ctrl_l {
-        let code = if !state.contacts.demo_carol_code.is_empty() {
-            state.contacts.demo_carol_code.clone()
-        } else {
-            state.invitations.demo_carol_code.clone()
-        };
+        let code = state.contacts.demo_carol_code.clone();
         if !code.is_empty() {
             state.modal_queue.update_active(|modal| match modal {
                 QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
-                QueuedModal::InvitationsImport(ref mut s) => s.code = code.clone(),
                 _ => {}
             });
             return;
@@ -564,16 +540,12 @@ fn handle_import_invitation_key_queue(
         KeyCode::Char(c) => {
             state.modal_queue.update_active(|modal| match modal {
                 QueuedModal::ContactsImport(ref mut s) => s.code.push(c),
-                QueuedModal::InvitationsImport(ref mut s) => s.code.push(c),
                 _ => {}
             });
         }
         KeyCode::Backspace => {
             state.modal_queue.update_active(|modal| match modal {
                 QueuedModal::ContactsImport(ref mut s) => {
-                    s.code.pop();
-                }
-                QueuedModal::InvitationsImport(ref mut s) => {
                     s.code.pop();
                 }
                 _ => {}
@@ -599,7 +571,6 @@ fn handle_create_invitation_key_queue(
             // Navigate to next step
             state.modal_queue.update_active(|modal| match modal {
                 QueuedModal::ContactsCreate(ref mut s) => s.next_step(),
-                QueuedModal::InvitationsCreate(ref mut s) => s.next_step(),
                 _ => {}
             });
         }
@@ -607,7 +578,6 @@ fn handle_create_invitation_key_queue(
             // Navigate to previous step
             state.modal_queue.update_active(|modal| match modal {
                 QueuedModal::ContactsCreate(ref mut s) => s.prev_step(),
-                QueuedModal::InvitationsCreate(ref mut s) => s.prev_step(),
                 _ => {}
             });
         }
@@ -634,7 +604,6 @@ fn handle_create_invitation_key_queue(
                 // Advance to next step
                 state.modal_queue.update_active(|modal| match modal {
                     QueuedModal::ContactsCreate(ref mut s) => s.next_step(),
-                    QueuedModal::InvitationsCreate(ref mut s) => s.next_step(),
                     _ => {}
                 });
             }
@@ -646,18 +615,12 @@ fn handle_create_invitation_key_queue(
                     QueuedModal::ContactsCreate(ref mut s) => {
                         s.type_index = s.type_index.saturating_sub(1);
                     }
-                    QueuedModal::InvitationsCreate(ref mut s) => {
-                        s.type_index = s.type_index.saturating_sub(1);
-                    }
                     _ => {}
                 });
             } else if modal_state.step == 2 {
                 // In step 2, increase TTL
                 state.modal_queue.update_active(|modal| match modal {
                     QueuedModal::ContactsCreate(ref mut s) => {
-                        s.ttl_hours = s.ttl_hours.saturating_add(24);
-                    }
-                    QueuedModal::InvitationsCreate(ref mut s) => {
                         s.ttl_hours = s.ttl_hours.saturating_add(24);
                     }
                     _ => {}
@@ -672,9 +635,6 @@ fn handle_create_invitation_key_queue(
                         QueuedModal::ContactsCreate(ref mut s) => {
                             s.type_index = (s.type_index + 1).min(2); // 3 types max
                         }
-                        QueuedModal::InvitationsCreate(ref mut s) => {
-                            s.type_index = (s.type_index + 1).min(2);
-                        }
                         _ => {}
                     }
                 });
@@ -682,9 +642,6 @@ fn handle_create_invitation_key_queue(
                 // In step 2, decrease TTL
                 state.modal_queue.update_active(|modal| match modal {
                     QueuedModal::ContactsCreate(ref mut s) => {
-                        s.ttl_hours = s.ttl_hours.saturating_sub(24).max(1);
-                    }
-                    QueuedModal::InvitationsCreate(ref mut s) => {
                         s.ttl_hours = s.ttl_hours.saturating_sub(24).max(1);
                     }
                     _ => {}
@@ -696,7 +653,6 @@ fn handle_create_invitation_key_queue(
             if modal_state.step == 1 {
                 state.modal_queue.update_active(|modal| match modal {
                     QueuedModal::ContactsCreate(ref mut s) => s.message.push(c),
-                    QueuedModal::InvitationsCreate(ref mut s) => s.message.push(c),
                     _ => {}
                 });
             }
@@ -705,9 +661,6 @@ fn handle_create_invitation_key_queue(
             if modal_state.step == 1 {
                 state.modal_queue.update_active(|modal| match modal {
                     QueuedModal::ContactsCreate(ref mut s) => {
-                        s.message.pop();
-                    }
-                    QueuedModal::InvitationsCreate(ref mut s) => {
                         s.message.pop();
                     }
                     _ => {}

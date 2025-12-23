@@ -11,7 +11,7 @@ use crate::tui::components::{
     AccountSetupModal, ConfirmModal, ContactSelectModal, HelpModal, ModalFrame, TextInputModal,
 };
 use crate::tui::props::{
-    BlockViewProps, ChatViewProps, ContactsViewProps, InvitationsViewProps, SettingsViewProps,
+    BlockViewProps, ChatViewProps, ContactsViewProps, SettingsViewProps,
 };
 use crate::tui::screens::{
     ChannelInfoModal, ChatCreateModal, GuardianCandidateProps, GuardianSetupModal,
@@ -246,6 +246,25 @@ pub fn render_contacts_create_modal(contacts: &ContactsViewProps) -> Option<AnyE
     }
 }
 
+pub fn render_contacts_code_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
+    if contacts.code_modal_visible {
+        Some(
+            element! {
+                ModalFrame {
+                    InvitationCodeModal(
+                        visible: true,
+                        code: contacts.code_modal_code.clone(),
+                        invitation_type: "Invitation".to_string(),
+                    )
+                }
+            }
+            .into_any(),
+        )
+    } else {
+        None
+    }
+}
+
 pub fn render_guardian_setup_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
     if contacts.guardian_setup_modal_visible {
         let guardian_contacts: Vec<GuardianCandidateProps> = contacts
@@ -468,86 +487,6 @@ pub fn render_block_invite_modal(
                         contacts: contacts_list.to_vec(),
                         selected_index: block.invite_selection,
                         error: String::new(),
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
-}
-
-// =============================================================================
-// Invitations Screen Modal Render Functions
-// =============================================================================
-
-pub fn render_invitations_create_modal(
-    invitations: &InvitationsViewProps,
-) -> Option<AnyElement<'static>> {
-    if invitations.create_modal_visible {
-        let invitation_type = match invitations.create_modal_type_index {
-            0 => InvitationType::Guardian,
-            1 => InvitationType::Contact,
-            _ => InvitationType::Channel,
-        };
-        Some(
-            element! {
-                ModalFrame {
-                    InvitationCreateModal(
-                        visible: true,
-                        focused: true,
-                        creating: false,
-                        error: String::new(),
-                        invitation_type: invitation_type,
-                        message: invitations.create_modal_message.clone(),
-                        ttl_hours: invitations.create_modal_ttl_hours as u32,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
-}
-
-pub fn render_invitation_code_modal(
-    invitations: &InvitationsViewProps,
-) -> Option<AnyElement<'static>> {
-    if invitations.code_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    InvitationCodeModal(
-                        visible: true,
-                        code: invitations.code_modal_code.clone(),
-                        invitation_type: "Guardian".to_string(),
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
-}
-
-pub fn render_invitations_import_modal(
-    invitations: &InvitationsViewProps,
-    demo_mode: bool,
-) -> Option<AnyElement<'static>> {
-    if invitations.import_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    InvitationImportModal(
-                        visible: true,
-                        focused: true,
-                        code: invitations.import_modal_code.clone(),
-                        error: String::new(),
-                        importing: invitations.import_modal_importing,
-                        demo_mode: demo_mode,
                     )
                 }
             }

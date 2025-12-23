@@ -94,11 +94,7 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
     // Handle modal input fields first
     if let Some(modal) = state.modal_queue.current_mut() {
         match modal {
-            // Invitation import modals (both contacts and invitations screens)
-            QueuedModal::InvitationsImport(modal_state) => {
-                modal_state.code.push_str(&text);
-                return;
-            }
+            // Invitation import modal (Contacts workflow)
             QueuedModal::ContactsImport(modal_state) => {
                 modal_state.code.push_str(&text);
                 return;
@@ -141,8 +137,6 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             | QueuedModal::ContactsCreate(_)
             | QueuedModal::ContactsCode(_)
             | QueuedModal::GuardianSetup(_)
-            | QueuedModal::InvitationsCreate(_)
-            | QueuedModal::InvitationsCode(_)
             | QueuedModal::SettingsThreshold(_)
             | QueuedModal::SettingsAddDevice(_)
             | QueuedModal::SettingsRemoveDevice(_)

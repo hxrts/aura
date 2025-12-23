@@ -79,9 +79,6 @@ pub struct TuiState {
     /// Contacts screen state
     pub contacts: ContactsViewState,
 
-    /// Invitations screen state
-    pub invitations: InvitationsViewState,
-
     /// Recovery screen state
     pub recovery: RecoveryViewState,
 
@@ -227,7 +224,6 @@ impl TuiState {
             Some(QueuedModal::ChatTopic(_)) => true,
             Some(QueuedModal::ContactsNickname(_)) => true,
             Some(QueuedModal::ContactsImport(_)) => true,
-            Some(QueuedModal::InvitationsImport(_)) => true,
             Some(QueuedModal::SettingsDisplayName(_)) => true,
             Some(QueuedModal::SettingsAddDevice(_)) => true,
             _ => false,

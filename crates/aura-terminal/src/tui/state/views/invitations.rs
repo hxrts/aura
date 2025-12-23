@@ -1,26 +1,7 @@
-//! Invitations screen view state
-
-use crate::tui::navigation::TwoPanelFocus;
-use crate::tui::types::InvitationFilter;
-
-/// Invitations screen state
-#[derive(Clone, Debug, Default)]
-pub struct InvitationsViewState {
-    /// Panel focus (list or detail)
-    pub focus: TwoPanelFocus,
-    /// Selected invitation index
-    pub selected_index: usize,
-    /// Total invitation count (for wrap-around navigation)
-    pub invitation_count: usize,
-    /// Current filter
-    pub filter: InvitationFilter,
-    /// Demo mode: Alice's invitation code (for Ctrl+a shortcut)
-    pub demo_alice_code: String,
-    /// Demo mode: Carol's invitation code (for Ctrl+l shortcut)
-    pub demo_carol_code: String,
-    // Note: Modal state is now stored in ModalQueue, not here.
-    // Use modal_queue.enqueue(QueuedModal::InvitationsCreate/Import/Code(...)) to show modals.
-}
+//! Invitation modal view state
+//!
+//! Invitation codes are managed from the Contacts screen (workflow + modals),
+//! but the modal state types are shared.
 
 /// State for create invitation modal
 ///

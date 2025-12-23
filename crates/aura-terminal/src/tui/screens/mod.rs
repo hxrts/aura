@@ -4,7 +4,6 @@
 //!
 //! Each screen is organized in its own directory with screen-specific modals colocated:
 //! - `chat/` - ChatScreen, ChannelInfoModal, ChatCreateModal
-//! - `invitations/` - InvitationsScreen, InvitationCodeModal, InvitationCreateModal, InvitationImportModal
 //! - `recovery/` - RecoveryScreen, GuardianSetupModal, ThresholdModal
 
 pub mod app;
@@ -36,7 +35,6 @@ pub use app::{run_app_with_context, IoApp};
 pub use block::{run_block_screen, BlockFocus, BlockScreen};
 pub use chat::{run_chat_screen, ChatFocus, ChatScreen};
 pub use contacts::{run_contacts_screen, ContactsScreen};
-pub use invitations::InvitationsScreen;
 pub use neighborhood::{run_neighborhood_screen, NeighborhoodScreen};
 pub use recovery::{run_recovery_screen, RecoveryScreen};
 pub use router::{NavAction, Router, Screen};
