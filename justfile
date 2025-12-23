@@ -814,7 +814,7 @@ quint-compile input output:
     @echo "Compilation completed successfully!"
 
 # Regenerate deterministic ITF trace for the TUI replay tests
-tui-itf-trace out="verification/quint/tui_trace.itf.json" seed="424242" max_steps="50":
+tui-itf-trace out="verification/traces/tui_trace.itf.json" seed="424242" max_steps="50":
     TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} nix develop --command scripts/gen-tui-itf-trace.sh {{out}}
 
 # Check that the checked-in ITF trace matches regeneration
@@ -1089,7 +1089,7 @@ quint-verify spec invariants:
     echo "Invariants: {{invariants}}"
     echo ""
 
-    mkdir -p traces/verify
+    mkdir -p verification/traces
     SPEC_NAME=$(basename "{{spec}}" .qnt)
 
     # Convert comma-separated to multiple --invariant flags
@@ -1102,7 +1102,7 @@ quint-verify spec invariants:
     quint verify "{{spec}}" \
         $INV_FLAGS \
         --max-steps=10 \
-        --out-itf="traces/verify/${SPEC_NAME}_counter.itf.json" \
+        --out-itf="verification/traces/${SPEC_NAME}_counter.itf.json" \
         --verbosity=3
 
 # Generate ITF traces from all Quint specs
@@ -1119,7 +1119,7 @@ quint-generate-traces:
     echo "======================================"
     echo ""
 
-    mkdir -p traces
+    mkdir -p verification/traces
 
     # Specs that have step actions defined
     RUNNABLE_SPECS=(
@@ -1144,18 +1144,18 @@ quint-generate-traces:
         if quint run "$spec" \
             --main=step \
             --max-steps=15 \
-            --out-itf="traces/${trace_name}.itf.json" \
+            --out-itf="verification/traces/${trace_name}.itf.json" \
             > /dev/null 2>&1; then
-            size=$(du -h "traces/${trace_name}.itf.json" | cut -f1)
-            echo -e "  ${GREEN}✓${NC} traces/${trace_name}.itf.json ($size)"
+            size=$(du -h "verification/traces/${trace_name}.itf.json" | cut -f1)
+            echo -e "  ${GREEN}✓${NC} verification/traces/${trace_name}.itf.json ($size)"
         else
             echo -e "  ${RED}✗${NC} Failed to generate trace"
         fi
     done
 
     echo ""
-    echo "Trace generation complete. Files in traces/"
-    ls -la traces/*.itf.json 2>/dev/null || echo "No traces generated"
+    echo "Trace generation complete. Files in verification/traces/"
+    ls -la verification/traces/*.itf.json 2>/dev/null || echo "No traces generated"
 
 # Execute any aura CLI command with nix build
 # Usage: just aura init -n 3 -t 2 -o test-account

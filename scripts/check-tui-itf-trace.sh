@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-EXPECTED_REL="${1:-verification/quint/tui_trace.itf.json}"
+EXPECTED_REL="${1:-verification/traces/tui_trace.itf.json}"
 EXPECTED="$ROOT/$EXPECTED_REL"
 
 if [ ! -f "$EXPECTED" ]; then
