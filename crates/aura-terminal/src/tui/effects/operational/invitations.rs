@@ -10,14 +10,15 @@ use std::sync::Arc;
 use async_lock::RwLock;
 use aura_app::runtime_bridge::InvitationBridgeType;
 use aura_app::AppCore;
+use aura_core::effects::reactive::ReactiveEffects;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
 pub use aura_app::workflows::invitation::{
-    accept_invitation, cancel_invitation, decline_invitation, export_invitation,
-    import_invitation_details,
+    accept_invitation, cancel_invitation, create_channel_invitation, create_contact_invitation,
+    create_guardian_invitation, decline_invitation, export_invitation, import_invitation_details,
 };
 
 /// Handle invitation commands
@@ -26,6 +27,180 @@ pub async fn handle_invitations(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Option<OpResult> {
     match command {
+        EffectCommand::CreateInvitation {
+            receiver_id,
+            invitation_type,
+            message,
+            ttl_secs,
+        } => {
+            let receiver: aura_core::identifiers::AuthorityId = match receiver_id.parse() {
+                Ok(id) => id,
+                Err(_) => {
+                    return Some(Err(OpError::InvalidArgument(format!(
+                        "Invalid receiver authority ID: {}",
+                        receiver_id
+                    ))));
+                }
+            };
+
+            let ttl_ms = ttl_secs.map(|s| s.saturating_mul(1000));
+            let invitation_type_lc = invitation_type.to_lowercase();
+            let (kind, extra) = invitation_type_lc
+                .split_once(':')
+                .map(|(k, rest)| (k, Some(rest.to_string())))
+                .unwrap_or((invitation_type_lc.as_str(), None));
+
+            let info = match kind {
+                "contact" | "personal" => {
+                    match create_contact_invitation(
+                        app_core,
+                        receiver,
+                        None,
+                        message.clone(),
+                        ttl_ms,
+                    )
+                    .await
+                    {
+                        Ok(info) => info,
+                        Err(e) => {
+                            return Some(Err(OpError::Failed(format!(
+                                "Failed to create contact invitation: {}",
+                                e
+                            ))));
+                        }
+                    }
+                }
+                "guardian" => {
+                    let subject = {
+                        let core = app_core.read().await;
+                        match core.authority() {
+                            Some(id) => id.clone(),
+                            None => {
+                                return Some(Err(OpError::Failed(
+                                    "No local authority is set; cannot create guardian invitation"
+                                        .to_string(),
+                                )));
+                            }
+                        }
+                    };
+
+                    match create_guardian_invitation(
+                        app_core,
+                        receiver,
+                        subject,
+                        message.clone(),
+                        ttl_ms,
+                    )
+                    .await
+                    {
+                        Ok(info) => info,
+                        Err(e) => {
+                            return Some(Err(OpError::Failed(format!(
+                                "Failed to create guardian invitation: {}",
+                                e
+                            ))));
+                        }
+                    }
+                }
+                "channel" | "chat" | "group" => {
+                    let block_id = if let Some(id) = extra {
+                        id
+                    } else {
+                        // Best effort: use the currently-selected block/channel from the reactive view.
+                        let core = app_core.read().await;
+                        let block = core
+                            .read(&*aura_app::signal_defs::BLOCK_SIGNAL)
+                            .await
+                            .unwrap_or_default();
+                        block.id.to_string()
+                    };
+
+                    if block_id.trim().is_empty() {
+                        return Some(Err(OpError::InvalidArgument(
+                            "No active block/channel to invite to".to_string(),
+                        )));
+                    }
+
+                    match create_channel_invitation(
+                        app_core,
+                        receiver,
+                        block_id,
+                        message.clone(),
+                        ttl_ms,
+                    )
+                    .await
+                    {
+                        Ok(info) => info,
+                        Err(e) => {
+                            return Some(Err(OpError::Failed(format!(
+                                "Failed to create channel invitation: {}",
+                                e
+                            ))));
+                        }
+                    }
+                }
+                other => {
+                    return Some(Err(OpError::InvalidArgument(format!(
+                        "Unknown invitation type: {}",
+                        other
+                    ))));
+                }
+            };
+
+            match export_invitation(app_core, &info.invitation_id).await {
+                Ok(code) => Some(Ok(OpResponse::InvitationCode {
+                    id: info.invitation_id,
+                    code,
+                })),
+                Err(e) => Some(Err(OpError::Failed(format!(
+                    "Failed to export invitation: {}",
+                    e
+                )))),
+            }
+        }
+
+        EffectCommand::SendBlockInvitation { contact_id } => {
+            let receiver: aura_core::identifiers::AuthorityId = match contact_id.parse() {
+                Ok(id) => id,
+                Err(_) => {
+                    return Some(Err(OpError::InvalidArgument(format!(
+                        "Invalid contact authority ID: {}",
+                        contact_id
+                    ))));
+                }
+            };
+
+            // Best effort: use the currently-selected block from the reactive view.
+            let block_id = {
+                use aura_core::effects::reactive::ReactiveEffects;
+
+                let core = app_core.read().await;
+
+                if let Ok(blocks) = core.read(&*aura_app::signal_defs::BLOCKS_SIGNAL).await {
+                    blocks
+                        .current_block_id
+                        .as_ref()
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "home".to_string())
+                } else if let Ok(block) = core.read(&*aura_app::signal_defs::BLOCK_SIGNAL).await {
+                    block.id.to_string()
+                } else {
+                    "home".to_string()
+                }
+            };
+
+            match create_channel_invitation(app_core, receiver, block_id, None, None).await {
+                Ok(info) => Some(Ok(OpResponse::Data(format!(
+                    "Block invitation sent: {}",
+                    info.invitation_id
+                )))),
+                Err(e) => Some(Err(OpError::Failed(format!(
+                    "Failed to send block invitation: {}",
+                    e
+                )))),
+            }
+        }
+
         EffectCommand::ExportInvitation { invitation_id } => {
             // Delegate to workflow
             match export_invitation(app_core, invitation_id).await {
@@ -73,6 +248,17 @@ pub async fn handle_invitations(
                                 format!("contact:{}", name)
                             } else {
                                 "contact".to_string()
+                            }
+                        }
+                        InvitationBridgeType::DeviceEnrollment {
+                            device_name,
+                            device_id,
+                            ..
+                        } => {
+                            if let Some(name) = device_name {
+                                format!("device:{}", name)
+                            } else {
+                                format!("device:{}", device_id)
                             }
                         }
                     };

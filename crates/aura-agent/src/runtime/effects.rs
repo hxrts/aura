@@ -893,6 +893,7 @@ impl TransportEffects for AuraEffectSystem {
     }
 
     async fn receive_envelope(&self) -> Result<TransportEnvelope, TransportError> {
+        let self_device_id = self.config.device_id.to_string();
         let maybe = {
             let mut inbox = self
                 .transport_inbox
@@ -901,7 +902,15 @@ impl TransportEffects for AuraEffectSystem {
             // In shared transport mode, filter by destination (this agent's authority ID)
             inbox
                 .iter()
-                .position(|env| env.destination == self.authority_id)
+                .position(|env| {
+                    if env.destination != self.authority_id {
+                        return false;
+                    }
+                    match env.metadata.get("aura-destination-device-id") {
+                        Some(dst) => dst == &self_device_id,
+                        None => true,
+                    }
+                })
                 .map(|pos| inbox.remove(pos))
         };
 
@@ -923,6 +932,7 @@ impl TransportEffects for AuraEffectSystem {
         source: AuthorityId,
         context: ContextId,
     ) -> Result<TransportEnvelope, TransportError> {
+        let self_device_id = self.config.device_id.to_string();
         let maybe = {
             let mut inbox = self
                 .transport_inbox
@@ -935,6 +945,10 @@ impl TransportEffects for AuraEffectSystem {
                     env.destination == self.authority_id
                         && env.source == source
                         && env.context == context
+                        && match env.metadata.get("aura-destination-device-id") {
+                            Some(dst) => dst == &self_device_id,
+                            None => true,
+                        }
                 })
                 .map(|pos| inbox.remove(pos))
         };
@@ -1426,10 +1440,10 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         // Store threshold metadata for epoch 0 (bootstrap case: 1-of-1 single signer)
         self.store_threshold_metadata(
             authority,
-            0,                           // epoch 0
-            1,                           // threshold
-            1,                           // total_participants
-            &[format!("{}", authority)], // guardian is self
+            0,   // epoch 0
+            1,   // threshold
+            1,   // total_participants
+            &[], // 1-of-1 bootstrap: participant set is implicit (local signer)
         )
         .await?;
 
@@ -1559,7 +1573,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
                 epoch: metadata.epoch,
                 threshold: metadata.threshold,
                 total_participants: metadata.total_participants,
-                guardian_ids: metadata.guardian_ids,
+                participants: metadata.resolved_participants(),
             });
         }
 
@@ -1580,7 +1594,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
                 epoch: current_epoch,
                 threshold: 1,
                 total_participants: 1,
-                guardian_ids: vec![format!("{}", authority)],
+                participants: Vec::new(),
             })
         } else {
             None
@@ -1614,21 +1628,21 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         authority: &AuthorityId,
         new_threshold: u16,
         new_total_participants: u16,
-        guardian_ids: &[String],
+        participants: &[aura_core::threshold::ParticipantIdentity],
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
         tracing::info!(
             ?authority,
             new_threshold,
             new_total_participants,
-            num_guardians = guardian_ids.len(),
+            num_participants = participants.len(),
             "Rotating threshold keys via AuraEffectSystem"
         );
 
         // Validate inputs
-        if guardian_ids.len() != new_total_participants as usize {
+        if participants.len() != new_total_participants as usize {
             return Err(AuraError::invalid(format!(
-                "Guardian count ({}) must match total_participants ({})",
-                guardian_ids.len(),
+                "Participant count ({}) must match total_participants ({})",
+                participants.len(),
                 new_total_participants
             )));
         }
@@ -1666,11 +1680,11 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             SecureStorageCapability::Read,
             SecureStorageCapability::Write,
         ];
-        for (guardian_id, key_package) in guardian_ids.iter().zip(key_result.key_packages.iter()) {
+        for (participant, key_package) in participants.iter().zip(key_result.key_packages.iter()) {
             let location = SecureStorageLocation::with_sub_key(
-                "guardian_shares",
+                "participant_shares",
                 format!("{}/{}", authority, new_epoch),
-                guardian_id,
+                participant.storage_key(),
             );
             self.secure_storage_handler
                 .secure_store(&location, key_package, &caps)
@@ -1693,7 +1707,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             new_epoch,
             new_threshold,
             new_total_participants,
-            guardian_ids,
+            participants,
         )
         .await?;
 
@@ -2615,12 +2629,20 @@ impl AuraEffectSystem {
     ) -> Result<(), AuraError> {
         let delete_caps = vec![SecureStorageCapability::Delete];
 
-        // Delete guardian shares for this epoch
+        // Delete participant shares for this epoch
         let shares_location =
-            SecureStorageLocation::new("guardian_shares", format!("{}/{}", authority, epoch));
+            SecureStorageLocation::new("participant_shares", format!("{}/{}", authority, epoch));
         let _ = self
             .secure_storage_handler
             .secure_delete(&shares_location, &delete_caps)
+            .await;
+
+        // Best-effort cleanup of legacy guardian shares for this epoch
+        let legacy_shares_location =
+            SecureStorageLocation::new("guardian_shares", format!("{}/{}", authority, epoch));
+        let _ = self
+            .secure_storage_handler
+            .secure_delete(&legacy_shares_location, &delete_caps)
             .await;
 
         // Delete public key for this epoch
@@ -2660,13 +2682,14 @@ impl AuraEffectSystem {
         epoch: u64,
         threshold: u16,
         total_participants: u16,
-        guardian_ids: &[String],
+        participants: &[aura_core::threshold::ParticipantIdentity],
     ) -> Result<(), AuraError> {
         let metadata = ThresholdMetadata {
             epoch,
             threshold,
             total_participants,
-            guardian_ids: guardian_ids.to_vec(),
+            participants: participants.to_vec(),
+            guardian_ids: Vec::new(),
         };
 
         let location = SecureStorageLocation::with_sub_key(
@@ -2694,7 +2717,7 @@ impl AuraEffectSystem {
             epoch,
             threshold,
             total_participants,
-            num_guardians = guardian_ids.len(),
+            num_participants = participants.len(),
             "Stored threshold metadata"
         );
         Ok(())
@@ -2749,8 +2772,26 @@ struct ThresholdMetadata {
     threshold: u16,
     /// Total number of participants (n in k-of-n)
     total_participants: u16,
-    /// Authority IDs of all guardians (in participant order)
+    /// Participants (in protocol participant order)
+    #[serde(default)]
+    participants: Vec<aura_core::threshold::ParticipantIdentity>,
+    /// Legacy guardian IDs (for backward-compatible deserialization)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     guardian_ids: Vec<String>,
+}
+
+impl ThresholdMetadata {
+    fn resolved_participants(&self) -> Vec<aura_core::threshold::ParticipantIdentity> {
+        if !self.participants.is_empty() {
+            return self.participants.clone();
+        }
+
+        self.guardian_ids
+            .iter()
+            .filter_map(|s| s.parse::<AuthorityId>().ok())
+            .map(aura_core::threshold::ParticipantIdentity::guardian)
+            .collect()
+    }
 }
 
 fn map_amp_err(e: aura_core::AuraError) -> AmpChannelError {

@@ -10,8 +10,8 @@ use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::{ContactSelectModalState, QueuedModal};
 use super::super::toast::ToastLevel;
 use super::super::views::{
-    AddDeviceModalState, BlockFocus, ChatFocus, CreateChannelModalState,
-    CreateInvitationModalState, DisplayNameModalState, ImportInvitationModalState,
+    AddDeviceModalState, BlockFocus, ChatFocus, CreateChannelModalState, DisplayNameModalState,
+    ImportInvitationModalState,
 };
 use super::super::TuiState;
 
@@ -238,9 +238,9 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             ));
         }
         KeyCode::Char('n') => {
-            // Open create invitation modal via queue (send an invitation)
-            state.modal_queue.enqueue(QueuedModal::ContactsCreate(
-                CreateInvitationModalState::default(),
+            // Open create invitation modal via dispatch (shell will populate receiver details)
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::OpenCreateInvitationModal,
             ));
         }
         KeyCode::Enter => {

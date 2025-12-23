@@ -8,9 +8,9 @@ use crate::tui::screens::Screen;
 
 use super::views::{
     AccountSetupModalState, AddDeviceModalState, ChannelInfoModalState, ConfirmRemoveModalState,
-    CreateChannelModalState, CreateInvitationModalState, DisplayNameModalState,
-    GuardianSetupModalState, ImportInvitationModalState, InvitationCodeModalState,
-    NicknameModalState, ThresholdModalState, TopicModalState,
+    CreateChannelModalState, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
+    DisplayNameModalState, GuardianSetupModalState, ImportInvitationModalState,
+    InvitationCodeModalState, NicknameModalState, ThresholdModalState, TopicModalState,
 };
 
 /// Unified modal enum - ALL modals MUST be one of these variants.
@@ -91,6 +91,9 @@ pub enum QueuedModal {
 
     /// Add device
     SettingsAddDevice(AddDeviceModalState),
+
+    /// Device enrollment ceremony (code + progress)
+    SettingsDeviceEnrollment(DeviceEnrollmentCeremonyModalState),
 
     /// Confirm device removal
     SettingsRemoveDevice(ConfirmRemoveModalState),

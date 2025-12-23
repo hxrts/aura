@@ -1515,16 +1515,19 @@ fn test_effect_commands() {
 
     // CreateInvitation
     let cmd = EffectCommand::CreateInvitation {
+        receiver_id: "receiver".to_string(),
         invitation_type: "Guardian".to_string(),
         message: Some("Be my guardian".to_string()),
         ttl_secs: Some(3600),
     };
     match cmd {
         EffectCommand::CreateInvitation {
+            receiver_id,
             invitation_type,
             message,
             ttl_secs,
         } => {
+            assert_eq!(receiver_id, "receiver");
             assert_eq!(invitation_type, "Guardian");
             assert_eq!(message, Some("Be my guardian".to_string()));
             assert_eq!(ttl_secs, Some(3600));
@@ -1734,6 +1737,7 @@ async fn test_invitation_export_import_roundtrip() {
     println!("\nPhase 1: Creating invitation");
     let create_result = ctx
         .dispatch(EffectCommand::CreateInvitation {
+            receiver_id: authority_id.to_string(),
             invitation_type: "Contact".to_string(),
             message: Some("Test invitation message".to_string()),
             ttl_secs: Some(3600),
@@ -3561,9 +3565,7 @@ async fn test_message_delivery_status_flow() {
 
 #[tokio::test]
 async fn test_retry_message_command() {
-    use aura_terminal::tui::effects::{
-        command_to_intent, CommandAuthorizationLevel, EffectCommand, IntentContext,
-    };
+    use aura_terminal::tui::effects::{CommandAuthorizationLevel, EffectCommand};
     use aura_terminal::tui::types::{DeliveryStatus, Message};
 
     println!("\n=== Retry Message Command Test ===\n");
@@ -3603,16 +3605,8 @@ async fn test_retry_message_command() {
     );
     println!("  ✓ RetryMessage has Basic authorization level");
 
-    // Phase 3: Test intent mapping (RetryMessage maps to SendMessage)
-    println!("\nPhase 3: Testing intent mapping");
-
-    let ctx = IntentContext::empty();
-    let intent = command_to_intent(&retry_cmd, &ctx);
-    assert!(intent.is_some(), "RetryMessage should map to an intent");
-    println!("  ✓ RetryMessage maps to SendMessage intent");
-
-    // Phase 4: Test retry flow scenario
-    println!("\nPhase 4: Testing retry flow scenario");
+    // Phase 3: Test retry flow scenario
+    println!("\nPhase 3: Testing retry flow scenario");
 
     // Create a failed message
     let failed_msg = Message::sending("msg-456", "general", "Me", "This will fail")

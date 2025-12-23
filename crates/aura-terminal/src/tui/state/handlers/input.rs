@@ -139,6 +139,7 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             | QueuedModal::GuardianSetup(_)
             | QueuedModal::SettingsThreshold(_)
             | QueuedModal::SettingsAddDevice(_)
+            | QueuedModal::SettingsDeviceEnrollment(_)
             | QueuedModal::SettingsRemoveDevice(_)
             | QueuedModal::BlockInvite(_) => {}
         }

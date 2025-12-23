@@ -187,6 +187,50 @@ pub async fn close_channel(
     Ok(())
 }
 
+/// Set a channel topic.
+///
+/// Today this is a UI-local operation that updates the channel entry in `CHAT_SIGNAL`.
+/// A fully persisted implementation will commit a topic fact (see work/007.md).
+pub async fn set_topic(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel: &str,
+    text: &str,
+) -> Result<(), AuraError> {
+    let channel_id = parse_channel_id(channel);
+
+    let core = app_core.read().await;
+    let mut chat_state = core
+        .read(&*CHAT_SIGNAL)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+
+    if let Some(ch) = chat_state.channels.iter_mut().find(|c| c.id == channel_id) {
+        ch.topic = Some(text.to_string());
+    } else {
+        // Best-effort: create the channel if missing so the topic is visible.
+        let now = 0u64;
+        let channel = Channel {
+            id: channel_id,
+            name: channel.to_string(),
+            topic: Some(text.to_string()),
+            channel_type: ChannelType::Block,
+            unread_count: 0,
+            is_dm: false,
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: now,
+        };
+        chat_state.add_channel(channel);
+    }
+
+    core.emit(&*CHAT_SIGNAL, chat_state)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
+
+    Ok(())
+}
+
 /// Send a message to a group/channel.
 ///
 /// **What it does**: Appends a message to the selected channel's message list

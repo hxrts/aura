@@ -62,11 +62,15 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) covers the commitment tree structure for threshold identity management.
 
+[Key Rotation Ceremonies](118_key_rotation_ceremonies.md) describes the shared Category C contract for key rotations and membership changes (devices, guardians, groups, blocks).
+
 [Journal System](102_journal.md) documents the fact-based journal, validation rules, and deterministic reduction flows.
 
 [Relational Contexts](103_relational_contexts.md) covers guardian bindings, recovery grants, and context-scoped journals.
 
 [Consensus](104_consensus.md) describes the Aura Consensus protocol for strong agreement.
+
+[Operation Categories](117_operation_categories.md) defines the A/B/C operation classification used throughout the system and how ceremonies relate to optimistic CRDT operations.
 
 [Effect System and Runtime](106_effect_system_and_runtime.md) covers effect system architecture and runtime composition.
 

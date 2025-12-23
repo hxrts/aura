@@ -468,11 +468,14 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
                 .unwrap_or_default();
             let public_key_hash = Hash32(hash::hash(&public_key));
 
-            // Parse guardian ID strings back to AuthorityIds
+            // Extract guardian IDs from the generic participant list.
             let guardian_ids: Vec<AuthorityId> = state
-                .guardian_ids
+                .participants
                 .iter()
-                .filter_map(|s| s.parse::<AuthorityId>().ok())
+                .filter_map(|p| match p {
+                    aura_core::threshold::ParticipantIdentity::Guardian(id) => Some(*id),
+                    _ => None,
+                })
                 .collect();
 
             Ok(GuardianState {
@@ -576,17 +579,14 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
 
         // Generate new FROST keys at the new epoch
         // IMPORTANT: These keys are stored but NOT activated until commit
-        let guardian_id_strings: Vec<String> =
-            new_guardian_ids.iter().map(|id| id.to_string()).collect();
+        let participants: Vec<aura_core::threshold::ParticipantIdentity> = new_guardian_ids
+            .iter()
+            .map(|id| aura_core::threshold::ParticipantIdentity::guardian(*id))
+            .collect();
 
         let (_epoch, key_packages, public_key_package) = self
             .effects
-            .rotate_keys(
-                &authority_id,
-                new_threshold_k,
-                total_n,
-                &guardian_id_strings,
-            )
+            .rotate_keys(&authority_id, new_threshold_k, total_n, &participants)
             .await
             .map_err(|e| RecoveryError::internal(format!("Key rotation failed: {}", e)))?;
 

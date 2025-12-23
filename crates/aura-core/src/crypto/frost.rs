@@ -3,6 +3,7 @@
 //! This module provides types for FROST (Flexible Round-Optimized Schnorr Threshold)
 //! signatures, including participant identifiers and threshold configuration.
 
+use crate::types::participants::ParticipantIdentity;
 use crate::AuraError;
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
@@ -57,8 +58,8 @@ pub struct ThresholdState {
     pub threshold: u16,
     /// Total number of participants (n in k-of-n)
     pub total_participants: u16,
-    /// Authority IDs of all guardians (in participant order)
-    pub guardian_ids: Vec<String>,
+    /// Participants (in protocol participant order)
+    pub participants: Vec<ParticipantIdentity>,
 }
 
 impl ThresholdState {
@@ -68,7 +69,7 @@ impl ThresholdState {
             epoch: 0,
             threshold: 0,
             total_participants: 0,
-            guardian_ids: Vec::new(),
+            participants: Vec::new(),
         }
     }
 

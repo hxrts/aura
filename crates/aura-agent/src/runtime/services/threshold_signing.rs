@@ -27,8 +27,8 @@ use aura_core::effects::{
 };
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{
-    ApprovalContext, SignableOperation, SigningContext, ThresholdConfig, ThresholdSignature,
-    ThresholdState,
+    ApprovalContext, ParticipantIdentity, SignableOperation, SigningContext, ThresholdConfig,
+    ThresholdSignature, ThresholdState,
 };
 use aura_core::{effects::ThresholdSigningEffects, AuraError};
 use serde::{Deserialize, Serialize};
@@ -43,10 +43,28 @@ struct ThresholdConfigMetadata {
     threshold_k: u16,
     /// Total number of participants
     total_n: u16,
-    /// Guardian authority IDs
+    /// Participants who will hold shares (in protocol participant order)
+    #[serde(default)]
+    participants: Vec<ParticipantIdentity>,
+    /// Legacy guardian IDs (for backward-compatible deserialization)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     guardian_ids: Vec<String>,
     /// Signing mode (SingleSigner for 1-of-1, Threshold for k>=2)
     mode: SigningMode,
+}
+
+impl ThresholdConfigMetadata {
+    fn resolved_participants(&self) -> Vec<ParticipantIdentity> {
+        if !self.participants.is_empty() {
+            return self.participants.clone();
+        }
+
+        self.guardian_ids
+            .iter()
+            .filter_map(|s| s.parse::<AuthorityId>().ok())
+            .map(ParticipantIdentity::guardian)
+            .collect()
+    }
 }
 
 /// State for a signing context (per authority)
@@ -62,8 +80,8 @@ pub struct SigningContextState {
     pub public_key_package: Vec<u8>,
     /// Signing mode (single-signer Ed25519 or FROST threshold)
     pub mode: SigningMode,
-    /// Guardian authority IDs (for threshold state queries)
-    pub guardian_ids: Vec<String>,
+    /// Participants who hold shares (for threshold state queries / prestate binding)
+    pub participants: Vec<ParticipantIdentity>,
 }
 
 /// Unified service for all threshold signing operations
@@ -293,7 +311,9 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             epoch: 0,
             public_key_package: key_result.public_key_package.clone(),
             mode: key_result.mode,
-            guardian_ids: vec![format!("{}", authority)], // Bootstrap: self is the only guardian
+            // For 1-of-1 bootstrap, the participant set is implicit (local signer).
+            // Ceremonies will overwrite this when rotating into multi-party configs.
+            participants: Vec::new(),
         };
 
         // Store in memory cache
@@ -405,7 +425,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 epoch: state.epoch,
                 threshold: state.config.threshold,
                 total_participants: state.config.total_participants,
-                guardian_ids: state.guardian_ids.clone(),
+                participants: state.participants.clone(),
             })
     }
 
@@ -431,21 +451,21 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         authority: &AuthorityId,
         new_threshold: u16,
         new_total_participants: u16,
-        guardian_ids: &[String],
+        participants: &[ParticipantIdentity],
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
         tracing::info!(
             ?authority,
             new_threshold,
             new_total_participants,
-            num_guardians = guardian_ids.len(),
-            "Rotating threshold keys for guardian ceremony"
+            num_participants = participants.len(),
+            "Rotating threshold keys for key-rotation ceremony"
         );
 
         // Validate inputs
-        if guardian_ids.len() != new_total_participants as usize {
+        if participants.len() != new_total_participants as usize {
             return Err(AuraError::invalid(format!(
-                "Guardian count ({}) must match total_participants ({})",
-                guardian_ids.len(),
+                "Participant count ({}) must match total_participants ({})",
+                participants.len(),
                 new_total_participants
             )));
         }
@@ -486,10 +506,10 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             }
         };
 
-        // Store each key package indexed by guardian
+        // Store each key package indexed by participant identity
         // Note: In a real deployment, these would be encrypted with each guardian's
         // public key before storage. For demo mode, we store them directly.
-        for (i, (guardian_id, key_package)) in guardian_ids
+        for (i, (participant, key_package)) in participants
             .iter()
             .zip(key_result.key_packages.iter())
             .enumerate()
@@ -497,11 +517,11 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             let signer_index = (i + 1) as u16; // 1-indexed
             let _ = signer_index; // Used for logging below
 
-            // Store at: guardian_shares/<authority>/<epoch>/<guardian_id>
+            // Store at: participant_shares/<authority>/<epoch>/<participant_key>
             let location = SecureStorageLocation::with_sub_key(
-                "guardian_shares",
+                "participant_shares",
                 format!("{}/{}", authority, new_epoch),
-                guardian_id,
+                participant.storage_key(),
             );
 
             self.effects
@@ -516,17 +536,18 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 .await
                 .map_err(|e| {
                     AuraError::internal(format!(
-                        "Failed to store key package for guardian {}: {}",
-                        guardian_id, e
+                        "Failed to store key package for participant {}: {}",
+                        participant.display_name(),
+                        e
                     ))
                 })?;
 
             tracing::debug!(
                 ?authority,
-                guardian_id,
+                participant = %participant.display_name(),
                 signer_index,
                 new_epoch,
-                "Stored guardian key package"
+                "Stored participant key package"
             );
         }
 
@@ -552,11 +573,12 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             })?;
 
         // Store threshold config metadata for use in commit_key_rotation
-        // This includes threshold_k, total_n, and guardian_ids
+        // This includes threshold_k, total_n, and participants
         let config_metadata = ThresholdConfigMetadata {
             threshold_k: new_threshold,
             total_n: new_total_participants,
-            guardian_ids: guardian_ids.to_vec(),
+            participants: participants.to_vec(),
+            guardian_ids: Vec::new(),
             mode: if new_threshold >= 2 {
                 SigningMode::Threshold
             } else {
@@ -689,7 +711,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             state.public_key_package = public_key_package;
             state.config = new_config;
             state.mode = config_metadata.mode;
-            state.guardian_ids = config_metadata.guardian_ids;
+            state.participants = config_metadata.resolved_participants();
 
             tracing::info!(
                 ?authority,
@@ -779,11 +801,13 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
         // Delete guardian key packages for this failed epoch
         if let Some(metadata) = config_metadata {
-            for guardian_id in &metadata.guardian_ids {
+            let participants = metadata.resolved_participants();
+
+            for participant in &participants {
                 let share_location = SecureStorageLocation::with_sub_key(
-                    "guardian_shares",
+                    "participant_shares",
                     format!("{}/{}", authority, failed_epoch),
-                    guardian_id,
+                    participant.storage_key(),
                 );
 
                 if let Err(e) = self
@@ -794,7 +818,34 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                     tracing::debug!(
                         ?authority,
                         failed_epoch,
-                        guardian_id,
+                        participant = %participant.display_name(),
+                        error = %e,
+                        "Failed to delete participant share (may not exist)"
+                    );
+                }
+            }
+
+            // Best-effort cleanup of legacy guardian share locations
+            for participant in participants {
+                let ParticipantIdentity::Guardian(guardian_id) = participant else {
+                    continue;
+                };
+
+                let share_location = SecureStorageLocation::with_sub_key(
+                    "guardian_shares",
+                    format!("{}/{}", authority, failed_epoch),
+                    guardian_id.to_string(),
+                );
+
+                if let Err(e) = self
+                    .effects
+                    .secure_delete(&share_location, delete_caps)
+                    .await
+                {
+                    tracing::debug!(
+                        ?authority,
+                        failed_epoch,
+                        guardian_id = %guardian_id,
                         error = %e,
                         "Failed to delete guardian share (may not exist)"
                     );

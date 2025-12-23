@@ -35,6 +35,7 @@ mod contacts;
 mod context;
 mod invitations;
 mod messaging;
+mod moderation;
 mod network;
 mod query;
 mod settings;
@@ -126,6 +127,11 @@ impl OperationalHandler {
 
         // Messaging commands
         if let Some(result) = messaging::handle_messaging(command, &self.app_core).await {
+            return Some(result);
+        }
+
+        // Moderation commands
+        if let Some(result) = moderation::handle_moderation(command, &self.app_core).await {
             return Some(result);
         }
 

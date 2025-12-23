@@ -863,7 +863,9 @@ impl aura_core::effects::ThresholdSigningEffects for MockEffects {
             epoch: 0,
             threshold: 1,
             total_participants: 1,
-            guardian_ids: vec![authority.to_string()],
+            participants: vec![aura_core::threshold::ParticipantIdentity::guardian(
+                authority.clone(),
+            )],
         })
     }
 
@@ -880,10 +882,10 @@ impl aura_core::effects::ThresholdSigningEffects for MockEffects {
         _authority: &AuthorityId,
         new_threshold: u16,
         new_total_participants: u16,
-        guardian_ids: &[String],
+        participants: &[aura_core::threshold::ParticipantIdentity],
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
-        // Return mock key packages for each guardian
-        let key_packages: Vec<Vec<u8>> = guardian_ids
+        // Return mock key packages for each participant
+        let key_packages: Vec<Vec<u8>> = participants
             .iter()
             .enumerate()
             .map(|(i, _)| {

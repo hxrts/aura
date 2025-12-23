@@ -162,6 +162,8 @@ pub struct ContactsViewProps {
     pub import_modal_importing: bool,
     // Create invitation modal (send invitation)
     pub create_modal_visible: bool,
+    pub create_modal_receiver_id: String,
+    pub create_modal_receiver_name: String,
     pub create_modal_type_index: usize,
     pub create_modal_message: String,
     pub create_modal_ttl_hours: u64,
@@ -214,13 +216,26 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         _ => (false, String::new(), false),
     };
 
-    let (create_visible, create_type_index, create_message, create_ttl, create_step) =
-        match state.modal_queue.current() {
-            Some(QueuedModal::ContactsCreate(s)) => {
-                (true, s.type_index, s.message.clone(), s.ttl_hours, s.step)
-            }
-            _ => (false, 0, String::new(), 24, 0),
-        };
+    let (
+        create_visible,
+        create_receiver_id,
+        create_receiver_name,
+        create_type_index,
+        create_message,
+        create_ttl,
+        create_step,
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::ContactsCreate(s)) => (
+            true,
+            s.receiver_id.clone(),
+            s.receiver_name.clone(),
+            s.type_index,
+            s.message.clone(),
+            s.ttl_hours,
+            s.step,
+        ),
+        _ => (false, String::new(), String::new(), 0, String::new(), 24, 0),
+    };
 
     let (code_visible, code_invitation_id, code_code, code_loading) =
         match state.modal_queue.current() {
@@ -287,6 +302,8 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         import_modal_importing: import_importing,
         // Create modal (from queue)
         create_modal_visible: create_visible,
+        create_modal_receiver_id: create_receiver_id,
+        create_modal_receiver_name: create_receiver_name,
         create_modal_type_index: create_type_index,
         create_modal_message: create_message,
         create_modal_ttl_hours: create_ttl,
@@ -360,6 +377,17 @@ pub struct SettingsViewProps {
     // Add device modal
     pub add_device_modal_visible: bool,
     pub add_device_modal_name: String,
+    // Device enrollment ceremony modal
+    pub device_enrollment_modal_visible: bool,
+    pub device_enrollment_modal_ceremony_id: String,
+    pub device_enrollment_modal_device_name: String,
+    pub device_enrollment_modal_code: String,
+    pub device_enrollment_modal_accepted_count: u16,
+    pub device_enrollment_modal_total_count: u16,
+    pub device_enrollment_modal_threshold: u16,
+    pub device_enrollment_modal_is_complete: bool,
+    pub device_enrollment_modal_has_failed: bool,
+    pub device_enrollment_modal_error_message: String,
     // Confirm remove modal
     pub confirm_remove_modal_visible: bool,
     pub confirm_remove_modal_device_id: String,
@@ -384,6 +412,44 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     let (add_device_visible, add_device_name) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsAddDevice(s)) => (true, s.name.clone()),
         _ => (false, String::new()),
+    };
+
+    let (
+        enrollment_visible,
+        enrollment_ceremony_id,
+        enrollment_device_name,
+        enrollment_code,
+        enrollment_accepted,
+        enrollment_total,
+        enrollment_threshold,
+        enrollment_is_complete,
+        enrollment_has_failed,
+        enrollment_error_message,
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::SettingsDeviceEnrollment(s)) => (
+            true,
+            s.ceremony.ceremony_id.clone().unwrap_or_default(),
+            s.device_name.clone(),
+            s.enrollment_code.clone(),
+            s.ceremony.accepted_count,
+            s.ceremony.total_count,
+            s.ceremony.threshold,
+            s.ceremony.is_complete,
+            s.ceremony.has_failed,
+            s.ceremony.error_message.clone().unwrap_or_default(),
+        ),
+        _ => (
+            false,
+            String::new(),
+            String::new(),
+            String::new(),
+            0,
+            0,
+            0,
+            false,
+            false,
+            String::new(),
+        ),
     };
 
     let (
@@ -416,6 +482,17 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         // Add device modal (from queue)
         add_device_modal_visible: add_device_visible,
         add_device_modal_name: add_device_name,
+        // Device enrollment ceremony modal (from queue)
+        device_enrollment_modal_visible: enrollment_visible,
+        device_enrollment_modal_ceremony_id: enrollment_ceremony_id,
+        device_enrollment_modal_device_name: enrollment_device_name,
+        device_enrollment_modal_code: enrollment_code,
+        device_enrollment_modal_accepted_count: enrollment_accepted,
+        device_enrollment_modal_total_count: enrollment_total,
+        device_enrollment_modal_threshold: enrollment_threshold,
+        device_enrollment_modal_is_complete: enrollment_is_complete,
+        device_enrollment_modal_has_failed: enrollment_has_failed,
+        device_enrollment_modal_error_message: enrollment_error_message,
         // Confirm remove modal (from queue)
         confirm_remove_modal_visible: confirm_remove_visible,
         confirm_remove_modal_device_id: confirm_remove_device_id,

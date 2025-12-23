@@ -23,8 +23,8 @@ use aura_terminal::tui::props::{
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::screens::{BlockFocus, ChatFocus};
 use aura_terminal::tui::state_machine::{
-    transition, ChatFocus as StateChatFocus, ContactSelectModalState, DispatchCommand, QueuedModal,
-    NicknameModalState, TuiCommand, TuiState,
+    transition, ChatFocus as StateChatFocus, ContactSelectModalState, DispatchCommand,
+    NicknameModalState, QueuedModal, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
 
@@ -64,10 +64,9 @@ impl PropsTestHarness {
                 )));
             }
             if let TuiCommand::Dispatch(DispatchCommand::OpenContactNicknameModal) = cmd {
-                new_state.show_modal(QueuedModal::ContactsNickname(NicknameModalState::for_contact(
-                    "contact-1",
-                    "",
-                )));
+                new_state.show_modal(QueuedModal::ContactsNickname(
+                    NicknameModalState::for_contact("contact-1", ""),
+                ));
             }
         }
 

@@ -281,6 +281,8 @@ pub enum EffectCommand {
     // === Invitation Commands ===
     /// Create a new invitation
     CreateInvitation {
+        /// Receiver authority ID
+        receiver_id: String,
         /// Type of invitation (Contact, Guardian, Channel)
         invitation_type: String,
         /// Optional message to include

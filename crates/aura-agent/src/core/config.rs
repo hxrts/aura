@@ -62,7 +62,7 @@ pub struct AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            device_id: DeviceId::new_from_entropy([0u8; 32]),
+            device_id: DeviceId::default(),
             storage: StorageConfig::default(),
             network: NetworkConfig::default(),
             reliability: ReliabilityConfig::default(),

@@ -29,6 +29,22 @@ pub enum OpResponse {
         /// Optional message from sender
         message: Option<String>,
     },
+    /// Device enrollment ceremony started (Settings → Add device)
+    DeviceEnrollmentStarted {
+        /// Ceremony identifier for polling/cancel
+        ceremony_id: String,
+        /// Shareable enrollment code to import on the new device
+        enrollment_code: String,
+        /// Pending epoch created during prepare
+        pending_epoch: u64,
+        /// Device id being enrolled
+        device_id: String,
+    },
+    /// Device removal ceremony started (Settings → Remove device)
+    DeviceRemovalStarted {
+        /// Ceremony identifier for polling/cancel
+        ceremony_id: String,
+    },
     /// Context changed (for SetContext command)
     ContextChanged {
         /// The new context ID (None to clear)

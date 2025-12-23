@@ -36,7 +36,9 @@
 use crate::core::IntentError;
 use async_trait::async_trait;
 use aura_core::identifiers::AuthorityId;
-use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
+use aura_core::threshold::{
+    ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
+};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::DeviceId;
 use aura_effects::ReactiveHandler;
@@ -74,6 +76,58 @@ pub struct RuntimeStatus {
     pub rendezvous: RendezvousStatus,
     /// Whether the runtime is authenticated
     pub is_authenticated: bool,
+}
+
+/// High-level ceremony kind exposed across the runtime bridge boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CeremonyKind {
+    /// Guardian threshold key rotation ceremony for an account authority.
+    GuardianRotation,
+    /// Device enrollment ceremony (account authority membership change + rotation).
+    DeviceEnrollment,
+    /// Device removal ceremony (account authority membership change + rotation).
+    DeviceRemoval,
+}
+
+/// Result of starting a device enrollment ceremony.
+#[derive(Debug, Clone)]
+pub struct DeviceEnrollmentStart {
+    /// Ceremony identifier for status polling / cancellation.
+    pub ceremony_id: String,
+    /// Shareable enrollment code (e.g. QR/copy-paste) to import on the new device.
+    pub enrollment_code: String,
+    /// Pending epoch created during prepare.
+    pub pending_epoch: u64,
+    /// Device id being enrolled.
+    pub device_id: DeviceId,
+}
+
+/// Status of a key-rotation / membership-change ceremony.
+///
+/// This is intentionally generic so multiple ceremony kinds can share the same
+/// UI and workflow infrastructure.
+#[derive(Debug, Clone)]
+pub struct KeyRotationCeremonyStatus {
+    /// Ceremony identifier
+    pub ceremony_id: String,
+    /// What kind of ceremony this is
+    pub kind: CeremonyKind,
+    /// Number of participants who have accepted
+    pub accepted_count: u16,
+    /// Total number of required participants
+    pub total_count: u16,
+    /// Threshold required for completion
+    pub threshold: u16,
+    /// Whether the ceremony is complete
+    pub is_complete: bool,
+    /// Whether the ceremony has failed
+    pub has_failed: bool,
+    /// List of participants who have accepted
+    pub accepted_participants: Vec<ParticipantIdentity>,
+    /// Optional error message if failed
+    pub error_message: Option<String>,
+    /// Pending epoch for key rotation (if applicable)
+    pub pending_epoch: Option<u64>,
 }
 
 /// Status of a guardian ceremony
@@ -132,6 +186,15 @@ pub enum InvitationBridgeType {
     Guardian { subject_authority: AuthorityId },
     /// Channel/block invitation
     Channel { block_id: String },
+    /// Device enrollment invitation (out-of-band transfer).
+    DeviceEnrollment {
+        subject_authority: AuthorityId,
+        initiator_device_id: DeviceId,
+        device_id: DeviceId,
+        device_name: Option<String>,
+        ceremony_id: String,
+        pending_epoch: u64,
+    },
 }
 
 /// Bridge-level invitation status
@@ -412,6 +475,24 @@ pub trait RuntimeBridge: Send + Sync {
         guardian_ids: &[String],
     ) -> Result<String, IntentError>;
 
+    /// Initiate a device enrollment ("add device") ceremony.
+    ///
+    /// Returns a shareable enrollment code for the invited device to import.
+    async fn initiate_device_enrollment_ceremony(
+        &self,
+        device_name: String,
+    ) -> Result<DeviceEnrollmentStart, IntentError>;
+
+    /// Initiate a device removal ("remove device") ceremony.
+
+    ///
+    /// The runtime is responsible for rotating threshold keys and updating the
+    /// account commitment tree to remove the specified device leaf.
+    async fn initiate_device_removal_ceremony(
+        &self,
+        device_id: String,
+    ) -> Result<String, IntentError>;
+
     /// Get status of a guardian ceremony
     ///
     /// Returns the current state of the ceremony including:
@@ -425,6 +506,19 @@ pub trait RuntimeBridge: Send + Sync {
     /// # Returns
     /// CeremonyStatus with current state
     async fn get_ceremony_status(&self, ceremony_id: &str) -> Result<CeremonyStatus, IntentError>;
+
+    /// Get status of a key rotation ceremony (generic form).
+    async fn get_key_rotation_ceremony_status(
+        &self,
+        ceremony_id: &str,
+    ) -> Result<KeyRotationCeremonyStatus, IntentError>;
+
+    /// Cancel an in-progress key rotation ceremony (best effort).
+    ///
+    /// Implementations should:
+    /// - mark the ceremony failed/canceled
+    /// - rollback any pending epoch (if present)
+    async fn cancel_key_rotation_ceremony(&self, ceremony_id: &str) -> Result<(), IntentError>;
 
     // =========================================================================
     // Invitation Operations
@@ -743,9 +837,42 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
+    async fn initiate_device_enrollment_ceremony(
+        &self,
+        _device_name: String,
+    ) -> Result<DeviceEnrollmentStart, IntentError> {
+        Err(IntentError::no_agent(
+            "Device enrollment not available in offline mode",
+        ))
+    }
+
+    async fn initiate_device_removal_ceremony(
+        &self,
+        _device_id: String,
+    ) -> Result<String, IntentError> {
+        Err(IntentError::no_agent(
+            "Device removal not available in offline mode",
+        ))
+    }
+
     async fn get_ceremony_status(&self, _ceremony_id: &str) -> Result<CeremonyStatus, IntentError> {
         Err(IntentError::no_agent(
             "Guardian ceremony not available in offline mode",
+        ))
+    }
+
+    async fn get_key_rotation_ceremony_status(
+        &self,
+        _ceremony_id: &str,
+    ) -> Result<KeyRotationCeremonyStatus, IntentError> {
+        Err(IntentError::no_agent(
+            "Key rotation ceremonies not available in offline mode",
+        ))
+    }
+
+    async fn cancel_key_rotation_ceremony(&self, _ceremony_id: &str) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Key rotation ceremonies not available in offline mode",
         ))
     }
 

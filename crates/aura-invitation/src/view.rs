@@ -40,7 +40,7 @@ pub enum InvitationDelta {
         direction: String,
         other_party_id: String,
         other_party_name: String,
-        /// Type: "guardian", "channel", "contact"
+        /// Type: "guardian", "channel", "contact", "device"
         invitation_type: String,
         created_at: u64,
         expires_at: Option<u64>,

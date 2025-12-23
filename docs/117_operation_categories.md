@@ -158,6 +158,15 @@ pub enum ApprovalThreshold {
 - User must wait for confirmation
 - Uses choreographic protocols with session types
 
+Key rotation and membership-change ceremonies (adding devices, changing guardians, group membership changes, etc.) follow a shared contract documented in `docs/118_key_rotation_ceremonies.md`.
+
+Frontends should start and monitor these ceremonies via the portable workflow layer:
+
+- `aura_app::workflows::ceremonies::start_device_enrollment_ceremony` (add device)
+- `aura_app::workflows::ceremonies::start_device_removal_ceremony` (remove device)
+- `aura_app::workflows::ceremonies::monitor_key_rotation_ceremony` (shared progress polling)
+
+
 ### Examples
 
 | Operation | Why Blocking Required | Risk if Optimistic |

@@ -23,6 +23,7 @@ use crate::guards::{
 };
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
+use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -44,6 +45,9 @@ pub struct InvitationConfig {
 
     /// Whether to require explicit capability for channel invitations
     pub require_channel_capability: bool,
+
+    /// Whether to require explicit capability for device enrollment invitations
+    pub require_device_capability: bool,
 }
 
 impl Default for InvitationConfig {
@@ -53,6 +57,7 @@ impl Default for InvitationConfig {
             max_message_length: 1000,
             require_guardian_capability: true,
             require_channel_capability: true,
+            require_device_capability: true,
         }
     }
 }
@@ -79,6 +84,27 @@ pub enum InvitationType {
         /// Optional nickname for the contact
         nickname: Option<String>,
     },
+
+    /// Invitation to enroll a new device for an account authority.
+    ///
+    /// This is primarily intended for out-of-band transfer (QR/copy-paste) and
+    /// carries the key-share material required for the new device to install.
+    DeviceEnrollment {
+        /// Account authority being modified
+        subject_authority: AuthorityId,
+        /// Initiator device id (used for routing acceptance back to the right device runtime)
+        initiator_device_id: DeviceId,
+        /// Device id being enrolled
+        device_id: DeviceId,
+        /// Optional device label
+        device_name: Option<String>,
+        /// Key-rotation ceremony identifier
+        ceremony_id: String,
+        /// Pending epoch created during prepare
+        pending_epoch: u64,
+        /// Encrypted/opaque key package for the invited device
+        key_package: Vec<u8>,
+    },
 }
 
 impl InvitationType {
@@ -88,6 +114,7 @@ impl InvitationType {
             InvitationType::Channel { .. } => "channel".to_string(),
             InvitationType::Guardian { .. } => "guardian".to_string(),
             InvitationType::Contact { .. } => "contact".to_string(),
+            InvitationType::DeviceEnrollment { .. } => "device".to_string(),
         }
     }
 
@@ -97,6 +124,7 @@ impl InvitationType {
             InvitationType::Channel { .. } => Some(costs::CAP_CHANNEL_INVITE),
             InvitationType::Guardian { .. } => Some(costs::CAP_GUARDIAN_INVITE),
             InvitationType::Contact { .. } => None,
+            InvitationType::DeviceEnrollment { .. } => Some(costs::CAP_DEVICE_ENROLL),
         }
     }
 }
@@ -225,6 +253,7 @@ impl InvitationService {
                 InvitationType::Guardian { .. } => self.config.require_guardian_capability,
                 InvitationType::Channel { .. } => self.config.require_channel_capability,
                 InvitationType::Contact { .. } => false,
+                InvitationType::DeviceEnrollment { .. } => self.config.require_device_capability,
             };
 
             if require_check {

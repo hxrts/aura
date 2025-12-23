@@ -10,6 +10,7 @@ use super::invitation::{
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::AuthorityId;
+use aura_core::DeviceId;
 use std::sync::Arc;
 
 /// Invitation service
@@ -109,6 +110,41 @@ impl InvitationService {
                 receiver_id,
                 InvitationType::Contact { nickname },
                 message,
+                expires_in_ms,
+            )
+            .await
+    }
+
+    /// Create an invitation to enroll a new device for the current authority.
+    ///
+    /// This is intended for out-of-band transfer (copy/paste, QR).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn invite_device_enrollment(
+        &self,
+        receiver_id: AuthorityId,
+        subject_authority: AuthorityId,
+        initiator_device_id: DeviceId,
+        device_id: DeviceId,
+        device_name: Option<String>,
+        ceremony_id: String,
+        pending_epoch: u64,
+        key_package: Vec<u8>,
+        expires_in_ms: Option<u64>,
+    ) -> AgentResult<Invitation> {
+        self.handler
+            .create_invitation(
+                &self.effects,
+                receiver_id,
+                InvitationType::DeviceEnrollment {
+                    subject_authority,
+                    initiator_device_id,
+                    device_id,
+                    device_name,
+                    ceremony_id,
+                    pending_epoch,
+                    key_package,
+                },
+                None,
                 expires_in_ms,
             )
             .await

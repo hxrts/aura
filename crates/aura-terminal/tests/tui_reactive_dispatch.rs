@@ -303,7 +303,7 @@ fn test_guardian_ceremony_in_progress_escape_cancels() {
     // Enqueue an in-progress guardian ceremony modal
     let mut modal = aura_terminal::tui::state_machine::GuardianSetupModalState::default();
     modal.step = aura_terminal::tui::state_machine::GuardianSetupStep::CeremonyInProgress;
-    modal.ceremony_id = Some("ceremony-123".to_string());
+    modal.ceremony.ceremony_id = Some("ceremony-123".to_string());
     state
         .modal_queue
         .enqueue(aura_terminal::tui::state_machine::QueuedModal::GuardianSetup(modal));
@@ -314,14 +314,14 @@ fn test_guardian_ceremony_in_progress_escape_cancels() {
     let has_cancel = commands.iter().any(|cmd| {
         matches!(
             cmd,
-            TuiCommand::Dispatch(DispatchCommand::CancelGuardianCeremony { ceremony_id })
+            TuiCommand::Dispatch(DispatchCommand::CancelKeyRotationCeremony { ceremony_id })
                 if ceremony_id == "ceremony-123"
         )
     });
 
     assert!(
         has_cancel,
-        "Escape on in-progress guardian ceremony should dispatch CancelGuardianCeremony"
+        "Escape on in-progress guardian ceremony should dispatch CancelKeyRotationCeremony"
     );
 
     assert!(

@@ -64,6 +64,9 @@ pub mod costs {
 
     /// Required capability for channel invitations specifically
     pub const CAP_CHANNEL_INVITE: &str = "invitation:channel";
+
+    /// Required capability for device enrollment invitations specifically
+    pub const CAP_DEVICE_ENROLL: &str = "invitation:device";
 }
 
 // =============================================================================

@@ -48,3 +48,4 @@ pub use invitations::{
     ModalCreateInvitationCallback,
 };
 pub use recovery::{GuardianCandidateProps, GuardianSetupModal, ThresholdModal, ThresholdState};
+pub use settings::DeviceEnrollmentModal;

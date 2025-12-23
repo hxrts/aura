@@ -1,5 +1,7 @@
 //! Guardian setup modal state
 
+use super::KeyRotationCeremonyUiState;
+
 /// Step in the guardian setup wizard
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum GuardianSetupStep {
@@ -49,13 +51,8 @@ pub struct GuardianSetupModalState {
     pub focused_index: usize,
     /// Selected threshold k (required signers)
     pub threshold_k: u8,
-    /// Ceremony ID (set when ceremony starts)
-    pub ceremony_id: Option<String>,
-    /// Pending epoch created for key rotation (set when ceremony starts)
-    ///
-    /// When the ceremony is canceled, this epoch's keys are rolled back.
-    /// When the ceremony succeeds, this becomes the active epoch.
-    pub pending_epoch: Option<u64>,
+    /// Ceremony UI state (id/progress/pending epoch)
+    pub ceremony: KeyRotationCeremonyUiState,
     /// Responses from guardians during ceremony (contact_id, name, response)
     pub ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
     /// Error message if any
@@ -87,8 +84,7 @@ impl GuardianSetupModalState {
             selected_indices,
             focused_index: 0,
             threshold_k,
-            ceremony_id: None,
-            pending_epoch: None,
+            ceremony: KeyRotationCeremonyUiState::default(),
             ceremony_responses: Vec::new(),
             error: None,
         }
@@ -101,8 +97,7 @@ impl GuardianSetupModalState {
         self.selected_indices.clear();
         self.focused_index = 0;
         self.threshold_k = 1;
-        self.ceremony_id = None;
-        self.pending_epoch = None;
+        self.ceremony.clear();
         self.ceremony_responses.clear();
         self.error = None;
     }
@@ -157,7 +152,7 @@ impl GuardianSetupModalState {
             && self.threshold_k <= n
             && n >= 2
             && !matches!(self.step, GuardianSetupStep::CeremonyInProgress)
-            && self.ceremony_id.is_none()
+            && self.ceremony.ceremony_id.is_none()
     }
 
     /// Transition into the in-progress ceremony step and initialize responses.
@@ -166,8 +161,7 @@ impl GuardianSetupModalState {
     pub fn begin_ceremony(&mut self) {
         self.step = GuardianSetupStep::CeremonyInProgress;
         self.error = None;
-        self.ceremony_id = None;
-        self.pending_epoch = None;
+        self.ceremony.clear();
 
         // Initialize responses for all selected contacts
         self.ceremony_responses.clear();
@@ -184,7 +178,7 @@ impl GuardianSetupModalState {
 
     /// Set the ceremony ID once available.
     pub fn set_ceremony_id(&mut self, ceremony_id: String) {
-        self.ceremony_id = Some(ceremony_id);
+        self.ceremony.set_ceremony_id(ceremony_id);
     }
 
     /// Record a guardian's response
@@ -234,7 +228,7 @@ impl GuardianSetupModalState {
     pub fn fail_ceremony(&mut self, reason: &str) {
         self.error = Some(reason.to_string());
         self.step = GuardianSetupStep::SelectContacts;
-        self.ceremony_id = None;
+        self.ceremony.clear();
         self.ceremony_responses.clear();
     }
 }

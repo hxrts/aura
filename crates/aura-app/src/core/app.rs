@@ -947,6 +947,32 @@ impl AppCore {
             .await
     }
 
+    /// Initiate a device enrollment ("add device") ceremony.
+    pub async fn initiate_device_enrollment_ceremony(
+        &self,
+        device_name: String,
+    ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("initiate_device_enrollment_ceremony requires a runtime")
+        })?;
+
+        runtime
+            .initiate_device_enrollment_ceremony(device_name)
+            .await
+    }
+
+    /// Initiate a device removal ("remove device") ceremony.
+    pub async fn initiate_device_removal_ceremony(
+        &self,
+        device_id: String,
+    ) -> Result<String, IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("initiate_device_removal_ceremony requires a runtime")
+        })?;
+
+        runtime.initiate_device_removal_ceremony(device_id).await
+    }
+
     /// Get status of a guardian ceremony
     ///
     /// Returns the current state of the ceremony including:
@@ -972,6 +998,27 @@ impl AppCore {
             .ok_or_else(|| IntentError::no_agent("get_ceremony_status requires a runtime"))?;
 
         runtime.get_ceremony_status(ceremony_id).await
+    }
+
+    /// Get status of a key rotation ceremony (generic form)
+    pub async fn get_key_rotation_ceremony_status(
+        &self,
+        ceremony_id: &str,
+    ) -> Result<crate::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("get_key_rotation_ceremony_status requires a runtime")
+        })?;
+
+        runtime.get_key_rotation_ceremony_status(ceremony_id).await
+    }
+
+    /// Cancel an in-progress key rotation ceremony (best effort)
+    pub async fn cancel_key_rotation_ceremony(&self, ceremony_id: &str) -> Result<(), IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("cancel_key_rotation_ceremony requires a runtime")
+        })?;
+
+        runtime.cancel_key_rotation_ceremony(ceremony_id).await
     }
 }
 

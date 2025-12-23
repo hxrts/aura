@@ -14,6 +14,9 @@ use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
+use aura_app::workflows::ceremonies::{
+    start_device_enrollment_ceremony, start_device_removal_ceremony,
+};
 pub use aura_app::workflows::settings::{set_channel_mode, update_mfa_policy, update_nickname};
 
 /// Handle settings commands
@@ -22,6 +25,25 @@ pub async fn handle_settings(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Option<OpResult> {
     match command {
+        EffectCommand::AddDevice { device_name } => {
+            match start_device_enrollment_ceremony(app_core, device_name.clone()).await {
+                Ok(start) => Some(Ok(OpResponse::DeviceEnrollmentStarted {
+                    ceremony_id: start.ceremony_id,
+                    enrollment_code: start.enrollment_code,
+                    pending_epoch: start.pending_epoch,
+                    device_id: start.device_id.to_string(),
+                })),
+                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
+            }
+        }
+
+        EffectCommand::RemoveDevice { device_id } => {
+            match start_device_removal_ceremony(app_core, device_id.clone()).await {
+                Ok(ceremony_id) => Some(Ok(OpResponse::DeviceRemovalStarted { ceremony_id })),
+                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
+            }
+        }
+
         EffectCommand::UpdateMfaPolicy { require_mfa } => {
             // Delegate to workflow
             match update_mfa_policy(app_core, *require_mfa).await {

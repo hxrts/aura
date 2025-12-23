@@ -48,6 +48,9 @@ pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Res
 
     // Promote to Admin
     resident.role = ResidentRole::Admin;
+    if let Some(block) = blocks.current_block() {
+        core.views_mut().set_block(block.clone());
+    }
     core.views_mut().set_blocks(blocks);
 
     Ok(())
@@ -98,6 +101,9 @@ pub async fn revoke_steward(
 
     // Demote to Resident
     resident.role = ResidentRole::Resident;
+    if let Some(block) = blocks.current_block() {
+        core.views_mut().set_block(block.clone());
+    }
     core.views_mut().set_blocks(blocks);
 
     Ok(())

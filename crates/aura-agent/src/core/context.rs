@@ -5,7 +5,7 @@
 
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AccountId, AuthorityId, ContextId};
+use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use std::collections::HashMap;
 
 /// Authority-first context for agent operations
@@ -57,9 +57,16 @@ pub struct ContextMetadata {
 impl AuthorityContext {
     /// Create a new authority context
     pub fn new(authority_id: AuthorityId) -> Self {
-        // Derive device_id internally from authority (1:1 mapping for single-device authorities)
-        let device_id = aura_core::identifiers::DeviceId(authority_id.0);
+        // Legacy default: derive device_id from authority (single-device mapping).
+        let device_id = DeviceId(authority_id.0);
+        Self::new_with_device(authority_id, device_id)
+    }
 
+    /// Create a new authority context with an explicit device id.
+    ///
+    /// This enables multiple device runtimes to operate on behalf of the same
+    /// account authority (demo/simulation and future production multi-device).
+    pub fn new_with_device(authority_id: AuthorityId, device_id: DeviceId) -> Self {
         // Compute account_id once at construction (cached for all service calls)
         let account_id = AccountId::new_from_entropy(hash(&authority_id.to_bytes()));
 

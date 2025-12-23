@@ -354,11 +354,26 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let authority = self.agent.authority_id();
         let signing_service = self.agent.threshold_signing();
 
+        let participants = guardian_ids
+            .iter()
+            .map(|id_str| {
+                id_str
+                    .parse::<AuthorityId>()
+                    .map(aura_core::threshold::ParticipantIdentity::guardian)
+                    .map_err(|_| {
+                        IntentError::validation_failed(format!(
+                            "Failed to parse guardian id as AuthorityId: {}",
+                            id_str
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         // Rotate keys to a new threshold configuration
         // The service returns (new_epoch, key_packages, public_key_bytes)
         // where public_key_bytes is already serialized
         signing_service
-            .rotate_keys(&authority, threshold_k, total_n, guardian_ids)
+            .rotate_keys(&authority, threshold_k, total_n, &participants)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to rotate guardian keys: {}", e))
@@ -395,17 +410,80 @@ impl RuntimeBridge for AgentRuntimeBridge {
         total_n: u16,
         guardian_ids: &[String],
     ) -> Result<String, IntentError> {
+        use aura_core::effects::ThresholdSigningEffects;
+        use aura_core::hash::hash;
+        use aura_recovery::guardian_ceremony::GuardianState;
+        use aura_recovery::{CeremonyId, GuardianRotationOp};
+
+        // Convert String guardian IDs to AuthorityIds for the ceremony protocol
+        let all_guardian_authority_ids: Vec<AuthorityId> = guardian_ids
+            .iter()
+            .filter_map(|id_str| id_str.parse().ok())
+            .collect();
+
+        if all_guardian_authority_ids.len() != guardian_ids.len() {
+            return Err(IntentError::validation_failed(
+                "Failed to parse one or more guardian IDs as AuthorityIds".to_string(),
+            ));
+        }
+
+        let participants = all_guardian_authority_ids
+            .iter()
+            .copied()
+            .map(aura_core::threshold::ParticipantIdentity::guardian)
+            .collect::<Vec<_>>();
+
         // Step 1: Generate FROST keys at new epoch
         let (new_epoch, key_packages, _public_key) = self
             .rotate_guardian_keys(threshold_k, total_n, guardian_ids)
             .await?;
 
-        // Step 2: Create ceremony ID (epoch provides uniqueness)
-        // Using a monotonic counter for additional uniqueness within same process
+        // Step 2: Compute prestate + operation hashes and derive a ceremony id.
+        let authority_id = self.agent.authority_id();
+        let signing_service = self.agent.threshold_signing();
+
+        let current_state = match signing_service.threshold_state(&authority_id).await {
+            Some(state) => {
+                let public_key = signing_service
+                    .public_key_package(&authority_id)
+                    .await
+                    .unwrap_or_default();
+
+                let public_key_hash = aura_core::Hash32(hash(&public_key));
+                let current_guardian_ids: Vec<AuthorityId> = state
+                    .participants
+                    .iter()
+                    .filter_map(|p| match p {
+                        aura_core::threshold::ParticipantIdentity::Guardian(id) => Some(*id),
+                        _ => None,
+                    })
+                    .collect();
+
+                GuardianState {
+                    epoch: state.epoch,
+                    threshold_k: state.threshold,
+                    guardian_ids: current_guardian_ids,
+                    public_key_hash,
+                }
+            }
+            None => GuardianState::empty(),
+        };
+
+        let prestate_hash = current_state.compute_prestate_hash(&authority_id);
+        let operation = GuardianRotationOp {
+            threshold_k,
+            total_n,
+            guardian_ids: all_guardian_authority_ids.clone(),
+            new_epoch,
+        };
+        let operation_hash = operation.compute_hash();
+
+        // Use a monotonic nonce for uniqueness within this process.
         use std::sync::atomic::{AtomicU64, Ordering};
-        static CEREMONY_COUNTER: AtomicU64 = AtomicU64::new(0);
-        let counter = CEREMONY_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let ceremony_id = format!("ceremony-{}-{}", new_epoch, counter);
+        static CEREMONY_NONCE: AtomicU64 = AtomicU64::new(0);
+        let nonce = CEREMONY_NONCE.fetch_add(1, Ordering::Relaxed);
+        let ceremony_id_hash = CeremonyId::new(prestate_hash, operation_hash, nonce);
+        let ceremony_id = ceremony_id_hash.to_string();
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -421,9 +499,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         tracker
             .register(
                 ceremony_id.clone(),
+                aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
                 threshold_k,
                 total_n,
-                guardian_ids.to_vec(),
+                participants,
                 new_epoch,
             )
             .await
@@ -436,18 +515,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let recovery_service = self.agent.recovery().map_err(|e| {
             IntentError::service_error(format!("Recovery service unavailable: {}", e))
         })?;
-
-        // Convert String guardian IDs to AuthorityIds for the ceremony protocol
-        let all_guardian_authority_ids: Vec<AuthorityId> = guardian_ids
-            .iter()
-            .filter_map(|id_str| id_str.parse().ok())
-            .collect();
-
-        if all_guardian_authority_ids.len() != guardian_ids.len() {
-            return Err(IntentError::validation_failed(
-                "Failed to parse one or more guardian IDs as AuthorityIds".to_string(),
-            ));
-        }
 
         for (idx, guardian_id) in guardian_ids.iter().enumerate() {
             let key_package = &key_packages[idx];
@@ -462,12 +529,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             // This should trigger the choreography-based guardian ceremony
             recovery_service
                 .send_guardian_invitation(
-                    guardian_id,
-                    &ceremony_id,
-                    threshold_k,
-                    total_n,
-                    &all_guardian_authority_ids,
-                    new_epoch,
+                    all_guardian_authority_ids[idx],
+                    ceremony_id_hash,
+                    prestate_hash,
+                    operation.clone(),
                     key_package,
                 )
                 .await
@@ -487,6 +552,320 @@ impl RuntimeBridge for AgentRuntimeBridge {
         Ok(ceremony_id)
     }
 
+    async fn initiate_device_enrollment_ceremony(
+        &self,
+        device_name: String,
+    ) -> Result<aura_app::runtime_bridge::DeviceEnrollmentStart, IntentError> {
+        use aura_core::effects::{RandomEffects, ThresholdSigningEffects};
+        use aura_core::hash::hash;
+        use aura_core::threshold::ParticipantIdentity;
+
+        let authority_id = self.agent.authority_id();
+        let effects = self.agent.runtime().effects();
+        let current_device_id = self.agent.context().device_id();
+
+        // Best-effort: derive current device participant set from the commitment tree.
+        let tree_state = effects
+            .get_current_state()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read tree state: {e}")))?;
+
+        let mut device_ids: Vec<aura_core::DeviceId> = tree_state
+            .leaves
+            .values()
+            .filter(|leaf| leaf.role == aura_core::tree::LeafRole::Device)
+            .map(|leaf| leaf.device_id)
+            .collect();
+
+        if !device_ids.contains(&current_device_id) {
+            device_ids.push(current_device_id);
+        }
+
+        // For now, only support enrolling a second device (single existing device → 2 devices).
+        //
+        // Enrolling a third+ device requires securely distributing fresh key packages to all
+        // existing devices, which is not yet wired end-to-end in the runtime.
+        let existing_other_devices = device_ids
+            .iter()
+            .filter(|id| **id != current_device_id)
+            .count();
+        if existing_other_devices > 0 {
+            return Err(IntentError::validation_failed(
+                "Device enrollment for multi-device accounts is not yet supported".to_string(),
+            ));
+        }
+
+        // Generate a new device id to enroll.
+        let entropy = effects.random_bytes(32).await;
+        let mut entropy_bytes = [0u8; 32];
+        entropy_bytes.copy_from_slice(&entropy[..32]);
+        let new_device_id = aura_core::DeviceId::new_from_entropy(entropy_bytes);
+
+        // Prepare new key material for the updated participant set.
+        //
+        // With 2 devices, we use a 2-of-2 threshold so the new device can hold a share without
+        // relying on a single-device signing fast path (which would replicate secrets).
+        let participants: Vec<ParticipantIdentity> = vec![
+            ParticipantIdentity::device(current_device_id),
+            ParticipantIdentity::device(new_device_id),
+        ];
+        let total_n = 2u16;
+        let threshold_k = 2u16;
+
+        let (pending_epoch, key_packages, _public_key) = effects
+            .rotate_keys(&authority_id, threshold_k, total_n, &participants)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to prepare device rotation: {e}"))
+            })?;
+
+        let Some(invited_key_package) = key_packages.last().cloned() else {
+            return Err(IntentError::internal_error(
+                "Key rotation returned no key package for invited device".to_string(),
+            ));
+        };
+
+        // Compute a best-effort prestate-bound ceremony id.
+        let prestate_input = serde_json::to_vec(&(
+            tree_state.epoch,
+            tree_state.root_commitment,
+            vec![current_device_id, new_device_id],
+        ))
+        .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
+        let prestate_hash = aura_core::Hash32(hash(&prestate_input));
+
+        let op_input = serde_json::to_vec(&(
+            new_device_id,
+            pending_epoch,
+            threshold_k,
+            total_n,
+            current_device_id,
+        ))
+        .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
+        let op_hash = aura_core::Hash32(hash(&op_input));
+
+        let nonce_bytes = effects.random_bytes(8).await;
+        let nonce = u64::from_le_bytes(nonce_bytes[..8].try_into().unwrap_or_default());
+        let mut ceremony_seed = Vec::with_capacity(32 + 32 + 8);
+        ceremony_seed.extend_from_slice(prestate_hash.as_bytes());
+        ceremony_seed.extend_from_slice(op_hash.as_bytes());
+        ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
+        let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
+        let ceremony_id = format!("ceremony:{}", hex::encode(ceremony_hash.as_bytes()));
+
+        // Register ceremony (acceptance required from the invited device).
+        let tracker = self.agent.ceremony_tracker().await;
+        tracker
+            .register(
+                ceremony_id.clone(),
+                aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
+                1,
+                1,
+                vec![ParticipantIdentity::device(new_device_id)],
+                pending_epoch,
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
+            })?;
+
+        // Create a shareable device enrollment invitation (out-of-band transfer).
+        let invitation_service = self.agent.invitations().map_err(|e| {
+            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+        })?;
+
+        let invitation = invitation_service
+            .invite_device_enrollment(
+                authority_id,
+                authority_id,
+                current_device_id,
+                new_device_id,
+                Some(device_name),
+                ceremony_id.clone(),
+                pending_epoch,
+                invited_key_package,
+                None,
+            )
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Create device invite: {e}")))?;
+
+        let enrollment_code = invitation_service
+            .export_code(&invitation.invitation_id)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Export device invite: {e}")))?;
+
+        Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {
+            ceremony_id,
+            enrollment_code,
+            pending_epoch,
+            device_id: new_device_id,
+        })
+    }
+
+    async fn initiate_device_removal_ceremony(
+        &self,
+        device_id: String,
+    ) -> Result<String, IntentError> {
+        use aura_core::effects::{RandomEffects, ThresholdSigningEffects};
+        use aura_core::hash::hash;
+        use aura_core::threshold::ParticipantIdentity;
+
+        let authority_id = self.agent.authority_id();
+        let effects = self.agent.runtime().effects();
+        let current_device_id = self.agent.context().device_id();
+
+        let target_device_id: aura_core::DeviceId = device_id.parse().map_err(|e| {
+            IntentError::validation_failed(format!("Invalid device id '{device_id}': {e}"))
+        })?;
+
+        if target_device_id == current_device_id {
+            return Err(IntentError::validation_failed(
+                "Cannot remove the current device".to_string(),
+            ));
+        }
+
+        let tree_state = effects
+            .get_current_state()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read tree state: {e}")))?;
+
+        let leaf_to_remove = tree_state
+            .leaves
+            .iter()
+            .find_map(|(leaf_id, leaf)| {
+                if leaf.role == aura_core::tree::LeafRole::Device
+                    && leaf.device_id == target_device_id
+                {
+                    Some(*leaf_id)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| {
+                IntentError::validation_failed(format!(
+                    "Device is not present in the commitment tree: {target_device_id}"
+                ))
+            })?;
+
+        // Determine remaining device participants.
+        let mut remaining_devices: Vec<aura_core::DeviceId> = tree_state
+            .leaves
+            .values()
+            .filter(|leaf| {
+                leaf.role == aura_core::tree::LeafRole::Device && leaf.device_id != target_device_id
+            })
+            .map(|leaf| leaf.device_id)
+            .collect();
+
+        if !remaining_devices.contains(&current_device_id) {
+            remaining_devices.push(current_device_id);
+        }
+
+        // For now, only support removing a device when the result is a single-device account.
+        // Supporting multi-device removals requires distributing fresh shares to all remaining devices.
+        if remaining_devices.len() != 1 {
+            return Err(IntentError::validation_failed(
+                "Device removal for multi-device accounts is not yet supported".to_string(),
+            ));
+        }
+
+        let participants: Vec<ParticipantIdentity> = remaining_devices
+            .iter()
+            .copied()
+            .map(ParticipantIdentity::device)
+            .collect();
+
+        let total_n: u16 = participants.len().try_into().unwrap_or(u16::MAX);
+        let threshold_k = total_n;
+
+        let (pending_epoch, _key_packages, _public_key) = effects
+            .rotate_keys(&authority_id, threshold_k, total_n, &participants)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to prepare device removal rotation: {e}"
+                ))
+            })?;
+
+        // Compute a best-effort prestate-bound ceremony id.
+        let prestate_input = serde_json::to_vec(&(
+            tree_state.epoch,
+            tree_state.root_commitment,
+            target_device_id,
+        ))
+        .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
+        let prestate_hash = aura_core::Hash32(hash(&prestate_input));
+
+        let op_input = serde_json::to_vec(&(target_device_id, pending_epoch, threshold_k, total_n))
+            .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
+        let op_hash = aura_core::Hash32(hash(&op_input));
+
+        let nonce_bytes = effects.random_bytes(8).await;
+        let nonce = u64::from_le_bytes(nonce_bytes[..8].try_into().unwrap_or_default());
+        let mut ceremony_seed = Vec::with_capacity(32 + 32 + 8);
+        ceremony_seed.extend_from_slice(prestate_hash.as_bytes());
+        ceremony_seed.extend_from_slice(op_hash.as_bytes());
+        ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
+        let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
+        let ceremony_id = format!("ceremony:{}", hex::encode(ceremony_hash.as_bytes()));
+
+        let tracker = self.agent.ceremony_tracker().await;
+        tracker
+            .register(
+                ceremony_id.clone(),
+                aura_app::runtime_bridge::CeremonyKind::DeviceRemoval,
+                0,
+                0,
+                Vec::new(),
+                pending_epoch,
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
+            })?;
+
+        // Apply the membership change and commit the key rotation.
+        let op = aura_core::tree::TreeOp {
+            parent_epoch: tree_state.epoch,
+            parent_commitment: tree_state.root_commitment,
+            op: aura_core::tree::TreeOpKind::RemoveLeaf {
+                leaf: leaf_to_remove,
+                reason: 0,
+            },
+            version: 1,
+        };
+
+        let attested = aura_core::tree::AttestedOp {
+            op,
+            agg_sig: Vec::new(),
+            signer_count: 1,
+        };
+
+        if let Err(e) = effects.apply_attested_op(attested).await {
+            let _ = tracker
+                .mark_failed(&ceremony_id, Some(format!("Failed to apply tree op: {e}")))
+                .await;
+            return Err(IntentError::internal_error(format!(
+                "Failed to apply tree op for device removal: {e}"
+            )));
+        }
+
+        if let Err(e) = effects
+            .commit_key_rotation(&authority_id, pending_epoch)
+            .await
+        {
+            let _ = tracker
+                .mark_failed(&ceremony_id, Some(format!("Commit failed: {e}")))
+                .await;
+            return Err(IntentError::internal_error(format!(
+                "Failed to commit key rotation: {e}"
+            )));
+        }
+
+        let _ = tracker.mark_committed(&ceremony_id).await;
+
+        Ok(ceremony_id)
+    }
     async fn get_ceremony_status(
         &self,
         ceremony_id: &str,
@@ -506,17 +885,76 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
 
+        let accepted_guardians: Vec<String> = state
+            .accepted_participants
+            .iter()
+            .filter_map(|p| match p {
+                aura_core::threshold::ParticipantIdentity::Guardian(id) => Some(id.to_string()),
+                _ => None,
+            })
+            .collect();
+
         Ok(aura_app::runtime_bridge::CeremonyStatus {
             ceremony_id: ceremony_id.to_string(),
-            accepted_count: state.accepted_guardians.len() as u16,
+            accepted_count: accepted_guardians.len() as u16,
             total_count: state.total_n,
             threshold: state.threshold_k,
             is_complete: state.is_committed,
             has_failed: state.has_failed,
-            accepted_guardians: state.accepted_guardians.clone(),
+            accepted_guardians,
             error_message: state.error_message.clone(),
             pending_epoch: Some(state.new_epoch),
         })
+    }
+
+    async fn get_key_rotation_ceremony_status(
+        &self,
+        ceremony_id: &str,
+    ) -> Result<aura_app::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
+        // Ensure acceptances are processed so polling drives progress in demo/simulation mode.
+        if let Err(e) = self.agent.process_ceremony_acceptances().await {
+            tracing::debug!("Failed to process ceremony acceptances: {}", e);
+        }
+
+        let tracker = self.agent.ceremony_tracker().await;
+        let state = tracker
+            .get(ceremony_id)
+            .await
+            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
+
+        Ok(aura_app::runtime_bridge::KeyRotationCeremonyStatus {
+            ceremony_id: ceremony_id.to_string(),
+            kind: state.kind,
+            accepted_count: state.accepted_participants.len() as u16,
+            total_count: state.total_n,
+            threshold: state.threshold_k,
+            is_complete: state.is_committed,
+            has_failed: state.has_failed,
+            accepted_participants: state.accepted_participants,
+            error_message: state.error_message,
+            pending_epoch: Some(state.new_epoch),
+        })
+    }
+
+    async fn cancel_key_rotation_ceremony(&self, ceremony_id: &str) -> Result<(), IntentError> {
+        // Ensure acceptances are processed so state is up-to-date.
+        if let Err(e) = self.agent.process_ceremony_acceptances().await {
+            tracing::debug!("Failed to process ceremony acceptances: {}", e);
+        }
+
+        let tracker = self.agent.ceremony_tracker().await;
+        let state = tracker.get(ceremony_id).await?;
+
+        // Best-effort: rollback pending epoch if present and not committed.
+        if !state.is_committed {
+            self.rollback_guardian_key_rotation(state.new_epoch).await?;
+        }
+
+        tracker
+            .mark_failed(ceremony_id, Some("Canceled".to_string()))
+            .await?;
+
+        Ok(())
     }
 
     // =========================================================================
@@ -823,9 +1261,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         if accept {
             // Record acceptance in ceremony tracker
-            let guardian_id = self.agent.authority_id().to_string();
             tracker
-                .mark_accepted(ceremony_id, guardian_id)
+                .mark_accepted(
+                    ceremony_id,
+                    aura_core::threshold::ParticipantIdentity::guardian(self.agent.authority_id()),
+                )
                 .await
                 .map_err(|e| {
                     IntentError::internal_error(format!(
@@ -940,6 +1380,22 @@ fn convert_invitation_type_to_bridge(
                 block_id: block_id.clone(),
             }
         }
+        crate::handlers::invitation::InvitationType::DeviceEnrollment {
+            subject_authority,
+            initiator_device_id,
+            device_id,
+            device_name,
+            ceremony_id,
+            pending_epoch,
+            key_package: _,
+        } => InvitationBridgeType::DeviceEnrollment {
+            subject_authority: *subject_authority,
+            initiator_device_id: *initiator_device_id,
+            device_id: *device_id,
+            device_name: device_name.clone(),
+            ceremony_id: ceremony_id.clone(),
+            pending_epoch: *pending_epoch,
+        },
     }
 }
 

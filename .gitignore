@@ -47,6 +47,7 @@ secure_store/
 # Nix
 result
 result-*
+.direnv/
 
 # Logs
 *.log

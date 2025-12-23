@@ -26,9 +26,15 @@ pub type StringOptStringCallback = Arc<dyn Fn(String, Option<String>) + Send + S
 /// Callback that takes two u8 values.
 pub type ThresholdCallback = Arc<dyn Fn(u8, u8) + Send + Sync>;
 
-/// Callback that takes three arguments: String, Option<String>, Option<u64>.
+/// Callback for creating an invitation and (usually) surfacing a shareable code.
+///
+/// Arguments:
+/// - receiver authority ID
+/// - invitation type string (e.g. "contact", "guardian", "channel")
+/// - optional message
+/// - optional TTL (seconds)
 pub type CreateInvitationCallbackType =
-    Arc<dyn Fn(String, Option<String>, Option<u64>) + Send + Sync>;
+    Arc<dyn Fn(String, String, Option<String>, Option<u64>) + Send + Sync>;
 
 // =============================================================================
 // Semantic Type Aliases

@@ -10,12 +10,11 @@ use iocraft::prelude::*;
 use crate::tui::components::{
     AccountSetupModal, ConfirmModal, ContactSelectModal, HelpModal, ModalFrame, TextInputModal,
 };
-use crate::tui::props::{
-    BlockViewProps, ChatViewProps, ContactsViewProps, SettingsViewProps,
-};
+use crate::tui::props::{BlockViewProps, ChatViewProps, ContactsViewProps, SettingsViewProps};
 use crate::tui::screens::{
-    ChannelInfoModal, ChatCreateModal, GuardianCandidateProps, GuardianSetupModal,
-    InvitationCodeModal, InvitationCreateModal, InvitationImportModal, ThresholdModal,
+    ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal, GuardianCandidateProps,
+    GuardianSetupModal, InvitationCodeModal, InvitationCreateModal, InvitationImportModal,
+    ThresholdModal,
 };
 use crate::tui::types::{Contact, InvitationType};
 
@@ -434,6 +433,31 @@ pub fn render_add_device_modal(settings: &SettingsViewProps) -> Option<AnyElemen
                         placeholder: "Enter device name...".to_string(),
                         error: String::new(),
                         submitting: false,
+                    )
+                }
+            }
+            .into_any(),
+        )
+    } else {
+        None
+    }
+}
+
+pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
+    if settings.device_enrollment_modal_visible {
+        Some(
+            element! {
+                ModalFrame {
+                    DeviceEnrollmentModal(
+                        visible: true,
+                        device_name: settings.device_enrollment_modal_device_name.clone(),
+                        enrollment_code: settings.device_enrollment_modal_code.clone(),
+                        accepted_count: settings.device_enrollment_modal_accepted_count,
+                        total_count: settings.device_enrollment_modal_total_count,
+                        threshold: settings.device_enrollment_modal_threshold,
+                        is_complete: settings.device_enrollment_modal_is_complete,
+                        has_failed: settings.device_enrollment_modal_has_failed,
+                        error_message: settings.device_enrollment_modal_error_message.clone(),
                     )
                 }
             }

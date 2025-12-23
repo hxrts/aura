@@ -18,7 +18,7 @@ Both frontends must respect the guard chain, journaling, and effect system bound
 - Modal. A blocking overlay that captures focus. Modals are queued and only one can be visible at a time.
 - Toast. A transient notification. Toasts are queued and only one can be visible at a time.
 - Signal. A reactive stream of domain values from `aura-app`.
-- Intent. A journaled application command dispatched through `AppCore.dispatch`.
+- Intent. A journaled application command dispatched through `AppCore.dispatch` (legacy in the TUI; most TUI actions are runtime-backed workflows via `IoContext`).
 
 ## Running
 
@@ -192,32 +192,35 @@ The footer “connected peers” count is a UI convenience signal. It must repre
 
 The TUI separates domain state from UI state. Domain state is push-based and comes from `aura-app` signals. UI state is deterministic and lives in `TuiState`.
 
-Navigation, focus, input buffers, modal queues, and toast queues are updated by a pure transition function. The entry point is `crates/aura-terminal/src/tui/state_machine.rs`. The runtime executes `TuiCommand` values in `crates/aura-terminal/src/tui/runtime.rs`.
+Navigation, focus, input buffers, modal queues, and toast queues are updated by a pure transition function. The entry point is `crates/aura-terminal/src/tui/state/mod.rs`. The runtime executes `TuiCommand` values in `crates/aura-terminal/src/tui/runtime.rs`.
 
-## Dispatch bridge and intents
+## Dispatch bridge
 
-The TUI dispatch path uses `IoContext` in `crates/aura-terminal/src/tui/context/io_context.rs`. It maps UI actions to intent-based dispatch through `AppCore` where possible. It also supports operational commands for local behavior.
+The TUI dispatch path uses `IoContext` in `crates/aura-terminal/src/tui/context/io_context.rs`.
 
-The intent path is the default. It keeps UI-driven work aligned with journaling and guard evaluation. Use the operational path only for local or test-only behavior.
+Today the TUI uses a runtime-backed dispatch model: `IoContext` routes `EffectCommand` to `DispatchHelper` and `OperationalHandler`. Most domain-affecting behavior occurs through `aura-app` workflows that call `RuntimeBridge` (which commits facts and drives signals).
 
 ```mermaid
 flowchart TD
   UI[User input] --> SM[TuiState transition]
   SM -->|TuiCommand::Dispatch| IO[IoContext dispatch]
-  IO --> IM[Intent mapper]
-  IM --> AC[AppCore dispatch]
-  AC --> J[Commit facts]
+  IO --> DH[DispatchHelper]
+  DH --> OP[OperationalHandler]
+  OP --> W[Workflows / RuntimeBridge]
+  W --> J[Commit facts]
   J --> S[Emit signals]
   S --> UI2[Screens subscribe]
 ```
 
-This diagram shows the default journaled TUI path. The operational path bypasses journal commits. The operational path may emit only operational signals such as `SYNC_STATUS_SIGNAL`, `CONNECTION_STATUS_SIGNAL`, and `ERROR_SIGNAL`. It must not emit domain signals such as `CHAT_SIGNAL` directly.
+This diagram shows the primary TUI dispatch path. Operational commands may also emit operational signals such as `SYNC_STATUS_SIGNAL`, `CONNECTION_STATUS_SIGNAL`, and `ERROR_SIGNAL`.
 
 ## Screens, modals, and callbacks
 
 The root iocraft component is in `crates/aura-terminal/src/tui/screens/app/shell.rs`. Global modals live in `crates/aura-terminal/src/tui/screens/app/modal_overlays.rs`. Long-lived signal subscriptions for the shell live in `crates/aura-terminal/src/tui/screens/app/subscriptions.rs`.
 
-Modals and toasts are routed through explicit queues in `TuiState`. The modal enum is `QueuedModal` in `crates/aura-terminal/src/tui/state_machine.rs`. Avoid per-modal `visible` flags.
+Modals and toasts are routed through explicit queues in `TuiState`. The modal enum is `QueuedModal` in `crates/aura-terminal/src/tui/state/modal_queue.rs`. Avoid per-modal `visible` flags.
+
+Invitation codes are managed from the Contacts workflow (modals), not via a dedicated routed Invitations screen.
 
 Callbacks are registered in `crates/aura-terminal/src/tui/callbacks/`. Asynchronous results are surfaced through `UiUpdate` in `crates/aura-terminal/src/tui/updates.rs`. Prefer subscribing to domain signals when a signal already exists.
 
@@ -284,7 +287,7 @@ crates/aura-terminal/src/
         shell.rs
         modal_overlays.rs
         subscriptions.rs
-    state_machine.rs
+    state/
     runtime.rs
     hooks.rs
     effects/

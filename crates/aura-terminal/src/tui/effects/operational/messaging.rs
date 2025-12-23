@@ -21,7 +21,7 @@ use super::EffectCommand;
 // Re-export workflow functions for convenience
 pub use aura_app::workflows::messaging::{
     close_channel, create_channel, invite_user_to_channel, send_action, send_direct_message,
-    send_message, start_direct_chat,
+    send_message, set_topic, start_direct_chat,
 };
 
 /// Get current time in milliseconds since Unix epoch
@@ -105,6 +105,16 @@ pub async fn handle_messaging(
             }
         }
 
+        EffectCommand::SetTopic { channel, text } => {
+            match set_topic(app_core, channel, text).await {
+                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to set topic: {}",
+                    e
+                )))),
+            }
+        }
+
         EffectCommand::SendAction { channel, action } => {
             // IRC-style /me action - use workflow
             let timestamp = current_time_ms();
@@ -133,6 +143,28 @@ pub async fn handle_messaging(
             }
         }
 
+        EffectCommand::JoinChannel { channel } => {
+            let timestamp = current_time_ms();
+            match create_channel(app_core, channel, None, &[], timestamp).await {
+                Ok(channel_id) => Some(Ok(OpResponse::Data(format!(
+                    "Joined channel: {}",
+                    channel_id
+                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to join channel: {}",
+                    e
+                )))),
+            }
+        }
+
+        EffectCommand::LeaveChannel { channel } => match close_channel(app_core, channel).await {
+            Ok(()) => Some(Ok(OpResponse::Ok)),
+            Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                "Failed to leave channel: {}",
+                e
+            )))),
+        },
+
         EffectCommand::CloseChannel { channel } => match close_channel(app_core, channel).await {
             Ok(()) => Some(Ok(OpResponse::Ok)),
             Err(e) => Some(Err(super::types::OpError::Failed(format!(
@@ -140,6 +172,24 @@ pub async fn handle_messaging(
                 e
             )))),
         },
+
+        EffectCommand::RetryMessage {
+            message_id: _,
+            channel,
+            content,
+        } => {
+            let timestamp = current_time_ms();
+            match send_message(app_core, channel, content, timestamp).await {
+                Ok(message_id) => Some(Ok(OpResponse::Data(format!(
+                    "Message retried: {}",
+                    message_id
+                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to retry message: {}",
+                    e
+                )))),
+            }
+        }
 
         _ => None,
     }

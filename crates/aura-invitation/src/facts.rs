@@ -63,7 +63,7 @@ pub enum InvitationFact {
         sender_id: AuthorityId,
         /// Authority receiving the invitation
         receiver_id: AuthorityId,
-        /// Type of invitation: "guardian", "channel", "contact"
+        /// Type of invitation: "guardian", "channel", "contact", "device"
         invitation_type: String,
         /// Timestamp when invitation was sent (uses unified time system)
         sent_at: PhysicalTime,

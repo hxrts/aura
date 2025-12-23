@@ -88,6 +88,29 @@ pub enum UiUpdate {
         device_id: String,
     },
 
+    /// Device enrollment ("add device") ceremony started.
+    DeviceEnrollmentStarted {
+        ceremony_id: String,
+        device_name: String,
+        enrollment_code: String,
+        pending_epoch: u64,
+        device_id: String,
+    },
+
+    /// Generic key-rotation ceremony status update (device enrollment, guardian rotation, etc.).
+    KeyRotationCeremonyStatus {
+        ceremony_id: String,
+        kind: aura_app::runtime_bridge::CeremonyKind,
+        accepted_count: u16,
+        total_count: u16,
+        threshold: u16,
+        is_complete: bool,
+        has_failed: bool,
+        accepted_participants: Vec<aura_core::threshold::ParticipantIdentity>,
+        error_message: Option<String>,
+        pending_epoch: Option<u64>,
+    },
+
     // =========================================================================
     // Toast Notifications
     // =========================================================================

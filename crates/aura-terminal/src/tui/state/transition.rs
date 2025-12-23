@@ -262,7 +262,10 @@ mod tests {
         // Press Right arrow to increment k (should go from 2 to 3)
         let (state, _) = transition(&state, events::arrow_right());
         if let Some(QueuedModal::SettingsThreshold(modal_state)) = state.modal_queue.current() {
-            assert_eq!(modal_state.k, 3, "Right arrow should increment k from 2 to 3");
+            assert_eq!(
+                modal_state.k, 3,
+                "Right arrow should increment k from 2 to 3"
+            );
         } else {
             panic!("Expected SettingsThreshold modal after Right key");
         }
@@ -270,7 +273,10 @@ mod tests {
         // Press Left arrow to decrement k (should go from 3 to 2)
         let (state, _) = transition(&state, events::arrow_left());
         if let Some(QueuedModal::SettingsThreshold(modal_state)) = state.modal_queue.current() {
-            assert_eq!(modal_state.k, 2, "Left arrow should decrement k from 3 to 2");
+            assert_eq!(
+                modal_state.k, 2,
+                "Left arrow should decrement k from 3 to 2"
+            );
         } else {
             panic!("Expected SettingsThreshold modal after Left key");
         }
@@ -278,7 +284,10 @@ mod tests {
         // Press Left again to decrement k (should go from 2 to 1)
         let (state, _) = transition(&state, events::arrow_left());
         if let Some(QueuedModal::SettingsThreshold(modal_state)) = state.modal_queue.current() {
-            assert_eq!(modal_state.k, 1, "Left arrow should decrement k from 2 to 1");
+            assert_eq!(
+                modal_state.k, 1,
+                "Left arrow should decrement k from 2 to 1"
+            );
         } else {
             panic!("Expected SettingsThreshold modal after second Left key");
         }
@@ -286,7 +295,10 @@ mod tests {
         // Press Left again - k should stay at 1 (minimum)
         let (state, _) = transition(&state, events::arrow_left());
         if let Some(QueuedModal::SettingsThreshold(modal_state)) = state.modal_queue.current() {
-            assert_eq!(modal_state.k, 1, "Left arrow should not decrement k below 1");
+            assert_eq!(
+                modal_state.k, 1,
+                "Left arrow should not decrement k below 1"
+            );
         } else {
             panic!("Expected SettingsThreshold modal after third Left key");
         }

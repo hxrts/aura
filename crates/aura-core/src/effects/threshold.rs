@@ -20,7 +20,9 @@
 //!
 //! The same implementation handles all scenarios; only the `SigningContext` differs.
 
-use crate::threshold::{SigningContext, ThresholdConfig, ThresholdSignature, ThresholdState};
+use crate::threshold::{
+    ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature, ThresholdState,
+};
 use crate::{AuraError, AuthorityId};
 use async_trait::async_trait;
 
@@ -139,7 +141,7 @@ pub trait ThresholdSigningEffects: Send + Sync {
     /// * `authority` - The authority to rotate keys for
     /// * `new_threshold` - New minimum signers required (k)
     /// * `new_total_participants` - New total number of key shares (n)
-    /// * `guardian_ids` - IDs of the guardians who will hold shares
+    /// * `participants` - Participants who will hold shares (devices/guardians/group members)
     ///
     /// # Returns
     /// A tuple of (new_epoch, key_packages, public_key_package) where:
@@ -151,7 +153,7 @@ pub trait ThresholdSigningEffects: Send + Sync {
         authority: &AuthorityId,
         new_threshold: u16,
         new_total_participants: u16,
-        guardian_ids: &[String],
+        participants: &[ParticipantIdentity],
     ) -> Result<(u64, Vec<Vec<u8>>, PublicKeyPackage), ThresholdSigningError>;
 
     /// Commit a pending key rotation

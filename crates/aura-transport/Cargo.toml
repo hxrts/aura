@@ -35,3 +35,8 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 # Testing only - no runtime dependencies
+criterion = { workspace = true }
+
+[[bench]]
+name = "transport"
+harness = false

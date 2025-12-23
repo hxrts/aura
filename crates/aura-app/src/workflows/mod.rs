@@ -64,11 +64,13 @@
 //! ```
 
 pub mod budget;
+pub mod ceremonies;
 pub mod contacts;
 pub mod context;
 pub mod invitation;
 #[cfg(feature = "signals")]
 pub mod messaging;
+pub mod moderation;
 pub mod network;
 pub mod query;
 #[cfg(feature = "signals")]
@@ -101,6 +103,10 @@ pub use budget::{
     NEIGHBORHOOD_DONATION,
     RESIDENT_ALLOCATION,
 };
+pub use ceremonies::{
+    cancel_key_rotation_ceremony, get_key_rotation_ceremony_status, monitor_key_rotation_ceremony,
+    start_guardian_ceremony,
+};
 pub use contacts::update_contact_nickname;
 pub use context::{get_current_position, get_neighborhood_state, move_position, set_context};
 pub use invitation::{
@@ -118,6 +124,7 @@ pub use network::{
     discover_peers, get_discovered_peers, list_lan_peers, list_peers, update_connection_status,
 };
 pub use query::{get_user_info, list_contacts, list_participants};
+pub use moderation::{ban_user, kick_user, mute_user, pin_message, unban_user, unmute_user, unpin_message};
 #[cfg(feature = "signals")]
 pub use recovery::{approve_recovery, dispute_recovery, get_recovery_status, start_recovery};
 pub use settings::{get_settings, set_channel_mode, update_mfa_policy, update_nickname};

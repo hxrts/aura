@@ -29,8 +29,8 @@ impl AuraAgent {
     /// Create a new agent with the given runtime system
     pub(crate) fn new(runtime: RuntimeSystem, authority_id: AuthorityId) -> Self {
         Self {
+            context: AuthorityContext::new_with_device(authority_id, runtime.device_id()),
             runtime,
-            context: AuthorityContext::new(authority_id),
         }
     }
 
@@ -134,167 +134,298 @@ impl AuraAgent {
     /// # Returns
     /// Number of acceptances processed and number of ceremonies completed
     pub async fn process_ceremony_acceptances(&self) -> AgentResult<(usize, usize)> {
-        // Get recovery service and ceremony tracker
-        let recovery_service = self.recovery()?;
+        use aura_core::effects::{ThresholdSigningEffects, TransportEffects};
+        use aura_protocol::effects::TreeEffects;
+
         let ceremony_tracker = self.ceremony_tracker().await;
-
         let authority_id = self.authority_id();
+        let effects = self.runtime.effects();
 
-        // Process incoming acceptances from transport
-        let acceptances = recovery_service.process_guardian_acceptances().await?;
-        let acceptance_count = acceptances.len();
-        let mut completed_count = 0;
+        let mut acceptance_count = 0usize;
+        let mut completed_count = 0usize;
 
-        // Update ceremony tracker and check for threshold completion
-        for (ceremony_id, guardian_id) in acceptances {
-            // Clone guardian_id for logging since mark_accepted takes ownership
-            let guardian_id_clone = guardian_id.clone();
+        loop {
+            let envelope = match effects.receive_envelope().await {
+                Ok(env) => env,
+                Err(aura_core::effects::TransportError::NoMessage) => break,
+                Err(e) => {
+                    tracing::warn!("Error receiving ceremony envelope: {}", e);
+                    break;
+                }
+            };
 
-            match ceremony_tracker
-                .mark_accepted(&ceremony_id, guardian_id)
-                .await
-            {
-                Ok(threshold_reached) => {
-                    if threshold_reached {
-                        tracing::info!(
+            let Some(content_type) = envelope.metadata.get("content-type").cloned() else {
+                continue;
+            };
+
+            match content_type.as_str() {
+                "application/aura-guardian-acceptance" => {
+                    let (Some(ceremony_id), Some(guardian_id)) = (
+                        envelope.metadata.get("ceremony-id"),
+                        envelope.metadata.get("guardian-id"),
+                    ) else {
+                        continue;
+                    };
+
+                    acceptance_count += 1;
+                    let guardian_authority: AuthorityId = match guardian_id.parse() {
+                        Ok(id) => id,
+                        Err(e) => {
+                            tracing::warn!(
+                                ceremony_id = %ceremony_id,
+                                guardian_id = %guardian_id,
+                                error = %e,
+                                "Invalid guardian authority id in acceptance"
+                            );
+                            let _ = ceremony_tracker
+                                .mark_failed(
+                                    ceremony_id,
+                                    Some(format!(
+                                        "Invalid guardian id in acceptance: {guardian_id}"
+                                    )),
+                                )
+                                .await;
+                            continue;
+                        }
+                    };
+
+                    let threshold_reached = match ceremony_tracker
+                        .mark_accepted(
+                            ceremony_id,
+                            aura_core::threshold::ParticipantIdentity::guardian(guardian_authority),
+                        )
+                        .await
+                    {
+                        Ok(reached) => reached,
+                        Err(e) => {
+                            tracing::warn!(
+                                ceremony_id = %ceremony_id,
+                                guardian_id = %guardian_id,
+                                error = %e,
+                                "Failed to mark guardian as accepted"
+                            );
+                            continue;
+                        }
+                    };
+
+                    if !threshold_reached {
+                        continue;
+                    }
+
+                    let ceremony_state = match ceremony_tracker.get(ceremony_id).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!(
+                                ceremony_id = %ceremony_id,
+                                error = %e,
+                                "Failed to retrieve ceremony state for commit"
+                            );
+                            continue;
+                        }
+                    };
+
+                    if ceremony_state.is_committed {
+                        continue;
+                    }
+
+                    let new_epoch = ceremony_state.new_epoch;
+                    if let Err(e) = effects.commit_key_rotation(&authority_id, new_epoch).await {
+                        tracing::error!(
                             ceremony_id = %ceremony_id,
-                            "Ceremony threshold reached - committing guardian key rotation"
+                            new_epoch,
+                            error = %e,
+                            "Failed to commit guardian key rotation"
                         );
+                        let _ = ceremony_tracker
+                            .mark_failed(ceremony_id, Some(format!("Commit failed: {e}")))
+                            .await;
+                        continue;
+                    }
 
-                        // Get ceremony state to retrieve new epoch
-                        match ceremony_tracker.get(&ceremony_id).await {
-                            Ok(ceremony_state) => {
-                                if ceremony_state.is_committed {
-                                    continue;
-                                }
+                    let mut bindings = Vec::new();
+                    for participant in &ceremony_state.participants {
+                        let aura_core::threshold::ParticipantIdentity::Guardian(guardian_id) =
+                            participant
+                        else {
+                            continue;
+                        };
 
-                                let new_epoch = ceremony_state.new_epoch;
+                        let binding_hash = aura_core::Hash32(aura_core::hash::hash(
+                            format!(
+                                "guardian-binding:{}:{}:{}:{}",
+                                ceremony_id, authority_id, guardian_id, new_epoch
+                            )
+                            .as_bytes(),
+                        ));
 
-                                tracing::info!(
-                                    ceremony_id = %ceremony_id,
-                                    new_epoch,
-                                    "Activating new guardian epoch"
-                                );
+                        bindings.push(aura_journal::fact::RelationalFact::GuardianBinding {
+                            account_id: authority_id,
+                            guardian_id: *guardian_id,
+                            binding_hash,
+                        });
+                    }
 
-                                // Commit the key rotation to activate the new epoch
-                                let commit_result = {
-                                    let effects = self.runtime.effects();
-
-                                    use aura_core::effects::ThresholdSigningEffects;
-                                    effects.commit_key_rotation(&authority_id, new_epoch).await
-                                };
-
-                                match commit_result {
-                                    Ok(()) => {
-                                        // Commit GuardianBinding facts so UI and downstream protocols
-                                        // can treat the selected contacts as guardians.
-                                        //
-                                        // This is the canonical signal for contact guardian status:
-                                        // `ContactsSignalView` updates `Contact.is_guardian` based on
-                                        // `RelationalFact::GuardianBinding`.
-                                        //
-                                        // Note: we only do this once per ceremony, guarded by
-                                        // `ceremony_state.is_committed`.
-                                        let mut bindings = Vec::new();
-                                        for guardian_str in &ceremony_state.guardian_ids {
-                                            let Ok(guardian_id) = guardian_str.parse() else {
-                                                let _ = ceremony_tracker
-                                                    .mark_failed(
-                                                        &ceremony_id,
-                                                        Some(format!(
-                                                            "Invalid guardian id: {guardian_str}"
-                                                        )),
-                                                    )
-                                                    .await;
-                                                continue;
-                                            };
-
-                                            let binding_hash =
-                                                aura_core::Hash32(aura_core::hash::hash(
-                                                    format!(
-                                                        "guardian-binding:{}:{}:{}:{}",
-                                                        ceremony_id,
-                                                        authority_id,
-                                                        guardian_id,
-                                                        new_epoch
-                                                    )
-                                                    .as_bytes(),
-                                                ));
-
-                                            bindings.push(aura_journal::fact::RelationalFact::GuardianBinding {
-                                                account_id: authority_id,
-                                                guardian_id,
-                                                binding_hash,
-                                            });
-                                        }
-
-                                        if !bindings.is_empty() {
-                                            let effects = self.runtime.effects();
-                                            if let Err(e) =
-                                                effects.commit_relational_facts(bindings).await
-                                            {
-                                                tracing::error!(
-                                                    ceremony_id = %ceremony_id,
-                                                    error = %e,
-                                                    "Failed to commit GuardianBinding facts"
-                                                );
-                                                let _ = ceremony_tracker
-                                                    .mark_failed(
-                                                        &ceremony_id,
-                                                        Some(format!(
-                                                            "Failed to commit guardian bindings: {e}"
-                                                        )),
-                                                    )
-                                                    .await;
-                                                continue;
-                                            }
-                                        }
-
-                                        tracing::info!(
-                                            ceremony_id = %ceremony_id,
-                                            new_epoch,
-                                            "Guardian ceremony committed successfully"
-                                        );
-
-                                        let _ = ceremony_tracker.mark_committed(&ceremony_id).await;
-                                        completed_count += 1;
-                                    }
-                                    Err(e) => {
-                                        tracing::error!(
-                                            ceremony_id = %ceremony_id,
-                                            new_epoch,
-                                            error = %e,
-                                            "Failed to commit guardian key rotation"
-                                        );
-
-                                        // Mark ceremony as failed
-                                        let _ = ceremony_tracker
-                                            .mark_failed(
-                                                &ceremony_id,
-                                                Some(format!("Commit failed: {}", e)),
-                                            )
-                                            .await;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    ceremony_id = %ceremony_id,
-                                    error = %e,
-                                    "Failed to retrieve ceremony state for commit"
-                                );
-                            }
+                    if !bindings.is_empty() {
+                        if let Err(e) = effects.commit_relational_facts(bindings).await {
+                            tracing::error!(
+                                ceremony_id = %ceremony_id,
+                                error = %e,
+                                "Failed to commit GuardianBinding facts"
+                            );
+                            let _ = ceremony_tracker
+                                .mark_failed(
+                                    ceremony_id,
+                                    Some(format!("Failed to commit guardian bindings: {e}")),
+                                )
+                                .await;
+                            continue;
                         }
                     }
+
+                    let _ = ceremony_tracker.mark_committed(ceremony_id).await;
+                    completed_count += 1;
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        ceremony_id = %ceremony_id,
-                        guardian_id = %guardian_id_clone,
-                        error = %e,
-                        "Failed to mark guardian as accepted"
+                "application/aura-device-enrollment-acceptance" => {
+                    let (Some(ceremony_id), Some(device_id_str)) = (
+                        envelope.metadata.get("ceremony-id"),
+                        envelope.metadata.get("acceptor-device-id"),
+                    ) else {
+                        continue;
+                    };
+
+                    let device_id: aura_core::DeviceId = match device_id_str.parse() {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::warn!(
+                                ceremony_id = %ceremony_id,
+                                device_id = %device_id_str,
+                                error = %e,
+                                "Invalid device id in device enrollment acceptance"
+                            );
+                            continue;
+                        }
+                    };
+
+                    acceptance_count += 1;
+
+                    let threshold_reached = match ceremony_tracker
+                        .mark_accepted(
+                            ceremony_id,
+                            aura_core::threshold::ParticipantIdentity::device(device_id),
+                        )
+                        .await
+                    {
+                        Ok(reached) => reached,
+                        Err(e) => {
+                            tracing::warn!(
+                                ceremony_id = %ceremony_id,
+                                device_id = %device_id_str,
+                                error = %e,
+                                "Failed to mark device as accepted"
+                            );
+                            continue;
+                        }
+                    };
+
+                    if !threshold_reached {
+                        continue;
+                    }
+
+                    let ceremony_state = match ceremony_tracker.get(ceremony_id).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!(
+                                ceremony_id = %ceremony_id,
+                                error = %e,
+                                "Failed to retrieve ceremony state for commit"
+                            );
+                            continue;
+                        }
+                    };
+
+                    if ceremony_state.is_committed {
+                        continue;
+                    }
+
+                    let new_epoch = ceremony_state.new_epoch;
+                    if let Err(e) = effects.commit_key_rotation(&authority_id, new_epoch).await {
+                        tracing::error!(
+                            ceremony_id = %ceremony_id,
+                            new_epoch,
+                            error = %e,
+                            "Failed to commit device enrollment key rotation"
+                        );
+                        let _ = ceremony_tracker
+                            .mark_failed(ceremony_id, Some(format!("Commit failed: {e}")))
+                            .await;
+                        continue;
+                    }
+
+                    // Add a device leaf to the commitment tree so UI membership updates.
+                    let tree_state = match effects.get_current_state().await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!(
+                                ceremony_id = %ceremony_id,
+                                error = %e,
+                                "Failed to read tree state for device enrollment commit"
+                            );
+                            let _ = ceremony_tracker
+                                .mark_failed(
+                                    ceremony_id,
+                                    Some(format!("Failed to read tree state: {e}")),
+                                )
+                                .await;
+                            continue;
+                        }
+                    };
+
+                    let next_leaf = tree_state
+                        .leaves
+                        .keys()
+                        .map(|id| id.0)
+                        .max()
+                        .unwrap_or(0)
+                        .saturating_add(1);
+
+                    let leaf = aura_core::tree::LeafNode::new_device(
+                        aura_core::tree::LeafId(next_leaf),
+                        device_id,
+                        Vec::new(),
                     );
+
+                    let op = aura_core::tree::TreeOp {
+                        parent_epoch: tree_state.epoch,
+                        parent_commitment: tree_state.root_commitment,
+                        op: aura_core::tree::TreeOpKind::AddLeaf {
+                            leaf,
+                            under: aura_core::tree::NodeIndex(0),
+                        },
+                        version: 1,
+                    };
+
+                    let attested = aura_core::tree::AttestedOp {
+                        op,
+                        agg_sig: Vec::new(),
+                        signer_count: 1,
+                    };
+
+                    if let Err(e) = effects.apply_attested_op(attested).await {
+                        tracing::error!(
+                            ceremony_id = %ceremony_id,
+                            error = %e,
+                            "Failed to apply tree op for device enrollment"
+                        );
+                        let _ = ceremony_tracker
+                            .mark_failed(ceremony_id, Some(format!("Failed to apply tree op: {e}")))
+                            .await;
+                        continue;
+                    }
+
+                    let _ = ceremony_tracker.mark_committed(ceremony_id).await;
+                    completed_count += 1;
                 }
+                _ => {}
             }
         }
 

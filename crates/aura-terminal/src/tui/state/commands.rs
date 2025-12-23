@@ -81,6 +81,11 @@ pub enum DispatchCommand {
     /// The shell populates the modal with the selected contact ID and current nickname
     /// from reactive subscriptions.
     OpenContactNicknameModal,
+    /// Open the “create invitation” modal.
+    ///
+    /// The shell populates the modal with the selected receiver (contact/peer)
+    /// from reactive subscriptions.
+    OpenCreateInvitationModal,
     StartChat,
     RemoveContact {
         contact_id: String,
@@ -102,13 +107,19 @@ pub enum DispatchCommand {
     CancelGuardianCeremony {
         ceremony_id: String,
     },
+    /// Cancel an in-progress key rotation ceremony (device enrollment, guardian rotation, etc.).
+    CancelKeyRotationCeremony {
+        ceremony_id: String,
+    },
 
     // Invitations screen
     AcceptInvitation,
     DeclineInvitation,
     CreateInvitation {
+        receiver_id: String,
         invitation_type: String,
         message: Option<String>,
+        ttl_secs: Option<u64>,
     },
     ImportInvitation {
         code: String,

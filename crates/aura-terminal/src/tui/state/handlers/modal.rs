@@ -9,10 +9,12 @@ use crate::tui::screens::Screen;
 
 use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::{ConfirmAction, ContactSelectModalState, QueuedModal};
+use super::super::toast::ToastLevel;
 use super::super::views::{
     AccountSetupModalState, AddDeviceModalState, ConfirmRemoveModalState, CreateChannelModalState,
-    CreateInvitationModalState, DisplayNameModalState, GuardianSetupModalState, GuardianSetupStep,
-    ImportInvitationModalState, NicknameModalState, ThresholdModalState, TopicModalState,
+    CreateInvitationModalState, DeviceEnrollmentCeremonyModalState, DisplayNameModalState,
+    GuardianSetupModalState, GuardianSetupStep, ImportInvitationModalState, NicknameModalState,
+    ThresholdModalState, TopicModalState,
 };
 use super::super::TuiState;
 
@@ -97,6 +99,9 @@ pub fn handle_queued_modal_key(
         }
         QueuedModal::SettingsAddDevice(modal_state) => {
             handle_settings_add_device_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::SettingsDeviceEnrollment(modal_state) => {
+            handle_device_enrollment_key_queue(state, commands, key, modal_state);
         }
         QueuedModal::SettingsRemoveDevice(modal_state) => {
             handle_settings_remove_device_key_queue(state, commands, key, modal_state);
@@ -584,20 +589,27 @@ fn handle_create_invitation_key_queue(
         KeyCode::Enter => {
             // On final step, submit
             if modal_state.step == 2 {
-                // Convert type_index to invitation type string
+                if modal_state.receiver_id.trim().is_empty() {
+                    commands.push(TuiCommand::ShowToast {
+                        message: "No receiver selected for invitation".to_string(),
+                        level: ToastLevel::Error,
+                    });
+                    return;
+                }
+
+                // Convert type_index to stable invitation type string.
                 let invitation_type = match modal_state.type_index {
-                    0 => "personal".to_string(),
-                    1 => "group".to_string(),
-                    2 => "guardian".to_string(),
-                    _ => "personal".to_string(),
+                    0 => "guardian".to_string(),
+                    1 => "contact".to_string(),
+                    _ => "channel".to_string(),
                 };
+
                 commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
+                    receiver_id: modal_state.receiver_id.clone(),
                     invitation_type,
-                    message: if modal_state.message.is_empty() {
-                        None
-                    } else {
-                        Some(modal_state.message.clone())
-                    },
+                    message: (!modal_state.message.trim().is_empty())
+                        .then(|| modal_state.message.clone()),
+                    ttl_secs: modal_state.ttl_secs(),
                 }));
                 state.modal_queue.dismiss();
             } else {
@@ -771,9 +783,9 @@ fn handle_guardian_setup_key_queue(
         GuardianSetupStep::CeremonyInProgress => {
             // During ceremony, allow escape to cancel once the ceremony has started.
             if key.code == KeyCode::Esc {
-                if let Some(ceremony_id) = modal_state.ceremony_id.clone() {
+                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id.clone() {
                     commands.push(TuiCommand::Dispatch(
-                        DispatchCommand::CancelGuardianCeremony { ceremony_id },
+                        DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
                     ));
                     state.modal_queue.dismiss();
                 } else {
@@ -947,6 +959,28 @@ fn handle_settings_remove_device_key_queue(
             commands.push(TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
                 device_id: modal_state.device_id.clone(),
             }));
+            state.modal_queue.dismiss();
+        }
+        _ => {}
+    }
+}
+
+fn handle_device_enrollment_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: DeviceEnrollmentCeremonyModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            // If still in progress, Esc cancels the ceremony; otherwise, it just closes.
+            if !modal_state.ceremony.is_complete && !modal_state.ceremony.has_failed {
+                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id.clone() {
+                    commands.push(TuiCommand::Dispatch(
+                        DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
+                    ));
+                }
+            }
             state.modal_queue.dismiss();
         }
         _ => {}

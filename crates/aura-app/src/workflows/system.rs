@@ -3,9 +3,7 @@
 //! This module contains system-level operations that are portable across all frontends.
 //! These are mostly lightweight health-check and state refresh operations.
 
-use crate::signal_defs::{
-    ConnectionStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
-};
+use crate::signal_defs::{ConnectionStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;

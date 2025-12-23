@@ -39,6 +39,13 @@
 //! - **No Orphaned Accepts**: Pending acceptances without consensus are inert
 //! - **Deterministic ID**: `CeremonyId = H(prestate_hash || invitation_hash || nonce)`
 //! - **Auditability**: All state changes recorded as journal facts
+//!
+//! ## Note on device enrollment
+//!
+//! Device enrollment ("add device") is also a Category C ceremony, but it is
+//! currently orchestrated by the agent runtime using out-of-band invitation codes
+//! and transport acknowledgements. This module focuses on consensus-backed
+//! relationship invitations (contacts/guardian/channel).
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{

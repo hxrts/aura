@@ -10,6 +10,32 @@ use aura_core::identifiers::AuthorityId;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use std::sync::Arc;
 
+
+#[cfg(feature = "signals")]
+async fn yield_once() {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    struct YieldOnce(bool);
+
+    impl Future for YieldOnce {
+        type Output = ();
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+            if self.0 {
+                Poll::Ready(())
+            } else {
+                self.0 = true;
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }
+    }
+
+    YieldOnce(false).await
+}
+
 // ============================================================================
 // Invitation Creation via RuntimeBridge
 // ============================================================================
@@ -191,10 +217,41 @@ pub async fn accept_invitation(
             .clone()
     };
 
+    let initial_contact_count = {
+        let core = app_core.read().await;
+        core.read(&*crate::signal_defs::CONTACTS_SIGNAL)
+            .await
+            .unwrap_or_default()
+            .contacts
+            .len()
+    };
+
+
     runtime
         .accept_invitation(invitation_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {}", e)))?;
+
+    // Give the runtime fact pipeline a chance to publish CONTACTS_SIGNAL before we refresh
+    // derived UI signals like CONNECTION_STATUS_SIGNAL.
+    #[cfg(feature = "signals")]
+    {
+        for _ in 0..32 {
+            yield_once().await;
+
+            let core = app_core.read().await;
+            if let Ok(state) = core.read(&*crate::signal_defs::CONTACTS_SIGNAL).await {
+                if state.contacts.len() > initial_contact_count {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Best-effort: refresh signals so UI status (e.g. online contact count) updates immediately.
+    let _ = super::system::refresh_account(app_core).await;
+
+    Ok(())
 }
 
 /// Decline an invitation

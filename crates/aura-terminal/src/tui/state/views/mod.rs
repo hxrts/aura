@@ -4,6 +4,7 @@
 
 mod account_setup;
 mod block;
+mod ceremony;
 mod chat;
 mod contacts;
 mod guardian;
@@ -15,6 +16,7 @@ mod settings;
 
 pub use account_setup::*;
 pub use block::*;
+pub use ceremony::*;
 pub use chat::*;
 pub use contacts::*;
 pub use guardian::*;

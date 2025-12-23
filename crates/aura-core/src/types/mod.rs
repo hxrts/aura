@@ -9,6 +9,7 @@ pub mod authority;
 pub mod epochs;
 pub mod flow;
 pub mod identifiers;
+pub mod participants;
 pub mod relationships;
 pub mod scope;
 pub mod sessions;
@@ -22,6 +23,7 @@ pub use identifiers::{
     EventNonce, GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext,
     OperationId, RelayId, SessionId,
 };
+pub use participants::{ParticipantEndpoint, ParticipantIdentity, SigningParticipant};
 pub use relationships::*;
 pub use scope::{AuthorityOp, ContextOp, ResourceScope};
 pub use sessions::*;

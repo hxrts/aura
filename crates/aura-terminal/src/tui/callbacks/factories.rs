@@ -8,9 +8,12 @@
 
 use std::sync::Arc;
 
+use crate::tui::commands::{parse_command, IrcCommand};
+use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
-use crate::tui::types::{Device, MfaPolicy, TraversalDepth};
+use crate::tui::effects::{CapabilityPolicy, CommandDispatcher};
+use crate::tui::types::{MfaPolicy, TraversalDepth};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use aura_core::identifiers::ChannelId;
 
@@ -47,18 +50,116 @@ impl ChatCallbacks {
             on_close_channel: Self::make_close_channel(ctx, tx),
         }
     }
-
     fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SendCallback {
         Arc::new(move |channel_id: String, content: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let channel_id_clone = channel_id.clone();
             let content_clone = content.clone();
-            let cmd = EffectCommand::SendMessage {
-                channel: channel_id,
-                content,
-            };
+
             tokio::spawn(async move {
+                let trimmed = content_clone.trim_start();
+                if trimmed.starts_with("/") {
+                    // IRC-style command path
+                    match parse_command(trimmed) {
+                        Ok(IrcCommand::Help { .. }) => {
+                            let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                                "help",
+                                "Use ? for TUI help. Supported slash commands: /msg /me /nick /who /whois /join /leave /topic /invite /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode",
+                            )));
+                            return;
+                        }
+                        Ok(irc) => {
+                            let mut dispatcher =
+                                CommandDispatcher::with_policy(CapabilityPolicy::AllowAll);
+                            dispatcher.set_current_channel(channel_id_clone.clone());
+
+                            let effect = match dispatcher.dispatch(irc) {
+                                Ok(cmd) => cmd,
+                                Err(e) => {
+                                    let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                        "command",
+                                        e.to_string(),
+                                    )));
+                                    return;
+                                }
+                            };
+
+                            match effect {
+                                EffectCommand::ListParticipants { channel } => {
+                                    match aura_app::workflows::query::list_participants(
+                                        ctx.app_core_raw(),
+                                        &channel,
+                                    )
+                                    .await
+                                    {
+                                        Ok(list) => {
+                                            let msg = if list.is_empty() {
+                                                "No participants".to_string()
+                                            } else {
+                                                list.join(", ")
+                                            };
+                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                                ToastMessage::info("participants", msg),
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                                ToastMessage::error("participants", e.to_string()),
+                                            ));
+                                        }
+                                    }
+                                }
+                                EffectCommand::GetUserInfo { target } => {
+                                    match aura_app::workflows::query::get_user_info(
+                                        ctx.app_core_raw(),
+                                        &target,
+                                    )
+                                    .await
+                                    {
+                                        Ok(contact) => {
+                                            let id = contact.id.to_string();
+                                            let name = if !contact.nickname.is_empty() {
+                                                contact.nickname.clone()
+                                            } else if let Some(s) = &contact.suggested_name {
+                                                s.clone()
+                                            } else {
+                                                id.chars().take(8).collect::<String>() + "..."
+                                            };
+                                            let msg = format!("User: {} ({})", name, id);
+                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                                ToastMessage::info("whois", msg),
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                                ToastMessage::error("whois", e.to_string()),
+                                            ));
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    let _ = ctx.dispatch(effect).await;
+                                }
+                            }
+                            return;
+                        }
+                        Err(e) => {
+                            let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                "command",
+                                e.to_string(),
+                            )));
+                            return;
+                        }
+                    }
+                }
+
+                // Normal message path
+                let cmd = EffectCommand::SendMessage {
+                    channel: channel_id_clone.clone(),
+                    content: content_clone.clone(),
+                };
+
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.send(UiUpdate::MessageSent {
@@ -170,7 +271,9 @@ impl ChatCallbacks {
         Arc::new(move |channel_id: String| {
             let ctx = ctx.clone();
             let _tx = tx.clone();
-            let cmd = EffectCommand::CloseChannel { channel: channel_id };
+            let cmd = EffectCommand::CloseChannel {
+                channel: channel_id,
+            };
             tokio::spawn(async move {
                 let _ = ctx.dispatch(cmd).await;
             });
@@ -393,25 +496,21 @@ impl InvitationsCallbacks {
 
     fn make_create(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateInvitationCallback {
         Arc::new(
-            move |invitation_type: String, message: Option<String>, ttl_secs: Option<u64>| {
+            move |receiver_id: String,
+                  invitation_type: String,
+                  message: Option<String>,
+                  ttl_secs: Option<u64>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
-                let inv_type = invitation_type.clone();
-                let cmd = EffectCommand::CreateInvitation {
-                    invitation_type,
-                    message,
-                    ttl_secs,
-                };
                 tokio::spawn(async move {
-                    match ctx.dispatch(cmd).await {
-                        Ok(_) => {
-                            let _ = tx.send(UiUpdate::InvitationCreated {
-                                invitation_code: inv_type,
-                            });
+                    match ctx
+                        .create_invitation_code(&receiver_id, &invitation_type, message, ttl_secs)
+                        .await
+                    {
+                        Ok(code) => {
+                            let _ = tx.send(UiUpdate::InvitationExported { code });
                         }
-                        Err(_e) => {
-                            // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                        }
+                        Err(_e) => {}
                     }
                 });
             },
@@ -663,23 +762,71 @@ impl SettingsCallbacks {
         Arc::new(move |device_name: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let device_name_clone = device_name.clone();
-            let cmd = EffectCommand::AddDevice { device_name };
             tokio::spawn(async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let device = Device {
-                            id: format!("device-{}", device_name_clone),
-                            name: device_name_clone,
-                            last_seen: None,
-                            is_current: false,
-                        };
-                        let _ = tx.send(UiUpdate::DeviceAdded(device));
-                    }
+                let start = match ctx.start_device_enrollment(&device_name).await {
+                    Ok(start) => start,
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        // Error already emitted to ERROR_SIGNAL by operational layer.
+                        return;
                     }
+                };
+
+                let _ = tx.send(UiUpdate::DeviceEnrollmentStarted {
+                    ceremony_id: start.ceremony_id.clone(),
+                    device_name: device_name.clone(),
+                    enrollment_code: start.enrollment_code.clone(),
+                    pending_epoch: start.pending_epoch,
+                    device_id: start.device_id.clone(),
+                });
+
+                // Prime status quickly (best-effort) so the modal has counters immediately.
+                if let Ok(status) =
+                    aura_app::workflows::ceremonies::get_key_rotation_ceremony_status(
+                        ctx.app_core_raw(),
+                        &start.ceremony_id,
+                    )
+                    .await
+                {
+                    let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
+                        ceremony_id: status.ceremony_id.clone(),
+                        kind: status.kind,
+                        accepted_count: status.accepted_count,
+                        total_count: status.total_count,
+                        threshold: status.threshold,
+                        is_complete: status.is_complete,
+                        has_failed: status.has_failed,
+                        accepted_participants: status.accepted_participants.clone(),
+                        error_message: status.error_message.clone(),
+                        pending_epoch: status.pending_epoch,
+                    });
                 }
+
+                let app = ctx.app_core_raw().clone();
+                let tx_monitor = tx.clone();
+                let ceremony_id = start.ceremony_id.clone();
+                tokio::spawn(async move {
+                    let _ = aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
+                        &app,
+                        ceremony_id,
+                        tokio::time::Duration::from_millis(500),
+                        |status| {
+                            let _ = tx_monitor.send(UiUpdate::KeyRotationCeremonyStatus {
+                                ceremony_id: status.ceremony_id.clone(),
+                                kind: status.kind,
+                                accepted_count: status.accepted_count,
+                                total_count: status.total_count,
+                                threshold: status.threshold,
+                                is_complete: status.is_complete,
+                                has_failed: status.has_failed,
+                                accepted_participants: status.accepted_participants.clone(),
+                                error_message: status.error_message.clone(),
+                                pending_epoch: status.pending_epoch,
+                            });
+                        },
+                        tokio::time::sleep,
+                    )
+                    .await;
+                });
             });
         })
     }
@@ -689,18 +836,55 @@ impl SettingsCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let device_id_clone = device_id.clone();
-            let cmd = EffectCommand::RemoveDevice { device_id };
+
             tokio::spawn(async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let _ = tx.send(UiUpdate::DeviceRemoved {
-                            device_id: device_id_clone,
-                        });
-                    }
+                let ceremony_id = match ctx.start_device_removal(&device_id_clone).await {
+                    Ok(id) => id,
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        // Error already emitted to ERROR_SIGNAL by operational layer.
+                        return;
                     }
-                }
+                };
+
+                let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                    "device-removal-started",
+                    "Device removal started",
+                )));
+
+                // Best-effort: monitor completion and toast success/failure.
+                let app = ctx.app_core_raw().clone();
+                let tx_monitor = tx.clone();
+                tokio::spawn(async move {
+                    match aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
+                        &app,
+                        ceremony_id,
+                        tokio::time::Duration::from_millis(250),
+                        |_| {},
+                        tokio::time::sleep,
+                    )
+                    .await
+                    {
+                        Ok(status) if status.is_complete => {
+                            let _ = tx_monitor.send(UiUpdate::ToastAdded(ToastMessage::success(
+                                "device-removal-complete",
+                                "Device removal complete",
+                            )));
+                        }
+                        Ok(status) if status.has_failed => {
+                            let msg = status
+                                .error_message
+                                .unwrap_or_else(|| "Device removal failed".to_string());
+                            let _ = tx_monitor.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                "device-removal-failed",
+                                msg,
+                            )));
+                        }
+                        Ok(_) => {}
+                        Err(_e) => {
+                            // monitor already emitted error via ERROR_SIGNAL on polling failures.
+                        }
+                    }
+                });
             });
         })
     }
@@ -730,7 +914,6 @@ impl BlockCallbacks {
             on_revoke_steward: Self::make_revoke_steward(ctx, tx),
         }
     }
-
     fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> BlockSendCallback {
         Arc::new(move |content: String| {
             let ctx = ctx.clone();
@@ -756,12 +939,110 @@ impl BlockCallbacks {
                         "home".to_string()
                     }
                 };
+
                 let channel = format!("block:{}", block_id);
                 let block_id_clone = block_id.clone();
+
+                let trimmed = content_clone.trim_start();
+                if trimmed.starts_with("/") {
+                    match parse_command(trimmed) {
+                        Ok(IrcCommand::Help { .. }) => {
+                            let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                                "help",
+                                "Use ? for TUI help. Supported slash commands: /msg /me /nick /who /whois /join /leave /topic /invite /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode",
+                            )));
+                            return;
+                        }
+                        Ok(irc) => {
+                            let mut dispatcher =
+                                CommandDispatcher::with_policy(CapabilityPolicy::AllowAll);
+                            dispatcher.set_current_channel(channel.clone());
+
+                            let effect = match dispatcher.dispatch(irc) {
+                                Ok(cmd) => cmd,
+                                Err(e) => {
+                                    let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                        "command",
+                                        e.to_string(),
+                                    )));
+                                    return;
+                                }
+                            };
+
+                            match effect {
+                                EffectCommand::ListParticipants { channel } => {
+                                    match aura_app::workflows::query::list_participants(
+                                        ctx.app_core_raw(),
+                                        &channel,
+                                    )
+                                    .await
+                                    {
+                                        Ok(list) => {
+                                            let msg = if list.is_empty() {
+                                                "No participants".to_string()
+                                            } else {
+                                                list.join(", ")
+                                            };
+                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                                ToastMessage::info("participants", msg),
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                                ToastMessage::error("participants", e.to_string()),
+                                            ));
+                                        }
+                                    }
+                                }
+                                EffectCommand::GetUserInfo { target } => {
+                                    match aura_app::workflows::query::get_user_info(
+                                        ctx.app_core_raw(),
+                                        &target,
+                                    )
+                                    .await
+                                    {
+                                        Ok(contact) => {
+                                            let id = contact.id.to_string();
+                                            let name = if !contact.nickname.is_empty() {
+                                                contact.nickname.clone()
+                                            } else if let Some(s) = &contact.suggested_name {
+                                                s.clone()
+                                            } else {
+                                                id.chars().take(8).collect::<String>() + "..."
+                                            };
+                                            let msg = format!("User: {} ({})", name, id);
+                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                                ToastMessage::info("whois", msg),
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                                ToastMessage::error("whois", e.to_string()),
+                                            ));
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    let _ = ctx.dispatch(effect).await;
+                                }
+                            }
+                            return;
+                        }
+                        Err(e) => {
+                            let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                "command",
+                                e.to_string(),
+                            )));
+                            return;
+                        }
+                    }
+                }
+
                 let cmd = EffectCommand::SendMessage {
                     channel,
                     content: content_clone.clone(),
                 };
+
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.send(UiUpdate::BlockMessageSent {

@@ -14,6 +14,7 @@ use crate::fact_registry::build_fact_registry;
 use crate::reactive::{FactSource, ReactivePipeline, SchedulerConfig};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
+use aura_core::DeviceId;
 use std::sync::Arc;
 
 /// Main runtime system for the agent
@@ -206,6 +207,11 @@ impl RuntimeSystem {
     /// Get the authority ID
     pub fn authority_id(&self) -> AuthorityId {
         self.authority_id
+    }
+
+    /// Device id for this runtime instance.
+    pub fn device_id(&self) -> DeviceId {
+        self.config.device_id
     }
 
     /// Get the effect system

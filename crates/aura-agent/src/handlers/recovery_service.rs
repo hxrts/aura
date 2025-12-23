@@ -283,14 +283,16 @@ impl RecoveryService {
         // Get effect system read lock
         let authority_id = self.handler.authority_context().authority_id;
 
-        // Convert AuthorityId to String for the effect system interface
-        let guardian_id_strings: Vec<String> =
-            guardian_ids.iter().map(|id| id.to_string()).collect();
+        let participants: Vec<aura_core::threshold::ParticipantIdentity> = guardian_ids
+            .iter()
+            .copied()
+            .map(aura_core::threshold::ParticipantIdentity::guardian)
+            .collect();
 
         // Generate new threshold keys
         let (new_epoch, key_packages, public_key) = self
             .effects
-            .rotate_keys(&authority_id, threshold_k, total_n, &guardian_id_strings)
+            .rotate_keys(&authority_id, threshold_k, total_n, &participants)
             .await
             .map_err(|e| {
                 AgentError::internal(format!("Failed to generate threshold keys: {}", e))
@@ -391,49 +393,26 @@ impl RecoveryService {
     /// * `key_package` - Encrypted key package for this guardian
     pub async fn send_guardian_invitation(
         &self,
-        guardian_id: &str,
-        ceremony_id: &str,
-        threshold_k: u16,
-        total_n: u16,
-        all_guardian_ids: &[AuthorityId],
-        new_epoch: u64,
+        guardian_authority: AuthorityId,
+        ceremony_id: aura_recovery::CeremonyId,
+        prestate_hash: aura_core::Hash32,
+        operation: aura_recovery::GuardianRotationOp,
         key_package: &[u8],
     ) -> AgentResult<()> {
         use crate::core::AgentError;
+        use aura_core::effects::RandomEffects;
         use aura_core::effects::TransportEffects;
-        use aura_core::{hash::hash, ContextId, Hash32};
+        use aura_core::ContextId;
         use aura_recovery::guardian_ceremony::CeremonyProposal;
-        use aura_recovery::{CeremonyId, GuardianRotationOp};
 
         tracing::info!(
-            guardian_id = %guardian_id,
+            guardian_id = %guardian_authority,
             ceremony_id = %ceremony_id,
-            threshold_k,
-            total_n,
+            threshold_k = operation.threshold_k,
+            total_n = operation.total_n,
             key_package_size = key_package.len(),
             "Sending guardian invitation through transport"
         );
-
-        // Parse ceremony ID (format: "ceremony-{epoch}-{uuid}")
-        let ceremony_id_bytes = if ceremony_id.starts_with("ceremony-") {
-            // Extract hash from ceremony ID
-            let parts: Vec<&str> = ceremony_id.split('-').collect();
-            if parts.len() >= 3 {
-                // Use the UUID part to derive a ceremony hash
-                let uuid_str = parts[2];
-                Hash32(hash(uuid_str.as_bytes()))
-            } else {
-                Hash32(hash(ceremony_id.as_bytes()))
-            }
-        } else {
-            Hash32(hash(ceremony_id.as_bytes()))
-        };
-        let ceremony_id_hash = CeremonyId(ceremony_id_bytes);
-
-        // Parse guardian authority ID from string
-        let guardian_authority: AuthorityId = guardian_id
-            .parse()
-            .map_err(|e| AgentError::invalid(format!("Invalid guardian ID: {}", e)))?;
 
         // Get our authority context for source
         let initiator_id = self.handler.authority_context().authority_id;
@@ -444,28 +423,26 @@ impl RecoveryService {
             let mut h = aura_core::hash::hasher();
             h.update(b"GUARDIAN_CEREMONY_CONTEXT");
             h.update(&initiator_id.to_bytes());
-            h.update(&ceremony_id_hash.0 .0);
+            h.update(&ceremony_id.0 .0);
             h.finalize()
         };
         let ceremony_context = ContextId::new_from_entropy(context_entropy);
 
-        // Create the rotation operation with full guardian list and epoch from ceremony state
-        let operation = GuardianRotationOp {
-            threshold_k,
-            total_n,
-            guardian_ids: all_guardian_ids.to_vec(),
-            new_epoch,
-        };
+        // Best-effort encryption envelope fields (actual key agreement is wired separately).
+        let nonce_bytes = self.effects.random_bytes(12).await;
+        let mut encryption_nonce = [0u8; 12];
+        encryption_nonce.copy_from_slice(&nonce_bytes[..12]);
+        let ephemeral_public_key = self.effects.random_bytes(32).await;
 
         // Create the ceremony proposal
         let proposal = CeremonyProposal {
-            ceremony_id: ceremony_id_hash,
+            ceremony_id,
             initiator_id,
-            prestate_hash: Hash32([0u8; 32]), // Will be computed from actual guardian state
+            prestate_hash,
             operation,
             encrypted_key_package: key_package.to_vec(),
-            encryption_nonce: [0u8; 12], // Should use actual encryption nonce
-            ephemeral_public_key: vec![], // Should include ephemeral key for key agreement
+            encryption_nonce,
+            ephemeral_public_key,
         };
 
         // Serialize the proposal
@@ -497,7 +474,7 @@ impl RecoveryService {
             .map_err(|e| AgentError::effects(format!("Failed to send invitation: {}", e)))?;
 
         tracing::info!(
-            guardian_id = %guardian_id,
+            guardian_id = %guardian_authority,
             ceremony_id = %ceremony_id,
             "Guardian invitation sent successfully"
         );

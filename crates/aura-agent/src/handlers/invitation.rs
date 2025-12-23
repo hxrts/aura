@@ -12,6 +12,9 @@ use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::storage::StorageEffects;
 use aura_core::effects::RandomEffects;
+use aura_core::effects::{
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, TransportEffects,
+};
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
 use aura_invitation::guards::GuardSnapshot;
@@ -127,6 +130,7 @@ impl InvitationHandler {
                 "invitation:cancel".to_string(),
                 "invitation:guardian".to_string(),
                 "invitation:channel".to_string(),
+                "invitation:device".to_string(),
             ]
         } else {
             // Capabilities will be derived from Biscuit token when integrated.
@@ -136,6 +140,7 @@ impl InvitationHandler {
                 "invitation:accept".to_string(),
                 "invitation:decline".to_string(),
                 "invitation:cancel".to_string(),
+                "invitation:device".to_string(),
             ]
         };
 
@@ -245,6 +250,78 @@ impl InvitationHandler {
                 .map_err(|e| {
                     crate::core::AgentError::effects(format!("commit contact fact: {e}"))
                 })?;
+        }
+
+        // Device enrollment: install share + notify initiator device runtime.
+        if let Some(enrollment) = self
+            .resolve_device_enrollment_invitation(effects, invitation_id)
+            .await?
+        {
+            let participant =
+                aura_core::threshold::ParticipantIdentity::device(enrollment.device_id);
+            let location = SecureStorageLocation::with_sub_key(
+                "participant_shares",
+                format!(
+                    "{}/{}",
+                    enrollment.subject_authority, enrollment.pending_epoch
+                ),
+                participant.storage_key(),
+            );
+
+            effects
+                .secure_store(
+                    &location,
+                    &enrollment.key_package,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await
+                .map_err(|e| {
+                    crate::core::AgentError::effects(format!(
+                        "store device enrollment key package: {e}"
+                    ))
+                })?;
+
+            // Send an acceptance envelope to the initiator device.
+            let context_entropy = {
+                let mut h = aura_core::hash::hasher();
+                h.update(b"DEVICE_ENROLLMENT_CONTEXT");
+                h.update(&enrollment.subject_authority.to_bytes());
+                h.update(enrollment.ceremony_id.as_bytes());
+                h.finalize()
+            };
+            let ceremony_context =
+                aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+
+            let mut metadata = std::collections::HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                "application/aura-device-enrollment-acceptance".to_string(),
+            );
+            metadata.insert("ceremony-id".to_string(), enrollment.ceremony_id.clone());
+            metadata.insert(
+                "acceptor-device-id".to_string(),
+                enrollment.device_id.to_string(),
+            );
+            metadata.insert(
+                "aura-destination-device-id".to_string(),
+                enrollment.initiator_device_id.to_string(),
+            );
+
+            let envelope = aura_core::effects::TransportEnvelope {
+                destination: enrollment.subject_authority,
+                source: self.context.authority.authority_id,
+                context: ceremony_context,
+                payload: Vec::new(),
+                metadata,
+                receipt: None,
+            };
+
+            effects.send_envelope(envelope).await.map_err(|e| {
+                crate::core::AgentError::effects(format!("send device enrollment acceptance: {e}"))
+            })?;
         }
 
         // Update cache if we have this invitation
@@ -359,6 +436,75 @@ impl InvitationHandler {
                 .unwrap_or_else(|| sender_id.to_string());
 
             return Ok(Some((sender_id, nickname)));
+        }
+
+        Ok(None)
+    }
+
+    async fn resolve_device_enrollment_invitation(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &str,
+    ) -> AgentResult<Option<DeviceEnrollmentInvitation>> {
+        let own_id = self.context.authority.authority_id;
+
+        // First try the local cache (fast path when the same handler instance is reused).
+        {
+            let cache = self.pending_invitations.read().await;
+            if let Some(inv) = cache.get(invitation_id) {
+                if let InvitationType::DeviceEnrollment {
+                    subject_authority,
+                    initiator_device_id,
+                    device_id,
+                    device_name: _,
+                    ceremony_id,
+                    pending_epoch,
+                    key_package,
+                } = &inv.invitation_type
+                {
+                    if *subject_authority != own_id {
+                        return Ok(None);
+                    }
+                    return Ok(Some(DeviceEnrollmentInvitation {
+                        subject_authority: *subject_authority,
+                        initiator_device_id: *initiator_device_id,
+                        device_id: *device_id,
+                        ceremony_id: ceremony_id.clone(),
+                        pending_epoch: *pending_epoch,
+                        key_package: key_package.clone(),
+                    }));
+                }
+            }
+        }
+
+        // Next try the persisted imported invitation store (covers out-of-band imports across
+        // handler instances, since AuraAgent constructs services on demand).
+        if let Some(shareable) =
+            Self::load_imported_invitation(effects, own_id, invitation_id).await
+        {
+            if let InvitationType::DeviceEnrollment {
+                subject_authority,
+                initiator_device_id,
+                device_id,
+                device_name: _,
+                ceremony_id,
+                pending_epoch,
+                key_package,
+            } = shareable.invitation_type
+            {
+                if subject_authority != own_id {
+                    return Ok(None);
+                }
+
+                return Ok(Some(DeviceEnrollmentInvitation {
+                    subject_authority,
+                    initiator_device_id,
+                    device_id,
+                    ceremony_id,
+                    pending_epoch,
+                    key_package,
+                }));
+            }
         }
 
         Ok(None)
@@ -494,6 +640,16 @@ impl InvitationHandler {
         let cache = self.pending_invitations.read().await;
         cache.get(invitation_id).cloned()
     }
+}
+
+#[derive(Debug, Clone)]
+struct DeviceEnrollmentInvitation {
+    subject_authority: AuthorityId,
+    initiator_device_id: aura_core::DeviceId,
+    device_id: aura_core::DeviceId,
+    ceremony_id: String,
+    pending_epoch: u64,
+    key_package: Vec<u8>,
 }
 
 // =============================================================================

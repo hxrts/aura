@@ -14,16 +14,18 @@ use super::modal_overlays::{
     render_account_setup_modal, render_add_device_modal, render_block_invite_modal,
     render_channel_info_modal, render_chat_create_modal, render_confirm_modal,
     render_contact_modal, render_contacts_code_modal, render_contacts_create_modal,
-    render_contacts_import_modal,
-    render_display_name_modal, render_guardian_modal, render_guardian_setup_modal,
-    render_help_modal, render_nickname_modal, render_remove_device_modal, render_threshold_modal,
-    render_topic_modal, GlobalModalProps,
+    render_contacts_import_modal, render_device_enrollment_modal, render_display_name_modal,
+    render_guardian_modal, render_guardian_setup_modal, render_help_modal, render_nickname_modal,
+    render_remove_device_modal, render_threshold_modal, render_topic_modal, GlobalModalProps,
 };
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
 use aura_app::signal_defs::{ERROR_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::workflows::{
+    cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_guardian_ceremony,
+};
 use aura_app::AppError;
 use aura_core::effects::reactive::ReactiveEffects;
 
@@ -36,8 +38,8 @@ use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
 use crate::tui::screens::app::subscriptions::{
     use_channels_subscription, use_contacts_subscription, use_messages_subscription,
-    use_nav_status_signals, use_neighborhood_blocks_subscription, use_pending_requests_subscription,
-    use_residents_subscription, use_threshold_subscription,
+    use_nav_status_signals, use_neighborhood_blocks_subscription,
+    use_pending_requests_subscription, use_residents_subscription, use_threshold_subscription,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
@@ -498,6 +500,160 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::DeviceRemoved { device_id: _ } => {
                             // Settings screen renders from SETTINGS_SIGNAL; no local state update.
                         }
+                        UiUpdate::DeviceEnrollmentStarted {
+                            ceremony_id,
+                            device_name,
+                            enrollment_code,
+                            pending_epoch: _,
+                            device_id: _,
+                        } => {
+                            enqueue_toast!(
+                                format!("Device enrollment started for \"{}\"", device_name),
+                                crate::tui::state_machine::ToastLevel::Info
+                            );
+
+                            tui.with_mut(|state| {
+                                state.modal_queue.enqueue(
+                                    crate::tui::state_machine::QueuedModal::SettingsDeviceEnrollment(
+                                        crate::tui::state_machine::DeviceEnrollmentCeremonyModalState::started(
+                                            ceremony_id,
+                                            device_name,
+                                            enrollment_code,
+                                        ),
+                                    ),
+                                );
+                            });
+                        }
+                        UiUpdate::KeyRotationCeremonyStatus {
+                            ceremony_id,
+                            kind,
+                            accepted_count,
+                            total_count,
+                            threshold,
+                            is_complete,
+                            has_failed,
+                            accepted_participants,
+                            error_message,
+                            pending_epoch,
+                        } => {
+                            let mut toast: Option<(String, crate::tui::state_machine::ToastLevel)> =
+                                None;
+
+                            tui.with_mut(|state| {
+                                let mut dismiss_modal = false;
+
+                                state.modal_queue.update_active(|modal| {
+                                    if let crate::tui::state_machine::QueuedModal::SettingsDeviceEnrollment(ref mut s) = modal {
+                                        if s.ceremony.ceremony_id.as_deref() == Some(ceremony_id.as_str()) {
+                                            s.update_from_status(
+                                                accepted_count,
+                                                total_count,
+                                                threshold,
+                                                is_complete,
+                                                has_failed,
+                                                error_message.clone(),
+                                                pending_epoch,
+                                            );
+
+                                            if has_failed {
+                                                toast = Some((
+                                                    error_message
+                                                        .clone()
+                                                        .unwrap_or_else(|| "Device enrollment failed".to_string()),
+                                                    crate::tui::state_machine::ToastLevel::Error,
+                                                ));
+                                            } else if is_complete {
+                                                dismiss_modal = true;
+                                                toast = Some((
+                                                    "Device enrollment complete".to_string(),
+                                                    crate::tui::state_machine::ToastLevel::Success,
+                                                ));
+                                            }
+                                        }
+                                    } else if let crate::tui::state_machine::QueuedModal::GuardianSetup(ref mut s) = modal {
+                                        if matches!(
+                                            s.step,
+                                            crate::tui::state_machine::GuardianSetupStep::CeremonyInProgress
+                                        ) {
+                                            // Ensure ceremony id is set for cancel UX.
+                                            if s.ceremony.ceremony_id.is_none() {
+                                                s.ceremony.set_ceremony_id(ceremony_id.clone());
+                                            }
+
+                                            s.ceremony.update_from_status(
+                                                accepted_count,
+                                                total_count,
+                                                threshold,
+                                                is_complete,
+                                                has_failed,
+                                                error_message.clone(),
+                                                pending_epoch,
+                                            );
+
+                                            // Update per-guardian responses based on accepted participants.
+                                            use aura_core::threshold::ParticipantIdentity;
+                                            let accepted_guardians: Vec<String> = accepted_participants
+                                                .iter()
+                                                .filter_map(|p| match p {
+                                                    ParticipantIdentity::Guardian(id) => Some(id.to_string()),
+                                                    _ => None,
+                                                })
+                                                .collect();
+
+                                            for (id, _name, response) in &mut s.ceremony_responses {
+                                                if accepted_guardians.iter().any(|g| g == id) {
+                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Accepted;
+                                                } else if matches!(
+                                                    response,
+                                                    crate::tui::state_machine::GuardianCeremonyResponse::Accepted
+                                                ) {
+                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Pending;
+                                                }
+                                            }
+
+                                            if has_failed {
+                                                let msg = error_message
+                                                    .clone()
+                                                    .unwrap_or_else(|| "Guardian ceremony failed".to_string());
+                                                s.error = Some(msg.clone());
+
+                                                // Return to threshold selection so the user can retry.
+                                                s.step = crate::tui::state_machine::GuardianSetupStep::ChooseThreshold;
+                                                s.ceremony.clear();
+                                                s.ceremony_responses.clear();
+
+                                                toast = Some((msg, crate::tui::state_machine::ToastLevel::Error));
+                                            } else if is_complete {
+                                                dismiss_modal = true;
+                                                toast = Some((
+                                                    match kind {
+                                                        aura_app::runtime_bridge::CeremonyKind::GuardianRotation => format!(
+                                                            "Guardian ceremony complete! {}-of-{} committed",
+                                                            threshold, total_count
+                                                        ),
+                                                        aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment => {
+                                                            "Device enrollment complete".to_string()
+                                                        }
+                                                        aura_app::runtime_bridge::CeremonyKind::DeviceRemoval => {
+                                                            "Device removal complete".to_string()
+                                                        }
+                                                    },
+                                                    crate::tui::state_machine::ToastLevel::Success,
+                                                ));
+                                            }
+                                        }
+                                    }
+                                });
+
+                                if dismiss_modal {
+                                    state.modal_queue.dismiss();
+                                }
+                            });
+
+                            if let Some((msg, level)) = toast {
+                                enqueue_toast!(msg, level);
+                            }
+                        }
 
                         // =========================================================================
                         // Toast notifications
@@ -579,8 +735,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 crate::tui::state_machine::ToastLevel::Success
                             );
                         }
-                        UiUpdate::InvitationExported { code: _ } => {
-                            // The code is surfaced via a dedicated modal/clipboard path.
+                        UiUpdate::InvitationExported { code } => {
+                            tui.with_mut(|state| {
+                                state
+                                    .modal_queue
+                                    .enqueue(crate::tui::state_machine::QueuedModal::ContactsCode(
+                                        crate::tui::state_machine::InvitationCodeModalState::for_code(
+                                            code,
+                                        ),
+                                    ));
+                            });
                         }
                         UiUpdate::InvitationImported { invitation_code: _ } => {
                             enqueue_toast!(
@@ -651,13 +815,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             s.step,
                                             crate::tui::state_machine::GuardianSetupStep::CeremonyInProgress
                                         ) {
-                                            if s.ceremony_id.is_none() {
-                                                s.set_ceremony_id(ceremony_id.clone());
+                                            if s.ceremony.ceremony_id.is_none() {
+                                                s.ceremony.set_ceremony_id(ceremony_id.clone());
                                             }
 
-                                            if let Some(epoch) = pending_epoch {
-                                                s.pending_epoch = Some(epoch);
-                                            }
+                                            s.ceremony.update_from_status(
+                                                accepted_guardians.len() as u16,
+                                                total_count,
+                                                threshold,
+                                                is_complete,
+                                                has_failed,
+                                                error_message.clone(),
+                                                pending_epoch,
+                                            );
 
                                             for (id, _name, response) in &mut s.ceremony_responses {
                                                 if accepted_guardians.iter().any(|g| g == id) {
@@ -678,8 +848,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                 // Return to threshold selection so the user can retry.
                                                 s.step = crate::tui::state_machine::GuardianSetupStep::ChooseThreshold;
-                                                s.ceremony_id = None;
-                                                s.pending_epoch = None;
+                                                s.ceremony.clear();
                                                 s.ceremony_responses.clear();
 
                                                 toast = Some((
@@ -1205,11 +1374,46 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let idx = new_state.chat.selected_channel;
                                         if let Ok(guard) = shared_channels_for_dispatch.read() {
                                             if let Some(channel) = guard.get(idx) {
-                                                let modal_state = crate::tui::state_machine::ChannelInfoModalState::for_channel(
+                                                let mut modal_state = crate::tui::state_machine::ChannelInfoModalState::for_channel(
                                                     &channel.id,
                                                     &channel.name,
                                                     channel.topic.as_deref(),
                                                 );
+
+                                                // Best-effort: populate participants from locally-known contacts.
+                                                let mut participants = vec!["You".to_string()];
+                                                if let Ok(contacts) = shared_contacts_for_dispatch.read() {
+                                                    if channel.id.starts_with("dm:") {
+                                                        let target = channel.id.trim_start_matches("dm:");
+                                                        let name = contacts
+                                                            .iter()
+                                                            .find(|c| c.id == target)
+                                                            .map(|c| {
+                                                                if !c.nickname.is_empty() {
+                                                                    c.nickname.clone()
+                                                                } else if let Some(s) = &c.suggested_name {
+                                                                    s.clone()
+                                                                } else {
+                                                                    c.id.chars().take(8).collect::<String>() + "..."
+                                                                }
+                                                            })
+                                                            .unwrap_or_else(|| target.to_string());
+                                                        participants.push(name);
+                                                    } else {
+                                                        for c in contacts.iter() {
+                                                            let name = if !c.nickname.is_empty() {
+                                                                c.nickname.clone()
+                                                            } else if let Some(s) = &c.suggested_name {
+                                                                s.clone()
+                                                            } else {
+                                                                c.id.chars().take(8).collect::<String>() + "..."
+                                                            };
+                                                            participants.push(name);
+                                                        }
+                                                    }
+                                                }
+
+                                                modal_state.participants = participants;
                                                 new_state
                                                     .modal_queue
                                                     .enqueue(crate::tui::state_machine::QueuedModal::ChatInfo(
@@ -1260,6 +1464,41 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("Failed to read contacts");
                                         }
                                     }
+                                    DispatchCommand::OpenCreateInvitationModal => {
+                                        let idx = new_state.contacts.selected_index;
+                                        if let Ok(guard) = shared_contacts_for_dispatch.read() {
+                                            if let Some(contact) = guard.get(idx) {
+                                                let receiver_name = if !contact.nickname.is_empty()
+                                                {
+                                                    contact.nickname.clone()
+                                                } else if let Some(s) = &contact.suggested_name {
+                                                    s.clone()
+                                                } else {
+                                                    let short = contact
+                                                        .id
+                                                        .chars()
+                                                        .take(8)
+                                                        .collect::<String>();
+                                                    format!("{short}...")
+                                                };
+
+                                                let modal_state =
+                                                    crate::tui::state_machine::CreateInvitationModalState::for_receiver(
+                                                        contact.id.clone(),
+                                                        receiver_name,
+                                                    );
+                                                new_state
+                                                    .modal_queue
+                                                    .enqueue(crate::tui::state_machine::QueuedModal::ContactsCreate(
+                                                        modal_state,
+                                                    ));
+                                            } else {
+                                                new_state.toast_error("No contact selected");
+                                            }
+                                        } else {
+                                            new_state.toast_error("Failed to read contacts");
+                                        }
+                                    }
                                     DispatchCommand::StartChat => {
                                         let idx = new_state.contacts.selected_index;
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
@@ -1295,11 +1534,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         );
                                     }
                                     DispatchCommand::CreateInvitation {
+                                        receiver_id,
                                         invitation_type,
                                         message,
+                                        ttl_secs,
                                     } => {
-                                        // Third argument is TTL in seconds (None = no expiry)
-                                        (cb.invitations.on_create)(invitation_type, message, None);
+                                        (cb.invitations.on_create)(
+                                            receiver_id,
+                                            invitation_type,
+                                            message,
+                                            ttl_secs,
+                                        );
                                     }
                                     DispatchCommand::ImportInvitation { code } => {
                                         (cb.invitations.on_import)(code);
@@ -1405,10 +1650,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let update_tx = update_tx_for_ceremony.clone();
 
                                         tokio::spawn(async move {
-                                            let core = app_core.raw().read().await;
+                                            let app = app_core.raw();
 
-                                            match core
-                                                .initiate_guardian_ceremony(k, n, &ids)
+                                            match start_guardian_ceremony(&app, k, n, ids.clone())
                                                 .await
                                             {
                                                 Ok(ceremony_id) => {
@@ -1430,68 +1674,47 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                         // Prime the modal with an initial status update so `ceremony_id` is
                                                         // available immediately for UI cancel.
-                                                        let _ = tx.send(UiUpdate::GuardianCeremonyStatus {
+                                                        let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
                                                             ceremony_id: ceremony_id.clone(),
-                                                            accepted_guardians: Vec::new(),
+                                                            kind: aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
+                                                            accepted_count: 0,
                                                             total_count: n,
                                                             threshold: k,
                                                             is_complete: false,
                                                             has_failed: false,
+                                                            accepted_participants: Vec::new(),
                                                             error_message: None,
                                                             pending_epoch: None,
                                                         });
                                                     }
 
                                                     // Spawn a task to monitor ceremony progress.
-                                                    let app_core_monitor = app_core.clone();
+                                                    let app_core_monitor = app.clone();
                                                     let update_tx_monitor = update_tx.clone();
                                                     tokio::spawn(async move {
-                                                        for _ in 0..60 {
-                                                            tokio::time::sleep(tokio::time::Duration::from_millis(500))
-                                                                .await;
-
-                                                            let core = app_core_monitor.raw().read().await;
-                                                            if let Ok(status) =
-                                                                core.get_ceremony_status(&ceremony_id).await
-                                                            {
+                                                        let _ = monitor_key_rotation_ceremony(
+                                                            &app_core_monitor,
+                                                            ceremony_id.clone(),
+                                                            tokio::time::Duration::from_millis(500),
+                                                            |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
-                                                                    let _ = tx.send(UiUpdate::GuardianCeremonyStatus {
+                                                                    let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
                                                                         ceremony_id: status.ceremony_id.clone(),
-                                                                        accepted_guardians: status.accepted_guardians.clone(),
+                                                                        kind: status.kind,
+                                                                        accepted_count: status.accepted_count,
                                                                         total_count: status.total_count,
                                                                         threshold: status.threshold,
                                                                         is_complete: status.is_complete,
                                                                         has_failed: status.has_failed,
+                                                                        accepted_participants: status.accepted_participants.clone(),
                                                                         error_message: status.error_message.clone(),
                                                                         pending_epoch: status.pending_epoch,
                                                                     });
                                                                 }
-
-                                                                if status.has_failed {
-                                                                    // Roll back the pending key rotation if epoch was created.
-                                                                    if let Some(pending_epoch) = status.pending_epoch {
-                                                                        tracing::info!(
-                                                                            pending_epoch,
-                                                                            "Rolling back failed key rotation"
-                                                                        );
-                                                                        if let Err(e) = core
-                                                                            .rollback_guardian_key_rotation(pending_epoch)
-                                                                            .await
-                                                                        {
-                                                                            tracing::error!(
-                                                                                "Failed to rollback key rotation: {}",
-                                                                                e
-                                                                            );
-                                                                        }
-                                                                    }
-                                                                    break;
-                                                                }
-
-                                                                if status.is_complete {
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
+                                                            },
+                                                            tokio::time::sleep,
+                                                        )
+                                                        .await;
                                                     });
                                                 }
                                                 Err(e) => {
@@ -1517,39 +1740,55 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let update_tx = update_tx_for_ceremony.clone();
 
                                         tokio::spawn(async move {
-                                            let core = app_core.raw().read().await;
+                                            let app = app_core.raw();
 
-                                            // Get ceremony status to retrieve the pending epoch.
-                                            if let Ok(status) = core.get_ceremony_status(&ceremony_id).await {
-                                                if let Some(pending_epoch) = status.pending_epoch {
-                                                    tracing::info!(
-                                                        pending_epoch,
-                                                        "Rolling back canceled key rotation"
-                                                    );
-
-                                                    if let Err(e) =
-                                                        core.rollback_guardian_key_rotation(pending_epoch).await
-                                                    {
-                                                        tracing::error!(
-                                                            "Failed to rollback key rotation: {}",
-                                                            e
-                                                        );
-
-                                                        if let Some(tx) = update_tx.clone() {
-                                                            let _ = tx.send(UiUpdate::operation_failed(
-                                                                "Cancel guardian ceremony",
-                                                                e.to_string(),
-                                                            ));
-                                                        }
-                                                        return;
-                                                    }
+                                            if let Err(e) =
+                                                cancel_key_rotation_ceremony(&app, &ceremony_id).await
+                                            {
+                                                tracing::error!("Failed to cancel guardian ceremony: {}", e);
+                                                if let Some(tx) = update_tx.clone() {
+                                                    let _ = tx.send(UiUpdate::operation_failed(
+                                                        "Cancel guardian ceremony",
+                                                        e.to_string(),
+                                                    ));
                                                 }
+                                                return;
                                             }
 
                                             if let Some(tx) = update_tx {
                                                 let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
                                                     "guardian-ceremony-canceled",
                                                     "Guardian ceremony canceled",
+                                                )));
+                                            }
+                                        });
+                                    }
+                                    DispatchCommand::CancelKeyRotationCeremony { ceremony_id } => {
+                                        tracing::info!(ceremony_id = %ceremony_id, "Canceling ceremony");
+
+                                        let app_core = app_core_for_ceremony.clone();
+                                        let update_tx = update_tx_for_ceremony.clone();
+
+                                        tokio::spawn(async move {
+                                            let app = app_core.raw();
+
+                                            if let Err(e) =
+                                                cancel_key_rotation_ceremony(&app, &ceremony_id).await
+                                            {
+                                                tracing::error!("Failed to cancel ceremony: {}", e);
+                                                if let Some(tx) = update_tx.clone() {
+                                                    let _ = tx.send(UiUpdate::operation_failed(
+                                                        "Cancel ceremony",
+                                                        e.to_string(),
+                                                    ));
+                                                }
+                                                return;
+                                            }
+
+                                            if let Some(tx) = update_tx {
+                                                let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                                                    "ceremony-canceled",
+                                                    "Ceremony canceled",
                                                 )));
                                             }
                                         });
@@ -1815,6 +2054,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             #(render_display_name_modal(&settings_props))
             #(render_threshold_modal(&settings_props, threshold_k))
             #(render_add_device_modal(&settings_props))
+            #(render_device_enrollment_modal(&settings_props))
             #(render_remove_device_modal(&settings_props))
 
             // === BLOCK SCREEN MODALS ===

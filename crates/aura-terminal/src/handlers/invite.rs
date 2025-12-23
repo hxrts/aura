@@ -173,6 +173,22 @@ fn format_invitation_type(shareable: &ShareableInvitation) -> String {
         aura_agent::handlers::InvitationType::Channel { block_id } => {
             format!("Channel (block: {})", block_id)
         }
+        aura_agent::handlers::InvitationType::DeviceEnrollment {
+            subject_authority,
+            device_id,
+            device_name,
+            pending_epoch,
+            ..
+        } => {
+            let label = device_name
+                .as_deref()
+                .map(|s| format!(" (name: {})", s))
+                .unwrap_or_default();
+            format!(
+                "Device enrollment (authority: {}, device: {}{}, pending_epoch: {})",
+                subject_authority, device_id, label, pending_epoch
+            )
+        }
     }
 }
 

@@ -602,6 +602,8 @@ Operations where partial state is dangerous. These block until consensus complet
 - Add contact / Create group (establishes cryptographic context)
 - Add member to group (changes group encryption keys)
 
+See `docs/117_operation_categories.md` for the full category framework and `docs/118_key_rotation_ceremonies.md` for the shared contract used by key rotation and membership-change ceremonies (guardians, devices, groups, blocks).
+
 ### 11.4 Key Insight
 
 **Ceremonies establish shared cryptographic context. Operations within that context are cheap.**

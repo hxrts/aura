@@ -18,6 +18,8 @@
 //! and `commit_guardian_key_rotation()` is triggered.
 
 use aura_app::core::IntentError;
+use aura_app::runtime_bridge::CeremonyKind;
+use aura_core::threshold::ParticipantIdentity;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -32,17 +34,20 @@ pub struct CeremonyTracker {
 /// State of a guardian ceremony
 #[derive(Debug, Clone)]
 pub struct CeremonyState {
+    /// Ceremony kind
+    pub kind: CeremonyKind,
+
     /// Threshold required for completion (k)
     pub threshold_k: u16,
 
-    /// Total number of guardians (n)
+    /// Total number of participants (n)
     pub total_n: u16,
 
-    /// Guardian IDs invited to participate
-    pub guardian_ids: Vec<String>,
+    /// Participants invited to participate
+    pub participants: Vec<ParticipantIdentity>,
 
-    /// Guardian IDs who have accepted
-    pub accepted_guardians: Vec<String>,
+    /// Participants who have accepted
+    pub accepted_participants: Vec<ParticipantIdentity>,
 
     /// New epoch for the key rotation
     pub new_epoch: u64,
@@ -76,15 +81,16 @@ impl CeremonyTracker {
     /// # Arguments
     /// * `ceremony_id` - Unique ceremony identifier
     /// * `threshold_k` - Minimum signers required
-    /// * `total_n` - Total number of guardians
-    /// * `guardian_ids` - IDs of guardians invited
+    /// * `total_n` - Total number of participants
+    /// * `participants` - Participants invited
     /// * `new_epoch` - Epoch for the new keys
     pub async fn register(
         &self,
         ceremony_id: String,
+        kind: CeremonyKind,
         threshold_k: u16,
         total_n: u16,
-        guardian_ids: Vec<String>,
+        participants: Vec<ParticipantIdentity>,
         new_epoch: u64,
     ) -> Result<(), IntentError> {
         let mut ceremonies = self.ceremonies.write().await;
@@ -97,10 +103,11 @@ impl CeremonyTracker {
         }
 
         let state = CeremonyState {
+            kind,
             threshold_k,
             total_n,
-            guardian_ids,
-            accepted_guardians: Vec::new(),
+            participants,
+            accepted_participants: Vec::new(),
             new_epoch,
             started_at: Instant::now(),
             has_failed: false,
@@ -147,7 +154,7 @@ impl CeremonyTracker {
     pub async fn mark_accepted(
         &self,
         ceremony_id: &str,
-        guardian_id: String,
+        participant: ParticipantIdentity,
     ) -> Result<bool, IntentError> {
         let mut ceremonies = self.ceremonies.write().await;
 
@@ -155,36 +162,34 @@ impl CeremonyTracker {
             IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
         })?;
 
-        // Check if guardian is part of this ceremony
-        if !state.guardian_ids.contains(&guardian_id) {
+        // Check if participant is part of this ceremony
+        if !state.participants.contains(&participant) {
             return Err(IntentError::validation_failed(format!(
-                "Guardian {} not part of ceremony {}",
-                guardian_id, ceremony_id
+                "Participant {:?} not part of ceremony {}",
+                participant, ceremony_id
             )));
         }
 
         // Check if already accepted
-        if state.accepted_guardians.contains(&guardian_id) {
+        if state.accepted_participants.contains(&participant) {
             tracing::debug!(
                 ceremony_id = %ceremony_id,
-                guardian_id = %guardian_id,
-                "Guardian already accepted (idempotent)"
+                "Participant already accepted (idempotent)"
             );
-            return Ok(state.accepted_guardians.len() >= state.threshold_k as usize);
+            return Ok(state.accepted_participants.len() >= state.threshold_k as usize);
         }
 
         // Add to accepted list
-        state.accepted_guardians.push(guardian_id.clone());
+        state.accepted_participants.push(participant.clone());
 
-        let threshold_reached = state.accepted_guardians.len() >= state.threshold_k as usize;
+        let threshold_reached = state.accepted_participants.len() >= state.threshold_k as usize;
 
         tracing::info!(
             ceremony_id = %ceremony_id,
-            guardian_id = %guardian_id,
-            accepted = state.accepted_guardians.len(),
+            accepted = state.accepted_participants.len(),
             threshold = state.threshold_k,
             threshold_reached,
-            "Guardian accepted invitation"
+            "Participant accepted ceremony"
         );
 
         Ok(threshold_reached)
@@ -208,7 +213,7 @@ impl CeremonyTracker {
 
         tracing::info!(
             ceremony_id = %ceremony_id,
-            accepted = state.accepted_guardians.len(),
+            accepted = state.accepted_participants.len(),
             threshold = state.threshold_k,
             "Ceremony committed"
         );
@@ -333,17 +338,28 @@ impl Default for CeremonyTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::identifiers::AuthorityId;
+    use aura_core::DeviceId;
 
     #[tokio::test]
     async fn test_ceremony_registration() {
         let tracker = CeremonyTracker::new();
 
+        let a = AuthorityId::new_from_entropy([1u8; 32]);
+        let b = AuthorityId::new_from_entropy([2u8; 32]);
+        let c = AuthorityId::new_from_entropy([3u8; 32]);
+
         tracker
             .register(
                 "ceremony-1".to_string(),
+                CeremonyKind::GuardianRotation,
                 2,
                 3,
-                vec!["alice".to_string(), "bob".to_string(), "carol".to_string()],
+                vec![
+                    ParticipantIdentity::guardian(a),
+                    ParticipantIdentity::guardian(b),
+                    ParticipantIdentity::guardian(c),
+                ],
                 100,
             )
             .await
@@ -352,20 +368,29 @@ mod tests {
         let state = tracker.get("ceremony-1").await.unwrap();
         assert_eq!(state.threshold_k, 2);
         assert_eq!(state.total_n, 3);
-        assert_eq!(state.guardian_ids.len(), 3);
-        assert_eq!(state.accepted_guardians.len(), 0);
+        assert_eq!(state.participants.len(), 3);
+        assert_eq!(state.accepted_participants.len(), 0);
     }
 
     #[tokio::test]
     async fn test_guardian_acceptance() {
         let tracker = CeremonyTracker::new();
 
+        let a = AuthorityId::new_from_entropy([1u8; 32]);
+        let b = AuthorityId::new_from_entropy([2u8; 32]);
+        let c = AuthorityId::new_from_entropy([3u8; 32]);
+
         tracker
             .register(
                 "ceremony-1".to_string(),
+                CeremonyKind::GuardianRotation,
                 2,
                 3,
-                vec!["alice".to_string(), "bob".to_string(), "carol".to_string()],
+                vec![
+                    ParticipantIdentity::guardian(a),
+                    ParticipantIdentity::guardian(b),
+                    ParticipantIdentity::guardian(c),
+                ],
                 100,
             )
             .await
@@ -373,34 +398,47 @@ mod tests {
 
         // First acceptance
         let threshold_reached = tracker
-            .mark_accepted("ceremony-1", "alice".to_string())
+            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
             .await
             .unwrap();
         assert!(!threshold_reached);
 
         // Second acceptance - threshold reached
         let threshold_reached = tracker
-            .mark_accepted("ceremony-1", "bob".to_string())
+            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(b))
             .await
             .unwrap();
         assert!(threshold_reached);
 
         let state = tracker.get("ceremony-1").await.unwrap();
-        assert_eq!(state.accepted_guardians.len(), 2);
-        assert!(state.accepted_guardians.contains(&"alice".to_string()));
-        assert!(state.accepted_guardians.contains(&"bob".to_string()));
+        assert_eq!(state.accepted_participants.len(), 2);
+        assert!(state
+            .accepted_participants
+            .contains(&ParticipantIdentity::guardian(a)));
+        assert!(state
+            .accepted_participants
+            .contains(&ParticipantIdentity::guardian(b)));
     }
 
     #[tokio::test]
     async fn test_ceremony_completion() {
         let tracker = CeremonyTracker::new();
 
+        let a = AuthorityId::new_from_entropy([1u8; 32]);
+        let b = AuthorityId::new_from_entropy([2u8; 32]);
+        let c = AuthorityId::new_from_entropy([3u8; 32]);
+
         tracker
             .register(
                 "ceremony-1".to_string(),
+                CeremonyKind::GuardianRotation,
                 2,
                 3,
-                vec!["alice".to_string(), "bob".to_string(), "carol".to_string()],
+                vec![
+                    ParticipantIdentity::guardian(a),
+                    ParticipantIdentity::guardian(b),
+                    ParticipantIdentity::guardian(c),
+                ],
                 100,
             )
             .await
@@ -409,13 +447,13 @@ mod tests {
         assert!(!tracker.is_complete("ceremony-1").await.unwrap());
 
         tracker
-            .mark_accepted("ceremony-1", "alice".to_string())
+            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
             .await
             .unwrap();
         assert!(!tracker.is_complete("ceremony-1").await.unwrap());
 
         let threshold_reached = tracker
-            .mark_accepted("ceremony-1", "bob".to_string())
+            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(b))
             .await
             .unwrap();
         assert!(threshold_reached);
@@ -430,12 +468,21 @@ mod tests {
     async fn test_idempotent_acceptance() {
         let tracker = CeremonyTracker::new();
 
+        let a = AuthorityId::new_from_entropy([1u8; 32]);
+        let b = AuthorityId::new_from_entropy([2u8; 32]);
+        let c = AuthorityId::new_from_entropy([3u8; 32]);
+
         tracker
             .register(
                 "ceremony-1".to_string(),
+                CeremonyKind::GuardianRotation,
                 2,
                 3,
-                vec!["alice".to_string(), "bob".to_string(), "carol".to_string()],
+                vec![
+                    ParticipantIdentity::guardian(a),
+                    ParticipantIdentity::guardian(b),
+                    ParticipantIdentity::guardian(c),
+                ],
                 100,
             )
             .await
@@ -443,28 +490,37 @@ mod tests {
 
         // Accept twice
         tracker
-            .mark_accepted("ceremony-1", "alice".to_string())
+            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
             .await
             .unwrap();
         tracker
-            .mark_accepted("ceremony-1", "alice".to_string())
+            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
             .await
             .unwrap();
 
         let state = tracker.get("ceremony-1").await.unwrap();
-        assert_eq!(state.accepted_guardians.len(), 1);
+        assert_eq!(state.accepted_participants.len(), 1);
     }
 
     #[tokio::test]
     async fn test_ceremony_failure() {
         let tracker = CeremonyTracker::new();
 
+        let a = AuthorityId::new_from_entropy([1u8; 32]);
+        let b = AuthorityId::new_from_entropy([2u8; 32]);
+        let c = AuthorityId::new_from_entropy([3u8; 32]);
+
         tracker
             .register(
                 "ceremony-1".to_string(),
+                CeremonyKind::GuardianRotation,
                 2,
                 3,
-                vec!["alice".to_string(), "bob".to_string(), "carol".to_string()],
+                vec![
+                    ParticipantIdentity::guardian(a),
+                    ParticipantIdentity::guardian(b),
+                    ParticipantIdentity::guardian(c),
+                ],
                 100,
             )
             .await
@@ -478,5 +534,37 @@ mod tests {
         let state = tracker.get("ceremony-1").await.unwrap();
         assert!(state.has_failed);
         assert_eq!(state.error_message, Some("Test failure".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_device_enrollment_ceremony_acceptance() {
+        let tracker = CeremonyTracker::new();
+        let device = DeviceId::new_from_entropy([9u8; 32]);
+
+        tracker
+            .register(
+                "ceremony-device-1".to_string(),
+                CeremonyKind::DeviceEnrollment,
+                1,
+                1,
+                vec![ParticipantIdentity::device(device)],
+                42,
+            )
+            .await
+            .unwrap();
+
+        let state = tracker.get("ceremony-device-1").await.unwrap();
+        assert_eq!(state.kind, CeremonyKind::DeviceEnrollment);
+        assert_eq!(state.threshold_k, 1);
+        assert_eq!(state.total_n, 1);
+
+        let threshold_reached = tracker
+            .mark_accepted("ceremony-device-1", ParticipantIdentity::device(device))
+            .await
+            .unwrap();
+        assert!(threshold_reached);
+
+        tracker.mark_committed("ceremony-device-1").await.unwrap();
+        assert!(tracker.is_complete("ceremony-device-1").await.unwrap());
     }
 }

@@ -1,5 +1,6 @@
 //! Settings screen view state
 
+use super::KeyRotationCeremonyUiState;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::types::{MfaPolicy, SettingsSection};
 
@@ -135,6 +136,53 @@ impl AddDeviceModalState {
 
     pub fn can_submit(&self) -> bool {
         !self.name.trim().is_empty()
+    }
+}
+
+/// State for the device enrollment ("add device") ceremony modal.
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
+#[derive(Clone, Debug, Default)]
+pub struct DeviceEnrollmentCeremonyModalState {
+    /// Ceremony UI state (id/progress/pending epoch)
+    pub ceremony: KeyRotationCeremonyUiState,
+    /// Device name being enrolled (for display)
+    pub device_name: String,
+    /// Enrollment code to import on the new device
+    pub enrollment_code: String,
+}
+
+impl DeviceEnrollmentCeremonyModalState {
+    pub fn started(ceremony_id: String, device_name: String, enrollment_code: String) -> Self {
+        Self {
+            ceremony: KeyRotationCeremonyUiState {
+                ceremony_id: Some(ceremony_id),
+                ..KeyRotationCeremonyUiState::default()
+            },
+            device_name,
+            enrollment_code,
+        }
+    }
+
+    pub fn update_from_status(
+        &mut self,
+        accepted_count: u16,
+        total_count: u16,
+        threshold: u16,
+        is_complete: bool,
+        has_failed: bool,
+        error_message: Option<String>,
+        pending_epoch: Option<u64>,
+    ) {
+        self.ceremony.update_from_status(
+            accepted_count,
+            total_count,
+            threshold,
+            is_complete,
+            has_failed,
+            error_message,
+            pending_epoch,
+        );
     }
 }
 

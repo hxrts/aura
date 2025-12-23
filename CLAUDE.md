@@ -4,7 +4,7 @@
 
 **IMPORTANT**: When starting any session, immediately:
 1. Enter the Nix environment if not already in the shell: `nix develop`
-3. Read `.claude/skills/aura_quick_ref.md` for enhanced context
+3. Read `.claude/skills/aura-quick-ref/SKILL.md` for enhanced context
 4. Provide a 3-sentence project status summary
 
 ## Project Overview

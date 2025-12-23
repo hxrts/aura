@@ -264,6 +264,27 @@ impl DispatchHelper {
                     .await;
                 Ok(())
             }
+            OpResponse::DeviceEnrollmentStarted {
+                ceremony_id: _,
+                enrollment_code,
+                pending_epoch: _,
+                device_id: _,
+            } => {
+                self.toasts
+                    .success(
+                        "device-enrollment",
+                        format!("Device enrollment code: {}", enrollment_code),
+                    )
+                    .await;
+                Ok(())
+            }
+            OpResponse::DeviceRemovalStarted { ceremony_id: _ } => {
+                self.toasts
+                    .success("device-removal", "Device removal started".to_string())
+                    .await;
+                Ok(())
+            }
+
             OpResponse::Ok | OpResponse::Data(_) | OpResponse::List(_) => Ok(()),
         }
     }

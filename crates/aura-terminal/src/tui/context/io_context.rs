@@ -225,6 +225,15 @@ pub struct IoContext {
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
 }
 
+/// Lightweight TUI-facing result of starting device enrollment.
+#[derive(Debug, Clone)]
+pub struct DeviceEnrollmentStartInfo {
+    pub ceremony_id: String,
+    pub enrollment_code: String,
+    pub pending_epoch: u64,
+    pub device_id: String,
+}
+
 impl IoContext {
     /// Create a new IoContextBuilder for flexible construction.
     ///
@@ -563,6 +572,85 @@ impl IoContext {
                 Err(err.to_string())
             }
             None => Err("ExportInvitation not handled".to_string()),
+        }
+    }
+
+    pub async fn create_invitation_code(
+        &self,
+        receiver_id: &str,
+        invitation_type: &str,
+        message: Option<String>,
+        ttl_secs: Option<u64>,
+    ) -> Result<String, String> {
+        match self
+            .operational
+            .execute(&EffectCommand::CreateInvitation {
+                receiver_id: receiver_id.to_string(),
+                invitation_type: invitation_type.to_string(),
+                message,
+                ttl_secs,
+            })
+            .await
+        {
+            Some(Ok(OpResponse::InvitationCode { code, .. })) => Ok(code),
+            Some(Ok(other)) => Err(format!("Unexpected response: {:?}", other)),
+            Some(Err(err)) => {
+                let terr: TerminalError = err.clone().into();
+                self.operational.emit_error(terr).await;
+                Err(err.to_string())
+            }
+            None => Err("CreateInvitation not handled".to_string()),
+        }
+    }
+
+    pub async fn start_device_enrollment(
+        &self,
+        device_name: &str,
+    ) -> Result<DeviceEnrollmentStartInfo, String> {
+        match self
+            .operational
+            .execute(&EffectCommand::AddDevice {
+                device_name: device_name.to_string(),
+            })
+            .await
+        {
+            Some(Ok(OpResponse::DeviceEnrollmentStarted {
+                ceremony_id,
+                enrollment_code,
+                pending_epoch,
+                device_id,
+            })) => Ok(DeviceEnrollmentStartInfo {
+                ceremony_id,
+                enrollment_code,
+                pending_epoch,
+                device_id,
+            }),
+            Some(Ok(other)) => Err(format!("Unexpected response: {:?}", other)),
+            Some(Err(err)) => {
+                let terr: TerminalError = err.clone().into();
+                self.operational.emit_error(terr).await;
+                Err(err.to_string())
+            }
+            None => Err("AddDevice not handled".to_string()),
+        }
+    }
+
+    pub async fn start_device_removal(&self, device_id: &str) -> Result<String, String> {
+        match self
+            .operational
+            .execute(&EffectCommand::RemoveDevice {
+                device_id: device_id.to_string(),
+            })
+            .await
+        {
+            Some(Ok(OpResponse::DeviceRemovalStarted { ceremony_id })) => Ok(ceremony_id),
+            Some(Ok(other)) => Err(format!("Unexpected response: {:?}", other)),
+            Some(Err(err)) => {
+                let terr: TerminalError = err.clone().into();
+                self.operational.emit_error(terr).await;
+                Err(err.to_string())
+            }
+            None => Err("RemoveDevice not handled".to_string()),
         }
     }
 

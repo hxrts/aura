@@ -4,6 +4,7 @@
 //! These define the message flow and guard annotations for invitation ceremonies.
 
 use aura_core::identifiers::AuthorityId;
+use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -95,6 +96,32 @@ pub struct GuardianConfirm {
     pub established: bool,
     /// Resulting relationship identifier
     pub relationship_id: Option<String>,
+}
+
+/// Device enrollment invitation request (adds a device to an account authority).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceEnrollmentRequest {
+    /// Unique invitation identifier
+    pub invitation_id: String,
+    /// Account authority being modified
+    pub subject_authority: AuthorityId,
+    /// Ceremony identifier for the key rotation
+    pub ceremony_id: String,
+    /// Pending epoch created during prepare
+    pub pending_epoch: u64,
+    /// Device id being enrolled
+    pub device_id: DeviceId,
+}
+
+/// Device enrollment acceptance response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceEnrollmentAccept {
+    /// Invitation identifier being accepted
+    pub invitation_id: String,
+    /// Ceremony identifier
+    pub ceremony_id: String,
+    /// Device id that accepted and installed the share
+    pub device_id: DeviceId,
 }
 
 // =============================================================================
