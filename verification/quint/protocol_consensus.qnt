@@ -12,20 +12,45 @@
 // - Fast path selected when valid cached nonces exist
 // - Nonces expire with epoch advancement
 //
+// == Lean Correspondence ==
+// Module: Aura.Consensus (verification/lean/Aura/Consensus/)
+// - Types: Aura.Consensus.Types
+// - Agreement proofs: Aura.Consensus.Agreement
+// - Validity proofs: Aura.Consensus.Validity
+// - Evidence proofs: Aura.Consensus.Evidence
+// - Equivocation proofs: Aura.Consensus.Equivocation
+// - FROST proofs: Aura.Consensus.Frost
+// - Axioms: Aura.Core.Assumptions
+//
+// == Rust Correspondence ==
+// - Types: crates/aura-protocol/src/consensus/types.rs
+// - Protocol: crates/aura-protocol/src/consensus/protocol.rs
+// - FROST: crates/aura-core/src/crypto/tree_signing.rs
+//
 // See: docs/104_consensus.md
 
 module protocol_consensus {
     // ==================== TYPE DEFINITIONS ====================
     // Identifiers for consensus instances, results, and participants.
+    // Lean: Aura.Consensus.Types
 
     type Option[a] = Some(a) | None
 
+    // Lean: Aura.Consensus.Types.ConsensusId
     type ConsensusId = str      // Unique consensus instance identifier
+
+    // Lean: Aura.Consensus.Types.ResultId
     type ResultId = str         // H(Op, prestate) - deterministic result binding
+
+    // Lean: Aura.Consensus.Types.PrestateHash
     type PrestateHash = str     // H(prestate) - ensures witnesses agree on starting state
+
+    // Lean: Aura.Consensus.Types.AuthorityId
     type AuthorityId = str      // Participant identity (device or threshold group)
+
     // ==================== THRESHOLD SIGNATURE TYPES ====================
     // Data binding structure for share verification
+    // Lean: Aura.Consensus.Types.DataBinding
     type DataBinding = {
         bindCid: ConsensusId,
         bindRid: ResultId,
@@ -34,6 +59,7 @@ module protocol_consensus {
 
     // FROST signature share (partial signature) with nonce binding.
     // Models: (share_value, nonce_commitment_binding, signed_data_binding)
+    // Lean: Aura.Consensus.Types.SignatureShare
     type ShareData = {
         shareValue: str,            // The actual share bytes (σ_i)
         nonceBinding: str,          // Binding to nonce commitment (D_i, E_i)
@@ -42,6 +68,7 @@ module protocol_consensus {
 
     // Aggregated k-of-n threshold signature with provenance.
     // Models: (signature_value, binding_context, participant_set)
+    // Lean: Aura.Consensus.Types.ThresholdSignature
     type ThresholdSignature = {
         sigValue: str,              // Aggregated signature σ
         boundCid: ConsensusId,      // Consensus instance bound to signature
@@ -94,6 +121,8 @@ module protocol_consensus {
     }
 
     // The commit fact output - contains the aggregated threshold signature
+    // Lean: Aura.Consensus.Types.CommitFact
+    // Rust: crates/aura-protocol/src/consensus/types.rs::CommitFact
     type CommitFact = {
         cid: ConsensusId,
         rid: ResultId,
@@ -597,9 +626,11 @@ module protocol_consensus {
 
     // ==================== INVARIANTS ====================
     // Safety properties that must hold in every reachable state.
+    // Each invariant corresponds to a Lean theorem in Aura.Consensus.*.
 
     // Safety: Only one CommitFact per consensus instance.
     // Prevents conflicting commits (double-spend protection).
+    // Lean: Aura.Consensus.Agreement.agreement, Aura.Consensus.Agreement.unique_commit
     val InvariantUniqueCommitPerInstance =
         committedFacts.forall(cf1 =>
             committedFacts.forall(cf2 =>
@@ -609,6 +640,7 @@ module protocol_consensus {
 
     // Safety: CommitFact requires threshold attesters.
     // Ensures k-of-n security (can't forge with fewer shares).
+    // Lean: Aura.Consensus.Validity.commit_has_threshold
     val InvariantCommitRequiresThreshold =
         instances.keys().forall(cid => {
             val inst = instances.get(cid)
@@ -631,6 +663,7 @@ module protocol_consensus {
 
     // Safety: Equivocators are excluded from attestation.
     // Byzantine witnesses who vote inconsistently can't contribute.
+    // Lean: Aura.Consensus.Equivocation.exclusion_correctness
     val InvariantEquivocatorsExcluded =
         instances.keys().forall(cid => {
             val inst = instances.get(cid)
@@ -696,6 +729,7 @@ module protocol_consensus {
 
     // Signature binding: CommitFact signature binds to correct cid/rid/pHash.
     // Ensures aggregated signature cannot be replayed for different consensus.
+    // Lean: Aura.Consensus.Frost.share_binding, Aura.Consensus.Validity.validPrestateBinding
     val InvariantSignatureBindsToCommitFact =
         committedFacts.forall(cf =>
             cf.signature.boundCid == cf.cid and
@@ -712,6 +746,7 @@ module protocol_consensus {
 
     // Signature threshold: All committed signatures have valid threshold.
     // Ensures k-of-n security requirement is met.
+    // Lean: Aura.Consensus.Frost.aggregation_threshold, Aura.Core.Assumptions.byzantine_threshold
     val InvariantSignatureThreshold =
         instances.keys().forall(cid => {
             val inst = instances.get(cid)

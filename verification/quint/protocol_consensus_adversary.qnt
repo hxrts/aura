@@ -12,6 +12,20 @@
 //
 // Security assumption: At most f < k Byzantine witnesses (f < threshold).
 //
+// == Lean Correspondence ==
+// Module: Aura.Consensus.Equivocation (verification/lean/Aura/Consensus/Equivocation.lean)
+// - Equivocation detection: Aura.Consensus.Equivocation.hasEquivocated
+// - Detection soundness: Aura.Consensus.Equivocation.detection_soundness
+// - Detection completeness: Aura.Consensus.Equivocation.detection_completeness
+// - Exclusion correctness: Aura.Consensus.Equivocation.exclusion_correctness
+// - Honest protection: Aura.Consensus.Equivocation.honest_never_detected
+// Axioms: Aura.Core.Assumptions (byzantine_threshold)
+//
+// == Rust Correspondence ==
+// - Types: crates/aura-protocol/src/consensus/types.rs::ConflictFact
+// - Detection: crates/aura-protocol/src/consensus/types.rs::detect_conflict
+// - Witness logic: crates/aura-protocol/src/consensus/witness.rs
+//
 // See: docs/004_distributed_systems_contract.md (§6.2 Byzantine Witness Model)
 
 module protocol_consensus_adversary {
@@ -293,8 +307,11 @@ module protocol_consensus_adversary {
     }
 
     // ==================== ADVERSARY INVARIANTS ====================
+    // Safety properties for Byzantine fault tolerance.
+    // Lean correspondence: Aura.Consensus.Equivocation, Aura.Core.Assumptions
 
     // Safety: Byzantine count never exceeds f < k bound.
+    // Lean: Aura.Core.Assumptions.byzantine_threshold (threshold > maxByzantine)
     val InvariantByzantineThreshold =
         core::instances.keys().forall(cid => {
             val inst = core::instances.get(cid)
@@ -302,6 +319,7 @@ module protocol_consensus_adversary {
         })
 
     // Safety: Equivocators are always detected and excluded.
+    // Lean: Aura.Consensus.Equivocation.detection_soundness, detection_completeness
     val InvariantEquivocationDetected =
         core::instances.keys().forall(cid => {
             val inst = core::instances.get(cid)
@@ -322,6 +340,7 @@ module protocol_consensus_adversary {
 
     // Security: Despite Byzantine behavior, honest majority can still commit.
     // If k - f honest witnesses participate, consensus can complete.
+    // Lean: Aura.Consensus.Validity.honest_participation
     val InvariantHonestMajorityCanCommit =
         core::instances.keys().forall(cid => {
             val inst = core::instances.get(cid)

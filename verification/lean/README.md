@@ -1,10 +1,10 @@
 # Aura Lean Verification
 
-This directory contains Lean 4 formal verification modules for Aura's kernel components.
+Formal verification modules for Aura's kernel components using Lean 4.
 
 ## Setup
 
-The Lean toolchain is managed through Nix. To enter the development environment:
+The Lean toolchain is managed through Nix:
 
 ```bash
 nix develop
@@ -12,151 +12,170 @@ nix develop
 
 ## Building
 
-Build the Lean verification modules:
-
 ```bash
 just lean-build
-```
-
-Or directly with lake:
-
-```bash
+# or directly:
 cd verification/lean && lake build
 ```
 
 ## Module Structure
 
-| Module | Description | Theorems |
-|--------|-------------|----------|
-| `Aura/Journal.lean` | CRDT semilattice definitions & instance | `merge_comm`, `merge_assoc`, `merge_idem`, `reduce_deterministic` |
-| `Aura/KeyDerivation.lean` | Contextual key derivation | `derive_unique` (axiomatic) |
-| `Aura/GuardChain.lean` | Guard chain evaluation | `cost_sum` |
-| `Aura/FlowBudget.lean` | Flow budget mathematics | `charge_decreases`, `charge_exact` |
-| `Aura/Frost.lean` | FROST protocol state machine | `aggregate_same_session_round` |
-| `Aura/TimeSystem.lean` | TimeStamp ordering & privacy | `compare_refl`, `compare_trans`, `physical_hidden` |
-| `Aura/Runner.lean` | CLI runner for differential testing | (executable) |
+```
+Aura/
+├── Assumptions.lean          # Cryptographic axioms (FROST, hash, PRF)
+├── Consensus/
+│   ├── Types.lean            # Core consensus data structures
+│   ├── Agreement.lean        # Agreement safety proofs
+│   ├── Validity.lean         # Validity proofs (threshold, prestate)
+│   ├── Evidence.lean         # Evidence CRDT semilattice proofs
+│   ├── Equivocation.lean     # Equivocation detection correctness
+│   ├── Frost.lean            # FROST threshold signature integration
+│   └── Proofs.lean           # Claims bundle aggregation
+├── Journal.lean              # CRDT semilattice proofs
+├── KeyDerivation.lean        # Contextual key derivation isolation
+├── GuardChain.lean           # Guard chain cost calculation
+├── FlowBudget.lean           # Budget charging monotonicity
+├── Frost.lean                # FROST state machine correctness
+├── TimeSystem.lean           # Timestamp ordering & privacy
+└── Runner.lean               # CLI for differential testing
+```
 
 ## Proof Status
 
-All core proofs are complete:
+All proofs are complete (no `sorry` placeholders):
 
-| Module | Status |
-|--------|--------|
-| `GuardChain` | ● Complete |
-| `Journal` | ● Complete |
-| `KeyDerivation` | ● Complete |
-| `FlowBudget` | ● Complete |
-| `Frost` | ● Complete |
-| `TimeSystem` | ● Complete |
-| `Runner` | ● Complete |
+| Module | Status | Key Theorems |
+|--------|--------|--------------|
+| `Assumptions` | ● Complete | Cryptographic axioms for FROST, hash, PRF |
+| `Consensus.Agreement` | ● Complete | `agreement`, `unique_commit`, `commit_determinism` |
+| `Consensus.Validity` | ● Complete | `threshold_reflexivity`, `prestate_binding` |
+| `Consensus.Evidence` | ● Complete | `merge_comm`, `merge_assoc`, `merge_idem` |
+| `Consensus.Equivocation` | ● Complete | `detection_soundness`, `detection_completeness`, `honest_never_detected` |
+| `Consensus.Frost` | ● Complete | `share_session_consistency`, `aggregatable_implies_valid_commit` |
+| `Journal` | ● Complete | `merge_comm`, `merge_assoc`, `merge_idem` |
+| `KeyDerivation` | ● Complete | `derive_unique` (axiomatic) |
+| `GuardChain` | ● Complete | `cost_sum` |
+| `FlowBudget` | ● Complete | `charge_decreases`, `charge_exact` |
+| `Frost` | ● Complete | `aggregate_same_session_round` |
+| `TimeSystem` | ● Complete | `compare_refl`, `compare_trans`, `physical_hidden` |
 
 ## Key Properties Proven
 
-### Journal CRDT (Semilattice Laws)
+### Consensus Agreement
+- **Agreement**: Valid commits for the same consensus instance have the same result
+- **Unique Commit**: At most one valid CommitFact per ConsensusId
+- **Commit Determinism**: Same threshold shares produce the same commit
+
+### Consensus Evidence (CRDT)
+- **Commutativity**: `merge e1 e2 ≃ merge e2 e1` (membership-wise)
+- **Associativity**: `merge (merge e1 e2) e3 ≃ merge e1 (merge e2 e3)`
+- **Idempotence**: `merge e e ≃ e`
+- **Monotonicity**: Votes and equivocators only grow under merge
+
+### Equivocation Detection
+- **Soundness**: Detection only reports actual equivocation
+- **Completeness**: All equivocations are detectable
+- **Honest Safety**: Honest witnesses are never falsely accused
+
+### FROST Integration
+- **Session Consistency**: All shares in aggregation have same session
+- **Threshold Requirement**: Aggregation requires ≥k shares
+- **Share Binding**: Shares are cryptographically bound to consensus data
+
+### Journal CRDT
 - **Commutativity**: `merge j1 j2 ≃ merge j2 j1`
 - **Associativity**: `merge (merge j1 j2) j3 ≃ merge j1 (merge j2 j3)`
 - **Idempotence**: `merge j j ≃ j`
 
 ### Flow Budget
-- **Monotonic decrease**: Charging never increases available budget
-- **Exact charge**: Charging exact amount results in zero budget
-
-### FROST Protocol
-- **Session/round consistency**: Successful aggregation implies all shares have the same session ID and round
+- **Monotonic Decrease**: Charging never increases available budget
+- **Exact Charge**: Charging exact amount results in zero budget
 
 ### TimeSystem
 - **Reflexivity**: `compare policy t t = .eq`
 - **Transitivity**: `compare policy a b = .lt → compare policy b c = .lt → compare policy a c = .lt`
-- **Privacy**: Physical time is hidden when `ignorePhysical = true`
+- **Privacy**: Physical time hidden when `ignorePhysical = true`
+
+## Claims Bundles
+
+Each module exports a Claims bundle for reviewers:
+
+```lean
+import Aura.Consensus.Proofs
+
+#check Aura.Consensus.Agreement.agreementClaims
+#check Aura.Consensus.Validity.validityClaims
+#check Aura.Consensus.Evidence.evidenceClaims
+#check Aura.Consensus.Equivocation.equivocationClaims
+#check Aura.Consensus.Frost.frostClaims
+```
+
+Axioms are documented in `Aura.Assumptions`.
 
 ## Justfile Commands
 
 ```bash
-just lean-check    # Build and check proofs
-just lean-status   # Show proof status summary
+just lean-build    # Build and check proofs
 just lean-full     # Full workflow (clean + build + verify)
 just lean-clean    # Clean build artifacts
 ```
 
 ## Implementation Notes
 
-### Manual BEq Instances (Frost.lean)
+### Bool Conditional Reduction
 
-The FROST module uses manually defined `BEq` instances instead of `deriving BEq`:
+Proofs involving `if (bne x y) then ... else ...` require specific simp lemmas:
+
+```lean
+have hne : (e1.consensusId != e2.consensusId) = false := by
+  rw [bne_eq_false_iff_eq, h]
+simp only [hne, Bool.false_eq_true, ite_false]
+```
+
+The pattern `Bool.false_eq_true, ite_false` reduces `if false = true then a else b` to `b`.
+
+### Manual BEq Instances
+
+FROST module uses manually defined `BEq` instances for proof reducibility:
 
 ```lean
 instance : BEq SessionId where
   beq a b := a.id == b.id
 ```
 
-This is necessary because Lean 4's derived `BEq` instances create opaque internal functions (like `beqSessionId✝`) that cannot be unfolded by `simp`. Manual instances allow the proofs to reduce `(a == b)` to `decide (a = b)`, which can then be converted to equality via `of_decide_eq_true`.
+### Membership-Based Set Equivalence
 
-### Membership-Based Set Equivalence (Journal.lean)
-
-Journal equivalence is defined via membership rather than structural equality:
+Journal and Evidence equivalence use membership rather than structural equality:
 
 ```lean
 def Journal.equiv (j1 j2 : Journal) : Prop :=
   ∀ f, f ∈ j1 ↔ f ∈ j2
 ```
 
-This matches CRDT semantics where we care about the set of facts, not their list ordering.
-
 ## Differential Testing
 
-The Lean oracle can be used for differential testing against Rust implementations:
+The Lean oracle supports differential testing against Rust:
 
 ```bash
-# Build the Lean oracle CLI
 just lean-oracle-build
-
-# Run differential tests
 just test-differential
 ```
 
-The oracle exposes these commands via JSON stdin/stdout:
-- `aura_verifier journal-merge` - Test journal merge operations
-- `aura_verifier journal-reduce` - Test journal reduction
-- `aura_verifier flow-charge` - Test flow budget charging
-- `aura_verifier timestamp-compare` - Test timestamp comparison
-
-See `crates/aura-testkit/tests/lean_differential.rs` for property-based tests.
+Oracle commands (JSON stdin/stdout):
+- `aura_verifier journal-merge`
+- `aura_verifier journal-reduce`
+- `aura_verifier flow-charge`
+- `aura_verifier timestamp-compare`
 
 ## CI Integration
 
-Two CI jobs verify the formal proofs:
+Two CI jobs verify formal proofs:
 
-1. **lean-proofs**: Builds all Lean modules, checks for `sorry` usage
+1. **lean-proofs**: Builds all Lean modules
 2. **differential-testing**: Runs Rust vs Lean oracle tests
 
-Both jobs only run when relevant files change:
+Jobs trigger on changes to:
 - `verification/lean/**`
 - `crates/aura-journal/**`
 - `crates/aura-core/src/time/**`
 - `crates/aura-testkit/**`
-
-## Verification Failure Triage
-
-When CI fails, use this guide to diagnose:
-
-| Failure Type | Symptom | Action |
-|--------------|---------|--------|
-| **Lean build failure** | `lake build` fails | Check Lean syntax errors in modified files |
-| **Proof regression** | `sorry` added or theorem fails | Investigate why the property no longer holds |
-| **Differential test mismatch** | Rust ≠ Lean output | Either Rust has a bug, or Lean spec needs updating |
-| **Oracle version mismatch** | Version check fails | Update `LeanOracle::expected_version` after Lean changes |
-
-### Common Issues
-
-1. **Rust implementation bug**: If differential test fails, the Rust code may not match the proven specification. Compare the algorithm step-by-step.
-
-2. **Spec drift**: If the Lean model was updated but Rust wasn't (or vice versa), ensure both stay in sync.
-
-3. **Semantic mismatch**: The Lean model uses list-based Journal with membership equivalence (`≃`). Rust implementations should compare using set semantics.
-
-## Next Steps
-
-1. ~~Add JSON serialization for Rust↔Lean differential testing~~ ✅
-2. ~~Integrate CLI runner with `aura-testkit` fixtures~~ ✅
-3. Add Aeneas translation for critical Rust functions (Phase 2)
-4. Add more comprehensive proof coverage for edge cases

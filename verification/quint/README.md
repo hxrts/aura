@@ -2,6 +2,12 @@
 
 Formal specifications of the Aura protocol using Quint 0.25.x, an executable specification language based on the Temporal Logic of Actions (TLA).
 
+## Related Documentation
+
+- **[STYLE.md](./STYLE.md)** - Quint coding conventions for this project
+- **[../CORRESPONDENCE.md](../CORRESPONDENCE.md)** - Mapping between Quint invariants and Lean theorems
+- **[../lean/STYLE.md](../lean/STYLE.md)** - Lean 4 coding conventions
+
 ## Getting Started
 
 Enter the Nix development environment:
@@ -52,7 +58,9 @@ Core protocol state machines modeling Aura's distributed protocols:
 | `protocol_sbb.qnt` | Social Bulletin Board gossip | [Rendezvous](../../docs/110_rendezvous.md) |
 | `protocol_journal.qnt` | CRDT journal operations | [Journal Guide](../../docs/102_journal.md) |
 | `protocol_signals.qnt` | Protocol signaling utilities | - |
-| `protocol_consensus.qnt` | Fast-path/fallback consensus with threshold signatures | [Consensus](../../docs/104_consensus.md) |
+| `protocol_consensus.qnt` | Fast-path/fallback consensus with threshold signatures | [Consensus](../../docs/104_consensus.md), [Lean Proofs](../lean/Aura/Consensus/) |
+| `protocol_consensus_adversary.qnt` | Byzantine adversary models for consensus | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
+| `protocol_consensus_liveness.qnt` | Liveness and termination properties | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
 | `protocol_cross_interaction.qnt` | Recovery∥Consensus concurrent execution safety | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
 | `protocol_anti_entropy.qnt` | CRDT delta sync and eventual convergence | [Maintenance](../../docs/111_maintenance.md) |
 | `protocol_epochs.qnt` | Epoch transitions and receipt validity windows | [Transport](../../docs/108_transport_and_information_flow.md) |

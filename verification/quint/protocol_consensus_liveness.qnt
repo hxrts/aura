@@ -7,6 +7,20 @@
 // - Failure mode characterization
 // - Timeout and retry logic
 //
+// == Lean Correspondence ==
+// Module: Aura.Consensus.* (verification/lean/Aura/Consensus/)
+// - Liveness is not directly proven in Lean (state machine model checking in Quint)
+// - Safety invariants that support liveness:
+//   - Aura.Consensus.Agreement.agreement (unique commit per instance)
+//   - Aura.Consensus.Validity.honest_participation (honest majority can commit)
+//   - Aura.Consensus.Frost.aggregation_threshold (threshold requirement)
+// - Byzantine threshold: Aura.Core.Assumptions.byzantine_threshold
+//
+// == Rust Correspondence ==
+// - Timeout handling: crates/aura-protocol/src/consensus/coordinator.rs
+// - Fallback logic: crates/aura-protocol/src/consensus/fallback.rs
+// - Gossip: crates/aura-sync/src/protocols/anti_entropy.rs
+//
 // See: docs/004_distributed_systems_contract.md §4, docs/104_consensus.md
 //
 // Key Liveness Properties:
@@ -415,8 +429,11 @@ module protocol_consensus_liveness {
         core::instances.keys().forall(cid => isTerminated(core::instances.get(cid)))
 
     // ==================== LIVENESS INVARIANTS ====================
+    // These properties ensure consensus eventually terminates.
+    // Note: Liveness proven via model checking, not Lean theorems.
 
     // Progress: Under synchrony with honest quorum, active instances make progress
+    // Lean support: Aura.Consensus.Validity.honest_participation
     val InvariantProgressUnderSynchrony =
         gstReached implies core::instances.keys().forall(cid => {
             val inst = core::instances.get(cid)
@@ -430,6 +447,7 @@ module protocol_consensus_liveness {
         })
 
     // Byzantine tolerance: < threshold Byzantine witnesses cannot prevent termination
+    // Lean: Aura.Core.Assumptions.byzantine_threshold
     val InvariantByzantineTolerance =
         core::instances.keys().forall(cid => {
             val inst = core::instances.get(cid)
