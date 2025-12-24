@@ -498,6 +498,60 @@ module protocol_dkg {
       isCompleted implies hasOutcome
     })
 
+  // ============ STRENGTHENED INVARIANTS (T3c.12) ============
+  // Share consistency: participants with shares must be in the configured participant set.
+  val InvariantShareConsistency =
+    participantShares.keys().forall(pid =>
+      if (pid.in(participantShares.keys()) and pid.in(participants.keys())) {
+        val shareMap = participantShares.get(pid)
+        shareMap.keys().subseteq(getOrDefaultSet(participants, pid))
+      } else true
+    )
+
+  // Commitment consistency: participants with commitments must be in the configured set.
+  val InvariantCommitmentConsistency =
+    dealerCommitments.keys().forall(pid =>
+      if (pid.in(dealerCommitments.keys()) and pid.in(participants.keys())) {
+        val commitMap = dealerCommitments.get(pid)
+        commitMap.keys().subseteq(getOrDefaultSet(participants, pid))
+      } else true
+    )
+
+  // Verification consistency: verifiers must be in the participant set.
+  val InvariantVerificationConsistency =
+    verifierResponses.keys().forall(pid =>
+      if (pid.in(verifierResponses.keys()) and pid.in(participants.keys())) {
+        val verifyMap = verifierResponses.get(pid)
+        verifyMap.keys().subseteq(getOrDefaultSet(participants, pid))
+      } else true
+    )
+
+  // Outcome matches participants: completed DKG outcome has correct participants.
+  val InvariantOutcomeParticipantsMatch =
+    outcome.keys().forall(pid => {
+      val outcomeOpt = outcome.get(pid)
+      match outcomeOpt {
+        | Some(o) => o.participants == getOrDefaultSet(participants, pid)
+        | None => true
+      }
+    })
+
+  // Combined well-formed state predicate.
+  val WellFormedDkgState = all {
+    InvariantThresholdBounds,
+    InvariantCommitmentsRequireConfiguration,
+    InvariantPhaseCommitmentCounts,
+    InvariantSharesOnlyAfterVerification,
+    InvariantLifecycleStatusDefined,
+    InvariantLifecycleStatusMatchesPhase,
+    InvariantLifecycleEffectsEmpty,
+    InvariantOutcomeWhenCompleted,
+    InvariantShareConsistency,
+    InvariantCommitmentConsistency,
+    InvariantVerificationConsistency,
+    InvariantOutcomeParticipantsMatch
+  }
+
   // ============ STEP RELATION (for trace generation) ============
   // Nondeterministically choose any enabled action.
 

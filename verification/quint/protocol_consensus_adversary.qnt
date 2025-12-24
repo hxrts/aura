@@ -34,7 +34,9 @@ module protocol_consensus_adversary {
     // Local Option type for match patterns (Quint doesn't allow qualified match patterns)
     type Option[a] = Some(a) | None
 
-    // ==================== ADVERSARY STATE ====================
+    // ════════════════════════════════════════════════════════════════════════
+    // ADVERSARY STATE
+    // ════════════════════════════════════════════════════════════════════════
 
     // Set of Byzantine (adversarial) witnesses - at most f < threshold
     var byzantineWitnesses: Set[core::AuthorityId]
@@ -52,19 +54,71 @@ module protocol_consensus_adversary {
     }
     var delayedActions: Set[DelayedAction]
 
-    // ==================== ADVERSARY HELPERS ====================
+    // ════════════════════════════════════════════════════════════════════════
+    // EXPOSE: SEMANTIC INTERFACE
 
-    // Check if a witness is Byzantine
+    // These predicates define Byzantine behavior MEANING.
+    // - Rust conformance tests verify these properties
+    // - Changing these requires updating Rust implementation
+    // - Lean proofs reference these definitions
+    //
+    // Exposed predicates:
+    //   - isByzantine: whether a witness is under adversary control
+    //   - canEquivocate: whether a Byzantine witness can submit conflicting shares
+    //   - byzantineThresholdOk: f < k bound holds
+    //   - WellFormedAdversaryState: combined adversary invariant
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// Check if a witness is Byzantine (under adversary control).
+    /// Lean: Aura.Assumptions.byzantine_threshold models adversary capability
+    /// Rust: consensus::adversary::is_byzantine
     pure def isByzantine(witness: core::AuthorityId, byzantines: Set[core::AuthorityId]): bool =
         byzantines.contains(witness)
+
+    /// Check if a Byzantine witness can equivocate for a consensus instance.
+    /// Lean: Aura.Consensus.Equivocation.hasEquivocated precondition
+    pure def canEquivocate(
+        witness: core::AuthorityId,
+        inst: core::ConsensusInstance,
+        byzantines: Set[core::AuthorityId]
+    ): bool = all {
+        isByzantine(witness, byzantines),
+        inst.witnesses.contains(witness),
+        inst.phase == core::FastPathActive or inst.phase == core::FallbackActive,
+        not(core::hasProposal(inst.proposals, witness))
+    }
+
+    /// Check Byzantine threshold: f < k (strictly less than threshold).
+    /// Lean: Aura.Assumptions.byzantine_threshold
+    /// This is the fundamental security assumption for threshold protocols.
+    pure def byzantineThresholdOk(byzantines: Set[core::AuthorityId], threshold: int): bool =
+        byzantines.size() < threshold
+
+    /// Combined adversary state well-formedness.
+    /// Ensures adversary model maintains safety assumptions.
+    pure def WellFormedAdversaryState(
+        insts: core::ConsensusId -> core::ConsensusInstance,
+        byzantines: Set[core::AuthorityId],
+        compromised: Set[core::AuthorityId]
+    ): bool = all {
+        // Byzantine threshold maintained for all instances
+        insts.keys().forall(cid => {
+            val inst = insts.get(cid)
+            countByzantine(inst.witnesses, byzantines) < inst.threshold
+        }),
+        // Compromised nonces subset of Byzantine witnesses
+        compromised.subseteq(byzantines)
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // INTERNAL HELPERS
+
+    // Implementation utilities. Do not reference in Rust conformance tests.
+    // ════════════════════════════════════════════════════════════════════════
 
     // Count Byzantine witnesses in a set
     pure def countByzantine(witnesses: Set[core::AuthorityId], byzantines: Set[core::AuthorityId]): int =
         witnesses.intersect(byzantines).size()
-
-    // Check Byzantine threshold: f < k (strictly less than threshold)
-    pure def byzantineThresholdOk(byzantines: Set[core::AuthorityId], threshold: int): bool =
-        byzantines.size() < threshold
 
     // ==================== BYZANTINE ACTIONS ====================
 

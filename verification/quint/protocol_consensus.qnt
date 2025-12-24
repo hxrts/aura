@@ -161,7 +161,113 @@ module protocol_consensus {
     // Nonces valid for N epochs (configurable constant)
     pure val NONCE_VALIDITY_WINDOW: int = 3
 
-    // ==================== HELPER FUNCTIONS ====================
+    // ════════════════════════════════════════════════════════════════════════
+    // EXPOSE: SEMANTIC INTERFACE
+    //
+    // These predicates define protocol MEANING.
+    // - Rust conformance tests verify these properties
+    // - Changing these requires updating Rust implementation
+    // - Lean proofs reference these definitions
+    //
+    // Exposed predicates:
+    //   - ValidCommit: what makes a commit fact valid
+    //   - ValidShare: what makes a signature share valid
+    //   - ValidInstance: instance well-formedness
+    //   - sharesConsistent: share agreement predicate
+    //   - canCommit: commit precondition (threshold reached)
+    //   - WellFormedState: global state invariant (combines all invariants)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// A CommitFact is valid if it has correct bindings and threshold attesters.
+    /// Lean: Aura.Consensus.Validity.validity
+    /// Rust: consensus::types::CommitFact::is_valid
+    pure def ValidCommit(cf: CommitFact, threshold: int): bool = all {
+        // Signature binds to the commit fact's consensus/result/prestate
+        cf.signature.boundCid == cf.cid,
+        cf.signature.boundRid == cf.rid,
+        cf.signature.boundPHash == cf.prestateHash,
+        // Signers match attesters
+        cf.signature.signerSet == cf.attesters,
+        // Threshold requirement met
+        cf.attesters.size() >= threshold,
+        // Signature value is non-empty (simplified verification)
+        cf.signature.sigValue != ""
+    }
+
+    /// A signature share is valid if it binds to correct data and has valid nonce.
+    /// Lean: Aura.Consensus.Frost.share_binding
+    /// Rust: consensus::protocol::verify_share
+    pure def ValidShare(share: ShareData, cid: ConsensusId, rid: ResultId, pHash: PrestateHash): bool = all {
+        share.dataBinding.bindCid == cid,
+        share.dataBinding.bindRid == rid,
+        share.dataBinding.bindPHash == pHash,
+        share.shareValue != "",
+        share.nonceBinding != ""
+    }
+
+    /// A consensus instance is well-formed if it has valid configuration.
+    /// Lean: Aura.Consensus.Types (instance well-formedness)
+    pure def ValidInstance(inst: ConsensusInstance): bool = all {
+        inst.threshold >= 1,
+        inst.witnesses.size() >= inst.threshold,
+        inst.proposals.forall(p => inst.witnesses.contains(p.witness)),
+        inst.equivocators.subseteq(inst.witnesses)
+    }
+
+    /// Shares are consistent if all match the same (rid, pHash) binding.
+    /// Lean: Aura.Consensus.Frost.share_session_consistency
+    pure def sharesConsistent(proposals: Set[ShareProposal], rid: ResultId, pHash: PrestateHash): bool =
+        val matchingProps = proposals.filter(p => p.resultId == rid and p.prestateHash == pHash)
+        matchingProps.forall(p => isValidDataBinding(p.share.dataBinding))
+
+    /// Commit precondition: threshold matching shares exist.
+    /// Lean: Aura.Consensus.Validity.commit_has_threshold
+    pure def canCommit(inst: ConsensusInstance, rid: ResultId): bool = {
+        val matchingCount = inst.proposals.filter(p =>
+            p.resultId == rid and p.prestateHash == inst.prestateHash
+        ).size()
+        matchingCount >= inst.threshold
+    }
+
+    /// Global state well-formedness (combines all invariants).
+    /// This is the master predicate for state validity.
+    pure def WellFormedState(
+        insts: ConsensusId -> ConsensusInstance,
+        committed: Set[CommitFact],
+        nonces: AuthorityId -> Option[CachedNonce],
+        epoch: Epoch
+    ): bool = all {
+        // All instances are well-formed
+        insts.keys().forall(cid => ValidInstance(insts.get(cid))),
+        // All committed facts are valid
+        committed.forall(cf =>
+            cf.cid.in(insts.keys()) implies ValidCommit(cf, insts.get(cf.cid).threshold)
+        ),
+        // Unique commit per instance (agreement)
+        committed.forall(cf1 => committed.forall(cf2 =>
+            cf1.cid == cf2.cid implies cf1.rid == cf2.rid
+        )),
+        // Equivocators excluded from attestation
+        insts.keys().forall(cid => {
+            val inst = insts.get(cid)
+            match inst.commitFact {
+                | Some(cf) => inst.equivocators.intersect(cf.attesters).size() == 0
+                | None => true
+            }
+        }),
+        // Nonces have valid epochs
+        nonces.keys().forall(w => match nonces.get(w) {
+            | Some(n) => n.epoch <= epoch
+            | None => true
+        })
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // INTERNAL HELPERS
+
+    // Implementation utilities. Do not reference in Rust conformance tests.
+    // These may change without requiring implementation updates.
+    // ════════════════════════════════════════════════════════════════════════
 
     pure def getOrDefaultInstance(m: ConsensusId -> ConsensusInstance, cid: ConsensusId): Option[ConsensusInstance] =
         if (cid.in(m.keys())) Some(m.get(cid)) else None
@@ -213,12 +319,6 @@ module protocol_consensus {
         // Share value must be non-empty
         share.shareValue != ""
     }
-
-    // Verify shares are consistent (all bind to same data)
-    pure def sharesConsistent(proposals: Set[ShareProposal], rid: ResultId, pHash: PrestateHash): bool =
-        val matchingProps = proposals.filter(p => p.resultId == rid and p.prestateHash == pHash)
-        // All shares have valid data binding (non-empty)
-        matchingProps.forall(p => isValidDataBinding(p.share.dataBinding))
 
     // Generate aggregated threshold signature from k valid shares
     // Models FROST signature aggregation: σ = Σ σ_i
@@ -624,9 +724,17 @@ module protocol_consensus {
         witnessNonces' = witnessNonces  // Nonces remain but validity checked against new epoch
     }
 
-    // ==================== INVARIANTS ====================
+    // ════════════════════════════════════════════════════════════════════════
+    // INVARIANTS
+    // ════════════════════════════════════════════════════════════════════════
     // Safety properties that must hold in every reachable state.
     // Each invariant corresponds to a Lean theorem in Aura.Consensus.*.
+    //
+    // For model checking, use: quint run --invariant=AllInvariants protocol_consensus.qnt
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// Combined invariant for model checking - uses WellFormedState predicate.
+    val AllInvariants = WellFormedState(instances, committedFacts, witnessNonces, currentEpoch)
 
     // Safety: Only one CommitFact per consensus instance.
     // Prevents conflicting commits (double-spend protection).

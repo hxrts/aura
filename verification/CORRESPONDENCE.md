@@ -59,7 +59,7 @@ This document maps Quint model invariants to Lean theorem proofs, establishing a
 | - | `Aura.Consensus.Frost.share_session_consistency` | ✓ proven |
 | - | `Aura.Consensus.Frost.share_result_consistency` | ✓ proven |
 | - | `Aura.Consensus.Frost.distinct_signers` | ✓ proven |
-| - | `Aura.Consensus.Frost.share_binding` | `sorry` |
+| - | `Aura.Consensus.Frost.share_binding` | ✓ proven |
 
 **Claims Bundle**: `Aura.Consensus.Frost.frostClaims`
 
@@ -67,11 +67,11 @@ This document maps Quint model invariants to Lean theorem proofs, establishing a
 
 | Quint Invariant | Lean Theorem | Status |
 |-----------------|--------------|--------|
-| - | `Aura.Consensus.Evidence.merge_comm_votes` | `sorry` |
-| - | `Aura.Consensus.Evidence.merge_assoc_votes` | `sorry` |
-| - | `Aura.Consensus.Evidence.merge_idem` | `sorry` |
-| - | `Aura.Consensus.Evidence.merge_preserves_commit` | `sorry` |
-| - | `Aura.Consensus.Evidence.commit_monotonic` | `sorry` |
+| - | `Aura.Consensus.Evidence.merge_comm_votes` | ✓ proven |
+| - | `Aura.Consensus.Evidence.merge_assoc_votes` | ✓ proven |
+| - | `Aura.Consensus.Evidence.merge_idem` | ✓ proven |
+| - | `Aura.Consensus.Evidence.merge_preserves_commit` | ✓ proven |
+| - | `Aura.Consensus.Evidence.commit_monotonic` | ✓ proven |
 
 **Claims Bundle**: `Aura.Consensus.Evidence.evidenceClaims`
 
@@ -79,10 +79,10 @@ This document maps Quint model invariants to Lean theorem proofs, establishing a
 
 | Quint Invariant | Lean Theorem | Status |
 |-----------------|--------------|--------|
-| `InvariantEquivocationDetected` | `Aura.Consensus.Equivocation.detection_soundness` | `sorry` |
-| `InvariantEquivocationDetected` | `Aura.Consensus.Equivocation.detection_completeness` | `sorry` |
+| `InvariantEquivocationDetected` | `Aura.Consensus.Equivocation.detection_soundness` | ✓ proven |
+| `InvariantEquivocationDetected` | `Aura.Consensus.Equivocation.detection_completeness` | ✓ proven |
 | `InvariantEquivocatorsExcluded` | `Aura.Consensus.Equivocation.exclusion_correctness` | ✓ proven |
-| `InvariantHonestMajorityCanCommit` | `Aura.Consensus.Equivocation.honest_never_detected` | `sorry` |
+| `InvariantHonestMajorityCanCommit` | `Aura.Consensus.Equivocation.honest_never_detected` | ✓ proven |
 | - | `Aura.Consensus.Equivocation.verified_proof_sound` | ✓ proven |
 
 **Claims Bundle**: `Aura.Consensus.Equivocation.equivocationClaims`
@@ -134,6 +134,8 @@ verification/
 │           ├── Evidence.lean       # Evidence CRDT proofs
 │           ├── Equivocation.lean   # Equivocation proofs
 │           ├── Frost.lean          # FROST integration proofs
+│           ├── Liveness.lean       # Liveness claims (axioms for temporal)
+│           ├── Adversary.lean      # Byzantine adversary model
 │           └── Proofs.lean         # Claims bundle summary
 └── quint/
     ├── STYLE.md                    # Quint coding conventions
@@ -147,17 +149,14 @@ verification/
 
 ### Lean Proofs
 
-**Completed (no sorry)**:
+**All proofs completed (no sorry)** as of 2024-12-24:
 - Validity reflexive properties (commit_has_threshold, validity, distinct_signers)
-- FROST aggregation properties (session/result consistency, threshold)
-- Equivocation exclusion correctness
+- FROST aggregation properties (session/result consistency, threshold, share_binding)
+- Equivocation exclusion correctness, detection soundness/completeness
 - Validity honest participation
-
-**Placeholder (sorry)**:
-- Agreement properties (require FROST uniqueness axiom connection)
-- Evidence CRDT properties (require list dedup lemmas)
-- Equivocation detection soundness/completeness
-- FROST share binding
+- Agreement properties (connected to FROST uniqueness axiom)
+- Evidence CRDT properties (using pure Lean list dedup lemmas)
+- All claims bundles fully instantiated
 
 ### Quint Model Checking
 
@@ -206,6 +205,62 @@ import Aura.Consensus.Proofs
 #check Aura.Consensus.Frost.frostClaims
 ```
 
+## Liveness Properties (Liveness.lean)
+
+| Quint Property | Lean Type/Theorem | Status |
+|----------------|-------------------|--------|
+| `isSynchronous` | `Aura.Consensus.Liveness.isSynchronous` | ✓ |
+| `canMakeProgress` | `Aura.Consensus.Liveness.canMakeProgress` | ✓ |
+| `SynchronyState` | `Aura.Consensus.Liveness.SynchronyState` | ✓ |
+| `ProgressCondition` | `Aura.Consensus.Liveness.ProgressCondition` | ✓ |
+| `FastPathProgressCheck` | `Aura.Consensus.Liveness.livenessClaims.fastPathBound` | axiom |
+| `SlowPathProgressCheck` | `Aura.Consensus.Liveness.livenessClaims.fallbackBound` | axiom |
+| `InvariantProgressUnderSynchrony` | `Aura.Consensus.Liveness.livenessClaims.terminationUnderSynchrony` | axiom |
+| `NoDeadlock` | `Aura.Consensus.Liveness.livenessClaims.noDeadlock` | axiom |
+
+**Claims Bundle**: `Aura.Consensus.Liveness.livenessClaims`
+
+## Adversary Properties (Adversary.lean)
+
+| Quint Property | Lean Type/Theorem | Status |
+|----------------|-------------------|--------|
+| `isByzantine` | `Aura.Consensus.Adversary.isByzantine` | ✓ |
+| `canEquivocate` | `Aura.Consensus.Adversary.hasEquivocated` | ✓ |
+| `byzantineThresholdOk` | `Aura.Consensus.Adversary.byzantineThresholdOk` | ✓ |
+| `ByzantineWitness` | `Aura.Consensus.Adversary.ByzantineWitness` | ✓ |
+| `AdversaryState` | `Aura.Consensus.Adversary.AdversaryState` | ✓ |
+| `EquivocationProof` | `Aura.Consensus.Adversary.EquivocationProof` | ✓ |
+| `InvariantEquivocationDetected` | `Aura.Consensus.Adversary.adversaryClaims.equivocation_detectable` | ✓ claim |
+| `InvariantHonestMajorityCanCommit` | `Aura.Consensus.Adversary.adversaryClaims.honest_majority_sufficient` | ✓ claim |
+| `InvariantByzantineThreshold` | `Aura.Consensus.Adversary.adversaryClaims.byzantine_cannot_forge` | ✓ claim |
+| `InvariantEquivocatorsExcluded` | `Aura.Consensus.Adversary.adversaryClaims.equivocators_excluded` | ✓ claim |
+
+**Claims Bundle**: `Aura.Consensus.Adversary.adversaryClaims`
+
+## Validation Checklist
+
+Use this checklist to validate correspondence completeness:
+
+- [x] Every Lean type has documented Quint/Rust equivalent (Types correspondence table)
+- [x] Every Quint EXPOSE predicate has documented Lean/Rust equivalent
+  - `protocol_consensus.qnt`: ValidCommit, WellFormedState, ValidShare, sharesConsistent, canCommit
+  - `protocol_consensus_adversary.qnt`: isByzantine, canEquivocate, byzantineThresholdOk
+  - `protocol_consensus_liveness.qnt`: isSynchronous, canMakeProgress, isTerminal, hasQuorumOnline
+- [x] Every Lean theorem has documented Quint invariant equivalent (Invariant-Theorem tables)
+- [x] Every cross-reference in Lean points to existing Quint location
+  - Types.lean → protocol_consensus.qnt TYPES
+  - Agreement.lean → protocol_consensus.qnt INVARIANTS
+  - Validity.lean → protocol_consensus.qnt INVARIANTS
+  - Evidence.lean → protocol_consensus.qnt INVARIANTS
+  - Equivocation.lean → protocol_consensus_adversary.qnt
+  - Frost.lean → protocol_consensus.qnt (signature properties)
+  - Liveness.lean → protocol_consensus_liveness.qnt
+  - Adversary.lean → protocol_consensus_adversary.qnt
+- [x] Every cross-reference in Quint points to existing Lean location
+  - protocol_consensus.qnt → Aura.Consensus.*
+  - protocol_consensus_adversary.qnt → Aura.Consensus.Equivocation, Aura.Consensus.Adversary
+  - protocol_consensus_liveness.qnt → Aura.Consensus.Liveness
+
 ## Maintaining Correspondence
 
 When modifying verification:
@@ -214,3 +269,4 @@ When modifying verification:
 2. **Completing Lean proofs**: Update status in this correspondence map
 3. **Adding types**: Update both Quint and Lean, add to Types correspondence table
 4. **Changing axioms**: Update Assumptions.lean and document impact
+5. **Updating EXPOSE predicates**: Ensure Lean/Rust equivalents are documented

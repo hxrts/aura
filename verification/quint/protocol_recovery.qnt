@@ -414,4 +414,68 @@ module protocol_recovery {
       val hasOutcome = match outcomeOpt { | Some(_) => true | None => false }
       isCompleted implies hasOutcome
     })
+
+  // ============ STRENGTHENED INVARIANTS (T3c.12) ============
+  // Guardian availability bounds: shares can only be from approving guardians.
+  val InvariantSharesFromApprovers =
+    pendingShares.keys().forall(pid => {
+      val shareMapLocal = if (pid.in(pendingShares.keys())) pendingShares.get(pid) else Map()
+      val approvalSet = getOrDefault(approvals, pid, Set())
+      // Guardians who submitted shares must have approved
+      shareMapLocal.keys().forall(guardian =>
+        optionIsSomeInt(shareMapLocal.get(guardian)) implies approvalSet.contains(guardian)
+      )
+    })
+
+  // Recovery progress: can only advance if sufficient guardians available.
+  // This bounds guardian availability by requiring threshold for phase transitions.
+  val InvariantProgressRequiresAvailability =
+    currentPhase.keys().forall(pid =>
+      match currentPhase.get(pid) {
+        | ReconstructingShares =>
+            // Can only be reconstructing if we have threshold approvals
+            approvalsCount(pid) >= getOrDefaultInt(threshold, pid, 0)
+        | RecoveryCompleted =>
+            // Completed implies sufficient guardians were available
+            shareCount(pid) >= getOrDefaultInt(threshold, pid, 0)
+        | _ => true
+      }
+    )
+
+  // Authority consistency: reconstructed authority must be set before completion.
+  val InvariantAuthoritySetBeforeCompletion =
+    currentPhase.keys().forall(pid =>
+      match currentPhase.get(pid) {
+        | RecoveryCompleted => optionIsSome(
+            if (pid.in(reconstructedAuthority.keys())) reconstructedAuthority.get(pid) else None
+          )
+        | _ => true
+      }
+    )
+
+  // Outcome guardians match approvals.
+  val InvariantOutcomeGuardiansMatch =
+    outcome.keys().forall(pid => {
+      val outcomeOpt = outcome.get(pid)
+      match outcomeOpt {
+        | Some(o) => o.guardiansApproved.subseteq(getOrDefault(guardians, pid, Set()))
+        | None => true
+      }
+    })
+
+  // Combined well-formed state predicate.
+  val WellFormedRecoveryState = all {
+    InvariantThresholdWithinBounds,
+    InvariantApprovalsSubsetGuardians,
+    InvariantCooldownNonNegative,
+    InvariantPhaseConsistency,
+    InvariantLifecycleStatusDefined,
+    InvariantLifecycleCompleteRequiresPhase,
+    InvariantLifecycleEffectsEmpty,
+    InvariantOutcomeWhenCompleted,
+    InvariantSharesFromApprovers,
+    InvariantProgressRequiresAvailability,
+    InvariantAuthoritySetBeforeCompletion,
+    InvariantOutcomeGuardiansMatch
+  }
 }

@@ -328,6 +328,74 @@ module protocol_frost {
             verifySignature(session.message, session.finalSignature, session.groupVerifyingKey)
     )
 
+    // ==================== STRENGTHENED INVARIANTS (T3c.12) ====================
+    // CRITICAL: Nonce uniqueness - nonces must never be reused across sessions.
+    // In FROST, nonce reuse allows private key extraction via Schnorr signature attack.
+    // Lean: Aura.Frost.nonce_uniqueness (axiom based on RNG security)
+    val InvariantNonceUniqueness = frostSessions.keys().forall(sid1 =>
+        frostSessions.keys().forall(sid2 =>
+            sid1 != sid2 implies {
+                val session1 = frostSessions.get(sid1)
+                val session2 = frostSessions.get(sid2)
+                // No participant should have the same nonce in different sessions
+                session1.nonces.keys().forall(pid =>
+                    if (pid.in(session2.nonces.keys())) {
+                        session1.nonces.get(pid) != session2.nonces.get(pid) or
+                        session1.nonces.get(pid) == ""  // Empty nonce is allowed (not yet generated)
+                    } else true
+                )
+            }
+        )
+    )
+
+    // Participant consistency: participants in session must be in key packages.
+    val InvariantParticipantsHaveKeys = frostSessions.keys().forall(sid =>
+        val session = frostSessions.get(sid)
+        session.participants.forall(pid => pid.in(keyPackages.keys()))
+    )
+
+    // Session-participant binding: participant state must match session participants.
+    val InvariantParticipantSessionBinding = frostParticipants.keys().forall(key =>
+        val sid = key._1
+        val pid = key._2
+        if (sid.in(frostSessions.keys())) {
+            val session = frostSessions.get(sid)
+            session.participants.contains(pid)
+        } else true
+    )
+
+    // Nonces only for committed participants.
+    val InvariantNoncesFromParticipants = frostSessions.keys().forall(sid =>
+        val session = frostSessions.get(sid)
+        session.nonces.keys().subseteq(session.participants)
+    )
+
+    // Commitments only from session participants.
+    val InvariantCommitmentsFromParticipants = frostSessions.keys().forall(sid =>
+        val session = frostSessions.get(sid)
+        session.commitments.keys().subseteq(session.participants)
+    )
+
+    // Threshold validity: must be positive and not exceed participant count.
+    val InvariantThresholdValid = frostSessions.keys().forall(sid =>
+        val session = frostSessions.get(sid)
+        session.threshold > 0 and session.threshold <= session.participants.size()
+    )
+
+    // Combined well-formed state predicate.
+    val WellFormedFrostState = all {
+        InvariantThreshold,
+        InvariantCommitmentBeforeSigning,
+        InvariantSharesFromCommitted,
+        InvariantValidSignature,
+        InvariantNonceUniqueness,
+        InvariantParticipantsHaveKeys,
+        InvariantParticipantSessionBinding,
+        InvariantNoncesFromParticipants,
+        InvariantCommitmentsFromParticipants,
+        InvariantThresholdValid
+    }
+
     // ==================== INITIALISATION ====================
     // Pre-populate key shares (normally from DKG).
 

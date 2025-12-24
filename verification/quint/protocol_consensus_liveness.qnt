@@ -32,7 +32,9 @@
 module protocol_consensus_liveness {
     import protocol_consensus as core from "protocol_consensus"
 
-    // ==================== SYNCHRONY MODEL ====================
+    // ════════════════════════════════════════════════════════════════════════
+    // TYPES: SYNCHRONY MODEL
+    // ════════════════════════════════════════════════════════════════════════
     // Partial synchrony with Global Stabilization Time (GST).
     // Before GST: messages may be arbitrarily delayed (but not lost)
     // After GST: all messages delivered within bound Δ
@@ -46,7 +48,9 @@ module protocol_consensus_liveness {
     pure val GOSSIP_INTERVAL: Time = 1          // Gossip period
     pure val MAX_RETRIES: int = 5               // Maximum retry attempts
 
-    // ==================== LIVENESS STATE ====================
+    // ════════════════════════════════════════════════════════════════════════
+    // STATE VARIABLES
+    // ════════════════════════════════════════════════════════════════════════
 
     var globalTime: Time                        // Current logical time
     var gst: Time                               // Global Stabilization Time (when set)
@@ -73,9 +77,7 @@ module protocol_consensus_liveness {
 
     var messageQueue: Set[PendingMessage]
 
-    // ==================== WITNESS PARTICIPATION ====================
     // Track honest vs Byzantine behavior for liveness analysis
-
     type WitnessParticipation = {
         witness: core::AuthorityId,
         isHonest: bool,                         // Follows protocol correctly
@@ -89,9 +91,22 @@ module protocol_consensus_liveness {
     // Count of Byzantine witnesses (must be < threshold for liveness)
     var byzantineCount: int
 
-    // ==================== HELPER FUNCTIONS ====================
+    // ════════════════════════════════════════════════════════════════════════
+    // EXPOSE: SEMANTIC INTERFACE
+    // ════════════════════════════════════════════════════════════════════════
+    // These predicates define liveness MEANING.
+    // - Rust conformance tests verify these properties
+    // - Lean cannot prove liveness directly (uses model checking)
+    //
+    // Exposed predicates:
+    //   - isSynchronous: whether network is past GST
+    //   - canMakeProgress: whether instance can advance toward termination
+    //   - isTerminal: whether instance has reached final state
+    //   - hasQuorumOnline: whether threshold honest witnesses are available
+    // ════════════════════════════════════════════════════════════════════════
 
-    // Check if network is synchronous (past GST)
+    /// Check if network is synchronous (past GST).
+    /// Rust: coordinator::is_synchronous
     pure def isSynchronous(time: Time, gstTime: Time, reached: bool): bool =
         reached and time >= gstTime
 
