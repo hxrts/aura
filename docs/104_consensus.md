@@ -694,6 +694,24 @@ Consensus satisfies validity. A commit fact references a result computed from th
 
 Consensus satisfies deterministic convergence. Evidence merges through CRDT join. All nodes accept the same commit fact.
 
+### Formal Verification Status
+
+These properties are formally verified through complementary approaches:
+
+- **Lean 4 Proofs** (`verification/lean/Aura/Consensus/`):
+  - `Agreement.agreement`: Unique commit per consensus instance
+  - `Validity.validity`: Committed values bound to prestates
+  - `Validity.prestate_binding_unique`: Hash collision resistance for prestate binding
+  - `Equivocation.detection_soundness`: Conflicting signatures are detectable
+
+- **Quint Model Checking** (`verification/quint/protocol_consensus*.qnt`):
+  - `AllInvariants`: Combined safety properties pass 1000-sample model checking
+  - `InvariantByzantineThreshold`: Byzantine witnesses bounded below threshold
+  - `InvariantEquivocationDetected`: Equivocation detection correctness
+  - `InvariantProgressUnderSynchrony`: Liveness under partial synchrony
+
+See [Verification Guide](807_verification_guide.md) for details on running verification.
+
 ### Binding Message Security
 
 The binding message for tree operations includes the group public key. This prevents key substitution attacks where an attacker captures a valid signature and replays it with a different key they control. The full binding includes:

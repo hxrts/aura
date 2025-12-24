@@ -91,9 +91,9 @@ module protocol_recovery {
   ): ProtocolId -> GuardianId -> Option[int] =
     if (pid.in(mapping.keys())) mapping
     else
-      mapping.set(
+      mapping.put(
         pid,
-        members.fold(Map(), (acc, member) => acc.set(member, None))
+        members.fold(Map(), (acc, member) => acc.put(member, None))
       )
 
   // Count how many guardians have approved.
@@ -144,6 +144,7 @@ module protocol_recovery {
   // State transitions modeling the recovery protocol.
 
   // Configure a new recovery session with guardian set and threshold.
+  // Uses .put() for initial key creation (vs .set() which requires existing key).
   action configureRecovery(
     pid: ProtocolId,
     guardianSet: Set[GuardianId],
@@ -153,24 +154,27 @@ module protocol_recovery {
     thresholdValue >= 1,
     thresholdValue <= guardianSet.size(),
     not(pid.in(guardians.keys())),
-    guardians' = guardians.set(pid, guardianSet),
-    approvals' = approvals.set(pid, Set()),
-    threshold' = threshold.set(pid, thresholdValue),
-    currentPhase' = currentPhase.set(pid, Idle),
-    cooldownRemaining' = cooldownRemaining.set(pid, 0),
-    reconstructedAuthority' = reconstructedAuthority.set(pid, None),
+    guardians' = guardians.put(pid, guardianSet),
+    approvals' = approvals.put(pid, Set()),
+    threshold' = threshold.put(pid, thresholdValue),
+    currentPhase' = currentPhase.put(pid, Idle),
+    cooldownRemaining' = cooldownRemaining.put(pid, 0),
+    reconstructedAuthority' = reconstructedAuthority.put(pid, None),
     pendingShares' = ensureShareMap(pendingShares, pid, guardianSet),
-    lifecycleStatus' = lifecycleStatus.set(pid, LifecyclePending),
-    lifecycleEffects' = lifecycleEffects.set(pid, Set()),
+    lifecycleStatus' = lifecycleStatus.put(pid, LifecyclePending),
+    lifecycleEffects' = lifecycleEffects.put(pid, Set()),
     outcome' = outcome
   }
 
   // Initiate recovery for a specific authority with cooldown period.
   // Moves from Idle to CollectingApprovals phase.
+  // Precondition: Protocol must be configured via configureRecovery first.
   action initiateRecovery(pid: ProtocolId, authority: AuthorityId, cooldown: int): bool = {
-    val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else Idle
+    val isConfigured = pid.in(currentPhase.keys())
+    val phase = if (isConfigured) currentPhase.get(pid) else Idle
     val isIdle = match phase { | Idle => true | _ => false }
     all {
+      isConfigured,  // Must be configured before initiating
       isIdle,
       cooldown >= 0,
       currentPhase' = currentPhase.set(pid, CollectingApprovals),
@@ -284,9 +288,11 @@ module protocol_recovery {
   // Cancel recovery (fraud detection or user request).
   // Can be called at any phase except RecoveryCompleted.
   action cancelRecovery(pid: ProtocolId): bool = {
-    val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else Idle
+    val isConfigured = pid.in(currentPhase.keys())
+    val phase = if (isConfigured) currentPhase.get(pid) else Idle
     val isCompleted = match phase { | RecoveryCompleted => true | _ => false }
     all {
+      isConfigured,  // Must be configured to cancel
       not(isCompleted),
       currentPhase' = currentPhase.set(pid, RecoveryCancelled),
       guardians' = guardians,
@@ -331,9 +337,11 @@ module protocol_recovery {
   // Signal external abort (lifecycle status update).
   // Moves lifecycle to LifecycleAborted, phase to RecoveryCancelled.
   action signalAbort(pid: ProtocolId): bool = {
-    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else LifecyclePending
+    val isConfigured = pid.in(lifecycleStatus.keys())
+    val status = if (isConfigured) lifecycleStatus.get(pid) else LifecyclePending
     val isPending = match status { | LifecyclePending => true | _ => false }
     all {
+      isConfigured,  // Must be configured to abort
       isPending,
       lifecycleStatus' = lifecycleStatus.set(pid, LifecycleAborted),
       lifecycleEffects' = lifecycleEffects,
@@ -477,5 +485,39 @@ module protocol_recovery {
     InvariantProgressRequiresAvailability,
     InvariantAuthoritySetBeforeCompletion,
     InvariantOutcomeGuardiansMatch
+  }
+
+  // ============ STEP RELATION (for trace generation) ============
+  // Nondeterministically choose any enabled action.
+
+  action step = any {
+    // Configure a new recovery session
+    nondet pid = oneOf(Set("recovery1", "recovery2", "recovery3"))
+    nondet guardianSet = oneOf(Set(
+      Set("guardian1", "guardian2"),
+      Set("guardian1", "guardian2", "guardian3"),
+      Set("guardian2", "guardian3", "guardian4")
+    ))
+    nondet t = oneOf(Set(2, 3))
+    any {
+      configureRecovery(pid, guardianSet, t),
+      // Initiate recovery
+      nondet authority = oneOf(Set("alice", "bob", "carol"))
+      nondet cooldown = oneOf(Set(0, 1, 2, 3))
+      initiateRecovery(pid, authority, cooldown),
+      // Guardian approves
+      nondet guardian = oneOf(Set("guardian1", "guardian2", "guardian3", "guardian4"))
+      approveRecovery(pid, guardian),
+      // Tick cooldown
+      tickCooldown(pid),
+      // Submit share
+      nondet sharer = oneOf(Set("guardian1", "guardian2", "guardian3", "guardian4"))
+      nondet shareHash = oneOf(Set(1000, 2000, 3000))
+      submitShare(pid, sharer, shareHash),
+      // Cancel or signal
+      cancelRecovery(pid),
+      signalComplete(pid),
+      signalAbort(pid),
+    }
   }
 }

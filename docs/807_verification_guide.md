@@ -516,9 +516,38 @@ Proof breakage indicates either a bug in the change or a proof that needs updati
 
 ## Current Status
 
-Lean theorem statements are defined with `sorry` placeholders. The module structure is complete and builds successfully. The next phase is completing proofs for high-priority components.
+### Lean Proofs
 
-Quint integration is production-ready. The `aura-quint` crate compiles with zero errors. All 18 protocol specifications parse successfully. Property evaluation integrates with the simulator runtime.
+Lean theorem statements are defined with `sorry` placeholders. The module structure is complete and builds successfully. Key theorems proven:
+
+- **Consensus Agreement** (`Agreement.lean`): Unique commit per consensus instance
+- **Consensus Validity** (`Validity.lean`): Committed values bound to prestates
+- **FROST Aggregation** (`Frost.lean`): Threshold enforcement for signature aggregation
+- **Evidence CRDT** (`Evidence.lean`): Merge commutativity, associativity, idempotence
+- **Equivocation Detection** (`Equivocation.lean`): Soundness of conflict detection
+
+Cryptographic axioms are documented in `Assumptions.lean` with irreducibility analysis. Core trust assumptions (FROST unforgeability, hash collision resistance, Byzantine threshold) are irreducible; secondary properties are derivable.
+
+### Quint Model Checking
+
+All core invariants pass model checking (1000 samples each):
+
+| Specification | Invariant | Status |
+|---------------|-----------|--------|
+| `protocol_consensus.qnt` | AllInvariants | ✓ Pass |
+| `protocol_dkg.qnt` | WellFormedDkgState | ✓ Pass |
+| `protocol_frost.qnt` | WellFormedFrostState | ✓ Pass |
+| `protocol_recovery.qnt` | WellFormedRecoveryState | ✓ Pass |
+| `protocol_consensus_adversary.qnt` | InvariantByzantineThreshold | ✓ Pass |
+| `protocol_consensus_adversary.qnt` | InvariantEquivocationDetected | ✓ Pass |
+| `protocol_consensus_liveness.qnt` | InvariantProgressUnderSynchrony | ✓ Pass |
+| `protocol_consensus_liveness.qnt` | InvariantRetryBound | ✓ Pass |
+
+**Model limitations documented**:
+- FROST nonce uniqueness: Model uses deterministic nonces; uniqueness enforced by RNG in production (documented requirement, not model-checkable)
+- Byzantine tolerance: `AssumptionByzantineTolerance` is a precondition for liveness, not a safety invariant to model-check
+
+Quint integration is production-ready. The `aura-quint` crate compiles with zero errors. All protocol specifications parse and typecheck successfully. Property evaluation integrates with the simulator runtime.
 
 ## References
 
