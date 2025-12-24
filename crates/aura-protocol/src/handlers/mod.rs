@@ -285,9 +285,9 @@ mod tests {
 // Remaining handler modules
 pub mod storage;
 pub mod tree;
-pub use tree::{InMemoryTreeHandler, PersistentTreeHandler};
+pub use tree::PersistentTreeHandler;
 // Sync handlers consolidated under crate::sync
-pub use crate::sync::{AntiEntropyHandler, BroadcastConfig, BroadcasterHandler, LocalSyncHandler};
+pub use crate::sync::{AntiEntropyHandler, BroadcastConfig, BroadcasterHandler, PersistentSyncHandler};
 
 pub mod time_handler;
 pub use time_handler::EnhancedTimeHandler;

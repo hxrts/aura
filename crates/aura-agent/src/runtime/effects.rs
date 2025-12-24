@@ -38,7 +38,7 @@ use aura_protocol::effects::{
     EffectApiEventStream, LeakageEffects, SyncEffects, SyncError,
 };
 use aura_protocol::guards::GuardContextProvider;
-use aura_protocol::handlers::{InMemoryTreeHandler, LocalSyncHandler};
+use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use aura_wot::{BiscuitAuthorizationBridge, FlowBudgetHandler};
 use biscuit_auth::{Biscuit, KeyPair, PublicKey};
 use rand::rngs::StdRng;
@@ -77,8 +77,8 @@ pub struct AuraEffectSystem {
     journal_policy: Option<(biscuit_auth::Biscuit, aura_wot::BiscuitAuthorizationBridge)>,
     journal_verifying_key: Option<Vec<u8>>,
     authority_id: AuthorityId,
-    tree_handler: InMemoryTreeHandler,
-    sync_handler: LocalSyncHandler,
+    tree_handler: PersistentTreeHandler,
+    sync_handler: PersistentSyncHandler,
     transport_handler: aura_effects::transport::RealTransportHandler,
     transport_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     shared_transport: Option<SharedTransport>,
@@ -215,9 +215,9 @@ impl AuraEffectSystem {
         ));
         let leakage_handler =
             aura_effects::leakage::ProductionLeakageHandler::with_storage(storage_handler.clone());
-        let oplog = Arc::new(RwLock::new(Vec::new()));
-        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
-        let sync_handler = LocalSyncHandler::new(oplog);
+        // Both tree and sync handlers share the same storage backend (no shared in-memory oplog)
+        let tree_handler = PersistentTreeHandler::new(storage_handler.clone());
+        let sync_handler = PersistentSyncHandler::new(storage_handler.clone());
         let transport_handler = aura_effects::transport::RealTransportHandler::default();
         // Use shared transport if provided (simulation mode), otherwise create new local inbox.
         // Also register the authority as "online" in the shared network so transport stats

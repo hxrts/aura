@@ -5,8 +5,14 @@
 //!
 //! This handler persists the OpLog to storage, enabling tree state to survive
 //! across restarts and supporting cross-device sync.
+//!
+//! ## Shared Storage
+//!
+//! Uses the same storage keys as `PersistentSyncHandler` (defined in `sync::persistent`),
+//! ensuring both handlers operate on the same source of truth.
 
 use crate::effects::tree::{Cut, Partial, ProposalId, Snapshot, TreeEffects};
+use crate::sync::{TREE_OPS_INDEX_KEY, TREE_OPS_PREFIX};
 use async_trait::async_trait;
 use aura_core::effects::storage::StorageEffects;
 use aura_core::hash;
@@ -15,11 +21,6 @@ use aura_core::{AuraError, Hash32};
 use aura_journal::commitment_tree::reduce;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-
-/// Storage key prefix for tree operations
-const TREE_OPS_PREFIX: &str = "tree_ops/";
-/// Storage key for the operation index (ordered list of op hashes)
-const TREE_OPS_INDEX_KEY: &str = "tree_ops_index";
 
 /// Persistent commitment tree handler backed by StorageEffects.
 ///

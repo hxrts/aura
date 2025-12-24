@@ -1,0 +1,364 @@
+// Lock poisoning is fatal for this module - we prefer to panic than continue with corrupted state
+#![allow(clippy::expect_used)]
+
+//! Persistent sync handler backed by StorageEffects.
+//!
+//! This handler shares the same storage keys as `PersistentTreeHandler`, ensuring
+//! both handlers operate on the same source of truth for tree operations.
+
+use super::effects::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
+use async_trait::async_trait;
+use aura_core::effects::storage::StorageEffects;
+use aura_core::hash;
+use aura_core::tree::AttestedOp;
+use aura_core::Hash32;
+use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
+use uuid::Uuid;
+
+/// Storage key prefix for tree operations (shared with PersistentTreeHandler)
+pub const TREE_OPS_PREFIX: &str = "tree_ops/";
+/// Storage key for the operation index (shared with PersistentTreeHandler)
+pub const TREE_OPS_INDEX_KEY: &str = "tree_ops_index";
+
+/// Persistent sync handler backed by StorageEffects.
+///
+/// This handler shares the same storage backend as `PersistentTreeHandler`,
+/// ensuring consistent view of tree operations for sync and tree reduction.
+///
+/// ## Storage Layout
+///
+/// Uses the same storage keys as `PersistentTreeHandler`:
+/// - `tree_ops/<hash>`: Individual attested operations keyed by content hash
+/// - `tree_ops_index`: Ordered list of operation hashes
+///
+/// ## Lazy Loading
+///
+/// Operations are loaded from storage lazily on first access.
+pub struct PersistentSyncHandler {
+    /// Storage backend (shared with PersistentTreeHandler)
+    storage: Arc<dyn StorageEffects>,
+    /// In-memory cache of operations (loaded from storage on first access)
+    ops_cache: RwLock<Vec<AttestedOp>>,
+    /// Whether we've loaded from storage yet
+    initialized: AtomicBool,
+}
+
+impl PersistentSyncHandler {
+    /// Create a new persistent sync handler (synchronous, lazy loading).
+    pub fn new(storage: Arc<dyn StorageEffects>) -> Self {
+        Self {
+            storage,
+            ops_cache: RwLock::new(Vec::new()),
+            initialized: AtomicBool::new(false),
+        }
+    }
+
+    /// Create a new persistent sync handler with eager loading (async).
+    pub async fn new_eager(
+        storage: Arc<dyn StorageEffects>,
+    ) -> Result<Self, aura_core::AuraError> {
+        let ops_cache = Self::load_ops_from_storage(&*storage).await?;
+        Ok(Self {
+            storage,
+            ops_cache: RwLock::new(ops_cache),
+            initialized: AtomicBool::new(true),
+        })
+    }
+
+    /// Ensure operations are loaded from storage (lazy initialization).
+    async fn ensure_initialized(&self) -> Result<(), aura_core::AuraError> {
+        if !self.initialized.load(Ordering::Acquire) {
+            let ops = Self::load_ops_from_storage(&*self.storage).await?;
+            let mut cache = self
+                .ops_cache
+                .write()
+                .expect("PersistentSyncHandler lock poisoned");
+            if !self.initialized.load(Ordering::Acquire) {
+                *cache = ops;
+                self.initialized.store(true, Ordering::Release);
+            }
+        }
+        Ok(())
+    }
+
+    /// Load all operations from storage in order.
+    async fn load_ops_from_storage(
+        storage: &dyn StorageEffects,
+    ) -> Result<Vec<AttestedOp>, aura_core::AuraError> {
+        use aura_core::AuraError;
+
+        // Load the index of op hashes
+        let index_bytes = storage
+            .retrieve(TREE_OPS_INDEX_KEY)
+            .await
+            .map_err(|e| AuraError::storage(format!("Failed to load tree ops index: {}", e)))?;
+
+        let op_hashes: Vec<[u8; 32]> = match index_bytes {
+            Some(bytes) => bincode::deserialize(&bytes).map_err(|e| {
+                AuraError::internal(format!("Failed to deserialize ops index: {}", e))
+            })?,
+            None => Vec::new(),
+        };
+
+        // Load each operation by hash
+        let mut ops = Vec::with_capacity(op_hashes.len());
+        for op_hash in op_hashes {
+            let key = format!("{}{}", TREE_OPS_PREFIX, hex::encode(op_hash));
+            let op_bytes = storage
+                .retrieve(&key)
+                .await
+                .map_err(|e| AuraError::storage(format!("Failed to load tree op {}: {}", key, e)))?
+                .ok_or_else(|| AuraError::storage(format!("Missing tree op: {}", key)))?;
+
+            let op: AttestedOp = bincode::deserialize(&op_bytes)
+                .map_err(|e| AuraError::internal(format!("Failed to deserialize tree op: {}", e)))?;
+            ops.push(op);
+        }
+
+        Ok(ops)
+    }
+
+    /// Persist an operation to storage.
+    async fn persist_op(
+        &self,
+        op: &AttestedOp,
+        op_hash: [u8; 32],
+    ) -> Result<(), aura_core::AuraError> {
+        use aura_core::AuraError;
+
+        // Serialize the operation
+        let op_bytes = bincode::serialize(op)
+            .map_err(|e| AuraError::internal(format!("Failed to serialize tree op: {}", e)))?;
+
+        // Store the operation by hash
+        let key = format!("{}{}", TREE_OPS_PREFIX, hex::encode(op_hash));
+        self.storage
+            .store(&key, op_bytes)
+            .await
+            .map_err(|e| AuraError::storage(format!("Failed to store tree op: {}", e)))?;
+
+        // Update the index
+        let hashes: Vec<[u8; 32]> = {
+            let ops = self
+                .ops_cache
+                .read()
+                .expect("PersistentSyncHandler lock poisoned");
+            ops.iter()
+                .map(|op| {
+                    let bytes = bincode::serialize(op).unwrap_or_default();
+                    hash::hash(&bytes)
+                })
+                .collect()
+        };
+
+        let index_bytes = bincode::serialize(&hashes)
+            .map_err(|e| AuraError::internal(format!("Failed to serialize ops index: {}", e)))?;
+
+        self.storage
+            .store(TREE_OPS_INDEX_KEY, index_bytes)
+            .await
+            .map_err(|e| AuraError::storage(format!("Failed to store ops index: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Compute hash for an operation (for deduplication and CID).
+    fn op_hash(op: &AttestedOp) -> Result<[u8; 32], aura_core::AuraError> {
+        let bytes = bincode::serialize(op)
+            .map_err(|e| aura_core::AuraError::internal(format!("hash serialize: {e}")))?;
+        Ok(hash::hash(&bytes))
+    }
+
+    /// Invalidate the cache to force reload from storage on next access.
+    ///
+    /// This is useful when the tree handler has written new ops and we need
+    /// to refresh the sync handler's view.
+    pub fn invalidate_cache(&self) {
+        self.initialized.store(false, Ordering::Release);
+    }
+}
+
+#[async_trait]
+impl SyncEffects for PersistentSyncHandler {
+    async fn sync_with_peer(&self, _peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
+        // No-op for local persistent sync; real networking handled by AntiEntropyHandler
+        Ok(SyncMetrics::empty())
+    }
+
+    async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
+        self.ensure_initialized()
+            .await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+        let ops = self
+            .ops_cache
+            .read()
+            .expect("PersistentSyncHandler lock poisoned");
+
+        let mut cids = BTreeSet::new();
+        for op in ops.iter() {
+            if let Ok(hash) = Self::op_hash(op) {
+                cids.insert(Hash32(hash));
+            }
+        }
+        Ok(BloomDigest { cids })
+    }
+
+    async fn get_missing_ops(
+        &self,
+        _remote_digest: &BloomDigest,
+    ) -> Result<Vec<AttestedOp>, SyncError> {
+        self.ensure_initialized()
+            .await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+        // Return full oplog; guard chain filters where needed
+        let ops = self
+            .ops_cache
+            .read()
+            .expect("PersistentSyncHandler lock poisoned");
+        Ok(ops.clone())
+    }
+
+    async fn request_ops_from_peer(
+        &self,
+        _peer_id: Uuid,
+        _cids: Vec<Hash32>,
+    ) -> Result<Vec<AttestedOp>, SyncError> {
+        // Local handler has no network; return empty
+        Ok(Vec::new())
+    }
+
+    async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
+        self.ensure_initialized()
+            .await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+        for op in ops {
+            let op_hash =
+                Self::op_hash(&op).map_err(|e| SyncError::VerificationFailed(e.to_string()))?;
+
+            // Check for duplicate
+            let already = {
+                let store = self
+                    .ops_cache
+                    .read()
+                    .expect("PersistentSyncHandler lock poisoned");
+                store.iter().any(|existing| {
+                    Self::op_hash(existing)
+                        .map(|h| h == op_hash)
+                        .unwrap_or(false)
+                })
+            };
+
+            if !already {
+                // Add to cache
+                {
+                    let mut store = self
+                        .ops_cache
+                        .write()
+                        .expect("PersistentSyncHandler lock poisoned");
+                    store.push(op.clone());
+                }
+
+                // Persist to storage
+                self.persist_op(&op, op_hash)
+                    .await
+                    .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn announce_new_op(&self, _cid: Hash32) -> Result<(), SyncError> {
+        Ok(())
+    }
+
+    async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
+        self.ensure_initialized()
+            .await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+        let store = self
+            .ops_cache
+            .read()
+            .expect("PersistentSyncHandler lock poisoned");
+
+        for op in store.iter() {
+            if let Ok(hash) = Self::op_hash(op) {
+                if Hash32(hash) == cid {
+                    return Ok(op.clone());
+                }
+            }
+        }
+        Err(SyncError::OperationNotFound)
+    }
+
+    async fn push_op_to_peers(&self, _op: AttestedOp, _peers: Vec<Uuid>) -> Result<(), SyncError> {
+        // Local handler doesn't push to peers; real networking handled by BroadcasterHandler
+        Ok(())
+    }
+
+    async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
+        // Local handler has no network peers
+        Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_testkit::MemoryStorageHandler;
+
+    #[tokio::test]
+    async fn test_persistent_sync_handler_empty_init() {
+        let storage = Arc::new(MemoryStorageHandler::new());
+        let handler = PersistentSyncHandler::new(storage);
+
+        handler.ensure_initialized().await.unwrap();
+
+        let ops = handler
+            .ops_cache
+            .read()
+            .expect("lock poisoned in test");
+        assert!(ops.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_persistent_sync_handler_lazy_init() {
+        let storage = Arc::new(MemoryStorageHandler::new());
+        let handler = PersistentSyncHandler::new(storage);
+
+        // Not initialized yet
+        assert!(!handler.initialized.load(Ordering::Acquire));
+
+        // Access digest triggers initialization
+        let digest = handler.get_oplog_digest().await.unwrap();
+        assert!(digest.is_empty());
+
+        // Now initialized
+        assert!(handler.initialized.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn test_persistent_sync_handler_survives_restart() {
+        let storage = Arc::new(MemoryStorageHandler::new());
+
+        // Create first handler
+        let handler1 = PersistentSyncHandler::new(storage.clone());
+        handler1.ensure_initialized().await.unwrap();
+        drop(handler1);
+
+        // Create second handler with same storage
+        let handler2 = PersistentSyncHandler::new(storage);
+        handler2.ensure_initialized().await.unwrap();
+
+        let ops = handler2
+            .ops_cache
+            .read()
+            .expect("lock poisoned in test");
+        assert!(ops.is_empty());
+    }
+}
