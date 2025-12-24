@@ -30,6 +30,8 @@ Aura/
 │   ├── Evidence.lean         # Evidence CRDT semilattice proofs
 │   ├── Equivocation.lean     # Equivocation detection correctness
 │   ├── Frost.lean            # FROST threshold signature integration
+│   ├── Liveness.lean         # Liveness claims (synchrony model)
+│   ├── Adversary.lean        # Byzantine model and tolerance
 │   └── Proofs.lean           # Claims bundle aggregation
 ├── Journal.lean              # CRDT semilattice proofs
 ├── KeyDerivation.lean        # Contextual key derivation isolation
@@ -39,6 +41,21 @@ Aura/
 ├── TimeSystem.lean           # Timestamp ordering & privacy
 └── Runner.lean               # CLI for differential testing
 ```
+
+## Quint Correspondence
+
+Lean proofs correspond to Quint specifications for verification coverage:
+
+| Lean Module | Quint File | What It Proves |
+|-------------|------------|----------------|
+| `Consensus.Agreement` | `protocol_consensus.qnt` | Agreement safety (unique commits) |
+| `Consensus.Evidence` | `protocol_consensus.qnt` | CRDT semilattice properties |
+| `Consensus.Frost` | `protocol_consensus.qnt` | Threshold signature correctness |
+| `Consensus.Liveness` | `protocol_consensus_liveness.qnt` | Synchrony model axioms |
+| `Consensus.Adversary` | `protocol_consensus_adversary.qnt` | Byzantine tolerance bounds |
+| `Consensus.Equivocation` | `protocol_consensus_adversary.qnt` | Detection soundness/completeness |
+
+See `verification/CORRESPONDENCE.md` for complete mapping.
 
 ## Proof Status
 
@@ -52,6 +69,8 @@ All proofs are complete (no `sorry` placeholders):
 | `Consensus.Evidence` | ● Complete | `merge_comm`, `merge_assoc`, `merge_idem` |
 | `Consensus.Equivocation` | ● Complete | `detection_soundness`, `detection_completeness`, `honest_never_detected` |
 | `Consensus.Frost` | ● Complete | `share_session_consistency`, `aggregatable_implies_valid_commit` |
+| `Consensus.Liveness` | ● Complete | `termination_under_synchrony`, `fast_path_bound` (axiomatic) |
+| `Consensus.Adversary` | ● Complete | `byzantine_tolerance`, `honest_majority_sufficient` |
 | `Journal` | ● Complete | `merge_comm`, `merge_assoc`, `merge_idem` |
 | `KeyDerivation` | ● Complete | `derive_unique` (axiomatic) |
 | `GuardChain` | ● Complete | `cost_sum` |
