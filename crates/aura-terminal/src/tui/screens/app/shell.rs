@@ -1265,7 +1265,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("Enter", "Enter"),
         ],
         Screen::Settings => vec![
-            KeyHint::new("h/l", "Panel"),
+            KeyHint::new("Enter", "Select"),
             KeyHint::new("Space", "Toggle"),
         ],
         Screen::Recovery => vec![
