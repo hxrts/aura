@@ -16,7 +16,7 @@ use super::super::views::{
     AccountSetupModalState, AddDeviceModalState, ConfirmRemoveModalState, CreateChannelModalState,
     CreateInvitationField, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
     DisplayNameModalState, GuardianSetupModalState, GuardianSetupStep, ImportInvitationModalState,
-    NicknameModalState, ThresholdModalState, TopicModalState,
+    NicknameModalState, TopicModalState,
 };
 use super::super::TuiState;
 
@@ -95,9 +95,6 @@ pub fn handle_queued_modal_key(
         // Settings screen modals
         QueuedModal::SettingsDisplayName(modal_state) => {
             handle_settings_display_name_key_queue(state, commands, key, modal_state);
-        }
-        QueuedModal::SettingsThreshold(modal_state) => {
-            handle_settings_threshold_key_queue(state, commands, key, modal_state);
         }
         QueuedModal::SettingsAddDevice(modal_state) => {
             handle_settings_add_device_key_queue(state, commands, key, modal_state);
@@ -905,60 +902,6 @@ fn handle_settings_display_name_key_queue(
                     s.value.pop();
                 }
             });
-        }
-        _ => {}
-    }
-}
-
-/// Handle settings threshold modal keys (queue-based)
-fn handle_settings_threshold_key_queue(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-    modal_state: ThresholdModalState,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.modal_queue.dismiss();
-        }
-        KeyCode::Tab => {
-            // Toggle between k and n fields
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::SettingsThreshold(ref mut s) = modal {
-                    s.active_field = (s.active_field + 1) % 2;
-                }
-            });
-        }
-        KeyCode::Up | KeyCode::Char('k') | KeyCode::Right => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::SettingsThreshold(ref mut s) = modal {
-                    if s.active_field == 0 {
-                        s.increment_k();
-                    } else {
-                        s.increment_n();
-                    }
-                }
-            });
-        }
-        KeyCode::Down | KeyCode::Char('j') | KeyCode::Left => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::SettingsThreshold(ref mut s) = modal {
-                    if s.active_field == 0 {
-                        s.decrement_k();
-                    } else {
-                        s.decrement_n();
-                    }
-                }
-            });
-        }
-        KeyCode::Enter => {
-            if modal_state.can_submit() {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateThreshold {
-                    k: modal_state.k,
-                    n: modal_state.n,
-                }));
-                state.modal_queue.dismiss();
-            }
         }
         _ => {}
     }

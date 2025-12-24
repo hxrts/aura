@@ -140,14 +140,8 @@ pub enum DispatchCommand {
     ApproveRecovery,
 
     // Settings screen
-    /// Open threshold modal (shell will populate current values)
-    OpenThresholdModal,
     UpdateDisplayName {
         display_name: String,
-    },
-    UpdateThreshold {
-        k: u8,
-        n: u8,
     },
     UpdateMfaPolicy {
         policy: MfaPolicy,

@@ -185,14 +185,16 @@ mod tests {
         state.account_setup_state_mut().unwrap().display_name = "Alice".to_string();
         state.account_setup_state_mut().unwrap().creating = true;
 
-        // Simulate success callback
-        state.account_created();
-        assert!(state.account_setup_state().unwrap().success);
-        assert!(!state.account_setup_state().unwrap().creating);
+        // Verify initial state
+        assert!(state.has_queued_modal());
 
-        // Enter should close modal
-        let (state, _) = transition(&state, events::enter());
-        assert!(!state.has_modal());
+        // Simulate success callback - this dismisses the modal and shows toast
+        state.account_created();
+
+        // Modal should be dismissed after account_created
+        assert!(!state.has_queued_modal());
+        // Toast should be active (success message)
+        assert!(state.toast_queue.is_active());
     }
 
     #[test]
@@ -235,76 +237,7 @@ mod tests {
         assert_eq!(state.account_setup_state().unwrap().display_name, "Alic");
     }
 
-    #[test]
-    fn test_threshold_modal_arrow_keys() {
-        use crate::tui::state::modal_queue::QueuedModal;
-        use crate::tui::state::views::ThresholdModalState;
-
-        let mut state = TuiState::new();
-        // Navigate to Settings screen
-        state.router.go_to(Screen::Settings);
-
-        // Enqueue threshold modal with k=2, n=3
-        state.modal_queue.enqueue(QueuedModal::SettingsThreshold(
-            ThresholdModalState::with_threshold(2, 3),
-        ));
-
-        // Verify modal is active and initial values
-        assert!(state.has_queued_modal());
-        if let Some(QueuedModal::SettingsThreshold(modal_state)) = state.modal_queue.current() {
-            assert_eq!(modal_state.k, 2);
-            assert_eq!(modal_state.n, 3);
-            assert_eq!(modal_state.active_field, 0); // k field is active
-        } else {
-            panic!("Expected SettingsThreshold modal");
-        }
-
-        // Press Right arrow to increment k (should go from 2 to 3)
-        let (state, _) = transition(&state, events::arrow_right());
-        if let Some(QueuedModal::SettingsThreshold(modal_state)) = state.modal_queue.current() {
-            assert_eq!(
-                modal_state.k, 3,
-                "Right arrow should increment k from 2 to 3"
-            );
-        } else {
-            panic!("Expected SettingsThreshold modal after Right key");
-        }
-
-        // Press Left arrow to decrement k (should go from 3 to 2)
-        let (state, _) = transition(&state, events::arrow_left());
-        if let Some(QueuedModal::SettingsThreshold(modal_state)) = state.modal_queue.current() {
-            assert_eq!(
-                modal_state.k, 2,
-                "Left arrow should decrement k from 3 to 2"
-            );
-        } else {
-            panic!("Expected SettingsThreshold modal after Left key");
-        }
-
-        // Press Left again to decrement k (should go from 2 to 1)
-        let (state, _) = transition(&state, events::arrow_left());
-        if let Some(QueuedModal::SettingsThreshold(modal_state)) = state.modal_queue.current() {
-            assert_eq!(
-                modal_state.k, 1,
-                "Left arrow should decrement k from 2 to 1"
-            );
-        } else {
-            panic!("Expected SettingsThreshold modal after second Left key");
-        }
-
-        // Press Left again - k should stay at 1 (minimum)
-        let (state, _) = transition(&state, events::arrow_left());
-        if let Some(QueuedModal::SettingsThreshold(modal_state)) = state.modal_queue.current() {
-            assert_eq!(
-                modal_state.k, 1,
-                "Left arrow should not decrement k below 1"
-            );
-        } else {
-            panic!("Expected SettingsThreshold modal after third Left key");
-        }
-
-        // Press Escape to dismiss
-        let (state, _) = transition(&state, events::escape());
-        assert!(!state.has_queued_modal(), "Escape should dismiss modal");
-    }
+    // Note: test_threshold_modal_arrow_keys was removed because threshold adjustments
+    // now use the GuardianSetup flow (OpenGuardianSetup dispatch) instead of the
+    // standalone threshold modal
 }

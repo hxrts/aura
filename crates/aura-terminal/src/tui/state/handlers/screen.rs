@@ -342,16 +342,17 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                     ));
                 }
                 SettingsSection::Threshold => {
-                    // Open threshold edit modal via dispatch (shell populates current values)
-                    commands.push(TuiCommand::Dispatch(DispatchCommand::OpenThresholdModal));
+                    // Open guardian setup modal via dispatch (reuse the same wizard as contacts)
+                    // Shell populates contacts and current guardians
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::OpenGuardianSetup));
                 }
                 _ => {}
             }
         }
         KeyCode::Char('t') => {
             if state.settings.section == SettingsSection::Threshold {
-                // Open threshold edit modal via dispatch (shell populates current values)
-                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenThresholdModal));
+                // Open guardian setup modal via dispatch (reuse the same wizard as contacts)
+                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenGuardianSetup));
             }
         }
         KeyCode::Char('a') => {

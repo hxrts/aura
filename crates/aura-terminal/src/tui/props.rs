@@ -393,11 +393,6 @@ pub struct SettingsViewProps {
     // Display name modal (user's own display name)
     pub display_name_modal_visible: bool,
     pub display_name_modal_value: String,
-    // Threshold modal
-    pub threshold_modal_visible: bool,
-    pub threshold_modal_k: u8,
-    pub threshold_modal_n: u8,
-    pub threshold_modal_active_field: usize,
     // Add device modal
     pub add_device_modal_visible: bool,
     pub add_device_modal_name: String,
@@ -426,12 +421,6 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         Some(QueuedModal::SettingsDisplayName(s)) => (true, s.value.clone()),
         _ => (false, String::new()),
     };
-
-    let (threshold_visible, threshold_k, threshold_n, threshold_active_field) =
-        match state.modal_queue.current() {
-            Some(QueuedModal::SettingsThreshold(s)) => (true, s.k, s.n, s.active_field),
-            _ => (false, 2, 3, 0),
-        };
 
     let (add_device_visible, add_device_name) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsAddDevice(s)) => (true, s.name.clone()),
@@ -501,11 +490,6 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         // Display name modal (from queue)
         display_name_modal_visible: display_name_visible,
         display_name_modal_value: display_name_value,
-        // Threshold modal (from queue)
-        threshold_modal_visible: threshold_visible,
-        threshold_modal_k: threshold_k,
-        threshold_modal_n: threshold_n,
-        threshold_modal_active_field: threshold_active_field,
         // Add device modal (from queue)
         add_device_modal_visible: add_device_visible,
         add_device_modal_name: add_device_name,

@@ -10,7 +10,7 @@ use super::views::{
     AccountSetupModalState, AddDeviceModalState, ChannelInfoModalState, ConfirmRemoveModalState,
     CreateChannelModalState, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
     DisplayNameModalState, GuardianSetupModalState, ImportInvitationModalState,
-    InvitationCodeModalState, NicknameModalState, ThresholdModalState, TopicModalState,
+    InvitationCodeModalState, NicknameModalState, TopicModalState,
 };
 
 /// Unified modal enum - ALL modals MUST be one of these variants.
@@ -88,9 +88,6 @@ pub enum QueuedModal {
     // ========================================================================
     /// Edit display name
     SettingsDisplayName(DisplayNameModalState),
-
-    /// Configure threshold
-    SettingsThreshold(ThresholdModalState),
 
     /// Add device
     SettingsAddDevice(AddDeviceModalState),

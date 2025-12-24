@@ -190,32 +190,20 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
             // Form content - fills available space
             View(
                 width: 100pct,
-                padding: Spacing::MODAL_PADDING,
+                padding_left: Spacing::MODAL_PADDING,
+                padding_right: Spacing::MODAL_PADDING,
+                padding_bottom: Spacing::XS,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
                 // Invitation Type selector
-                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::SM) {
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
                     View(flex_direction: FlexDirection::Row) {
                         Text(content: type_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
                         Text(content: "Type", color: if type_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
-                    }
-                    View(
-                        margin_top: Spacing::XS,
-                        margin_left: 2,
-                        flex_direction: FlexDirection::Row,
-                        gap: Spacing::XS,
-                        border_style: Borders::INPUT,
-                        border_color: type_border,
-                        padding_left: Spacing::PANEL_PADDING,
-                        padding_right: Spacing::PANEL_PADDING,
-                    ) {
-                        Text(content: type_display, color: if type_focused { Theme::PRIMARY } else { Theme::TEXT })
-                    }
-                    // Type description
-                    View(margin_top: Spacing::XS, margin_left: 2) {
+                        Text(content: " - ", color: Theme::TEXT_MUTED)
                         #(match invitation_type {
                             InvitationType::Contact => element! {
                                 Text(content: "Add as a contact for messaging", color: Theme::TEXT_MUTED)
@@ -228,10 +216,21 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                             },
                         })
                     }
+                    View(
+                        margin_left: 2,
+                        flex_direction: FlexDirection::Row,
+                        gap: Spacing::XS,
+                        border_style: Borders::INPUT,
+                        border_color: type_border,
+                        padding_left: Spacing::PANEL_PADDING,
+                        padding_right: Spacing::PANEL_PADDING,
+                    ) {
+                        Text(content: type_display, color: if type_focused { Theme::PRIMARY } else { Theme::TEXT })
+                    }
                 }
 
                 // Optional message
-                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::SM) {
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
                     View(flex_direction: FlexDirection::Row) {
                         Text(content: message_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
                         Text(content: "Message", color: if message_focused { Theme::TEXT } else { Theme::TEXT_MUTED })

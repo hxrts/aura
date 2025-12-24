@@ -16,7 +16,7 @@ use super::modal_overlays::{
     render_contact_modal, render_contacts_code_modal, render_contacts_create_modal,
     render_contacts_import_modal, render_device_enrollment_modal, render_display_name_modal,
     render_guardian_modal, render_guardian_setup_modal, render_help_modal, render_nickname_modal,
-    render_remove_device_modal, render_threshold_modal, render_topic_modal, GlobalModalProps,
+    render_remove_device_modal, render_topic_modal, GlobalModalProps,
 };
 
 use iocraft::prelude::*;
@@ -343,8 +343,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Threshold subscription: SharedThreshold for dispatch handlers to read
     // =========================================================================
-    // Used to populate the threshold modal with current k/n values.
-    let shared_threshold = use_threshold_subscription(&mut hooks, &app_ctx);
+    // Threshold values from settings - currently unused since threshold changes
+    // now go through OpenGuardianSetup. Kept for future direct display updates.
+    let _shared_threshold = use_threshold_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
     // ERROR_SIGNAL subscription: central domain error surfacing
@@ -912,8 +913,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         } => {
                             // CONTACTS_SIGNAL owns contact data; no local state update.
                         }
-                        UiUpdate::ChatStarted { contact_id: _ } => {
-                            // Navigation/state machine handles screen changes.
+                        UiUpdate::ChatStarted { contact_id } => {
+                            // Navigate to Chat screen after starting a direct chat
+                            tracing::info!("Chat started with contact: {}", contact_id);
+                            tui.with_mut(|state| {
+                                state.router.go_to(Screen::Chat);
+                            });
                         }
                         UiUpdate::LanPeerInvited { peer_id: _ } => {
                             enqueue_toast!(
@@ -1284,8 +1289,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_channels_for_dispatch = shared_channels.clone();
         let shared_neighborhood_blocks_for_dispatch = shared_neighborhood_blocks.clone();
         let shared_pending_requests_for_dispatch = shared_pending_requests.clone();
-        // Clone shared threshold for opening threshold modal with current values
-        let shared_threshold_for_dispatch = shared_threshold.clone();
         // This Arc is updated by a reactive subscription, so reading from it
         // always gets current contacts (not stale props)
         let shared_contacts_for_dispatch = shared_contacts.clone();
@@ -1890,9 +1893,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::UpdateDisplayName { display_name } => {
                                         (cb.settings.on_update_display_name)(display_name);
                                     }
-                                    DispatchCommand::UpdateThreshold { k, n } => {
-                                        (cb.settings.on_update_threshold)(k, n);
-                                    }
                                     DispatchCommand::UpdateMfaPolicy { policy } => {
                                         (cb.settings.on_update_mfa)(policy);
                                     }
@@ -1902,23 +1902,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::RemoveDevice { device_id } => {
                                         (cb.settings.on_remove_device)(device_id);
                                     }
-                                    DispatchCommand::OpenThresholdModal => {
-                                        // Read current threshold from shared state (updated by reactive subscription)
-                                        let (current_k, current_n) = shared_threshold_for_dispatch
-                                            .read()
-                                            .map(|guard| *guard)
-                                            .unwrap_or((2, 3));
-
-                                        // Populate the threshold modal with the current values
-                                        new_state
-                                            .modal_queue
-                                            .enqueue(crate::tui::state_machine::QueuedModal::SettingsThreshold(
-                                                crate::tui::state_machine::ThresholdModalState::with_threshold(
-                                                    current_k,
-                                                    current_n,
-                                                ),
-                                            ));
-                                    }
+                                    // Note: Threshold/guardian changes now use OpenGuardianSetup
+                                    // which is handled above with the guardian ceremony commands.
 
                                     // === Neighborhood Screen Commands ===
                                     DispatchCommand::EnterBlock => {
@@ -2145,8 +2130,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // === SETTINGS SCREEN MODALS ===
             // Rendered via modal_overlays module for maintainability
+            // Note: Threshold changes now use OpenGuardianSetup (see contacts screen modals)
             #(render_display_name_modal(&settings_props))
-            #(render_threshold_modal(&settings_props, threshold_k))
             #(render_add_device_modal(&settings_props))
             #(render_device_enrollment_modal(&settings_props))
             #(render_remove_device_modal(&settings_props))

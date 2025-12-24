@@ -75,7 +75,10 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
             // Header
             View(
                 width: 100pct,
-                padding: Spacing::PANEL_PADDING,
+                padding_left: Spacing::PANEL_PADDING,
+                padding_right: Spacing::PANEL_PADDING,
+                padding_top: Spacing::XS,
+                padding_bottom: Spacing::XS,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 border_style: BorderStyle::Single,
@@ -87,14 +90,13 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
                     weight: Weight::Bold,
                     color: Theme::TEXT,
                 )
-                View(margin_top: Spacing::XS, flex_direction: FlexDirection::Row, gap: 1) {
+                View(flex_direction: FlexDirection::Row, gap: 1) {
                     Text(content: status_icon.to_string(), color: status_color)
                     Text(content: status_text, color: status_color, weight: Weight::Bold)
-                }
-                View(margin_top: Spacing::XS) {
+                    Text(content: " — ", color: Theme::TEXT_MUTED)
                     Text(
                         content: format!(
-                            "Accepted: {} / {} (threshold {})",
+                            "{}/{} accepted (need {})",
                             props.accepted_count, props.total_count, props.threshold
                         ),
                         color: Theme::TEXT_MUTED,
@@ -105,25 +107,25 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
             // Body
             View(
                 width: 100pct,
-                padding: Spacing::MODAL_PADDING,
+                padding_left: Spacing::MODAL_PADDING,
+                padding_right: Spacing::MODAL_PADDING,
+                padding_top: Spacing::XS,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
-                View(margin_bottom: Spacing::XS) {
-                    Text(
-                        content: "Import this code on the new device:",
-                        color: Theme::TEXT,
-                    )
-                }
-
+                Text(
+                    content: "Import this code on the new device:",
+                    color: Theme::TEXT,
+                )
                 View(
                     width: 100pct,
                     flex_direction: FlexDirection::Column,
                     border_style: Borders::INPUT,
                     border_color: Theme::PRIMARY,
-                    padding: Spacing::MODAL_PADDING,
+                    padding_left: Spacing::PANEL_PADDING,
+                    padding_right: Spacing::PANEL_PADDING,
                 ) {
                     Text(
                         content: formatted_code,
@@ -131,10 +133,9 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
                         wrap: TextWrap::Wrap,
                     )
                 }
-
                 #(if props.has_failed && !props.error_message.is_empty() {
                     Some(element! {
-                        View(margin_top: Spacing::SM) {
+                        View(margin_top: Spacing::XS) {
                             Text(content: props.error_message.clone(), color: Theme::ERROR)
                         }
                     })
@@ -148,7 +149,10 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
-                padding: Spacing::PANEL_PADDING,
+                padding_left: Spacing::PANEL_PADDING,
+                padding_right: Spacing::PANEL_PADDING,
+                padding_top: Spacing::XS,
+                padding_bottom: Spacing::XS,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,

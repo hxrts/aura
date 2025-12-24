@@ -16,7 +16,8 @@ pub struct SettingsViewState {
     /// Current MFA policy
     pub mfa_policy: MfaPolicy,
     // Note: Modal state is now stored in ModalQueue, not here.
-    // Use modal_queue.enqueue(QueuedModal::SettingsDisplayName/Threshold/AddDevice/RemoveDevice(...)) to show modals.
+    // Use modal_queue.enqueue(QueuedModal::SettingsDisplayName/AddDevice/RemoveDevice(...)) to show modals.
+    // For threshold/guardian changes, use OpenGuardianSetup dispatch which shows GuardianSetup modal.
 }
 
 /// State for display name edit modal (settings screen)
@@ -47,67 +48,6 @@ impl DisplayNameModalState {
 
     pub fn can_submit(&self) -> bool {
         !self.value.trim().is_empty()
-    }
-}
-
-/// State for threshold config modal
-///
-/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
-#[derive(Clone, Debug, Default)]
-pub struct ThresholdModalState {
-    /// Threshold K (required signatures)
-    pub k: u8,
-    /// Threshold N (total guardians)
-    pub n: u8,
-    /// Active field (0 = k, 1 = n)
-    pub active_field: usize,
-    /// Error message if any
-    pub error: Option<String>,
-}
-
-impl ThresholdModalState {
-    /// Create initialized state with current threshold
-    pub fn with_threshold(current_k: u8, current_n: u8) -> Self {
-        Self {
-            k: current_k,
-            n: current_n,
-            active_field: 0,
-            error: None,
-        }
-    }
-
-    /// Reset state (called when dismissed)
-    pub fn reset(&mut self) {
-        self.k = 0;
-        self.n = 0;
-        self.active_field = 0;
-        self.error = None;
-    }
-
-    pub fn increment_k(&mut self) {
-        if self.k < self.n {
-            self.k += 1;
-        }
-    }
-
-    pub fn decrement_k(&mut self) {
-        if self.k > 1 {
-            self.k -= 1;
-        }
-    }
-
-    pub fn increment_n(&mut self) {
-        self.n = self.n.saturating_add(1);
-    }
-
-    pub fn decrement_n(&mut self) {
-        if self.n > self.k {
-            self.n -= 1;
-        }
-    }
-
-    pub fn can_submit(&self) -> bool {
-        self.k > 0 && self.k <= self.n && self.n > 0
     }
 }
 

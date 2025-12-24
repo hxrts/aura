@@ -14,7 +14,6 @@ use crate::tui::props::{BlockViewProps, ChatViewProps, ContactsViewProps, Settin
 use crate::tui::screens::{
     ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal, GuardianCandidateProps,
     GuardianSetupModal, InvitationCodeModal, InvitationCreateModal, InvitationImportModal,
-    ThresholdModal,
 };
 use crate::tui::types::{Contact, InvitationType};
 
@@ -398,32 +397,6 @@ pub fn render_display_name_modal(settings: &SettingsViewProps) -> Option<AnyElem
                         value: settings.display_name_modal_value.clone(),
                         placeholder: "Enter your display name...".to_string(),
                         hint: String::new(),
-                        error: String::new(),
-                        submitting: false,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
-}
-
-pub fn render_threshold_modal(
-    settings: &SettingsViewProps,
-    current_threshold_k: u8,
-) -> Option<AnyElement<'static>> {
-    if settings.threshold_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    ThresholdModal(
-                        visible: true,
-                        focused: true,
-                        threshold_k: settings.threshold_modal_k,
-                        threshold_n: settings.threshold_modal_n,
-                        has_changed: settings.threshold_modal_k != current_threshold_k,
                         error: String::new(),
                         submitting: false,
                     )
