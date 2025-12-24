@@ -21,7 +21,10 @@
 pub mod state;
 pub mod transitions;
 pub mod validation;
+
+#[cfg(feature = "simulation")]
 pub mod quint_mapping;
+
 pub mod itf_loader;
 
 // Re-export core types for convenience

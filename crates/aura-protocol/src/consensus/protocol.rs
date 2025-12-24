@@ -5,6 +5,7 @@
 //! the message flow, and integrates with the FROST cryptography layer.
 
 use super::{
+    core::{self, ConsensusPhase as CorePhase, ConsensusState as CoreState},
     frost::FrostConsensusOrchestrator,
     messages::{ConsensusMessage, ConsensusPhase, ConsensusRequest, ConsensusResponse},
     types::{CommitFact, ConsensusConfig, ConsensusId},
@@ -87,6 +88,51 @@ struct ProtocolInstance {
     start_time_ms: u64,
     /// Cached nonce token for signing (slow path)
     nonce_token: Option<NonceToken>,
+    /// Pure core state for invariant validation
+    /// Quint: protocol_consensus.qnt / Lean: Aura.Consensus.Types
+    core_state: CoreState,
+}
+
+impl ProtocolInstance {
+    /// Convert effectful phase to pure core phase
+    /// Quint: ConsensusPhase / Lean: Aura.Consensus.Types.ConsensusPhase
+    fn to_core_phase(&self) -> CorePhase {
+        match self.phase {
+            ConsensusPhase::Execute => CorePhase::FastPathActive,
+            ConsensusPhase::NonceCommit => CorePhase::FastPathActive,
+            ConsensusPhase::Sign => CorePhase::FastPathActive,
+            ConsensusPhase::Result => CorePhase::Committed,
+        }
+    }
+
+    /// Synchronize pure core state with effectful state
+    fn sync_core_state(&mut self) {
+        self.core_state.phase = self.to_core_phase();
+        // Sync proposals from tracker
+        self.core_state.proposals = self
+            .tracker
+            .get_signatures()
+            .iter()
+            .map(|sig| core::ShareProposal {
+                witness: format!("{}", sig.signer),
+                result_id: format!("{:?}", self.operation_hash),
+                share: core::ShareData {
+                    share_value: hex::encode(&sig.signature),
+                    nonce_binding: String::new(),
+                    data_binding: format!("{:?}", self.prestate_hash),
+                },
+            })
+            .collect();
+    }
+
+    /// Check invariants after state transitions (debug mode only)
+    fn assert_invariants(&self) {
+        debug_assert!(
+            core::check_invariants(&self.core_state).is_ok(),
+            "Consensus invariant violation: {:?}",
+            core::check_invariants(&self.core_state).err()
+        );
+    }
 }
 
 /// Role in the protocol (coordinator or witness)
@@ -166,6 +212,27 @@ impl ConsensusProtocol {
                 operation_bytes,
                 cached_commitments,
             } => {
+                // Initialize pure core state for invariant validation
+                // Quint: startConsensus action / Lean: Consensus.Agreement
+                let core_state = CoreState {
+                    cid: format!("{}", consensus_id),
+                    operation: String::new(), // Set from operation_bytes if needed
+                    prestate_hash: format!("{:?}", prestate_hash),
+                    threshold: self.config.threshold as usize,
+                    witnesses: self
+                        .config
+                        .witness_set
+                        .iter()
+                        .map(|w| format!("{}", w))
+                        .collect(),
+                    initiator: format!("{}", coordinator),
+                    phase: CorePhase::FastPathActive,
+                    proposals: Vec::new(),
+                    commit_fact: None,
+                    fallback_timer_active: false,
+                    equivocators: std::collections::HashSet::new(),
+                };
+
                 // Initialize witness instance
                 let instance = ProtocolInstance {
                     consensus_id,
@@ -180,7 +247,11 @@ impl ConsensusProtocol {
                     phase: ConsensusPhase::Execute,
                     start_time_ms: time.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
                     nonce_token: None,
+                    core_state,
                 };
+
+                // Verify invariants on initialization
+                instance.assert_invariants();
 
                 self.instances.write().await.insert(consensus_id, instance);
 
@@ -350,6 +421,8 @@ impl ConsensusProtocol {
                 // Check if we have threshold
                 if instance.tracker.has_nonce_threshold(self.config.threshold) {
                     instance.phase = ConsensusPhase::Sign;
+                    instance.sync_core_state();
+                    instance.assert_invariants();
                     let nonces = instance.tracker.get_nonces();
 
                     return Ok(Some(ConsensusMessage::SignRequest {
@@ -366,6 +439,11 @@ impl ConsensusProtocol {
                 ..
             } => {
                 instance.tracker.add_signature(sender, share);
+
+                // Sync core state after adding share
+                // Quint: applyShare action / Lean: Consensus.Agreement
+                instance.sync_core_state();
+                instance.assert_invariants();
 
                 // Cache next commitment if provided
                 if let (Some(commitment), _) = (next_commitment, epoch == self.config.epoch) {

@@ -12,6 +12,7 @@ workspace = true
 
 [features]
 default = []
+simulation = ["aura-core/simulation"]
 
 [dependencies]
 # Workspace crates
