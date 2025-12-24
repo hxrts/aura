@@ -90,6 +90,19 @@ pub enum ChatDelta {
         /// Identifier of the removed message.
         message_id: String,
     },
+    /// A message was edited (Category A operation)
+    MessageUpdated {
+        /// Channel containing the message.
+        channel_id: String,
+        /// Identifier of the edited message.
+        message_id: String,
+        /// AuthorityId string of the editor (must be original sender).
+        editor_id: String,
+        /// New content after edit.
+        new_content: String,
+        /// Unix epoch milliseconds when the edit occurred.
+        edited_at: u64,
+    },
     /// A message was delivered to a recipient's device
     ///
     /// This delta is emitted when we learn that a message has been
@@ -245,6 +258,28 @@ impl ViewDeltaReducer for ChatViewReducer {
                 channel_id: channel_id.to_string(),
                 message_id,
                 acknowledged_at: acknowledged_at.ts_ms,
+            }),
+            ChatFact::MessageEdited {
+                channel_id,
+                message_id,
+                editor_id,
+                new_payload,
+                edited_at,
+                ..
+            } => Some(ChatDelta::MessageUpdated {
+                channel_id: channel_id.to_string(),
+                message_id,
+                editor_id: editor_id.to_string(),
+                new_content: String::from_utf8_lossy(&new_payload).to_string(),
+                edited_at: edited_at.ts_ms,
+            }),
+            ChatFact::MessageDeleted {
+                channel_id,
+                message_id,
+                ..
+            } => Some(ChatDelta::MessageRemoved {
+                channel_id: channel_id.to_string(),
+                message_id,
             }),
         };
 

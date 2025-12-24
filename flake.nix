@@ -263,7 +263,7 @@
 
         devShells.nightly = pkgs.mkShell {
           buildInputs = with pkgs; [
-            # Nightly Rust toolchain
+            # Nightly Rust toolchain (required for Kani)
             rustToolchainNightly
             cargo-udeps
 
@@ -282,6 +282,13 @@
             findutils
             gawk
             gnused
+
+            # Kani dependencies
+            # Note: Kani itself must be installed via `cargo install --locked kani-verifier`
+            # and `cargo kani setup` because it requires specific nightly Rust components
+            # that aren't available in nixpkgs. Kani downloads its own CBMC during setup,
+            # so we only need z3 from nixpkgs.
+            z3 # SMT solver for Kani
           ];
 
           shellHook = ''
@@ -293,8 +300,15 @@
             echo ""
             echo "Available commands:"
             echo "  cargo udeps              Check for unused dependencies"
-            echo "  cargo +nightly udeps     Same as above (already using nightly)"
             echo "  just --list              Show all available tasks"
+            echo ""
+            echo "Kani Setup (first time only):"
+            echo "  cargo install --locked kani-verifier"
+            echo "  cargo kani setup"
+            echo ""
+            echo "Kani Usage:"
+            echo "  cargo kani                   Run Kani on current crate"
+            echo "  cargo kani --harness <name>  Run specific harness"
             echo ""
             export RUST_BACKTRACE=1
             export RUST_LOG=info

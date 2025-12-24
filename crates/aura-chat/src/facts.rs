@@ -164,6 +164,40 @@ pub enum ChatFact {
         /// Timestamp when acknowledgment was sent (uses unified time system)
         acknowledged_at: PhysicalTime,
     },
+    /// Message edited (Category A operation - optimistic)
+    ///
+    /// Edit facts are append-only - the original message is not modified.
+    /// Clients reduce by displaying the latest edit for each message_id.
+    MessageEdited {
+        /// Relational context of the message
+        context_id: ContextId,
+        /// Channel containing the message
+        channel_id: ChannelId,
+        /// Message being edited
+        message_id: String,
+        /// Authority that edited the message (must be original sender)
+        editor_id: AuthorityId,
+        /// New content (opaque bytes, typically UTF-8)
+        new_payload: Vec<u8>,
+        /// Timestamp when message was edited
+        edited_at: PhysicalTime,
+    },
+    /// Message deleted (Category B operation - deferred approval may apply)
+    ///
+    /// Delete facts mark a message as deleted. The original message remains
+    /// in the journal but clients should not display deleted messages.
+    MessageDeleted {
+        /// Relational context of the message
+        context_id: ContextId,
+        /// Channel containing the message
+        channel_id: ChannelId,
+        /// Message being deleted
+        message_id: String,
+        /// Authority that deleted the message
+        deleter_id: AuthorityId,
+        /// Timestamp when message was deleted
+        deleted_at: PhysicalTime,
+    },
 }
 
 impl ChatFact {
@@ -179,6 +213,8 @@ impl ChatFact {
             ChatFact::DeliveryAcknowledged {
                 acknowledged_at, ..
             } => acknowledged_at.ts_ms,
+            ChatFact::MessageEdited { edited_at, .. } => edited_at.ts_ms,
+            ChatFact::MessageDeleted { deleted_at, .. } => deleted_at.ts_ms,
         }
     }
 
@@ -244,36 +280,6 @@ impl ChatFact {
             },
             actor_id,
         }
-    }
-
-    /// Create a MessageSent fact with millisecond timestamp (backward compatibility).
-    ///
-    /// This is retained for older call sites but now produces a `MessageSentSealed`
-    /// fact by encoding the provided content as UTF-8 bytes.
-    #[deprecated(
-        note = "Use ChatFact::message_sent_sealed_ms; chat facts now store opaque payload bytes"
-    )]
-    #[allow(clippy::too_many_arguments)]
-    pub fn message_sent_ms(
-        context_id: ContextId,
-        channel_id: ChannelId,
-        message_id: String,
-        sender_id: AuthorityId,
-        sender_name: String,
-        content: String,
-        sent_at_ms: u64,
-        reply_to: Option<String>,
-    ) -> Self {
-        Self::message_sent_sealed_ms(
-            context_id,
-            channel_id,
-            message_id,
-            sender_id,
-            sender_name,
-            content.into_bytes(),
-            sent_at_ms,
-            reply_to,
-        )
     }
 
     /// Create a MessageSentSealed fact with millisecond timestamp.
@@ -370,6 +376,52 @@ impl ChatFact {
             },
         }
     }
+
+    /// Create a MessageEdited fact with millisecond timestamp (Category A operation)
+    ///
+    /// Edit facts are append-only - clients display the latest edit for each message.
+    pub fn message_edited_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        editor_id: AuthorityId,
+        new_payload: Vec<u8>,
+        edited_at_ms: u64,
+    ) -> Self {
+        Self::MessageEdited {
+            context_id,
+            channel_id,
+            message_id,
+            editor_id,
+            new_payload,
+            edited_at: PhysicalTime {
+                ts_ms: edited_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a MessageDeleted fact with millisecond timestamp (Category B operation)
+    ///
+    /// Delete facts mark a message as deleted - clients should not display deleted messages.
+    pub fn message_deleted_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        deleter_id: AuthorityId,
+        deleted_at_ms: u64,
+    ) -> Self {
+        Self::MessageDeleted {
+            context_id,
+            channel_id,
+            message_id,
+            deleter_id,
+            deleted_at: PhysicalTime {
+                ts_ms: deleted_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
 }
 
 impl DomainFact for ChatFact {
@@ -386,6 +438,8 @@ impl DomainFact for ChatFact {
             ChatFact::MessageRead { context_id, .. } => *context_id,
             ChatFact::MessageDelivered { context_id, .. } => *context_id,
             ChatFact::DeliveryAcknowledged { context_id, .. } => *context_id,
+            ChatFact::MessageEdited { context_id, .. } => *context_id,
+            ChatFact::MessageDeleted { context_id, .. } => *context_id,
         }
     }
 
@@ -432,6 +486,8 @@ impl FactReducer for ChatFactReducer {
             ChatFact::MessageRead { context_id, .. } => *context_id,
             ChatFact::MessageDelivered { context_id, .. } => *context_id,
             ChatFact::DeliveryAcknowledged { context_id, .. } => *context_id,
+            ChatFact::MessageEdited { context_id, .. } => *context_id,
+            ChatFact::MessageDeleted { context_id, .. } => *context_id,
         };
         if fact_context_id != context_id {
             return None;
@@ -462,6 +518,14 @@ impl FactReducer for ChatFactReducer {
             ),
             ChatFact::DeliveryAcknowledged { message_id, .. } => (
                 "delivery-acknowledged".to_string(),
+                message_id.as_bytes().to_vec(),
+            ),
+            ChatFact::MessageEdited { message_id, .. } => (
+                "message-edited".to_string(),
+                message_id.as_bytes().to_vec(),
+            ),
+            ChatFact::MessageDeleted { message_id, .. } => (
+                "message-deleted".to_string(),
                 message_id.as_bytes().to_vec(),
             ),
         };

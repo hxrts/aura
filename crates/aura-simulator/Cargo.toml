@@ -58,3 +58,4 @@ chrono = { workspace = true }
 # tokio-test = { workspace = true } # removed - unused
 tempfile = { workspace = true }
 aura-macros = { path = "../aura-macros" }
+proptest = { workspace = true }

@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 use aura_core::{AttestedOp, Hash32};
-use aura_journal::semilattice::concrete_types::OpLog;
+use aura_journal::semilattice::OpLog;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;

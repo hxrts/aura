@@ -349,10 +349,26 @@ fn parse_proposals(value: Option<&Value>) -> Result<Vec<ShareProposal>, AuraErro
 }
 
 /// Parse share data
+///
+/// Handles two formats:
+/// 1. Simple string: `"share": "share_value"` (Quint simplified format)
+/// 2. Full object: `"share": {"shareValue": "...", "nonceBinding": "...", "dataBinding": "..."}`
 fn parse_share_data(value: Option<&Value>) -> Result<ShareData, AuraError> {
-    let obj = value
-        .and_then(|v| v.as_object())
-        .ok_or_else(|| AuraError::invalid("share is not object"))?;
+    let val = value.ok_or_else(|| AuraError::invalid("missing share field"))?;
+
+    // Handle simple string format
+    if let Some(share_str) = val.as_str() {
+        return Ok(ShareData {
+            share_value: share_str.to_string(),
+            nonce_binding: String::new(),
+            data_binding: String::new(),
+        });
+    }
+
+    // Handle full object format
+    let obj = val
+        .as_object()
+        .ok_or_else(|| AuraError::invalid("share is not string or object"))?;
 
     let share_value = obj
         .get("shareValue")

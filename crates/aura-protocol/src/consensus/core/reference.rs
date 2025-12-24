@@ -210,6 +210,232 @@ pub fn detect_equivocators_ref(votes: &[Vote]) -> HashSet<String> {
 }
 
 // ============================================================================
+// TRANSITION REFERENCE IMPLEMENTATIONS
+// ============================================================================
+//
+// These mirror the production transitions in transitions.rs but are written
+// for maximum clarity rather than efficiency. They serve as an oracle for
+// differential testing.
+
+/// Reference result type for transitions
+/// Mirrors TransitionResult but simplified
+#[derive(Debug, Clone)]
+pub enum TransitionResultRef {
+    /// Transition succeeded
+    Ok(ConsensusState),
+    /// Transition was not enabled
+    NotEnabled(String),
+}
+
+impl TransitionResultRef {
+    /// Check if transition succeeded
+    pub fn is_ok(&self) -> bool {
+        matches!(self, TransitionResultRef::Ok(_))
+    }
+
+    /// Get the new state if transition succeeded
+    pub fn state(self) -> Option<ConsensusState> {
+        match self {
+            TransitionResultRef::Ok(s) => Some(s),
+            TransitionResultRef::NotEnabled(_) => None,
+        }
+    }
+
+    /// Get the error message if transition failed
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            TransitionResultRef::Ok(_) => None,
+            TransitionResultRef::NotEnabled(msg) => Some(msg),
+        }
+    }
+}
+
+/// Reference implementation of apply_share
+///
+/// Quint: `submitWitnessShare(cid, witness, rid, share)`
+/// Lean: Follows from Agreement.lean share submission
+///
+/// This implementation prioritizes clarity:
+/// 1. Check all preconditions explicitly
+/// 2. Apply changes in obvious order
+/// 3. Check threshold and commit if met
+pub fn apply_share_ref(state: &ConsensusState, proposal: ShareProposal) -> TransitionResultRef {
+    // Precondition 1: witness must be in witness set
+    if !state.witnesses.contains(&proposal.witness) {
+        return TransitionResultRef::NotEnabled(format!(
+            "witness {} not in witness set",
+            proposal.witness
+        ));
+    }
+
+    // Precondition 2: witness must not have already voted
+    let has_voted = state.proposals.iter().any(|p| p.witness == proposal.witness);
+    if has_voted {
+        return TransitionResultRef::NotEnabled(format!(
+            "witness {} already voted",
+            proposal.witness
+        ));
+    }
+
+    // Precondition 3: consensus must be active
+    let is_active = matches!(
+        state.phase,
+        super::state::ConsensusPhase::FastPathActive | super::state::ConsensusPhase::FallbackActive
+    );
+    if !is_active {
+        return TransitionResultRef::NotEnabled("consensus not active".to_string());
+    }
+
+    // Precondition 4: witness must not be known equivocator
+    if state.equivocators.contains(&proposal.witness) {
+        return TransitionResultRef::NotEnabled(format!(
+            "witness {} is known equivocator",
+            proposal.witness
+        ));
+    }
+
+    // Create new state
+    let mut new_state = state.clone();
+
+    // Check for equivocation (same witness, different result)
+    // Note: This shouldn't happen since we checked has_voted above,
+    // but this is the reference check for completeness
+    let is_equivocating = state
+        .proposals
+        .iter()
+        .any(|p| p.witness == proposal.witness && p.result_id != proposal.result_id);
+
+    if is_equivocating {
+        new_state.equivocators.insert(proposal.witness.clone());
+    } else {
+        new_state.proposals.push(proposal.clone());
+    }
+
+    // Check if threshold is met after adding proposal
+    // Count proposals for each result
+    let mut result_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for p in &new_state.proposals {
+        *result_counts.entry(&p.result_id).or_insert(0) += 1;
+    }
+
+    // Check if any result has threshold
+    let threshold_met = result_counts.values().any(|&count| count >= new_state.threshold);
+
+    if threshold_met {
+        new_state.phase = super::state::ConsensusPhase::Committed;
+
+        // Find the winning result
+        let winning_result = result_counts
+            .iter()
+            .find(|(_, &count)| count >= new_state.threshold)
+            .map(|(&rid, _)| rid.to_string());
+
+        if let Some(rid) = winning_result {
+            new_state.commit_fact = Some(PureCommitFact {
+                cid: new_state.cid.clone(),
+                result_id: rid,
+                signature: "ref_agg_sig".to_string(),
+                prestate_hash: new_state.prestate_hash.clone(),
+            });
+        }
+    }
+
+    TransitionResultRef::Ok(new_state)
+}
+
+/// Reference implementation of trigger_fallback
+///
+/// Quint: `triggerFallback(cid)`
+///
+/// Simple: just change phase from FastPathActive to FallbackActive
+pub fn trigger_fallback_ref(state: &ConsensusState) -> TransitionResultRef {
+    // Precondition: must be in fast path
+    if state.phase != super::state::ConsensusPhase::FastPathActive {
+        return TransitionResultRef::NotEnabled(format!(
+            "not in fast path: {:?}",
+            state.phase
+        ));
+    }
+
+    let mut new_state = state.clone();
+    new_state.phase = super::state::ConsensusPhase::FallbackActive;
+    new_state.fallback_timer_active = true;
+
+    TransitionResultRef::Ok(new_state)
+}
+
+/// Reference implementation of fail_consensus
+///
+/// Quint: `failConsensus(cid)`
+pub fn fail_consensus_ref(state: &ConsensusState) -> TransitionResultRef {
+    // Cannot fail if already committed
+    if state.phase == super::state::ConsensusPhase::Committed {
+        return TransitionResultRef::NotEnabled("already committed".to_string());
+    }
+
+    // Cannot fail if already failed
+    if state.phase == super::state::ConsensusPhase::Failed {
+        return TransitionResultRef::NotEnabled("already failed".to_string());
+    }
+
+    let mut new_state = state.clone();
+    new_state.phase = super::state::ConsensusPhase::Failed;
+
+    TransitionResultRef::Ok(new_state)
+}
+
+/// Reference implementation of check_invariants
+///
+/// Quint: `WellFormedState(insts, committed, nonces, epoch)`
+///
+/// Returns None if valid, Some(error) if invalid
+pub fn check_invariants_ref(state: &ConsensusState) -> Option<String> {
+    // Invariant 1: threshold >= 1
+    if state.threshold < 1 {
+        return Some("threshold must be >= 1".to_string());
+    }
+
+    // Invariant 2: |witnesses| >= threshold
+    if state.witnesses.len() < state.threshold {
+        return Some(format!(
+            "insufficient witnesses: {} < {}",
+            state.witnesses.len(),
+            state.threshold
+        ));
+    }
+
+    // Invariant 3: all proposals from witnesses
+    for proposal in &state.proposals {
+        if !state.witnesses.contains(&proposal.witness) {
+            return Some(format!("proposal from non-witness: {}", proposal.witness));
+        }
+    }
+
+    // Invariant 4: equivocators subset of witnesses
+    for eq in &state.equivocators {
+        if !state.witnesses.contains(eq) {
+            return Some(format!("equivocator not in witness set: {}", eq));
+        }
+    }
+
+    // Invariant 5: committed phase requires commit fact
+    if state.phase == super::state::ConsensusPhase::Committed && state.commit_fact.is_none() {
+        return Some("committed phase but no commit fact".to_string());
+    }
+
+    // Invariant 6: no witness has multiple proposals (no duplicate entries)
+    let mut seen_witnesses: HashSet<&str> = HashSet::new();
+    for proposal in &state.proposals {
+        if seen_witnesses.contains(proposal.witness.as_str()) {
+            return Some(format!("duplicate proposal from witness: {}", proposal.witness));
+        }
+        seen_witnesses.insert(&proposal.witness);
+    }
+
+    None // All invariants hold
+}
+
+// ============================================================================
 // CONSENSUS STATE EXTRACTION (for differential testing)
 // ============================================================================
 

@@ -1,6 +1,6 @@
 //! # Aura Chat
 //!
-//! Layer 5 feature crate for chat-related domain facts and (currently) a small, local chat service.
+//! Layer 5 feature crate for chat-related domain facts and guard-compatible services.
 //!
 //! ## What belongs here
 //!
@@ -8,11 +8,36 @@
 //!   append-only facts stored via `RelationalFact::Generic`. Message payloads are represented as
 //!   **opaque bytes** (`MessageSentSealed`); rendering/decryption is a higher-layer concern.
 //! - **View reduction**: `ChatViewReducer` produces UI deltas from facts without assuming plaintext.
+//! - **Guard-compatible service**: `ChatFactService` provides guard chain integration for all
+//!   chat operations (capability checks, flow budget charging, fact emission).
 //!
-//! ## Local (non-replicated) handler
+//! ## Canonical API
 //!
-//! `ChatHandler` is a per-call-effects handler that persists group/message state via `StorageEffects`.
-//! It is intentionally **local-only** and separate from the journal-backed `ChatFact` path.
+//! Use `ChatFactService` for all chat operations. It integrates with:
+//! - Capability guards (`CAP_CHAT_CHANNEL_CREATE`, `CAP_CHAT_MESSAGE_SEND`)
+//! - Flow budget charging (`CHAT_CHANNEL_CREATE_COST`, `CHAT_MESSAGE_SEND_COST`)
+//! - Journal fact emission via `EffectCommand::JournalAppend`
+//!
+//! The actual runtime integration is in `aura-agent/src/handlers/chat_service.rs`.
+//!
+//! ## Operation Categories (per docs/117_operation_categories.md)
+//!
+//! Chat operations follow the three-tier classification:
+//!
+//! | Operation | Category | Notes |
+//! |-----------|----------|-------|
+//! | Send message | A (Optimistic) | Keys already derived from context |
+//! | Create channel | A (Optimistic) | Emit `ChannelCreated` fact |
+//! | Add channel member | A (Optimistic) | If member already in relational context |
+//! | Update topic | A (Optimistic) | CRDT, last-write-wins |
+//! | Change permissions | B (Deferred) | Requires approval workflow |
+//! | Kick from channel | B (Deferred) | May need approval |
+//! | Create group | C (Blocking) | Multi-party key agreement ceremony |
+//! | Add member to group | C (Blocking) | Changes group keys, requires ceremony |
+//!
+//! **Key insight**: Adding to a **channel** within existing context = Category A.
+//! Adding to a **group** (new context relationship) = Category C ceremony
+//! (see `docs/118_key_rotation_ceremonies.md`).
 //!
 //! ## Effect system compliance
 //!
@@ -45,16 +70,12 @@ pub mod fact_service;
 pub mod facts;
 pub mod group;
 pub mod guards;
-pub mod history;
-pub mod service;
 pub mod types;
 pub mod view;
 
 pub use fact_service::ChatFactService;
 pub use facts::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 pub use group::ChatGroup;
-pub use history::ChatHistory;
-pub use service::ChatHandler;
 pub use types::*;
 pub use view::{ChatDelta, ChatViewReducer};
 

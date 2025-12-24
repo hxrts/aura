@@ -699,6 +699,46 @@ impl ReactiveView for ChatSignalView {
                         "Delivery receipt acknowledged"
                     );
                 }
+                ChatFact::MessageEdited {
+                    channel_id,
+                    message_id,
+                    editor_id,
+                    new_payload,
+                    edited_at,
+                    ..
+                } => {
+                    // Update the message content in local state
+                    let new_content = String::from_utf8_lossy(&new_payload).to_string();
+                    if let Some(msg) = state.message_mut(&message_id) {
+                        msg.content = new_content;
+                    }
+                    tracing::debug!(
+                        channel_id = %channel_id,
+                        message_id,
+                        editor_id = %editor_id,
+                        edited_at = edited_at.ts_ms,
+                        "Message edited"
+                    );
+                    changed = true;
+                }
+                ChatFact::MessageDeleted {
+                    channel_id,
+                    message_id,
+                    deleter_id,
+                    deleted_at,
+                    ..
+                } => {
+                    // Remove the message from local state
+                    state.remove_message(&message_id);
+                    tracing::debug!(
+                        channel_id = %channel_id,
+                        message_id,
+                        deleter_id = %deleter_id,
+                        deleted_at = deleted_at.ts_ms,
+                        "Message deleted"
+                    );
+                    changed = true;
+                }
             }
         }
 
@@ -727,7 +767,8 @@ mod tests {
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
-    use aura_protocol::moderation::{BlockBanFact, BlockPinFact, BlockUnpinFact};
+    use aura_protocol::moderation::facts::{BlockPinFact, BlockUnpinFact};
+    use aura_protocol::moderation::BlockBanFact;
 
     async fn setup_blocks(reactive: &ReactiveHandler, context: ContextId) -> BlocksState {
         register_app_signals(reactive).await.unwrap();

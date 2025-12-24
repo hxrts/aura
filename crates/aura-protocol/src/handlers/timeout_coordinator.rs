@@ -16,7 +16,6 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects, TimeError};
-use std::sync::Arc;
 
 /// Timeout coordinator that adds multi-context coordination to a base TimeEffects handler
 #[derive(Debug, Clone)]
@@ -24,19 +23,14 @@ pub struct TimeoutCoordinator<T, R> {
     /// Base time handler for stateless operations
     inner: T,
     /// Random effects for UUID generation
+    #[allow(dead_code)]
     random: R,
-    /// Reserved registry hook for future coordination (kept for API compatibility)
-    _registry: Arc<()>,
 }
 
 impl<T: PhysicalTimeEffects + Clone, R: RandomEffects + Clone> TimeoutCoordinator<T, R> {
     /// Create a new timeout coordinator wrapping a base time handler and random effects
     pub fn new(inner: T, random: R) -> Self {
-        Self {
-            inner,
-            random,
-            _registry: Arc::new(()),
-        }
+        Self { inner, random }
     }
 }
 

@@ -36,6 +36,7 @@
 - [Maintenance and OTA Guide](808_maintenance_guide.md)
 - [Generative Testing Guide](809_generative_testing_guide.md)
 - [Reactive Signals Guide](810_reactive_signals_guide.md)
+- [Verification Coverage](998_verification_coverage.md)
 - [Aura Crate Structure and Dependency Graph](999_project_structure.md)
 
 # Blog

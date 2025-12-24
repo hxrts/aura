@@ -18,8 +18,7 @@
 //!
 //! Generate traces first:
 //! ```bash
-//! cd verification/quint
-//! quint run --out-itf=consensus_trace.itf.json --max-steps=30 protocol_consensus.qnt
+//! ./scripts/generate-itf-traces.sh 50  # Generate 200+ traces
 //! ```
 //!
 //! Then run tests:
@@ -35,20 +34,21 @@ use aura_protocol::consensus::core::{
 };
 use std::collections::HashMap;
 use std::fmt;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Test that all states in an ITF trace satisfy invariants
 #[test]
 fn test_itf_trace_invariants() {
-    // Try to load the generated trace
-    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+    // Load trace from the dedicated traces directory
+    let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
         eprintln!(
             "Skipping ITF conformance test: trace file not found at {:?}",
             trace_path
         );
-        eprintln!("Generate traces with: cd verification/quint && quint run --out-itf=consensus_trace.itf.json protocol_consensus.qnt");
+        eprintln!("Generate traces with: quint run --out-itf=traces/consensus.itf.json verification/quint/protocol_consensus.qnt");
         return;
     }
 
@@ -80,7 +80,7 @@ fn test_itf_trace_invariants() {
 /// Test phase transitions are valid
 #[test]
 fn test_itf_phase_transitions() {
-    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -140,7 +140,7 @@ fn is_valid_phase_transition(from: ConsensusPhase, to: ConsensusPhase) -> bool {
 /// Test that committed instances have valid commit facts
 #[test]
 fn test_itf_committed_has_commit_fact() {
-    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -233,7 +233,7 @@ fn test_parse_itf_with_instance() {
 /// Test monotonicity: proposal counts never decrease
 #[test]
 fn test_itf_proposal_monotonicity() {
-    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -377,7 +377,7 @@ fn infer_action(
 /// Test action inference from state changes
 #[test]
 fn test_itf_action_inference() {
-    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -426,7 +426,7 @@ fn test_itf_action_inference() {
 /// Test equivocator detection matches between states
 #[test]
 fn test_itf_equivocator_monotonicity() {
-    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -460,7 +460,7 @@ fn test_itf_equivocator_monotonicity() {
 /// Test that terminal states (Committed/Failed) remain terminal
 #[test]
 fn test_itf_terminal_states_permanent() {
-    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -554,7 +554,7 @@ fn is_expected_divergence(actions: &[InferredAction], diff: &InstanceDiff) -> bo
 /// Test comprehensive state comparison with divergence reporting
 #[test]
 fn test_itf_state_comparison_with_divergence() {
-    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
         eprintln!("Skipping divergence test: trace file not found");
@@ -726,7 +726,7 @@ fn test_invariant_violation_with_divergence() {
 /// Test action inference accuracy with divergence correlation
 #[test]
 fn test_action_inference_with_divergence() {
-    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -770,4 +770,265 @@ fn test_action_inference_with_divergence() {
 
     println!("✓ Action inference correlated with {} total divergence instances",
              action_divergence_correlation.values().sum::<usize>());
+}
+
+// ============================================================================
+// EXHAUSTIVE TRACE CONFORMANCE (All traces in directory)
+// ============================================================================
+
+/// Discover all ITF trace files in a directory
+fn discover_traces(dir: &Path) -> Vec<PathBuf> {
+    let mut traces = Vec::new();
+
+    if !dir.exists() {
+        return traces;
+    }
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "json") {
+                traces.push(path);
+            }
+        }
+    }
+
+    traces.sort();
+    traces
+}
+
+/// Result of validating a single trace
+#[derive(Debug)]
+struct TraceValidationResult {
+    path: PathBuf,
+    states: usize,
+    invariant_violations: Vec<String>,
+    phase_violations: Vec<String>,
+    monotonicity_violations: Vec<String>,
+    divergences: Vec<String>,
+}
+
+impl TraceValidationResult {
+    fn is_ok(&self) -> bool {
+        self.invariant_violations.is_empty()
+            && self.phase_violations.is_empty()
+            && self.monotonicity_violations.is_empty()
+            && self.divergences.is_empty()
+    }
+
+    fn error_count(&self) -> usize {
+        self.invariant_violations.len()
+            + self.phase_violations.len()
+            + self.monotonicity_violations.len()
+            + self.divergences.len()
+    }
+}
+
+/// Validate a single trace comprehensively
+fn validate_trace(path: &Path) -> Result<TraceValidationResult, String> {
+    let trace = load_itf_trace(path).map_err(|e| format!("Failed to load: {}", e))?;
+
+    let mut result = TraceValidationResult {
+        path: path.to_path_buf(),
+        states: trace.states.len(),
+        invariant_violations: Vec::new(),
+        phase_violations: Vec::new(),
+        monotonicity_violations: Vec::new(),
+        divergences: Vec::new(),
+    };
+
+    // Check invariants for all states
+    for state in &trace.states {
+        for (cid, inst) in &state.instances {
+            if let Err(e) = check_invariants(inst) {
+                result.invariant_violations.push(format!(
+                    "State {} instance {}: {:?}",
+                    state.index, cid, e
+                ));
+            }
+        }
+    }
+
+    // Check phase transitions and monotonicity
+    for i in 1..trace.states.len() {
+        let prev_state = &trace.states[i - 1];
+        let curr_state = &trace.states[i];
+
+        for (cid, curr_inst) in &curr_state.instances {
+            if let Some(prev_inst) = prev_state.instances.get(cid) {
+                // Phase transition validity
+                if !is_valid_phase_transition(prev_inst.phase, curr_inst.phase) {
+                    result.phase_violations.push(format!(
+                        "State {}: {:?} -> {:?} for {}",
+                        i, prev_inst.phase, curr_inst.phase, cid
+                    ));
+                }
+
+                // Proposal monotonicity
+                if curr_inst.proposals.len() < prev_inst.proposals.len() {
+                    result.monotonicity_violations.push(format!(
+                        "State {}: proposals {} -> {} for {}",
+                        i,
+                        prev_inst.proposals.len(),
+                        curr_inst.proposals.len(),
+                        cid
+                    ));
+                }
+
+                // Equivocator monotonicity
+                for eq in &prev_inst.equivocators {
+                    if !curr_inst.equivocators.contains(eq) {
+                        result.monotonicity_violations.push(format!(
+                            "State {}: equivocator '{}' disappeared for {}",
+                            i, eq, cid
+                        ));
+                    }
+                }
+
+                // Check for unexpected divergences
+                let actions = infer_action(prev_state, curr_state);
+                let diff = StateDiff::compare_instances(prev_inst, curr_inst);
+                if !diff.is_empty() && !is_expected_divergence(&actions, &diff) {
+                    result.divergences.push(format!(
+                        "State {}: unexpected divergence for {}: {:?}",
+                        i, cid, diff.diffs
+                    ));
+                }
+            }
+        }
+
+        // Terminal state permanence
+        for (cid, prev_inst) in &prev_state.instances {
+            if prev_inst.phase == ConsensusPhase::Committed
+                || prev_inst.phase == ConsensusPhase::Failed
+            {
+                if let Some(curr_inst) = curr_state.instances.get(cid) {
+                    if prev_inst.phase != curr_inst.phase {
+                        result.phase_violations.push(format!(
+                            "State {}: terminal {:?} changed to {:?} for {}",
+                            i, prev_inst.phase, curr_inst.phase, cid
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Run exhaustive conformance tests on all traces in the consensus directory
+#[test]
+fn test_exhaustive_trace_conformance() {
+    let trace_dir = Path::new("../../traces/consensus");
+    let traces = discover_traces(trace_dir);
+
+    if traces.is_empty() {
+        eprintln!("No traces found in {:?}", trace_dir);
+        eprintln!("Generate traces with: ./scripts/generate-itf-traces.sh");
+        return;
+    }
+
+    println!("========================================");
+    println!("Exhaustive ITF Trace Conformance Test");
+    println!("========================================");
+    println!("Discovered {} traces in {:?}", traces.len(), trace_dir);
+    println!();
+
+    let mut total_states = 0;
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut failed_traces: Vec<TraceValidationResult> = Vec::new();
+
+    for trace_path in &traces {
+        match validate_trace(trace_path) {
+            Ok(result) => {
+                total_states += result.states;
+                if result.is_ok() {
+                    passed += 1;
+                } else {
+                    failed += 1;
+                    failed_traces.push(result);
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                eprintln!("  [LOAD ERROR] {:?}: {}", trace_path.file_name(), e);
+            }
+        }
+    }
+
+    println!();
+    println!("========================================");
+    println!("Summary");
+    println!("========================================");
+    println!("  Traces tested:  {}", traces.len());
+    println!("  Total states:   {}", total_states);
+    println!("  Passed:         {}", passed);
+    println!("  Failed:         {}", failed);
+    println!();
+
+    if !failed_traces.is_empty() {
+        println!("Failed traces:");
+        for result in &failed_traces {
+            println!(
+                "  {:?}: {} errors",
+                result.path.file_name(),
+                result.error_count()
+            );
+            for v in &result.invariant_violations {
+                println!("    [INVARIANT] {}", v);
+            }
+            for v in &result.phase_violations {
+                println!("    [PHASE] {}", v);
+            }
+            for v in &result.monotonicity_violations {
+                println!("    [MONOTONICITY] {}", v);
+            }
+            for v in &result.divergences {
+                println!("    [DIVERGENCE] {}", v);
+            }
+        }
+    }
+
+    assert_eq!(
+        failed, 0,
+        "Conformance test failed: {} traces had violations",
+        failed
+    );
+
+    println!();
+    println!("✓ All {} traces passed conformance testing ({} total states)",
+             passed, total_states);
+}
+
+/// Test for minimum trace coverage
+#[test]
+fn test_trace_coverage_minimum() {
+    let trace_dir = Path::new("../../traces/consensus");
+    let traces = discover_traces(trace_dir);
+
+    // We need at least 50 traces for reasonable coverage
+    // Target is 200+ but we'll warn at 50
+    const MIN_TRACES: usize = 50;
+    const TARGET_TRACES: usize = 200;
+
+    if traces.len() < MIN_TRACES {
+        eprintln!(
+            "WARNING: Only {} traces found (minimum: {}, target: {})",
+            traces.len(),
+            MIN_TRACES,
+            TARGET_TRACES
+        );
+        eprintln!("Generate more traces with: ./scripts/generate-itf-traces.sh");
+        // Don't fail, just warn
+    } else if traces.len() < TARGET_TRACES {
+        println!(
+            "Note: {} traces found (target: {}). Consider generating more.",
+            traces.len(),
+            TARGET_TRACES
+        );
+    } else {
+        println!("✓ Trace coverage meets target: {} traces", traces.len());
+    }
 }

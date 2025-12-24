@@ -130,8 +130,8 @@ pub mod context;
 
 // Scenario definitions
 pub mod scenario;
-#[cfg(test)]
-mod scenarios;
+/// Simulation scenarios for testing consensus and protocols
+pub mod scenarios;
 
 // Testkit integration bridge
 pub mod testkit_bridge;

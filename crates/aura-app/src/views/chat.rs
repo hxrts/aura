@@ -219,4 +219,14 @@ impl ChatState {
             }
         }
     }
+
+    /// Get mutable reference to a message by ID
+    pub fn message_mut(&mut self, message_id: &str) -> Option<&mut Message> {
+        self.messages.iter_mut().find(|m| m.id == message_id)
+    }
+
+    /// Remove a message by ID
+    pub fn remove_message(&mut self, message_id: &str) {
+        self.messages.retain(|m| m.id != message_id);
+    }
 }

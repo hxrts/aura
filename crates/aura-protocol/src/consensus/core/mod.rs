@@ -29,6 +29,10 @@ pub mod quint_mapping;
 
 pub mod itf_loader;
 
+// Kani bounded model checking proofs - only compiled when running Kani
+#[cfg(kani)]
+pub mod kani_proofs;
+
 // Re-export core types for convenience
 pub use state::{
     ConsensusPhase, ConsensusState, PathSelection, ShareData, ShareProposal, WitnessParticipation,

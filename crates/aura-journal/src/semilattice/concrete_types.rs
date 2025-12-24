@@ -5,7 +5,7 @@
 
 use crate::effect_api::intent::{Intent, IntentId};
 use aura_core::semilattice::{Bottom, CvState, JoinSemilattice};
-use aura_core::{AttestedOp, Hash32};
+// Note: OpLog is defined in op_log.rs with full sync helpers (OpLogSummary, diff, etc.)
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -102,119 +102,6 @@ impl Bottom for IntentPool {
 impl CvState for IntentPool {}
 
 impl Default for IntentPool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Tree operation log CRDT using OR-set semantics
-///
-/// The OpLog is the **source of truth** for all attested tree operations.
-/// It implements a grow-only OR-set keyed by operation hash (CID).
-///
-/// ## Key Properties (from docs/123_commitment_tree.md):
-///
-/// - **Append-Only**: Operations are never removed, only added
-/// - **OR-Set Semantics**: Union of all seen operations across replicas
-/// - **Keyed by Hash**: Operations indexed by H(TreeOp) for deduplication
-/// - **No Shares/Transcripts**: Stores only AttestedOp with aggregate signatures
-/// - **TreeState is Derived**: Reduction function materializes tree on-demand
-///
-/// ## CRDT Properties:
-///
-/// - Join: Set union (all ops from both replicas)
-/// - Convergence: All replicas eventually have same OpLog
-/// - Deterministic: Same OpLog always reduces to same TreeState
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OpLog {
-    /// Attested operations indexed by commitment hash (CID)
-    /// Using Hash32 as the content identifier
-    pub ops: BTreeMap<Hash32, AttestedOp>,
-}
-
-impl OpLog {
-    /// Create a new empty operation log
-    pub fn new() -> Self {
-        Self {
-            ops: BTreeMap::new(),
-        }
-    }
-
-    /// Append an attested operation to the log
-    ///
-    /// The operation is keyed by its commitment hash for deduplication.
-    /// Returns the hash (CID) of the operation.
-    pub fn append(&mut self, op: AttestedOp) -> Hash32 {
-        // Compute CID by hashing the entire operation
-        let cid = self.compute_operation_cid(&op);
-        self.ops.insert(cid, op);
-        cid
-    }
-
-    /// Compute the content ID (CID) of an operation
-    fn compute_operation_cid(&self, op: &AttestedOp) -> Hash32 {
-        let mut hasher = aura_core::hash::hasher();
-
-        // Hash the TreeOp
-        hasher.update(&op.op.parent_epoch.to_le_bytes());
-        hasher.update(&op.op.parent_commitment);
-        hasher.update(&op.op.version.to_le_bytes());
-
-        // Hash the aggregate signature
-        hasher.update(&op.agg_sig);
-        hasher.update(&op.signer_count.to_le_bytes());
-
-        Hash32(hasher.finalize())
-    }
-
-    /// Get an operation by its hash (CID)
-    pub fn get(&self, cid: &Hash32) -> Option<&AttestedOp> {
-        self.ops.get(cid)
-    }
-
-    /// List all operations (unordered)
-    pub fn list_ops(&self) -> Vec<&AttestedOp> {
-        self.ops.values().collect()
-    }
-
-    /// Get number of operations
-    pub fn len(&self) -> usize {
-        self.ops.len()
-    }
-
-    /// Check if log is empty
-    pub fn is_empty(&self) -> bool {
-        self.ops.is_empty()
-    }
-
-    /// Check if log contains an operation with the given hash
-    pub fn contains(&self, cid: &Hash32) -> bool {
-        self.ops.contains_key(cid)
-    }
-}
-
-impl JoinSemilattice for OpLog {
-    fn join(&self, other: &Self) -> Self {
-        let mut result = self.clone();
-
-        // OR-set semantics: union of all operations
-        for (cid, op) in &other.ops {
-            result.ops.insert(*cid, op.clone());
-        }
-
-        result
-    }
-}
-
-impl Bottom for OpLog {
-    fn bottom() -> Self {
-        Self::new()
-    }
-}
-
-impl CvState for OpLog {}
-
-impl Default for OpLog {
     fn default() -> Self {
         Self::new()
     }

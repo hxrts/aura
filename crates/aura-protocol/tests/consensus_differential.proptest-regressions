@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 678cfae271d4aca144a77b89787597f4492770e3ea0d40d3fcd280d4fc8d328d # shrinks to n_witnesses = 3, n_proposals = 0

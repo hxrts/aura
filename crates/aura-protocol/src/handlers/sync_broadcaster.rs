@@ -1,6 +1,7 @@
 use crate::effects::sync::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use async_lock::RwLock;
 use async_trait::async_trait;
+use aura_core::effects::NetworkEffects;
 use aura_core::identifiers::ContextId;
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,7 +39,7 @@ impl Default for BroadcastConfig {
 /// 2. Lazy pull: Respond to requests from peers for specific operations
 ///
 /// Includes rate limiting and back pressure handling to prevent overwhelming peers.
-/// All sends go through the guard chain to enforce authorization → flow → leakage → journal sequence.
+/// When network effects are configured, sends go through actual network transport.
 #[derive(Clone)]
 pub struct BroadcasterHandler {
     config: BroadcastConfig,
@@ -51,6 +52,8 @@ pub struct BroadcasterHandler {
     rate_limits: Arc<RwLock<BTreeMap<Uuid, usize>>>,
     /// Context ID for guard chain operations
     context_id: ContextId,
+    /// Optional network effects for actual message transport
+    network: Option<Arc<dyn NetworkEffects + Send + Sync>>,
 }
 
 impl BroadcasterHandler {
@@ -62,6 +65,24 @@ impl BroadcasterHandler {
             pending_announcements: Arc::new(RwLock::new(BTreeMap::new())),
             rate_limits: Arc::new(RwLock::new(BTreeMap::new())),
             context_id,
+            network: None,
+        }
+    }
+
+    /// Create a broadcaster with network effects for actual transport
+    pub fn with_network(
+        config: BroadcastConfig,
+        context_id: ContextId,
+        network: Arc<dyn NetworkEffects + Send + Sync>,
+    ) -> Self {
+        Self {
+            config,
+            oplog: Arc::new(RwLock::new(BTreeMap::new())),
+            peers: Arc::new(RwLock::new(BTreeSet::new())),
+            pending_announcements: Arc::new(RwLock::new(BTreeMap::new())),
+            rate_limits: Arc::new(RwLock::new(BTreeMap::new())),
+            context_id,
+            network: Some(network),
         }
     }
 
@@ -247,23 +268,6 @@ impl SyncEffects for BroadcasterHandler {
 }
 
 impl BroadcasterHandler {
-    async fn request_ops_from_peer_legacy(
-        &self,
-        _peer_id: Uuid,
-        cids: Vec<Hash32>,
-    ) -> Result<Vec<AttestedOp>, SyncError> {
-        let oplog = self.oplog.read().await;
-        let mut result = Vec::new();
-
-        for cid in cids {
-            if let Some(op) = oplog.get(&cid) {
-                result.push(op.clone());
-            }
-        }
-
-        Ok(result)
-    }
-
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
         let mut oplog = self.oplog.write().await;
 
@@ -298,17 +302,53 @@ impl BroadcasterHandler {
     }
 
     async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
-        // Legacy interface - currently bypasses guard chain (transport integration pending)
-        tracing::warn!("push_op_to_peers called without guard chain - this bypasses security");
-
         let cid = Hash32::from(op.op.parent_commitment);
-        for peer in peers {
-            tracing::debug!("Pushing op {:?} to peer: {:?} (INSECURE)", cid, peer);
-            // NOTE: This bypasses the guard chain and should not be used in production
+
+        // Check if we have network effects configured
+        let Some(network) = &self.network else {
+            // No network configured - log warning and skip actual send
+            tracing::warn!(
+                cid = ?cid,
+                peer_count = peers.len(),
+                "push_op_to_peers called without network effects - message not sent"
+            );
+            let mut pending = self.pending_announcements.write().await;
+            pending.remove(&cid);
+            return Ok(());
+        };
+
+        // Serialize the operation for transport
+        let op_data = bincode::serialize(&op).map_err(|e| {
+            SyncError::NetworkError(format!("Failed to serialize operation: {}", e))
+        })?;
+
+        // Send to each peer
+        let mut send_errors = Vec::new();
+        for peer in &peers {
+            tracing::debug!(cid = ?cid, peer = ?peer, "Pushing operation to peer");
+            if let Err(e) = network.send_to_peer(*peer, op_data.clone()).await {
+                tracing::warn!(
+                    cid = ?cid,
+                    peer = ?peer,
+                    error = %e,
+                    "Failed to send operation to peer"
+                );
+                send_errors.push((*peer, e));
+            }
         }
 
+        // Remove from pending announcements
         let mut pending = self.pending_announcements.write().await;
         pending.remove(&cid);
+
+        // If all sends failed, return an error
+        if !send_errors.is_empty() && send_errors.len() == peers.len() {
+            return Err(SyncError::NetworkError(format!(
+                "Failed to send operation to any peer: {} errors",
+                send_errors.len()
+            )));
+        }
+
         Ok(())
     }
 

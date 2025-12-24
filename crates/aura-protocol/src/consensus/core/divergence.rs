@@ -17,7 +17,7 @@
 //! ```text
 //! ╔══════════════════════════════════════════════════════════════════════╗
 //! ║ DIVERGENCE DETECTED at step 5                                        ║
-//! ║ Inferred action: ApplyShare { cid: "cns1", witness: "w2" }          ║
+//! ║ Inferred action: ApplyShare { cid: "cns1", witness: "w2" }           ║
 //! ╠══════════════════════════════════════════════════════════════════════╣
 //! ║ Instance: cns1                                                       ║
 //! ╠──────────────────────────────────────────────────────────────────────╣
@@ -44,7 +44,11 @@ pub struct FieldDiff {
 }
 
 impl FieldDiff {
-    pub fn new(field: impl Into<String>, expected: impl fmt::Debug, actual: impl fmt::Debug) -> Self {
+    pub fn new(
+        field: impl Into<String>,
+        expected: impl fmt::Debug,
+        actual: impl fmt::Debug,
+    ) -> Self {
         Self {
             field: field.into(),
             expected: format!("{:?}", expected),
@@ -115,7 +119,11 @@ impl StateDiff {
         }
 
         if expected.operation != actual.operation {
-            diff.add(FieldDiff::new("operation", &expected.operation, &actual.operation));
+            diff.add(FieldDiff::new(
+                "operation",
+                &expected.operation,
+                &actual.operation,
+            ));
         }
 
         if expected.prestate_hash != actual.prestate_hash {
@@ -127,11 +135,19 @@ impl StateDiff {
         }
 
         if expected.threshold != actual.threshold {
-            diff.add(FieldDiff::new("threshold", &expected.threshold, &actual.threshold));
+            diff.add(FieldDiff::new(
+                "threshold",
+                &expected.threshold,
+                &actual.threshold,
+            ));
         }
 
         if expected.initiator != actual.initiator {
-            diff.add(FieldDiff::new("initiator", &expected.initiator, &actual.initiator));
+            diff.add(FieldDiff::new(
+                "initiator",
+                &expected.initiator,
+                &actual.initiator,
+            ));
         }
 
         if expected.phase != actual.phase {
@@ -242,7 +258,14 @@ impl StateDiff {
     fn format_set(set: &HashSet<String>) -> String {
         let mut items: Vec<_> = set.iter().collect();
         items.sort();
-        format!("{{{}}}", items.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+        format!(
+            "{{{}}}",
+            items
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 
     /// Compare two proposal lists
@@ -306,7 +329,11 @@ impl StateDiff {
         let mut diffs = Vec::new();
 
         if expected.cid != actual.cid {
-            diffs.push(FieldDiff::new("commit_fact.cid", &expected.cid, &actual.cid));
+            diffs.push(FieldDiff::new(
+                "commit_fact.cid",
+                &expected.cid,
+                &actual.cid,
+            ));
         }
 
         if expected.result_id != actual.result_id {
@@ -379,10 +406,7 @@ impl<'a> DivergenceReport<'a> {
         report.push_str(&format!(
             "╠══════════════════════════════════════════════════════════════════════╣\n"
         ));
-        report.push_str(&format!(
-            "║ Instance: {:<60} ║\n",
-            diff.cid
-        ));
+        report.push_str(&format!("║ Instance: {:<60} ║\n", diff.cid));
         report.push_str(&format!(
             "╠──────────────────────────────────────────────────────────────────────╣\n"
         ));
@@ -434,11 +458,7 @@ impl<'a> fmt::Display for DivergenceReport<'a> {
             f,
             "╔══════════════════════════════════════════════════════════════════════╗"
         )?;
-        writeln!(
-            f,
-            "║ DIVERGENCE DETECTED at step {:<40} ║",
-            self.step_index
-        )?;
+        writeln!(f, "║ DIVERGENCE DETECTED at step {:<40} ║", self.step_index)?;
 
         if let Some(action) = &self.action_description {
             let action_display = if action.len() > 62 {
@@ -456,7 +476,10 @@ impl<'a> fmt::Display for DivergenceReport<'a> {
 
         // Global diffs
         if !self.diff.global_diffs.is_empty() {
-            writeln!(f, "║ Global State Changes:                                                ║")?;
+            writeln!(
+                f,
+                "║ Global State Changes:                                                ║"
+            )?;
             for gd in &self.diff.global_diffs {
                 writeln!(f, "║   {}: {} → {}", gd.field, gd.expected, gd.actual)?;
             }
@@ -464,11 +487,7 @@ impl<'a> fmt::Display for DivergenceReport<'a> {
 
         // Missing instances
         if !self.diff.missing_instances.is_empty() {
-            writeln!(
-                f,
-                "║ Missing instances: {:?}",
-                self.diff.missing_instances
-            )?;
+            writeln!(f, "║ Missing instances: {:?}", self.diff.missing_instances)?;
         }
 
         // Extra instances
@@ -533,7 +552,8 @@ impl<'a> fmt::Display for DivergenceReport<'a> {
 #[macro_export]
 macro_rules! assert_state_eq {
     ($expected:expr, $actual:expr, $step:expr) => {
-        let diff = $crate::consensus::core::divergence::StateDiff::compare_instances($expected, $actual);
+        let diff =
+            $crate::consensus::core::divergence::StateDiff::compare_instances($expected, $actual);
         if !diff.is_empty() {
             panic!(
                 "State divergence at step {}:\n{}",
@@ -543,7 +563,8 @@ macro_rules! assert_state_eq {
         }
     };
     ($expected:expr, $actual:expr, $step:expr, $action:expr) => {
-        let diff = $crate::consensus::core::divergence::StateDiff::compare_instances($expected, $actual);
+        let diff =
+            $crate::consensus::core::divergence::StateDiff::compare_instances($expected, $actual);
         if !diff.is_empty() {
             panic!(
                 "State divergence at step {} (action: {:?}):\n{}",
@@ -558,7 +579,7 @@ macro_rules! assert_state_eq {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::consensus::core::state::{PathSelection, ShareData};
+    use crate::consensus::core::state::{ConsensusPhase, PathSelection, ShareData};
 
     fn make_test_state() -> ConsensusState {
         let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();

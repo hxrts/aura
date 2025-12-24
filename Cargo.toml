@@ -170,3 +170,5 @@ expect_used = "warn"
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
+# Allow kani cfg for bounded model checking proofs
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
