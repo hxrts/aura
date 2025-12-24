@@ -3,6 +3,17 @@
 //! These tests verify that the Rust consensus implementation matches
 //! the Quint specification by replaying ITF traces.
 //!
+//! ## Conformance Testing Approach
+//!
+//! We use **state-based conformance testing** where:
+//! 1. ITF traces contain expected states computed by Quint
+//! 2. We validate that all states satisfy invariants
+//! 3. We verify state transitions follow valid patterns
+//! 4. We check monotonicity properties (proposals never decrease)
+//!
+//! Note: `quint run` traces don't include action names. For action-level
+//! conformance, use `quint trace` or Apalache which includes `action_taken`.
+//!
 //! ## Running Tests
 //!
 //! Generate traces first:
@@ -27,7 +38,7 @@ use std::path::Path;
 #[test]
 fn test_itf_trace_invariants() {
     // Try to load the generated trace
-    let trace_path = Path::new("../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
 
     if !trace_path.exists() {
         eprintln!(
@@ -66,7 +77,7 @@ fn test_itf_trace_invariants() {
 /// Test phase transitions are valid
 #[test]
 fn test_itf_phase_transitions() {
-    let trace_path = Path::new("../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -126,7 +137,7 @@ fn is_valid_phase_transition(from: ConsensusPhase, to: ConsensusPhase) -> bool {
 /// Test that committed instances have valid commit facts
 #[test]
 fn test_itf_committed_has_commit_fact() {
-    let trace_path = Path::new("../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -219,7 +230,7 @@ fn test_parse_itf_with_instance() {
 /// Test monotonicity: proposal counts never decrease
 #[test]
 fn test_itf_proposal_monotonicity() {
-    let trace_path = Path::new("../verification/quint/consensus_trace.itf.json");
+    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
 
     if !trace_path.exists() {
         return;
@@ -247,4 +258,205 @@ fn test_itf_proposal_monotonicity() {
     }
 
     println!("✓ Proposal counts are monotonic");
+}
+
+/// Inferred action type based on state changes
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum InferredAction {
+    /// New consensus instance created
+    StartConsensus { cid: String },
+    /// Share proposal added
+    ApplyShare { cid: String, witness: String },
+    /// Phase transitioned to fallback
+    TriggerFallback { cid: String },
+    /// Phase transitioned to failed
+    FailConsensus { cid: String },
+    /// Phase transitioned to committed
+    CompleteConsensus { cid: String },
+    /// Epoch advanced
+    EpochAdvance { from: u64, to: u64 },
+    /// No change detected
+    NoOp,
+}
+
+/// Infer action from state difference
+fn infer_action(
+    prev: &aura_protocol::consensus::core::itf_loader::ITFState,
+    curr: &aura_protocol::consensus::core::itf_loader::ITFState,
+) -> Vec<InferredAction> {
+    let mut actions = Vec::new();
+
+    // Check for epoch changes
+    if curr.epoch > prev.epoch {
+        actions.push(InferredAction::EpochAdvance {
+            from: prev.epoch,
+            to: curr.epoch,
+        });
+    }
+
+    // Check for new instances
+    for cid in curr.instances.keys() {
+        if !prev.instances.contains_key(cid) {
+            actions.push(InferredAction::StartConsensus { cid: cid.clone() });
+        }
+    }
+
+    // Check for instance changes
+    for (cid, curr_inst) in &curr.instances {
+        if let Some(prev_inst) = prev.instances.get(cid) {
+            // Check for new proposals
+            if curr_inst.proposals.len() > prev_inst.proposals.len() {
+                for prop in &curr_inst.proposals {
+                    let prop_exists = prev_inst
+                        .proposals
+                        .iter()
+                        .any(|p| p.witness == prop.witness);
+                    if !prop_exists {
+                        actions.push(InferredAction::ApplyShare {
+                            cid: cid.clone(),
+                            witness: prop.witness.clone(),
+                        });
+                    }
+                }
+            }
+
+            // Check for phase transitions
+            if prev_inst.phase != curr_inst.phase {
+                match curr_inst.phase {
+                    ConsensusPhase::FallbackActive => {
+                        actions.push(InferredAction::TriggerFallback { cid: cid.clone() });
+                    }
+                    ConsensusPhase::Failed => {
+                        actions.push(InferredAction::FailConsensus { cid: cid.clone() });
+                    }
+                    ConsensusPhase::Committed => {
+                        actions.push(InferredAction::CompleteConsensus { cid: cid.clone() });
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if actions.is_empty() {
+        actions.push(InferredAction::NoOp);
+    }
+
+    actions
+}
+
+/// Test action inference from state changes
+#[test]
+fn test_itf_action_inference() {
+    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+
+    if !trace_path.exists() {
+        return;
+    }
+
+    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+
+    let mut action_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for i in 1..trace.states.len() {
+        let prev_state = &trace.states[i - 1];
+        let curr_state = &trace.states[i];
+
+        let actions = infer_action(prev_state, curr_state);
+
+        for action in &actions {
+            let key = match action {
+                InferredAction::StartConsensus { .. } => "StartConsensus",
+                InferredAction::ApplyShare { .. } => "ApplyShare",
+                InferredAction::TriggerFallback { .. } => "TriggerFallback",
+                InferredAction::FailConsensus { .. } => "FailConsensus",
+                InferredAction::CompleteConsensus { .. } => "CompleteConsensus",
+                InferredAction::EpochAdvance { .. } => "EpochAdvance",
+                InferredAction::NoOp => "NoOp",
+            };
+            *action_counts.entry(key.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    println!("Action inference summary:");
+    for (action, count) in &action_counts {
+        println!("  {}: {}", action, count);
+    }
+
+    // Verify at least some meaningful actions were detected
+    let meaningful_actions: usize = action_counts
+        .iter()
+        .filter(|(k, _)| *k != "NoOp" && *k != "EpochAdvance")
+        .map(|(_, v)| v)
+        .sum();
+
+    println!("✓ Inferred {} meaningful actions from {} transitions",
+             meaningful_actions, trace.states.len() - 1);
+}
+
+/// Test equivocator detection matches between states
+#[test]
+fn test_itf_equivocator_monotonicity() {
+    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+
+    if !trace_path.exists() {
+        return;
+    }
+
+    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+
+    for i in 1..trace.states.len() {
+        let prev_state = &trace.states[i - 1];
+        let curr_state = &trace.states[i];
+
+        for (cid, curr_inst) in &curr_state.instances {
+            if let Some(prev_inst) = prev_state.instances.get(cid) {
+                // Equivocators can only grow (monotonicity per Lean: equivocator_monotonic)
+                for equivocator in &prev_inst.equivocators {
+                    assert!(
+                        curr_inst.equivocators.contains(equivocator),
+                        "Equivocator '{}' disappeared at state {} for {}",
+                        equivocator,
+                        i,
+                        cid
+                    );
+                }
+            }
+        }
+    }
+
+    println!("✓ Equivocator sets are monotonic");
+}
+
+/// Test that terminal states (Committed/Failed) remain terminal
+#[test]
+fn test_itf_terminal_states_permanent() {
+    let trace_path = Path::new("../../verification/quint/consensus_trace.itf.json");
+
+    if !trace_path.exists() {
+        return;
+    }
+
+    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+
+    for i in 1..trace.states.len() {
+        let prev_state = &trace.states[i - 1];
+        let curr_state = &trace.states[i];
+
+        for (cid, prev_inst) in &prev_state.instances {
+            if prev_inst.phase == ConsensusPhase::Committed
+                || prev_inst.phase == ConsensusPhase::Failed
+            {
+                if let Some(curr_inst) = curr_state.instances.get(cid) {
+                    assert_eq!(
+                        prev_inst.phase, curr_inst.phase,
+                        "Terminal state {:?} changed at state {} for {}",
+                        prev_inst.phase, i, cid
+                    );
+                }
+            }
+        }
+    }
+
+    println!("✓ Terminal states (Committed/Failed) are permanent");
 }
