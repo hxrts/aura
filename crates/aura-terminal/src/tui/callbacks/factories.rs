@@ -219,26 +219,28 @@ impl ChatCallbacks {
     }
 
     fn make_create_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateChannelCallback {
-        Arc::new(move |name: String, topic: Option<String>| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let channel_name = name.clone();
-            let cmd = EffectCommand::CreateChannel {
-                name,
-                topic,
-                members: vec![],
-            };
-            tokio::spawn(async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let _ = tx.send(UiUpdate::ChannelCreated(channel_name));
+        Arc::new(
+            move |name: String, topic: Option<String>, members: Vec<String>| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let channel_name = name.clone();
+                let cmd = EffectCommand::CreateChannel {
+                    name,
+                    topic,
+                    members,
+                };
+                tokio::spawn(async move {
+                    match ctx.dispatch(cmd).await {
+                        Ok(_) => {
+                            let _ = tx.send(UiUpdate::ChannelCreated(channel_name));
+                        }
+                        Err(_e) => {
+                            // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        }
                     }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                    }
-                }
-            });
-        })
+                });
+            },
+        )
     }
 
     fn make_set_topic(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SetTopicCallback {

@@ -20,6 +20,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::FrostThreshold;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
 use aura_terminal::demo::DemoSimulator;
@@ -118,7 +119,8 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
     // Start a real guardian ceremony.
     let ceremony_id = {
         let core = app_core.read().await;
-        core.initiate_guardian_ceremony(2, 2, &[alice_id.to_string(), carol_id.to_string()])
+        let threshold = FrostThreshold::new(2).expect("valid threshold");
+        core.initiate_guardian_ceremony(threshold, 2, &[alice_id.to_string(), carol_id.to_string()])
             .await
             .expect("initiate_guardian_ceremony")
     };

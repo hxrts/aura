@@ -20,7 +20,8 @@
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::screens::{BlockFocus as ScreenBlockFocus, ChatFocus as ScreenChatFocus};
 use crate::tui::state_machine::{
-    BlockFocus, ChatFocus, GuardianCeremonyResponse, GuardianSetupStep, QueuedModal, TuiState,
+    BlockFocus, ChatFocus, CreateInvitationField, GuardianCeremonyResponse, GuardianSetupStep,
+    QueuedModal, TuiState,
 };
 use crate::tui::types::TraversalDepth;
 use tracing::warn;
@@ -84,6 +85,7 @@ pub struct ChatViewProps {
     pub create_modal_name: String,
     pub create_modal_topic: String,
     pub create_modal_active_field: usize,
+    pub create_modal_member_count: usize,
     // Topic modal
     pub topic_modal_visible: bool,
     pub topic_modal_value: String,
@@ -105,13 +107,17 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
     };
 
     // Extract modal state from queue (all modals now use queue system)
-    let (create_visible, create_name, create_topic, create_field) = match state
-        .modal_queue
-        .current()
-    {
-        Some(QueuedModal::ChatCreate(s)) => (true, s.name.clone(), s.topic.clone(), s.active_field),
-        _ => (false, String::new(), String::new(), 0),
-    };
+    let (create_visible, create_name, create_topic, create_field, create_member_count) =
+        match state.modal_queue.current() {
+            Some(QueuedModal::ChatCreate(s)) => (
+                true,
+                s.name.clone(),
+                s.topic.clone(),
+                s.active_field,
+                s.member_ids.len(),
+            ),
+            _ => (false, String::new(), String::new(), 0, 0),
+        };
 
     let (topic_visible, topic_value) = match state.modal_queue.current() {
         Some(QueuedModal::ChatTopic(s)) => (true, s.value.clone()),
@@ -134,6 +140,7 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
         create_modal_name: create_name,
         create_modal_topic: create_topic,
         create_modal_active_field: create_field,
+        create_modal_member_count: create_member_count,
         // Topic modal (from queue)
         topic_modal_visible: topic_visible,
         topic_modal_value: topic_value,
@@ -158,6 +165,7 @@ pub struct ContactsViewProps {
     pub nickname_modal_visible: bool,
     pub nickname_modal_contact_id: String,
     pub nickname_modal_value: String,
+    pub nickname_modal_suggested_name: Option<String>,
     // Import invitation modal (accept invitation code)
     pub import_modal_visible: bool,
     pub import_modal_code: String,
@@ -169,7 +177,7 @@ pub struct ContactsViewProps {
     pub create_modal_type_index: usize,
     pub create_modal_message: String,
     pub create_modal_ttl_hours: u64,
-    pub create_modal_step: usize,
+    pub create_modal_focused_field: CreateInvitationField,
     // Code display modal (show generated code)
     pub code_modal_visible: bool,
     pub code_modal_invitation_id: String,
@@ -207,11 +215,16 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
     let focus = state.contacts.focus;
 
     // Extract modal state from queue (all modals now use queue system)
-    let (nickname_visible, nickname_contact_id, nickname_value) = match state.modal_queue.current()
-    {
-        Some(QueuedModal::ContactsNickname(s)) => (true, s.contact_id.clone(), s.value.clone()),
-        _ => (false, String::new(), String::new()),
-    };
+    let (nickname_visible, nickname_contact_id, nickname_value, nickname_suggested) =
+        match state.modal_queue.current() {
+            Some(QueuedModal::ContactsNickname(s)) => (
+                true,
+                s.contact_id.clone(),
+                s.value.clone(),
+                s.suggested_name.clone(),
+            ),
+            _ => (false, String::new(), String::new(), None),
+        };
 
     let (import_visible, import_code, import_importing) = match state.modal_queue.current() {
         Some(QueuedModal::ContactsImport(s)) => (true, s.code.clone(), s.importing),
@@ -225,7 +238,7 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         create_type_index,
         create_message,
         create_ttl,
-        create_step,
+        create_focused_field,
     ) = match state.modal_queue.current() {
         Some(QueuedModal::ContactsCreate(s)) => (
             true,
@@ -234,9 +247,17 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
             s.type_index,
             s.message.clone(),
             s.ttl_hours,
-            s.step,
+            s.focused_field,
         ),
-        _ => (false, String::new(), String::new(), 0, String::new(), 24, 0),
+        _ => (
+            false,
+            String::new(),
+            String::new(),
+            0,
+            String::new(),
+            24,
+            CreateInvitationField::Type,
+        ),
     };
 
     let (code_visible, code_invitation_id, code_code, code_loading) =
@@ -298,6 +319,7 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         nickname_modal_visible: nickname_visible,
         nickname_modal_contact_id: nickname_contact_id,
         nickname_modal_value: nickname_value,
+        nickname_modal_suggested_name: nickname_suggested,
         // Import modal (from queue)
         import_modal_visible: import_visible,
         import_modal_code: import_code,
@@ -309,7 +331,7 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         create_modal_type_index: create_type_index,
         create_modal_message: create_message,
         create_modal_ttl_hours: create_ttl,
-        create_modal_step: create_step,
+        create_modal_focused_field: create_focused_field,
         // Code display modal (from queue)
         code_modal_visible: code_visible,
         code_modal_invitation_id: code_invitation_id,
@@ -430,13 +452,10 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     ) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsDeviceEnrollment(s)) => (
             true,
-            s.ceremony
-                .ceremony_id
-                .clone()
-                .unwrap_or_else(|| {
-                    warn!("Device enrollment modal missing ceremony id");
-                    String::new()
-                }),
+            s.ceremony.ceremony_id.clone().unwrap_or_else(|| {
+                warn!("Device enrollment modal missing ceremony id");
+                String::new()
+            }),
             s.device_name.clone(),
             s.enrollment_code.clone(),
             s.ceremony.accepted_count,

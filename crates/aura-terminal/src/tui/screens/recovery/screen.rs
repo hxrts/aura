@@ -186,14 +186,16 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
         View(
             flex_direction: FlexDirection::Column,
             width: 100pct,
-            flex_grow: 1.0,
+            height: 100pct,
+            overflow: Overflow::Hidden,
             gap: 0,
         ) {
-            // Status header
+            // Status header (3 rows: 1 content + 2 border)
             View(
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
                 width: 100pct,
+                height: 3,
                 padding: Spacing::PANEL_PADDING,
             ) {
                 View(flex_direction: FlexDirection::Row) {
@@ -202,23 +204,25 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
                 }
             }
 
-            // Progress
+            // Progress (3 rows: 1 content + 2 border)
             View(
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
                 width: 100pct,
+                height: 3,
                 padding: Spacing::PANEL_PADDING,
             ) {
                 KeyValue(label: "Progress".to_string(), value: progress_text)
             }
 
-            // Approvals list
+            // Approvals list (remaining space)
             View(
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
                 width: 100pct,
                 flex_grow: 1.0,
+                overflow: Overflow::Hidden,
             ) {
                 View(padding_left: Spacing::PANEL_PADDING) {
                     Text(content: "Guardian Approvals", weight: Weight::Bold, color: Theme::PRIMARY)

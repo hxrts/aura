@@ -23,7 +23,10 @@ pub use identifiers::{
     EventNonce, GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext,
     OperationId, RelayId, SessionId,
 };
-pub use participants::{ParticipantEndpoint, ParticipantIdentity, SigningParticipant};
+pub use participants::{
+    FrostThreshold, InvalidThresholdError, ParticipantEndpoint, ParticipantIdentity,
+    SigningParticipant,
+};
 pub use relationships::*;
 pub use scope::{AuthorityOp, ContextOp, ResourceScope};
 pub use sessions::*;

@@ -25,6 +25,7 @@ use aura_core::identifiers::AuthorityId;
 use aura_core::identifiers::ChannelId;
 use aura_core::query::{FactPredicate, Query};
 use aura_core::tree::{AttestedOp, TreeOp};
+use aura_core::types::FrostThreshold;
 use aura_core::AccountId;
 use aura_effects::ReactiveHandler;
 use serde::{Deserialize, Serialize};
@@ -847,7 +848,7 @@ impl AppCore {
     /// until `commit_guardian_key_rotation` is called.
     ///
     /// # Arguments
-    /// * `threshold_k` - Minimum signers required (k)
+    /// * `threshold_k` - Minimum signers required (k), must be >= 2 for FROST
     /// * `total_n` - Total number of guardians (n)
     /// * `guardian_ids` - IDs of contacts who will become guardians
     ///
@@ -858,7 +859,7 @@ impl AppCore {
     /// Returns `IntentError::NoAgent` if no runtime is configured.
     pub async fn rotate_guardian_keys(
         &self,
-        threshold_k: u16,
+        threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
@@ -934,7 +935,7 @@ impl AppCore {
     /// Returns `IntentError::NoAgent` if no runtime is configured.
     pub async fn initiate_guardian_ceremony(
         &self,
-        threshold_k: u16,
+        threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
     ) -> Result<String, IntentError> {

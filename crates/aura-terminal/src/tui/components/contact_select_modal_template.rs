@@ -26,6 +26,10 @@ pub struct ContactSelectModalProps {
     pub contacts: Vec<Contact>,
     /// Currently selected index
     pub selected_index: usize,
+    /// Selected contact IDs (for multi-select)
+    pub selected_ids: Vec<String>,
+    /// Whether multi-select is enabled
+    pub multi_select: bool,
     /// Error message if any
     pub error: String,
     /// Callback when a contact is selected
@@ -47,6 +51,8 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     let title = props.title.clone();
     let contacts = props.contacts.clone();
     let selected_index = props.selected_index;
+    let selected_ids = props.selected_ids.clone();
+    let multi_select = props.multi_select;
     let error = props.error.clone();
 
     // Determine border color based on state
@@ -95,15 +101,37 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
                         }
                     }]
                 } else {
-                    contacts.iter().enumerate().map(|(idx, contact)| {
+                                        contacts.iter().enumerate().map(|(idx, contact)| {
                         let is_selected = idx == selected_index;
+                        let is_checked =
+                            multi_select && selected_ids.iter().any(|i| i == &contact.id);
+
                         // Use consistent list item colors
-                        let bg = if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL };
-                        let text_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL };
-                        let pointer_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::PRIMARY };
+                        let bg = if is_selected {
+                            Theme::LIST_BG_SELECTED
+                        } else {
+                            Theme::LIST_BG_NORMAL
+                        };
+                        let text_color = if is_selected {
+                            Theme::LIST_TEXT_SELECTED
+                        } else {
+                            Theme::LIST_TEXT_NORMAL
+                        };
+                        let pointer_color = if is_selected {
+                            Theme::LIST_TEXT_SELECTED
+                        } else {
+                            Theme::PRIMARY
+                        };
+
                         let name = contact.nickname.clone();
                         let id = contact.id.clone();
-                        let pointer = if is_selected { "▸ " } else { "  " }.to_string();
+                        let pointer = if is_selected { "▸ " } else { "  " };
+                        let checkbox = if multi_select {
+                            if is_checked { "[x] " } else { "[ ] " }
+                        } else {
+                            ""
+                        };
+
                         element! {
                             View(
                                 key: id,
@@ -111,11 +139,13 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
                                 background_color: bg,
                                 padding_left: Spacing::XS,
                             ) {
-                                Text(content: pointer, color: pointer_color)
+                                Text(content: pointer.to_string(), color: pointer_color)
+                                Text(content: checkbox.to_string(), color: pointer_color)
                                 Text(content: name, color: text_color)
                             }
                         }
                     }).collect()
+
                 })
 
                 // Error message (if any)
@@ -149,9 +179,19 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
                     Text(content: "↑↓", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Navigate", color: Theme::TEXT_MUTED)
                 }
+                #(if multi_select {
+                    Some(element! {
+                        View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                            Text(content: "Space", weight: Weight::Bold, color: Theme::SECONDARY)
+                            Text(content: "Toggle", color: Theme::TEXT_MUTED)
+                        }
+                    })
+                } else {
+                    None
+                })
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Select", color: Theme::TEXT_MUTED)
+                    Text(content: if multi_select { "Done" } else { "Select" }.to_string(), color: Theme::TEXT_MUTED)
                 }
             }
         }

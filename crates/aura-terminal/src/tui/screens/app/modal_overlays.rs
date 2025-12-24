@@ -40,12 +40,18 @@ pub struct GlobalModalProps {
     pub guardian_modal_selected: usize,
     pub guardian_modal_error: Option<String>,
 
+    pub guardian_modal_selected_ids: Vec<String>,
+    pub guardian_modal_multi_select: bool,
+
     // Generic contact selection modal
     pub contact_modal_visible: bool,
     pub contact_modal_title: String,
     pub contact_modal_contacts: Vec<Contact>,
     pub contact_modal_selected: usize,
     pub contact_modal_error: Option<String>,
+
+    pub contact_modal_selected_ids: Vec<String>,
+    pub contact_modal_multi_select: bool,
 
     // Confirm dialog modal
     pub confirm_visible: bool,
@@ -95,6 +101,8 @@ pub fn render_guardian_modal(global: &GlobalModalProps) -> Option<AnyElement<'st
                         contacts: global.guardian_modal_contacts.clone(),
                         selected_index: global.guardian_modal_selected,
                         error: global.guardian_modal_error.clone().unwrap_or_default(),
+                        selected_ids: global.guardian_modal_selected_ids.clone(),
+                        multi_select: global.guardian_modal_multi_select,
                     )
                 }
             }
@@ -116,6 +124,8 @@ pub fn render_contact_modal(global: &GlobalModalProps) -> Option<AnyElement<'sta
                         contacts: global.contact_modal_contacts.clone(),
                         selected_index: global.contact_modal_selected,
                         error: global.contact_modal_error.clone().unwrap_or_default(),
+                        selected_ids: global.contact_modal_selected_ids.clone(),
+                        multi_select: global.contact_modal_multi_select,
                     )
                 }
             }
@@ -169,6 +179,13 @@ pub fn render_help_modal(global: &GlobalModalProps) -> Option<AnyElement<'static
 
 pub fn render_nickname_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
     if contacts.nickname_modal_visible {
+        // Show hint with suggested name if available
+        let hint = contacts
+            .nickname_modal_suggested_name
+            .as_ref()
+            .map(|s| format!("Suggestion: {}", s))
+            .unwrap_or_default();
+
         Some(
             element! {
                 ModalFrame {
@@ -178,6 +195,7 @@ pub fn render_nickname_modal(contacts: &ContactsViewProps) -> Option<AnyElement<
                         title: "Edit Nickname".to_string(),
                         value: contacts.nickname_modal_value.clone(),
                         placeholder: "Enter nickname...".to_string(),
+                        hint: hint,
                         error: String::new(),
                         submitting: false,
                     )
@@ -192,11 +210,6 @@ pub fn render_nickname_modal(contacts: &ContactsViewProps) -> Option<AnyElement<
 
 pub fn render_contacts_import_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
     if contacts.import_modal_visible {
-        #[cfg(feature = "development")]
-        let demo_mode = contacts.demo_mode;
-        #[cfg(not(feature = "development"))]
-        let demo_mode = false;
-
         Some(
             element! {
                 ModalFrame {
@@ -206,7 +219,6 @@ pub fn render_contacts_import_modal(contacts: &ContactsViewProps) -> Option<AnyE
                         code: contacts.import_modal_code.clone(),
                         error: String::new(),
                         importing: contacts.import_modal_importing,
-                        demo_mode: demo_mode,
                     )
                 }
             }
@@ -230,7 +242,8 @@ pub fn render_contacts_create_modal(contacts: &ContactsViewProps) -> Option<AnyE
                     InvitationCreateModal(
                         visible: true,
                         focused: true,
-                        creating: contacts.create_modal_step > 0,
+                        focused_field: contacts.create_modal_focused_field,
+                        creating: false,
                         error: String::new(),
                         invitation_type: invitation_type,
                         message: contacts.create_modal_message.clone(),
@@ -314,6 +327,7 @@ pub fn render_chat_create_modal(chat: &ChatViewProps) -> Option<AnyElement<'stat
                         name: chat.create_modal_name.clone(),
                         topic: chat.create_modal_topic.clone(),
                         active_field: chat.create_modal_active_field,
+                        members_count: chat.create_modal_member_count,
                         error: String::new(),
                         creating: false,
                     )
@@ -336,6 +350,7 @@ pub fn render_topic_modal(chat: &ChatViewProps) -> Option<AnyElement<'static>> {
                         title: "Set Channel Topic".to_string(),
                         value: chat.topic_modal_value.clone(),
                         placeholder: "Enter topic...".to_string(),
+                        hint: String::new(),
                         error: String::new(),
                     )
                 }
@@ -382,6 +397,7 @@ pub fn render_display_name_modal(settings: &SettingsViewProps) -> Option<AnyElem
                         title: "Edit Display Name".to_string(),
                         value: settings.display_name_modal_value.clone(),
                         placeholder: "Enter your display name...".to_string(),
+                        hint: String::new(),
                         error: String::new(),
                         submitting: false,
                     )
@@ -431,6 +447,7 @@ pub fn render_add_device_modal(settings: &SettingsViewProps) -> Option<AnyElemen
                         title: "Add Device".to_string(),
                         value: settings.add_device_modal_name.clone(),
                         placeholder: "Enter device name...".to_string(),
+                        hint: String::new(),
                         error: String::new(),
                         submitting: false,
                     )
@@ -511,6 +528,8 @@ pub fn render_block_invite_modal(
                         contacts: contacts_list.to_vec(),
                         selected_index: block.invite_selection,
                         error: String::new(),
+                        selected_ids: vec![],
+                        multi_select: false,
                     )
                 }
             }

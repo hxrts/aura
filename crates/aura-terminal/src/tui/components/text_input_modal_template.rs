@@ -27,6 +27,8 @@ pub struct TextInputModalProps {
     pub value: String,
     /// Placeholder text
     pub placeholder: String,
+    /// Hint text (shown below input, e.g., "Suggestion: Alice")
+    pub hint: String,
     /// Error message if any
     pub error: String,
     /// Whether submission is in progress
@@ -49,6 +51,7 @@ pub fn TextInputModal(props: &TextInputModalProps) -> impl Into<AnyElement<'stat
     let value = props.value.clone();
     let title = props.title.clone();
     let placeholder = props.placeholder.clone();
+    let hint = props.hint.clone();
     let error = props.error.clone();
     let submitting = props.submitting;
 
@@ -124,6 +127,17 @@ pub fn TextInputModal(props: &TextInputModalProps) -> impl Into<AnyElement<'stat
                         color: value_color,
                     )
                 }
+
+                // Hint (if any)
+                #(if !hint.is_empty() {
+                    Some(element! {
+                        View(margin_bottom: Spacing::XS) {
+                            Text(content: hint, color: Theme::TEXT_MUTED)
+                        }
+                    })
+                } else {
+                    None
+                })
 
                 // Error message (if any)
                 #(if !error.is_empty() {

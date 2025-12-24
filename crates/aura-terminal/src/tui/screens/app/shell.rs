@@ -28,6 +28,7 @@ use aura_app::workflows::{
 };
 use aura_app::AppError;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::types::FrostThreshold;
 
 use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
@@ -541,6 +542,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         } => {
                             let mut toast: Option<(String, crate::tui::state_machine::ToastLevel)> =
                                 None;
+                            let mut dismiss_ceremony_started_toast = false;
 
                             tui.with_mut(|state| {
                                 let mut dismiss_modal = false;
@@ -626,6 +628,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 s.ceremony_responses.clear();
 
                                                 toast = Some((msg, crate::tui::state_machine::ToastLevel::Error));
+                                                dismiss_ceremony_started_toast = true;
                                             } else if is_complete {
                                                 dismiss_modal = true;
                                                 toast = Some((
@@ -643,6 +646,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     },
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
+                                                dismiss_ceremony_started_toast = true;
                                             }
                                         }
                                     }
@@ -650,6 +654,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                 if dismiss_modal {
                                     state.modal_queue.dismiss();
+                                }
+                                if dismiss_ceremony_started_toast {
+                                    state.toast_queue.dismiss();
                                 }
                             });
 
@@ -808,6 +815,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         } => {
                             let mut toast: Option<(String, crate::tui::state_machine::ToastLevel)> =
                                 None;
+                            let mut dismiss_ceremony_started_toast = false;
 
                             tui.with_mut(|state| {
                                 let mut dismiss_modal = false;
@@ -858,6 +866,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     msg,
                                                     crate::tui::state_machine::ToastLevel::Error,
                                                 ));
+                                                dismiss_ceremony_started_toast = true;
                                             } else if is_complete {
                                                 dismiss_modal = true;
                                                 toast = Some((
@@ -867,6 +876,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     ),
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
+                                                dismiss_ceremony_started_toast = true;
                                             }
                                         }
                                     }
@@ -874,6 +884,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                 if dismiss_modal {
                                     state.modal_queue.dismiss();
+                                }
+                                if dismiss_ceremony_started_toast {
+                                    state.toast_queue.dismiss();
                                 }
                             });
 
@@ -1152,6 +1165,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     .map(|(id, name)| Contact::new(id.clone(), name.clone()))
                     .collect();
                 global_modals.guardian_modal_selected = state.selected_index;
+                global_modals.guardian_modal_selected_ids = state.selected_ids.clone();
+                global_modals.guardian_modal_multi_select = state.multi_select;
             }
             QueuedModal::ContactSelect(state) => {
                 global_modals.contact_modal_visible = true;
@@ -1162,6 +1177,21 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     .map(|(id, name)| Contact::new(id.clone(), name.clone()))
                     .collect();
                 global_modals.contact_modal_selected = state.selected_index;
+                global_modals.contact_modal_selected_ids = state.selected_ids.clone();
+                global_modals.contact_modal_multi_select = state.multi_select;
+            }
+            QueuedModal::ChatMemberSelect(state) => {
+                global_modals.contact_modal_visible = true;
+                global_modals.contact_modal_title = state.picker.title.clone();
+                global_modals.contact_modal_contacts = state
+                    .picker
+                    .contacts
+                    .iter()
+                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                    .collect();
+                global_modals.contact_modal_selected = state.picker.selected_index;
+                global_modals.contact_modal_selected_ids = state.picker.selected_ids.clone();
+                global_modals.contact_modal_multi_select = state.picker.multi_select;
             }
             QueuedModal::Confirm {
                 title,
@@ -1217,9 +1247,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("n", "Invite"),
         ],
         Screen::Neighborhood => vec![
-            KeyHint::new("Enter", "Enter"),
             KeyHint::new("g", "Home"),
             KeyHint::new("b", "Back"),
+            KeyHint::new("Enter", "Enter"),
         ],
         Screen::Settings => vec![
             KeyHint::new("h/l", "Panel"),
@@ -1429,9 +1459,42 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("Failed to read channels");
                                         }
                                     }
+                                    DispatchCommand::OpenChatMemberSelect => {
+                                        let current_contacts = shared_contacts_for_dispatch
+                                            .read()
+                                            .map(|guard| guard.clone())
+                                            .unwrap_or_default();
 
-                                    DispatchCommand::CreateChannel { name } => {
-                                        (cb.chat.on_create_channel)(name, None);
+                                        let contacts: Vec<(String, String)> = current_contacts
+                                            .iter()
+                                            .map(|c| (c.id.clone(), c.nickname.clone()))
+                                            .collect();
+
+                                        let Some(crate::tui::state_machine::QueuedModal::ChatCreate(draft)) =
+                                            new_state.modal_queue.current().cloned()
+                                        else {
+                                            new_state.toast_error("Chat create modal is not open");
+                                            continue;
+                                        };
+
+                                        let mut picker = crate::tui::state_machine::ContactSelectModalState::multi(
+                                            "Select chat members",
+                                            contacts,
+                                        );
+                                        picker.selected_ids = draft.member_ids.clone();
+
+                                        new_state.modal_queue.update_active(|modal| {
+                                            *modal = crate::tui::state_machine::QueuedModal::ChatMemberSelect(
+                                                crate::tui::state_machine::ChatMemberSelectModalState {
+                                                    picker,
+                                                    draft,
+                                                },
+                                            );
+                                        });
+                                    }
+
+                                    DispatchCommand::CreateChannel { name, topic, members } => {
+                                        (cb.chat.on_create_channel)(name, topic, members);
                                     }
                                     DispatchCommand::SetChannelTopic { channel_id, topic } => {
                                         (cb.chat.on_set_topic)(channel_id, topic);
@@ -1451,10 +1514,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let idx = new_state.contacts.selected_index;
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
                                             if let Some(contact) = guard.get(idx) {
+                                                // nickname is already populated with suggested_name if empty (see Contact::from)
                                                 let modal_state = crate::tui::state_machine::NicknameModalState::for_contact(
                                                     &contact.id,
                                                     &contact.nickname,
-                                                );
+                                                ).with_suggestion(contact.suggested_name.clone());
                                                 new_state
                                                     .modal_queue
                                                     .enqueue(crate::tui::state_machine::QueuedModal::ContactsNickname(
@@ -1611,6 +1675,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .unwrap_or_default();
 
                                         // Populate candidates from current contacts
+                                        // Note: nickname is already populated with suggested_name if empty (see Contact::from)
                                         let candidates: Vec<crate::tui::state_machine::GuardianCandidate> = current_contacts
                                             .iter()
                                             .map(|c| crate::tui::state_machine::GuardianCandidate {
@@ -1647,7 +1712,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                         let ids = contact_ids.clone();
                                         let n = contact_ids.len() as u16;
-                                        let k = threshold_k as u16;
+                                        let k_raw = threshold_k as u16;
+
+                                        // Create FrostThreshold with validation (FROST requires k >= 2)
+                                        let threshold = match FrostThreshold::new(k_raw) {
+                                            Ok(t) => t,
+                                            Err(e) => {
+                                                tracing::error!("Invalid threshold for guardian ceremony: {}", e);
+                                                if let Some(tx) = update_tx_for_ceremony.clone() {
+                                                    let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                                        "guardian-ceremony-failed",
+                                                        format!("Invalid threshold: {}", e),
+                                                    )));
+                                                }
+                                                continue;
+                                            }
+                                        };
 
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
@@ -1655,10 +1735,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tokio::spawn(async move {
                                             let app = app_core.raw();
 
-                                            match start_guardian_ceremony(&app, k, n, ids.clone())
+                                            match start_guardian_ceremony(&app, threshold, n, ids.clone())
                                                 .await
                                             {
                                                 Ok(ceremony_id) => {
+                                                    let k = threshold.value();
                                                     tracing::info!(
                                                         ceremony_id = ?ceremony_id,
                                                         threshold = k,

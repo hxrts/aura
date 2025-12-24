@@ -1249,9 +1249,18 @@ impl BlockSummary {
 
 impl From<&AppContact> for Contact {
     fn from(c: &AppContact) -> Self {
+        // Use suggested_name as default nickname if nickname is empty
+        let nickname = if !c.nickname.is_empty() {
+            c.nickname.clone()
+        } else if let Some(suggested) = &c.suggested_name {
+            suggested.clone()
+        } else {
+            String::new()
+        };
+
         Self {
             id: c.id.to_string(),
-            nickname: c.nickname.clone(),
+            nickname,
             suggested_name: c.suggested_name.clone(),
             status: if c.is_online {
                 ContactStatus::Active

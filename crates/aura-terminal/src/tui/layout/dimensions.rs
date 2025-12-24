@@ -26,12 +26,27 @@ pub mod dim {
     /// Footer border/separator height
     pub const FOOTER_BORDER_HEIGHT: u16 = 1;
 
+    // === Two-Panel Layout (Settings, Contacts, etc.) ===
+
+    /// Left panel width for two-panel layouts (list/menu side)
+    pub const TWO_PANEL_LEFT_WIDTH: u16 = 28;
+
+    /// Gap between panels
+    pub const TWO_PANEL_GAP: u16 = 1;
+
+    /// Right panel width for two-panel layouts (detail side)
+    /// Computed as: TOTAL_WIDTH - LEFT_WIDTH - GAP = 80 - 28 - 1 = 51
+    pub const TWO_PANEL_RIGHT_WIDTH: u16 = TOTAL_WIDTH - TWO_PANEL_LEFT_WIDTH - TWO_PANEL_GAP;
+
     // Compile-time validation
     const _: () = assert!(NAV_HEIGHT + MIDDLE_HEIGHT + FOOTER_HEIGHT == TOTAL_HEIGHT);
     const _: () = assert!(MIDDLE_HEIGHT > 0);
     const _: () = assert!(TOTAL_WIDTH >= 40); // Minimum usable width
     const _: () = assert!(MIDDLE_HEIGHT == 26); // Explicit check for expected value
     const _: () = assert!(KEY_HINTS_HEIGHT + FOOTER_BORDER_HEIGHT == FOOTER_HEIGHT);
+    const _: () =
+        assert!(TWO_PANEL_LEFT_WIDTH + TWO_PANEL_GAP + TWO_PANEL_RIGHT_WIDTH == TOTAL_WIDTH);
+    const _: () = assert!(TWO_PANEL_RIGHT_WIDTH == 51); // Explicit check
 }
 
 pub use dim::*;

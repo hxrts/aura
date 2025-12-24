@@ -36,7 +36,7 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::props::ContactsViewProps;
-use crate::tui::theme::{list_item_colors, Spacing, Theme};
+use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Contact, ContactStatus};
 
 /// Props for ContactItem
@@ -47,10 +47,24 @@ pub struct ContactItemProps {
 }
 
 /// A single contact in the list
+///
+/// Uses the same selection indicator pattern as Settings screen.
 #[component]
 pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
     let c = &props.contact;
-    let (bg, text_color) = list_item_colors(props.is_selected);
+
+    // Selection styling (matches SimpleSelectableItem)
+    let bg = if props.is_selected {
+        Theme::LIST_BG_SELECTED
+    } else {
+        Theme::LIST_BG_NORMAL
+    };
+    let text_color = if props.is_selected {
+        Theme::LIST_TEXT_SELECTED
+    } else {
+        Theme::LIST_TEXT_NORMAL
+    };
+    let indicator = if props.is_selected { "> " } else { "  " };
 
     let status = match c.status {
         ContactStatus::Active => crate::tui::components::Status::Online,
@@ -74,13 +88,15 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
         View(
             flex_direction: FlexDirection::Row,
             background_color: bg,
-            padding_left: Spacing::XS,
-            padding_right: Spacing::XS,
-            gap: Spacing::XS,
+            padding_left: 1,
+            padding_right: 1,
             overflow: Overflow::Hidden,
         ) {
+            Text(content: indicator, color: text_color)
             StatusIndicator(status: status, icon_only: true)
-            Text(content: name, color: text_color, wrap: TextWrap::NoWrap)
+            View(margin_left: Spacing::XS) {
+                Text(content: name, color: text_color, wrap: TextWrap::NoWrap)
+            }
             Text(content: guardian_badge, color: Theme::SECONDARY)
         }
     }
@@ -146,31 +162,15 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             ContactStatus::Blocked => "Blocked",
         };
         let guardian = if c.is_guardian { "Yes" } else { "No" };
-        let suggestion = c.suggested_name.clone();
 
-        let mut rows: Vec<AnyElement<'static>> = vec![
+        vec![
             element! { KeyValue(label: "Nickname".to_string(), value: c.nickname.clone()) }
                 .into_any(),
             element! { KeyValue(label: "Status".to_string(), value: status_label.to_string()) }
                 .into_any(),
             element! { KeyValue(label: "Guardian".to_string(), value: guardian.to_string()) }
                 .into_any(),
-        ];
-
-        // Only show the suggested name when the user hasn't set a nickname.
-        if c.nickname.is_empty() {
-            if let Some(suggestion) = suggestion {
-                if !suggestion.trim().is_empty() {
-                    rows.push(element! { View(height: 1) }.into_any());
-                    rows.push(
-                        element! { KeyValue(label: "Suggested name".to_string(), value: suggestion) }
-                            .into_any(),
-                    );
-                }
-            }
-        }
-
-        rows
+        ]
     } else {
         vec![]
     };
@@ -332,16 +332,16 @@ pub fn ContactsScreen(
             height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
         ) {
-            // Main content: list + detail - full 25 rows
+            // Main content: list + detail - full 25 rows (matches settings screen ratio)
             View(
                 flex_direction: FlexDirection::Row,
                 height: dim::MIDDLE_HEIGHT,
                 overflow: Overflow::Hidden,
-                gap: Spacing::XS,
+                gap: dim::TWO_PANEL_GAP,
             ) {
-                // Left column: LAN peers + contacts list (24 chars = 30% of 80)
+                // Left column: LAN peers + contacts list (matches settings screen)
                 View(
-                    width: 24,
+                    width: dim::TWO_PANEL_LEFT_WIDTH,
                     flex_direction: FlexDirection::Column,
                     overflow: Overflow::Hidden,
                     gap: 0,
@@ -368,7 +368,7 @@ pub fn ContactsScreen(
                         focused: !is_detail_focused,
                     )
                 }
-                // Detail (remaining width ~55 chars)
+                // Detail (matches settings screen width)
                 ContactDetail(
                     contact: selected_contact,
                     focused: is_detail_focused,

@@ -12,6 +12,6 @@ mod invitation_import_modal;
 pub use invitation_code_modal::{InvitationCodeModal, InvitationCodeState};
 pub use invitation_create_modal::{
     CancelCallback, CreateInvitationCallback as ModalCreateInvitationCallback,
-    InvitationCreateModal, InvitationCreateState,
+    InvitationCreateModal,
 };
 pub use invitation_import_modal::{ImportCallback, InvitationImportModal, InvitationImportState};

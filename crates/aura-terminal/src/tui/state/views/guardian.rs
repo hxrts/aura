@@ -39,7 +39,7 @@ pub struct GuardianCandidate {
 /// State for guardian setup modal (multi-select + threshold + ceremony)
 ///
 /// Note: Visibility is controlled by ModalQueue, not a `visible` field.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct GuardianSetupModalState {
     /// Current step in the wizard
     pub step: GuardianSetupStep,
@@ -49,7 +49,7 @@ pub struct GuardianSetupModalState {
     pub selected_indices: Vec<usize>,
     /// Currently focused contact index
     pub focused_index: usize,
-    /// Selected threshold k (required signers)
+    /// Selected threshold k (required signers) - minimum 2 (FROST requirement)
     pub threshold_k: u8,
     /// Ceremony UI state (id/progress/pending epoch)
     pub ceremony: KeyRotationCeremonyUiState,
@@ -57,6 +57,21 @@ pub struct GuardianSetupModalState {
     pub ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
     /// Error message if any
     pub error: Option<String>,
+}
+
+impl Default for GuardianSetupModalState {
+    fn default() -> Self {
+        Self {
+            step: GuardianSetupStep::default(),
+            contacts: Vec::new(),
+            selected_indices: Vec::new(),
+            focused_index: 0,
+            threshold_k: 2, // Minimum 2 for FROST threshold signing
+            ceremony: KeyRotationCeremonyUiState::default(),
+            ceremony_responses: Vec::new(),
+            error: None,
+        }
+    }
 }
 
 impl GuardianSetupModalState {
@@ -74,9 +89,9 @@ impl GuardianSetupModalState {
                 selected_indices.push(idx);
             }
         }
-        // Default threshold: majority (n/2 + 1) or 1 if no selection
+        // Default threshold: majority (n/2 + 1), minimum 2 for FROST
         let n = selected_indices.len() as u8;
-        let threshold_k = if n > 0 { (n / 2) + 1 } else { 1 };
+        let threshold_k = if n >= 2 { (n / 2) + 1 } else { 2 };
 
         Self {
             step: GuardianSetupStep::SelectContacts,
@@ -96,7 +111,7 @@ impl GuardianSetupModalState {
         self.contacts.clear();
         self.selected_indices.clear();
         self.focused_index = 0;
-        self.threshold_k = 1;
+        self.threshold_k = 2; // Minimum 2 for FROST
         self.ceremony.clear();
         self.ceremony_responses.clear();
         self.error = None;
@@ -113,10 +128,12 @@ impl GuardianSetupModalState {
         } else {
             self.selected_indices.push(self.focused_index);
         }
-        // Adjust threshold_k if it exceeds new n
+        // Adjust threshold_k if it exceeds new n, but keep minimum 2 for FROST
         let n = self.threshold_n();
-        if self.threshold_k > n && n > 0 {
+        if self.threshold_k > n && n >= 2 {
             self.threshold_k = n;
+        } else if self.threshold_k < 2 {
+            self.threshold_k = 2;
         }
     }
 
@@ -133,9 +150,9 @@ impl GuardianSetupModalState {
         }
     }
 
-    /// Decrement threshold k (down to 1)
+    /// Decrement threshold k (down to 2 - FROST minimum)
     pub fn decrement_k(&mut self) {
-        if self.threshold_k > 1 {
+        if self.threshold_k > 2 {
             self.threshold_k -= 1;
         }
     }
@@ -148,7 +165,8 @@ impl GuardianSetupModalState {
     /// Check if can start ceremony
     pub fn can_start_ceremony(&self) -> bool {
         let n = self.threshold_n();
-        self.threshold_k >= 1
+        // FROST requires threshold >= 2 for multi-party signing
+        self.threshold_k >= 2
             && self.threshold_k <= n
             && n >= 2
             && !matches!(self.step, GuardianSetupStep::CeremonyInProgress)

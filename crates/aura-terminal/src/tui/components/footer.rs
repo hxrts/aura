@@ -52,13 +52,7 @@ fn format_relative_time(now_ms: u64, ts_ms: u64) -> String {
 }
 
 /// Fixed 3-row footer with 6-column grid for the TUI.
-///
 /// Layout (columns align with nav bar tabs):
-/// ```text
-/// ├──────────────────────────────────────────────────────────────────────────────┤ Row 1: Border
-/// │ [i] Insert  [v] Invite  [n] Neighbor [g] Grant    [r] Revoke  Synced 2m      │ Row 2: Screen hints + status
-/// │ [1-6] screen [?] Help   [Tab] Next   [←→] Nav     [q] Quit    3 peers        │ Row 3: Global hints + peers
-/// ```
 #[component]
 pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
     // Format screen-specific hints (top row), padded to 5 columns
@@ -257,7 +251,8 @@ mod tests {
 
     #[test]
     fn test_format_relative_time() {
-        let now_ms = 1_000_000;
+        // Use a large enough value to avoid underflow when subtracting days
+        let now_ms = 1_000_000_000; // ~11.5 days in ms
 
         // Test "just now"
         assert_eq!(format_relative_time(now_ms, now_ms), "just now");

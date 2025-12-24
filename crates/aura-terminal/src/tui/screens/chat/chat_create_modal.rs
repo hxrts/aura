@@ -25,6 +25,8 @@ pub struct ChatCreateModalProps {
     pub name: String,
     /// The current topic input
     pub topic: String,
+    /// Number of selected members
+    pub members_count: usize,
     /// Which field is active (0 = name, 1 = topic)
     pub active_field: usize,
     /// Error message if creation failed
@@ -48,6 +50,7 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
 
     let name = props.name.clone();
     let topic = props.topic.clone();
+    let members_count = props.members_count;
     let active_field = props.active_field;
     let error = props.error.clone();
     let creating = props.creating;
@@ -158,6 +161,29 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                     )
                 }
 
+
+                // Members
+                View(margin_bottom: Spacing::XS) {
+                    Text(content: "Members:", color: Theme::TEXT)
+                }
+                View(
+                    width: 100pct,
+                    flex_direction: FlexDirection::Column,
+                    border_style: Borders::INPUT,
+                    border_color: Theme::BORDER,
+                    padding: Spacing::PANEL_PADDING,
+                    margin_bottom: Spacing::SM,
+                ) {
+                    Text(
+                        content: if members_count == 0 {
+                            "None selected (press m to choose)".to_string()
+                        } else {
+                            format!("{members_count} selected (press m to edit)")
+                        },
+                        color: Theme::TEXT_MUTED,
+                    )
+                }
+
                 // Error message (if any)
                 #(if !error.is_empty() {
                     Some(element! {
@@ -199,6 +225,10 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Tab", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Next", color: Theme::TEXT_MUTED)
+                }
+                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                    Text(content: "m", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Members", color: Theme::TEXT_MUTED)
                 }
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)

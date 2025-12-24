@@ -44,7 +44,7 @@ pub use settings::{run_settings_screen, SettingsScreen};
 pub use chat::{ChannelInfoModal, ChatCreateModal, ChatCreateState, CreateChatCallback};
 pub use invitations::{
     CancelCallback, ImportCallback, InvitationCodeModal, InvitationCodeState,
-    InvitationCreateModal, InvitationCreateState, InvitationImportModal, InvitationImportState,
+    InvitationCreateModal, InvitationImportModal, InvitationImportState,
     ModalCreateInvitationCallback,
 };
 pub use recovery::{GuardianCandidateProps, GuardianSetupModal, ThresholdModal, ThresholdState};

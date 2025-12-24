@@ -199,7 +199,9 @@ pub fn TraversalInfo(props: &TraversalInfoProps) -> impl Into<AnyElement<'static
             flex_direction: FlexDirection::Column,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
-            padding: 1,
+            padding_left: 1,
+            padding_right: 1,
+            padding_bottom: 1,
         ) {
             View(flex_direction: FlexDirection::Row, gap: 1) {
                 Text(content: "Neighborhood:", color: Theme::TEXT_MUTED)

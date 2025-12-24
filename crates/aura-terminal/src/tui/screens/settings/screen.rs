@@ -23,6 +23,7 @@ use aura_app::signal_defs::SETTINGS_SIGNAL;
 use crate::tui::callbacks::{
     AddDeviceCallback, RemoveDeviceCallback, UpdateDisplayNameCallback, UpdateThresholdCallback,
 };
+use crate::tui::components::SimpleSelectableItem;
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
@@ -35,42 +36,6 @@ use crate::tui::types::{Device, MfaPolicy, SettingsSection};
 
 /// MFA callback takes MfaPolicy type - kept local due to specialized parameter
 pub type MfaCallback = Arc<dyn Fn(MfaPolicy) + Send + Sync>;
-
-// =============================================================================
-// Menu Item Component
-// =============================================================================
-
-#[derive(Default, Props)]
-struct MenuItemProps {
-    label: String,
-    selected: bool,
-}
-
-#[component]
-fn MenuItem(props: &MenuItemProps) -> impl Into<AnyElement<'static>> {
-    let bg = if props.selected {
-        Theme::LIST_BG_SELECTED
-    } else {
-        Theme::LIST_BG_NORMAL
-    };
-    let fg = if props.selected {
-        Theme::LIST_TEXT_SELECTED
-    } else {
-        Theme::LIST_TEXT_NORMAL
-    };
-    let indicator = if props.selected { "> " } else { "  " };
-    let text = format!("{}{}", indicator, props.label);
-
-    element! {
-        View(
-            background_color: bg,
-            padding_left: 1,
-            padding_right: 1,
-        ) {
-            Text(content: text, color: fg)
-        }
-    }
-}
 
 // =============================================================================
 // Settings Screen Props
@@ -313,31 +278,31 @@ pub fn SettingsScreen(
     element! {
         View(flex_direction: FlexDirection::Column, width: dim::TOTAL_WIDTH, height: dim::MIDDLE_HEIGHT, overflow: Overflow::Hidden) {
             // Main row layout - full 25 rows
-            View(flex_direction: FlexDirection::Row, height: dim::MIDDLE_HEIGHT, gap: 1, overflow: Overflow::Hidden) {
-                // Left panel: Section list (fixed width in characters)
+            View(flex_direction: FlexDirection::Row, height: dim::MIDDLE_HEIGHT, gap: dim::TWO_PANEL_GAP, overflow: Overflow::Hidden) {
+                // Left panel: Section list (fixed width from layout constants)
                 View(
                     flex_direction: FlexDirection::Column,
                     border_style: BorderStyle::Round,
                     border_color: list_border,
                     padding: 1,
-                    width: 28,
+                    width: dim::TWO_PANEL_LEFT_WIDTH,
                 ) {
                     Text(content: "Settings", weight: Weight::Bold, color: Theme::PRIMARY)
                     View(flex_direction: FlexDirection::Column, margin_top: 1) {
-                        MenuItem(label: "Profile".to_string(), selected: current_section == SettingsSection::Profile)
-                        MenuItem(label: "Guardian Threshold".to_string(), selected: current_section == SettingsSection::Threshold)
-                        MenuItem(label: "Devices".to_string(), selected: current_section == SettingsSection::Devices)
-                        MenuItem(label: "Multifactor Auth".to_string(), selected: current_section == SettingsSection::Mfa)
+                        SimpleSelectableItem(label: "Profile".to_string(), selected: current_section == SettingsSection::Profile)
+                        SimpleSelectableItem(label: "Guardian Threshold".to_string(), selected: current_section == SettingsSection::Threshold)
+                        SimpleSelectableItem(label: "Devices".to_string(), selected: current_section == SettingsSection::Devices)
+                        SimpleSelectableItem(label: "Multifactor Auth".to_string(), selected: current_section == SettingsSection::Mfa)
                     }
                 }
 
-                // Right panel: Detail view (fixed width: 80 - 28 - 1 gap = 51)
+                // Right panel: Detail view (fixed width from layout constants)
                 View(
                     flex_direction: FlexDirection::Column,
                     border_style: BorderStyle::Round,
                     border_color: detail_border,
                     padding: 1,
-                    width: 51,
+                    width: dim::TWO_PANEL_RIGHT_WIDTH,
                     overflow: Overflow::Hidden,
                 ) {
                     Text(content: current_section.title(), weight: Weight::Bold, color: Theme::PRIMARY)

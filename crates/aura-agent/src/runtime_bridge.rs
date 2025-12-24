@@ -22,6 +22,7 @@ use aura_core::effects::{
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
+use aura_core::types::FrostThreshold;
 use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_effects::ReactiveHandler;
@@ -603,7 +604,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn rotate_guardian_keys(
         &self,
-        threshold_k: u16,
+        threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
@@ -629,7 +630,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         // The service returns (new_epoch, key_packages, public_key_bytes)
         // where public_key_bytes is already serialized
         signing_service
-            .rotate_keys(&authority, threshold_k, total_n, &participants)
+            .rotate_keys(&authority, threshold_k.value(), total_n, &participants)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to rotate guardian keys: {}", e))
@@ -662,7 +663,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn initiate_guardian_ceremony(
         &self,
-        threshold_k: u16,
+        threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
     ) -> Result<String, IntentError> {
@@ -726,8 +727,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
 
         let prestate_hash = current_state.compute_prestate_hash(&authority_id);
+        let threshold_k_value = threshold_k.value();
         let operation = GuardianRotationOp {
-            threshold_k,
+            threshold_k: threshold_k_value,
             total_n,
             guardian_ids: all_guardian_authority_ids.clone(),
             new_epoch,
@@ -744,7 +746,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         tracing::info!(
             ceremony_id = %ceremony_id,
             new_epoch,
-            threshold_k,
+            threshold_k = threshold_k_value,
             total_n,
             "Guardian ceremony initiated, sending invitations to {} guardians",
             guardian_ids.len()
@@ -756,7 +758,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .register(
                 ceremony_id.clone(),
                 aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
-                threshold_k,
+                threshold_k_value,
                 total_n,
                 participants,
                 new_epoch,

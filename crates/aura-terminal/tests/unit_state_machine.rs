@@ -25,86 +25,17 @@
 //! | Debugging | Hard (terminal) | Easy (state dumps) |
 //! | CI/CD | Requires PTY | Works anywhere |
 
+mod support;
+
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state_machine::{
-    transition, ChatFocus, DispatchCommand, QueuedModal, TuiCommand, TuiState,
+    ChatFocus, ChatMemberSelectModalState, ContactSelectModalState, DispatchCommand, QueuedModal,
+    TuiCommand,
 };
 use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
 use proptest::prelude::*;
-
-// ============================================================================
-// Test Helpers
-// ============================================================================
-
-/// Simple test wrapper for state machine
-struct TestTui {
-    state: TuiState,
-    commands: Vec<TuiCommand>,
-}
-
-impl TestTui {
-    fn new() -> Self {
-        Self {
-            state: TuiState::new(),
-            commands: Vec::new(),
-        }
-    }
-
-    fn send(&mut self, event: aura_core::effects::terminal::TerminalEvent) {
-        let (new_state, cmds) = transition(&self.state, event);
-        self.state = new_state;
-        self.commands.extend(cmds);
-    }
-
-    fn send_char(&mut self, c: char) {
-        self.send(events::char(c));
-    }
-
-    fn send_tab(&mut self) {
-        self.send(events::tab());
-    }
-
-    fn send_enter(&mut self) {
-        self.send(events::enter());
-    }
-
-    fn send_escape(&mut self) {
-        self.send(events::escape());
-    }
-
-    fn screen(&self) -> Screen {
-        self.state.screen()
-    }
-
-    fn assert_screen(&self, expected: Screen) {
-        assert_eq!(
-            self.screen(),
-            expected,
-            "Expected {:?}, got {:?}",
-            expected,
-            self.screen()
-        );
-    }
-
-    fn is_insert_mode(&self) -> bool {
-        self.state.is_insert_mode()
-    }
-
-    fn has_modal(&self) -> bool {
-        self.state.has_modal()
-    }
-
-    fn has_dispatch(&self, check: impl Fn(&DispatchCommand) -> bool) -> bool {
-        self.commands
-            .iter()
-            .any(|c| matches!(c, TuiCommand::Dispatch(d) if check(d)))
-    }
-
-    fn clear_commands(&mut self) {
-        self.commands.clear();
-    }
-}
+use support::TestTui;
 
 // ============================================================================
 // Screen Navigation Tests (converted from test_screen_navigation)
@@ -149,8 +80,8 @@ fn test_screen_navigation_deterministic() {
 #[test]
 fn test_demo_shortcuts_fill_contacts_import_modal() {
     let mut tui = TestTui::new();
-    tui.state.contacts.demo_alice_code = "ALICECODE".to_string();
-    tui.state.contacts.demo_carol_code = "CAROLCODE".to_string();
+    tui.state_mut().contacts.demo_alice_code = "ALICECODE".to_string();
+    tui.state_mut().contacts.demo_carol_code = "CAROLCODE".to_string();
 
     // Go to Contacts screen
     tui.send_char('4');
@@ -158,18 +89,18 @@ fn test_demo_shortcuts_fill_contacts_import_modal() {
 
     // Open Contacts import modal
     tui.send_char('i');
-    assert!(tui.state.has_modal());
+    assert!(tui.has_modal());
 
     // Ctrl+A fills Alice code
     tui.send(events::ctrl('a'));
-    match tui.state.modal_queue.current() {
+    match tui.state().modal_queue.current() {
         Some(QueuedModal::ContactsImport(s)) => assert_eq!(s.code, "ALICECODE"),
         other => panic!("Expected ContactsImport modal, got {:?}", other),
     }
 
     // Ctrl+L fills Carol code
     tui.send(events::ctrl('l'));
-    match tui.state.modal_queue.current() {
+    match tui.state().modal_queue.current() {
         Some(QueuedModal::ContactsImport(s)) => assert_eq!(s.code, "CAROLCODE"),
         other => panic!("Expected ContactsImport modal, got {:?}", other),
     }
@@ -221,38 +152,38 @@ fn test_chat_keyboard_shortcuts_deterministic() {
     tui.assert_screen(Screen::Chat);
 
     // Set up item counts for navigation to work
-    tui.state.chat.channel_count = 10;
-    tui.state.chat.message_count = 50;
+    tui.state_mut().chat.channel_count = 10;
+    tui.state_mut().chat.message_count = 50;
 
     // Chat starts at Channels by default
-    assert_eq!(tui.state.chat.focus, ChatFocus::Channels);
+    assert_eq!(tui.state().chat.focus, ChatFocus::Channels);
 
     // Test 'l' for focus right (message area)
     tui.send_char('l');
-    assert_eq!(tui.state.chat.focus, ChatFocus::Messages);
+    assert_eq!(tui.state().chat.focus, ChatFocus::Messages);
 
     // Test 'h' for focus left (wraps back to channels)
     tui.send_char('h');
-    assert_eq!(tui.state.chat.focus, ChatFocus::Channels);
+    assert_eq!(tui.state().chat.focus, ChatFocus::Channels);
 
     // Go back to Messages for scroll test
     tui.send_char('l');
-    assert_eq!(tui.state.chat.focus, ChatFocus::Messages);
+    assert_eq!(tui.state().chat.focus, ChatFocus::Messages);
 
     // Test 'j' for scroll down in messages
-    let initial_scroll = tui.state.chat.message_scroll;
+    let initial_scroll = tui.state().chat.message_scroll;
     tui.send_char('j');
-    assert_eq!(tui.state.chat.message_scroll, initial_scroll + 1);
+    assert_eq!(tui.state().chat.message_scroll, initial_scroll + 1);
 
     // Test 'k' for scroll up in messages
     tui.send_char('k');
-    assert_eq!(tui.state.chat.message_scroll, initial_scroll);
+    assert_eq!(tui.state().chat.message_scroll, initial_scroll);
 
     // Test 'i' for insert mode
     assert!(!tui.is_insert_mode());
     tui.send_char('i');
     assert!(tui.is_insert_mode());
-    assert_eq!(tui.state.chat.focus, ChatFocus::Input);
+    assert_eq!(tui.state().chat.focus, ChatFocus::Input);
 
     // Escape exits insert mode
     tui.send_escape();
@@ -266,19 +197,19 @@ fn test_chat_channel_selection_deterministic() {
 
     // Go to Chat - starts at Channels by default
     tui.send_char('3');
-    assert_eq!(tui.state.chat.focus, ChatFocus::Channels);
+    assert_eq!(tui.state().chat.focus, ChatFocus::Channels);
 
     // Set up item counts for navigation to work
-    tui.state.chat.channel_count = 10;
-    tui.state.chat.message_count = 50;
+    tui.state_mut().chat.channel_count = 10;
+    tui.state_mut().chat.message_count = 50;
 
     // Navigate channel list
-    let initial = tui.state.chat.selected_channel;
+    let initial = tui.state().chat.selected_channel;
     tui.send_char('j'); // Down
-    assert_eq!(tui.state.chat.selected_channel, initial + 1);
+    assert_eq!(tui.state().chat.selected_channel, initial + 1);
 
     tui.send_char('k'); // Up
-    assert_eq!(tui.state.chat.selected_channel, initial);
+    assert_eq!(tui.state().chat.selected_channel, initial);
 }
 
 // ============================================================================
@@ -301,7 +232,7 @@ fn test_insert_mode_text_entry_deterministic() {
     }
 
     // Verify input buffer
-    assert_eq!(tui.state.chat.input_buffer, "Hello, world!");
+    assert_eq!(tui.state().chat.input_buffer, "Hello, world!");
 
     // Press Enter to send
     tui.clear_commands();
@@ -311,7 +242,7 @@ fn test_insert_mode_text_entry_deterministic() {
     assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::SendChatMessage { .. })));
 
     // Input buffer should be cleared
-    assert!(tui.state.chat.input_buffer.is_empty());
+    assert!(tui.state().chat.input_buffer.is_empty());
 }
 
 /// Test Escape exits insert mode without sending
@@ -331,14 +262,14 @@ fn test_escape_exits_insert_mode_deterministic() {
     tui.send_char('e');
     tui.send_char('s');
     tui.send_char('t');
-    assert_eq!(tui.state.block.input_buffer, "test");
+    assert_eq!(tui.state().block.input_buffer, "test");
 
     // Escape should exit insert mode
     tui.send_escape();
     assert!(!tui.is_insert_mode());
 
     // Buffer is preserved (not cleared) - vim-style behavior
-    assert_eq!(tui.state.block.input_buffer, "test");
+    assert_eq!(tui.state().block.input_buffer, "test");
 }
 
 // ============================================================================
@@ -394,23 +325,23 @@ fn test_recovery_tabs_deterministic() {
     tui.assert_screen(Screen::Recovery);
 
     // Default tab is Guardians
-    assert_eq!(tui.state.recovery.tab, RecoveryTab::Guardians);
+    assert_eq!(tui.state().recovery.tab, RecoveryTab::Guardians);
 
     // Navigate right: Guardians -> Recovery
     tui.send_char('l');
-    assert_eq!(tui.state.recovery.tab, RecoveryTab::Recovery);
+    assert_eq!(tui.state().recovery.tab, RecoveryTab::Recovery);
 
     // Navigate right: Recovery -> Requests
     tui.send_char('l');
-    assert_eq!(tui.state.recovery.tab, RecoveryTab::Requests);
+    assert_eq!(tui.state().recovery.tab, RecoveryTab::Requests);
 
     // Navigate left: Requests -> Recovery
     tui.send_char('h');
-    assert_eq!(tui.state.recovery.tab, RecoveryTab::Recovery);
+    assert_eq!(tui.state().recovery.tab, RecoveryTab::Recovery);
 
     // Navigate left: Recovery -> Guardians
     tui.send_char('h');
-    assert_eq!(tui.state.recovery.tab, RecoveryTab::Guardians);
+    assert_eq!(tui.state().recovery.tab, RecoveryTab::Guardians);
 }
 
 /// Test Recovery screen guardian selection
@@ -421,18 +352,18 @@ fn test_recovery_guardian_list_deterministic() {
     // Go to Recovery, Guardians tab (key '5')
     tui.send_char('5');
     tui.assert_screen(Screen::Recovery);
-    assert_eq!(tui.state.recovery.tab, RecoveryTab::Guardians);
+    assert_eq!(tui.state().recovery.tab, RecoveryTab::Guardians);
 
     // Set up item count for navigation to work
-    tui.state.recovery.item_count = 10;
+    tui.state_mut().recovery.item_count = 10;
 
     // Navigate list
-    let initial = tui.state.recovery.selected_index;
+    let initial = tui.state().recovery.selected_index;
     tui.send_char('j');
-    assert_eq!(tui.state.recovery.selected_index, initial + 1);
+    assert_eq!(tui.state().recovery.selected_index, initial + 1);
 
     tui.send_char('k');
-    assert_eq!(tui.state.recovery.selected_index, initial);
+    assert_eq!(tui.state().recovery.selected_index, initial);
 }
 
 // ============================================================================
@@ -451,20 +382,20 @@ fn test_settings_sections_deterministic() {
     tui.assert_screen(Screen::Settings);
 
     // Default section is Profile
-    assert_eq!(tui.state.settings.section, SettingsSection::Profile);
+    assert_eq!(tui.state().settings.section, SettingsSection::Profile);
 
     // 'j' moves to next section: Profile -> Threshold -> Devices -> Mfa -> Profile
     tui.send_char('j');
-    assert_eq!(tui.state.settings.section, SettingsSection::Threshold);
+    assert_eq!(tui.state().settings.section, SettingsSection::Threshold);
 
     tui.send_char('j');
-    assert_eq!(tui.state.settings.section, SettingsSection::Devices);
+    assert_eq!(tui.state().settings.section, SettingsSection::Devices);
 
     tui.send_char('j');
-    assert_eq!(tui.state.settings.section, SettingsSection::Mfa);
+    assert_eq!(tui.state().settings.section, SettingsSection::Mfa);
 
     tui.send_char('j');
-    assert_eq!(tui.state.settings.section, SettingsSection::Profile); // Wraps
+    assert_eq!(tui.state().settings.section, SettingsSection::Profile); // Wraps
 }
 
 // ============================================================================
@@ -477,16 +408,16 @@ fn test_quit_deterministic() {
     let mut tui = TestTui::new();
 
     // Not exiting initially
-    assert!(!tui.state.should_exit);
+    assert!(!tui.state().should_exit);
 
     // Press 'q' to quit
     tui.send_char('q');
 
     // Should be marked for exit
-    assert!(tui.state.should_exit);
+    assert!(tui.state().should_exit);
 
     // Exit command should be generated
-    assert!(tui.commands.iter().any(|c| matches!(c, TuiCommand::Exit)));
+    assert!(tui.commands().iter().any(|c| matches!(c, TuiCommand::Exit)));
 }
 
 /// Test 'q' doesn't quit in insert mode
@@ -500,8 +431,8 @@ fn test_quit_blocked_in_insert_mode_deterministic() {
 
     // Press 'q' - should type 'q', not quit
     tui.send_char('q');
-    assert!(!tui.state.should_exit);
-    assert_eq!(tui.state.block.input_buffer, "q");
+    assert!(!tui.state().should_exit);
+    assert_eq!(tui.state().block.input_buffer, "q");
 }
 
 // ============================================================================
@@ -518,15 +449,15 @@ fn test_contacts_navigation_deterministic() {
     tui.assert_screen(Screen::Contacts);
 
     // Set up item count for navigation to work
-    tui.state.contacts.contact_count = 10;
+    tui.state_mut().contacts.contact_count = 10;
 
     // Navigate contact list
-    let initial = tui.state.contacts.selected_index;
+    let initial = tui.state().contacts.selected_index;
     tui.send_char('j');
-    assert_eq!(tui.state.contacts.selected_index, initial + 1);
+    assert_eq!(tui.state().contacts.selected_index, initial + 1);
 
     tui.send_char('k');
-    assert_eq!(tui.state.contacts.selected_index, initial);
+    assert_eq!(tui.state().contacts.selected_index, initial);
 }
 
 // ============================================================================
@@ -544,15 +475,15 @@ fn test_resize_event_deterministic() {
     let mut tui = TestTui::new();
 
     // Initial size is default
-    assert_eq!(tui.state.terminal_size, (80, 24));
+    assert_eq!(tui.state().terminal_size, (80, 24));
 
     // Resize event
     tui.send(events::resize(120, 40));
-    assert_eq!(tui.state.terminal_size, (120, 40));
+    assert_eq!(tui.state().terminal_size, (120, 40));
 
     // Another resize
     tui.send(events::resize(200, 60));
-    assert_eq!(tui.state.terminal_size, (200, 60));
+    assert_eq!(tui.state().terminal_size, (200, 60));
 }
 
 // ============================================================================
@@ -604,7 +535,7 @@ fn test_long_text_input_deterministic() {
     }
 
     // Verify buffer length
-    assert_eq!(tui.state.block.input_buffer.len(), 10000);
+    assert_eq!(tui.state().block.input_buffer.len(), 10000);
 }
 
 // ============================================================================
@@ -776,8 +707,8 @@ proptest! {
         prop_assert_eq!(tui1.screen(), tui2.screen());
         prop_assert_eq!(tui1.is_insert_mode(), tui2.is_insert_mode());
         prop_assert_eq!(tui1.has_modal(), tui2.has_modal());
-        prop_assert_eq!(tui1.state.terminal_size, tui2.state.terminal_size);
-        prop_assert_eq!(tui1.state.should_exit, tui2.state.should_exit);
+        prop_assert_eq!(tui1.state().terminal_size, tui2.state().terminal_size);
+        prop_assert_eq!(tui1.state().should_exit, tui2.state().should_exit);
     }
 
     /// Property: Resize events update terminal size correctly
@@ -787,7 +718,7 @@ proptest! {
 
         tui.send(events::resize(width, height));
 
-        prop_assert_eq!(tui.state.terminal_size, (width, height));
+        prop_assert_eq!(tui.state().terminal_size, (width, height));
     }
 
     /// Property: Insert mode only available on Block and Chat screens
@@ -817,7 +748,7 @@ proptest! {
         }
 
         // Index should be 0, not negative
-        prop_assert_eq!(tui.state.contacts.selected_index, 0);
+        prop_assert_eq!(tui.state().contacts.selected_index, 0);
     }
 
     /// Property: Escape closes any modal
@@ -838,4 +769,72 @@ proptest! {
         tui.send_escape();
         prop_assert!(!tui.has_modal());
     }
+}
+
+#[test]
+fn test_chat_create_select_members_dispatches_create_channel_with_members() {
+    let mut tui = TestTui::new();
+
+    // Go to Chat screen
+    tui.send_char('3');
+    tui.assert_screen(Screen::Chat);
+
+    // Open create chat modal
+    tui.send_char('n');
+    match tui.current_modal() {
+        Some(QueuedModal::ChatCreate(_)) => {}
+        other => panic!("Expected ChatCreate modal, got {:?}", other),
+    }
+
+    // Fill in name + topic
+    tui.type_str("group");
+    tui.send_tab();
+    tui.type_str("topic");
+
+    // Replace active modal with ChatMemberSelect (shell normally populates contacts)
+    let draft = match tui.current_modal() {
+        Some(QueuedModal::ChatCreate(s)) => s.clone(),
+        other => panic!("Expected ChatCreate modal, got {:?}", other),
+    };
+
+    let contacts = vec![
+        ("alice".to_string(), "Alice".to_string()),
+        ("carol".to_string(), "Carol".to_string()),
+    ];
+    let picker = ContactSelectModalState::multi("Select chat members", contacts);
+
+    tui.state_mut().modal_queue.update_active(|modal| {
+        *modal = QueuedModal::ChatMemberSelect(ChatMemberSelectModalState { picker, draft });
+    });
+
+    // Select both contacts
+    tui.send_char(' ');
+    tui.send_down();
+    tui.send_char(' ');
+
+    // Confirm selection; should return to ChatCreate with member_ids populated
+    tui.send_enter();
+    match tui.current_modal() {
+        Some(QueuedModal::ChatCreate(s)) => {
+            assert_eq!(s.member_ids.len(), 2);
+            assert!(s.member_ids.contains(&"alice".to_string()));
+            assert!(s.member_ids.contains(&"carol".to_string()));
+        }
+        other => panic!("Expected ChatCreate modal, got {:?}", other),
+    }
+
+    tui.clear_commands();
+    tui.send_enter();
+
+    assert!(tui.has_dispatch(|d| {
+        matches!(
+            d,
+            DispatchCommand::CreateChannel { name, topic, members }
+                if name == "group"
+                    && topic.as_deref() == Some("topic")
+                    && members.len() == 2
+                    && members.contains(&"alice".to_string())
+                    && members.contains(&"carol".to_string())
+        )
+    }));
 }

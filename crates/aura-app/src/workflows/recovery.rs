@@ -10,7 +10,9 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::{effects::reactive::ReactiveEffects, identifiers::AuthorityId, AuraError};
+use aura_core::{
+    effects::reactive::ReactiveEffects, identifiers::AuthorityId, types::FrostThreshold, AuraError,
+};
 use std::sync::Arc;
 
 /// Start a guardian recovery ceremony
@@ -29,7 +31,7 @@ use std::sync::Arc;
 pub async fn start_recovery(
     app_core: &Arc<RwLock<AppCore>>,
     guardian_ids: Vec<String>,
-    threshold_k: u16,
+    threshold_k: FrostThreshold,
 ) -> Result<String, AuraError> {
     let runtime = {
         let core = app_core.read().await;
@@ -51,7 +53,7 @@ pub async fn start_recovery(
         account_id: AuthorityId::default(), // Would be set from context
         status: RecoveryProcessStatus::WaitingForApprovals,
         approvals_received: 0,
-        approvals_required: threshold_k as u32,
+        approvals_required: threshold_k.value() as u32,
         approved_by: Vec::new(),
         approvals: Vec::new(),
         initiated_at: 0, // Would be set from PhysicalTimeEffects
@@ -61,7 +63,7 @@ pub async fn start_recovery(
 
     let state = RecoveryState {
         guardians: Vec::new(), // Would be populated from guardian list
-        threshold: threshold_k as u32,
+        threshold: threshold_k.value() as u32,
         guardian_count: guardian_ids.len() as u32,
         active_recovery: Some(recovery_process),
         pending_requests: Vec::new(),

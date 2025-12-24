@@ -45,6 +45,8 @@ pub struct CreateChannelModalState {
     pub name: String,
     /// Optional topic input
     pub topic: String,
+    /// Selected member contact/authority IDs to add to the channel
+    pub member_ids: Vec<String>,
     /// Current input field (0 = name, 1 = topic)
     pub active_field: usize,
     /// Error message if any
@@ -61,6 +63,7 @@ impl CreateChannelModalState {
     pub fn reset(&mut self) {
         self.name.clear();
         self.topic.clear();
+        self.member_ids.clear();
         self.active_field = 0;
         self.error = None;
     }

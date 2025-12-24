@@ -8,6 +8,7 @@ use async_lock::RwLock;
 
 use crate::runtime_bridge::KeyRotationCeremonyStatus;
 use crate::AppCore;
+use aura_core::types::FrostThreshold;
 use aura_core::AuraError;
 use std::future::Future;
 use std::time::Duration;
@@ -15,7 +16,7 @@ use std::time::Duration;
 /// Start a guardian key-rotation ceremony.
 pub async fn start_guardian_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
-    threshold_k: u16,
+    threshold_k: FrostThreshold,
     total_n: u16,
     guardian_ids: Vec<String>,
 ) -> Result<String, AuraError> {

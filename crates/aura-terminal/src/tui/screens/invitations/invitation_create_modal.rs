@@ -1,11 +1,21 @@
 //! # Invitation Create Modal
 //!
 //! Modal for creating new invitations from the TUI.
+//!
+//! ## Field-Focus Navigation
+//!
+//! The modal uses a simple field-focus model:
+//! - ↑/↓: Navigate between Type, Message, and TTL fields
+//! - ←/→: Change value (Type and TTL fields only)
+//! - Typing: Edit message when Message field is focused
+//! - Enter: Create invitation
+//! - Esc: Cancel
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::layout::dim;
+use crate::tui::state_machine::CreateInvitationField;
 use crate::tui::theme::{Borders, Spacing, Theme};
 use crate::tui::types::InvitationType;
 
@@ -21,8 +31,10 @@ pub type CancelCallback = Arc<dyn Fn() + Send + Sync>;
 pub struct InvitationCreateModalProps {
     /// Whether the modal is visible
     pub visible: bool,
-    /// Whether the input is focused
+    /// Whether the modal itself is focused (vs other UI elements)
     pub focused: bool,
+    /// Which field is currently focused
+    pub focused_field: CreateInvitationField,
     /// Whether creation is in progress
     pub creating: bool,
     /// Error message if creation failed
@@ -54,14 +66,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     let invitation_type = props.invitation_type;
     let message = props.message.clone();
     let ttl_hours = props.ttl_hours;
-
-    let border_color = if has_error {
-        Theme::ERROR
-    } else if props.focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
+    let focused_field = props.focused_field;
 
     let can_submit = !creating;
 
@@ -69,32 +74,86 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     let type_label = invitation_type.label();
     let type_icon = invitation_type.icon();
 
-    // Message display (truncated if too long)
-    let message_display = if message.is_empty() {
-        "(optional message)".to_string()
+    // Field focus colors
+    let type_focused = focused_field == CreateInvitationField::Type;
+    let message_focused = focused_field == CreateInvitationField::Message;
+    let ttl_focused = focused_field == CreateInvitationField::Ttl;
+
+    let type_border = if type_focused {
+        Theme::BORDER_FOCUS
+    } else {
+        Theme::BORDER
+    };
+    let message_border = if message_focused {
+        Theme::BORDER_FOCUS
+    } else {
+        Theme::BORDER
+    };
+    let ttl_border = if ttl_focused {
+        Theme::BORDER_FOCUS
+    } else {
+        Theme::BORDER
+    };
+
+    // Focus indicator
+    let type_pointer = if type_focused { "▸ " } else { "  " };
+    let message_pointer = if message_focused { "▸ " } else { "  " };
+    let ttl_pointer = if ttl_focused { "▸ " } else { "  " };
+
+    // Message display (truncated if too long, show cursor when focused)
+    let message_display = if message_focused {
+        if message.is_empty() {
+            "│".to_string() // Cursor only
+        } else if message.len() > 38 {
+            format!("{}...│", &message[..35])
+        } else {
+            format!("{}│", message)
+        }
+    } else if message.is_empty() {
+        "(optional)".to_string()
     } else if message.len() > 40 {
         format!("{}...", &message[..37])
     } else {
         message.clone()
     };
 
-    let message_color = if message.is_empty() {
+    let message_color = if message_focused {
+        Theme::TEXT
+    } else if message.is_empty() {
         Theme::TEXT_MUTED
     } else {
         Theme::TEXT
     };
 
-    // TTL display
-    let ttl_display = if ttl_hours == 0 {
-        "Never expires".to_string()
-    } else if ttl_hours == 1 {
-        "Expires in 1 hour".to_string()
-    } else if ttl_hours < 24 {
-        format!("Expires in {} hours", ttl_hours)
-    } else if ttl_hours == 24 {
-        "Expires in 1 day".to_string()
+    // TTL display with arrows when focused
+    let ttl_display = {
+        let base = if ttl_hours == 0 {
+            "Never".to_string()
+        } else if ttl_hours == 1 {
+            "1 hour".to_string()
+        } else if ttl_hours < 24 {
+            format!("{} hours", ttl_hours)
+        } else if ttl_hours == 24 {
+            "1 day".to_string()
+        } else if ttl_hours < 168 {
+            format!("{} days", ttl_hours / 24)
+        } else if ttl_hours == 168 {
+            "1 week".to_string()
+        } else {
+            format!("{} days", ttl_hours / 24)
+        };
+        if ttl_focused {
+            format!("◀ {} ▶", base)
+        } else {
+            base
+        }
+    };
+
+    // Type display with arrows when focused
+    let type_display = if type_focused {
+        format!("◀ {} {} ▶", type_icon, type_label)
     } else {
-        format!("Expires in {} days", ttl_hours / 24)
+        format!("{} {}", type_icon, type_label)
     };
 
     element! {
@@ -138,54 +197,51 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 overflow: Overflow::Hidden,
             ) {
                 // Invitation Type selector
-                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
-                    Text(content: "Type (Tab to change)", color: Theme::TEXT_MUTED)
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::SM) {
+                    View(flex_direction: FlexDirection::Row) {
+                        Text(content: type_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                        Text(content: "Type", color: if type_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                    }
                     View(
                         margin_top: Spacing::XS,
+                        margin_left: 2,
                         flex_direction: FlexDirection::Row,
                         gap: Spacing::XS,
                         border_style: Borders::INPUT,
-                        border_color: border_color,
+                        border_color: type_border,
                         padding_left: Spacing::PANEL_PADDING,
                         padding_right: Spacing::PANEL_PADDING,
                     ) {
-                        Text(content: type_icon.to_string(), color: Theme::PRIMARY)
-                        Text(content: type_label.to_string(), color: Theme::TEXT)
+                        Text(content: type_display, color: if type_focused { Theme::PRIMARY } else { Theme::TEXT })
+                    }
+                    // Type description
+                    View(margin_top: Spacing::XS, margin_left: 2) {
+                        #(match invitation_type {
+                            InvitationType::Contact => element! {
+                                Text(content: "Add as a contact for messaging", color: Theme::TEXT_MUTED)
+                            },
+                            InvitationType::Guardian => element! {
+                                Text(content: "Invite to be a guardian for recovery", color: Theme::TEXT_MUTED)
+                            },
+                            InvitationType::Channel => element! {
+                                Text(content: "Invite to join a chat channel", color: Theme::TEXT_MUTED)
+                            },
+                        })
                     }
                 }
 
-                // Type descriptions
-                View(margin_bottom: Spacing::XS) {
-                    #(match invitation_type {
-                        InvitationType::Contact => element! {
-                            Text(
-                                content: "Add as a contact for messaging",
-                                color: Theme::TEXT_MUTED,
-                            )
-                        },
-                        InvitationType::Guardian => element! {
-                            Text(
-                                content: "Invite to be a guardian for account recovery",
-                                color: Theme::TEXT_MUTED,
-                            )
-                        },
-                        InvitationType::Channel => element! {
-                            Text(
-                                content: "Invite to join a chat channel",
-                                color: Theme::TEXT_MUTED,
-                            )
-                        },
-                    })
-                }
-
                 // Optional message
-                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
-                    Text(content: "Message (m to edit)", color: Theme::TEXT_MUTED)
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::SM) {
+                    View(flex_direction: FlexDirection::Row) {
+                        Text(content: message_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                        Text(content: "Message", color: if message_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                    }
                     View(
                         margin_top: Spacing::XS,
+                        margin_left: 2,
                         width: 100pct,
                         border_style: Borders::INPUT,
-                        border_color: Theme::BORDER,
+                        border_color: message_border,
                         padding_left: Spacing::PANEL_PADDING,
                         padding_right: Spacing::PANEL_PADDING,
                     ) {
@@ -195,15 +251,19 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
 
                 // TTL selector
                 View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
-                    Text(content: "Expiry (t to change)", color: Theme::TEXT_MUTED)
+                    View(flex_direction: FlexDirection::Row) {
+                        Text(content: ttl_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                        Text(content: "Expiry", color: if ttl_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                    }
                     View(
                         margin_top: Spacing::XS,
+                        margin_left: 2,
                         border_style: Borders::INPUT,
-                        border_color: Theme::BORDER,
+                        border_color: ttl_border,
                         padding_left: Spacing::PANEL_PADDING,
                         padding_right: Spacing::PANEL_PADDING,
                     ) {
-                        Text(content: ttl_display, color: Theme::TEXT)
+                        Text(content: ttl_display, color: if ttl_focused { Theme::PRIMARY } else { Theme::TEXT })
                     }
                 }
 
@@ -219,7 +279,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 })
             }
 
-            // Footer with hints and button
+            // Footer with hints
             View(
                 width: 100pct,
                 flex_direction: FlexDirection::Row,
@@ -232,12 +292,12 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 border_color: Theme::BORDER,
             ) {
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Tab", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Type", color: Theme::TEXT_MUTED)
+                    Text(content: "↑/↓", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Navigate", color: Theme::TEXT_MUTED)
                 }
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "t", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "TTL", color: Theme::TEXT_MUTED)
+                    Text(content: "←/→", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "Change", color: Theme::TEXT_MUTED)
                 }
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
@@ -249,216 +309,5 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 }
             }
         }
-    }
-}
-
-/// State for invitation create modal
-#[derive(Clone, Debug, Default)]
-pub struct InvitationCreateState {
-    /// Whether the modal is visible
-    pub visible: bool,
-    /// Currently selected invitation type
-    pub invitation_type: InvitationType,
-    /// Optional message for the invitation
-    pub message: String,
-    /// TTL in hours (0 = no expiry)
-    pub ttl_hours: u32,
-    /// Whether creation is in progress
-    pub creating: bool,
-    /// Error message if creation failed
-    pub error: Option<String>,
-}
-
-impl InvitationCreateState {
-    /// Create a new invitation create state
-    pub fn new() -> Self {
-        Self {
-            ttl_hours: 24, // Default to 24 hours
-            ..Default::default()
-        }
-    }
-
-    /// Show the modal
-    pub fn show(&mut self) {
-        self.visible = true;
-        self.invitation_type = InvitationType::Contact;
-        self.message.clear();
-        self.ttl_hours = 24;
-        self.creating = false;
-        self.error = None;
-    }
-
-    /// Hide the modal
-    pub fn hide(&mut self) {
-        self.visible = false;
-    }
-
-    /// Cycle to next invitation type
-    pub fn next_type(&mut self) {
-        self.invitation_type = match self.invitation_type {
-            InvitationType::Contact => InvitationType::Guardian,
-            InvitationType::Guardian => InvitationType::Channel,
-            InvitationType::Channel => InvitationType::Contact,
-        };
-        self.error = None;
-    }
-
-    /// Cycle to previous invitation type
-    pub fn prev_type(&mut self) {
-        self.invitation_type = match self.invitation_type {
-            InvitationType::Contact => InvitationType::Channel,
-            InvitationType::Guardian => InvitationType::Contact,
-            InvitationType::Channel => InvitationType::Guardian,
-        };
-        self.error = None;
-    }
-
-    /// Set the message
-    pub fn set_message(&mut self, msg: impl Into<String>) {
-        self.message = msg.into();
-        self.error = None;
-    }
-
-    /// Append a character to the message
-    pub fn push_char(&mut self, c: char) {
-        self.message.push(c);
-        self.error = None;
-    }
-
-    /// Remove last character from message
-    pub fn backspace(&mut self) {
-        self.message.pop();
-    }
-
-    /// Cycle TTL values: 0 (never) -> 1h -> 24h -> 72h -> 168h (1 week) -> 0
-    pub fn cycle_ttl(&mut self) {
-        self.ttl_hours = match self.ttl_hours {
-            0 => 1,
-            1 => 24,
-            24 => 72,
-            72 => 168,
-            _ => 0,
-        };
-    }
-
-    /// Check if submission is valid
-    pub fn can_submit(&self) -> bool {
-        !self.creating
-    }
-
-    /// Start creating invitation
-    pub fn start_creating(&mut self) {
-        self.creating = true;
-        self.error = None;
-    }
-
-    /// Mark creation as complete
-    pub fn finish_creating(&mut self) {
-        self.creating = false;
-        self.visible = false;
-    }
-
-    /// Set error message
-    pub fn set_error(&mut self, error: impl Into<String>) {
-        self.creating = false;
-        self.error = Some(error.into());
-    }
-
-    /// Get TTL in seconds (None if no expiry)
-    pub fn ttl_secs(&self) -> Option<u64> {
-        if self.ttl_hours == 0 {
-            None
-        } else {
-            Some(self.ttl_hours as u64 * 3600)
-        }
-    }
-
-    /// Get the message if not empty
-    pub fn get_message(&self) -> Option<&str> {
-        if self.message.is_empty() {
-            None
-        } else {
-            Some(&self.message)
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_invitation_create_state() {
-        let mut state = InvitationCreateState::new();
-        assert!(!state.visible);
-        assert_eq!(state.ttl_hours, 24); // Default
-
-        state.show();
-        assert!(state.visible);
-        assert_eq!(state.invitation_type, InvitationType::Contact);
-        assert!(state.can_submit());
-
-        state.next_type();
-        assert_eq!(state.invitation_type, InvitationType::Guardian);
-
-        state.next_type();
-        assert_eq!(state.invitation_type, InvitationType::Channel);
-
-        state.next_type();
-        assert_eq!(state.invitation_type, InvitationType::Contact);
-    }
-
-    #[test]
-    fn test_ttl_cycling() {
-        let mut state = InvitationCreateState::new();
-        state.show();
-        assert_eq!(state.ttl_hours, 24);
-
-        state.cycle_ttl();
-        assert_eq!(state.ttl_hours, 72);
-
-        state.cycle_ttl();
-        assert_eq!(state.ttl_hours, 168);
-
-        state.cycle_ttl();
-        assert_eq!(state.ttl_hours, 0);
-
-        state.cycle_ttl();
-        assert_eq!(state.ttl_hours, 1);
-    }
-
-    #[test]
-    fn test_message_handling() {
-        let mut state = InvitationCreateState::new();
-        state.show();
-        assert!(state.get_message().is_none());
-
-        state.push_char('H');
-        state.push_char('i');
-        assert_eq!(state.get_message(), Some("Hi"));
-
-        state.backspace();
-        assert_eq!(state.get_message(), Some("H"));
-
-        state.set_message("Hello there!");
-        assert_eq!(state.get_message(), Some("Hello there!"));
-    }
-
-    #[test]
-    fn test_error_handling() {
-        let mut state = InvitationCreateState::new();
-        state.show();
-        state.start_creating();
-        assert!(state.creating);
-        assert!(!state.can_submit());
-
-        state.set_error("Network error");
-        assert!(!state.creating);
-        assert_eq!(state.error, Some("Network error".to_string()));
-        assert!(state.visible); // Still visible after error
-
-        // Typing clears error
-        state.push_char('x');
-        assert!(state.error.is_none());
     }
 }

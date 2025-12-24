@@ -44,6 +44,7 @@ use aura_core::threshold::{
     ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
 };
 use aura_core::tree::{AttestedOp, TreeOp};
+use aura_core::types::FrostThreshold;
 use aura_core::DeviceId;
 use aura_effects::PhysicalTimeHandler;
 use aura_effects::ReactiveHandler;
@@ -514,7 +515,7 @@ pub trait RuntimeBridge: Send + Sync {
     /// until `commit_guardian_key_rotation` is called.
     ///
     /// # Arguments
-    /// * `threshold_k` - Minimum signers required (k)
+    /// * `threshold_k` - Minimum signers required (k), must be >= 2 for FROST
     /// * `total_n` - Total number of guardians (n)
     /// * `guardian_ids` - IDs of contacts who will become guardians
     ///
@@ -522,7 +523,7 @@ pub trait RuntimeBridge: Send + Sync {
     /// A tuple of (new_epoch, key_packages, public_key_package) on success
     async fn rotate_guardian_keys(
         &self,
-        threshold_k: u16,
+        threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError>;
@@ -551,7 +552,7 @@ pub trait RuntimeBridge: Send + Sync {
     /// threshold is reached.
     ///
     /// # Arguments
-    /// * `threshold_k` - Minimum signers required (k)
+    /// * `threshold_k` - Minimum signers required (k), must be >= 2 for FROST
     /// * `total_n` - Total number of guardians (n)
     /// * `guardian_ids` - IDs of contacts who will become guardians
     ///
@@ -559,7 +560,7 @@ pub trait RuntimeBridge: Send + Sync {
     /// A ceremony ID for tracking progress
     async fn initiate_guardian_ceremony(
         &self,
-        threshold_k: u16,
+        threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
     ) -> Result<String, IntentError>;
@@ -1012,7 +1013,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn rotate_guardian_keys(
         &self,
-        _threshold_k: u16,
+        _threshold_k: FrostThreshold,
         _total_n: u16,
         _guardian_ids: &[String],
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
@@ -1035,7 +1036,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn initiate_guardian_ceremony(
         &self,
-        _threshold_k: u16,
+        _threshold_k: FrostThreshold,
         _total_n: u16,
         _guardian_ids: &[String],
     ) -> Result<String, IntentError> {

@@ -306,22 +306,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_chat_commands_update_chat_signal() {
+    async fn test_chat_commands_fail_without_runtime() {
         let app_core = test_app_core().await;
         let handler = OperationalHandler::new(app_core);
 
+        // Without RuntimeBridge, SendMessage should fail gracefully
         let result = handler
             .execute(&EffectCommand::SendMessage {
                 channel: "general".to_string(),
                 content: "Hello".to_string(),
             })
             .await;
-        assert!(
-            matches!(result, Some(Ok(OpResponse::Data(_)))),
-            "Expected SendMessage to be handled, got: {:?}",
-            result
-        );
+        match result {
+            Some(Err(OpError::Failed(msg))) => {
+                assert!(
+                    msg.contains("Runtime bridge not available"),
+                    "Expected runtime bridge error, got: {}",
+                    msg
+                );
+            }
+            _ => panic!(
+                "Expected Failed error without RuntimeBridge, got: {:?}",
+                result
+            ),
+        }
 
+        // Without RuntimeBridge, CreateChannel should also fail gracefully
         let result = handler
             .execute(&EffectCommand::CreateChannel {
                 name: "Guardians".to_string(),
@@ -329,11 +339,19 @@ mod tests {
                 members: vec!["authority-00000000-0000-0000-0000-000000000000".to_string()],
             })
             .await;
-        assert!(
-            matches!(result, Some(Ok(OpResponse::Data(_)))),
-            "Expected CreateChannel to be handled, got: {:?}",
-            result
-        );
+        match result {
+            Some(Err(OpError::Failed(msg))) => {
+                assert!(
+                    msg.contains("Runtime bridge not available"),
+                    "Expected runtime bridge error, got: {}",
+                    msg
+                );
+            }
+            _ => panic!(
+                "Expected Failed error without RuntimeBridge, got: {:?}",
+                result
+            ),
+        }
     }
 
     #[tokio::test]

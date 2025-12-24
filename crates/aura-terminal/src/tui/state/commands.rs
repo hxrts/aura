@@ -60,8 +60,11 @@ pub enum DispatchCommand {
     RetryMessage,
     OpenChatTopicModal,
     OpenChatInfoModal,
+    OpenChatMemberSelect,
     CreateChannel {
         name: String,
+        topic: Option<String>,
+        members: Vec<String>,
     },
     SetChannelTopic {
         channel_id: String,

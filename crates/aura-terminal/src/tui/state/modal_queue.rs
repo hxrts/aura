@@ -56,6 +56,9 @@ pub enum QueuedModal {
     /// Create a new channel
     ChatCreate(CreateChannelModalState),
 
+    /// Select channel members (multi-select contact picker)
+    ChatMemberSelect(ChatMemberSelectModalState),
+
     /// Edit channel topic
     ChatTopic(TopicModalState),
 
@@ -173,6 +176,13 @@ impl ContactSelectModalState {
             .get(self.selected_index)
             .map(|(id, _)| id.as_str())
     }
+}
+
+/// State for chat member selection modal (wraps a multi-select contact picker plus the draft create-channel state)
+#[derive(Clone, Debug, Default)]
+pub struct ChatMemberSelectModalState {
+    pub picker: ContactSelectModalState,
+    pub draft: CreateChannelModalState,
 }
 
 /// Modal queue that ensures only one modal is visible at a time.

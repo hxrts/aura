@@ -34,7 +34,10 @@ pub mod views;
 
 // Re-export all public types for backwards compatibility
 pub use commands::{DispatchCommand, TuiCommand};
-pub use modal_queue::{ConfirmAction, ContactSelectModalState, ModalQueue, ModalType, QueuedModal};
+pub use modal_queue::{
+    ChatMemberSelectModalState, ConfirmAction, ContactSelectModalState, ModalQueue, ModalType,
+    QueuedModal,
+};
 pub use toast::{QueuedToast, Toast, ToastLevel, ToastQueue};
 pub use transition::transition;
 pub use views::*;
@@ -203,10 +206,28 @@ impl TuiState {
     }
 
     /// Signal that account creation succeeded (queue-based)
+    /// Dismisses modal and shows a success toast instead of a success screen
     pub fn account_created_queued(&mut self) {
-        if let Some(QueuedModal::AccountSetup(ref mut state)) = self.modal_queue.current_mut() {
-            state.set_success();
-        }
+        // Get the display name before dismissing
+        let display_name =
+            if let Some(QueuedModal::AccountSetup(ref state)) = self.modal_queue.current() {
+                state.display_name.clone()
+            } else {
+                String::new()
+            };
+
+        // Dismiss the modal
+        self.modal_queue.dismiss();
+
+        // Show a success toast
+        let message = if display_name.is_empty() {
+            "Account created successfully".to_string()
+        } else {
+            format!("Welcome, {}!", display_name)
+        };
+        self.next_toast_id += 1;
+        self.toast_queue
+            .enqueue(QueuedToast::success(self.next_toast_id, message));
     }
 
     /// Signal that account creation failed (queue-based)

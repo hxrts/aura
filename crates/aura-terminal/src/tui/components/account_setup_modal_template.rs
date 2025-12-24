@@ -126,12 +126,15 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
             // Welcome header
             View(
                 width: 100pct,
+                height: 4,
+                flex_shrink: 0.0,
                 padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
+                overflow: Overflow::Hidden,
             ) {
                 Text(
                     content: "Welcome to Aura",
@@ -149,24 +152,17 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
             // Form content
             View(
                 width: 100pct,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
                 padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
+                overflow: Overflow::Hidden,
             ) {
-                // Description
-                View(margin_bottom: Spacing::SM) {
-                    Text(
-                        content: "Your account uses Ed25519 signatures for security.",
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
+                // Description (condensed to 2 lines)
                 Text(
-                    content: "This creates a single-device account. Add guardians later",
+                    content: "Single-device account with Ed25519 signatures.",
                     color: Theme::TEXT_MUTED,
                 )
                 Text(
-                    content: "in Settings to enable threshold signing and social recovery.",
+                    content: "Add additional threshold devices in Settings.",
                     color: Theme::TEXT_MUTED,
                 )
 
@@ -190,6 +186,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
             // Footer with hints and button (or spinner when creating)
             View(
                 width: 100pct,
+                height: 4,
+                flex_shrink: 0.0,
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,

@@ -8,13 +8,15 @@ use crate::tui::navigation::{navigate_list, NavKey};
 use crate::tui::screens::Screen;
 
 use super::super::commands::{DispatchCommand, TuiCommand};
-use super::super::modal_queue::{ConfirmAction, ContactSelectModalState, QueuedModal};
+use super::super::modal_queue::{
+    ChatMemberSelectModalState, ConfirmAction, ContactSelectModalState, QueuedModal,
+};
 use super::super::toast::ToastLevel;
 use super::super::views::{
     AccountSetupModalState, AddDeviceModalState, ConfirmRemoveModalState, CreateChannelModalState,
-    CreateInvitationModalState, DeviceEnrollmentCeremonyModalState, DisplayNameModalState,
-    GuardianSetupModalState, GuardianSetupStep, ImportInvitationModalState, NicknameModalState,
-    ThresholdModalState, TopicModalState,
+    CreateInvitationField, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
+    DisplayNameModalState, GuardianSetupModalState, GuardianSetupStep, ImportInvitationModalState,
+    NicknameModalState, ThresholdModalState, TopicModalState,
 };
 use super::super::TuiState;
 
@@ -105,6 +107,9 @@ pub fn handle_queued_modal_key(
         }
         QueuedModal::SettingsRemoveDevice(modal_state) => {
             handle_settings_remove_device_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::ChatMemberSelect(modal_state) => {
+            handle_chat_member_select_key_queue(state, commands, key, modal_state);
         }
     }
 }
@@ -372,6 +377,9 @@ fn handle_chat_create_key_queue(
         KeyCode::Esc => {
             state.modal_queue.dismiss();
         }
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            commands.push(TuiCommand::Dispatch(DispatchCommand::OpenChatMemberSelect));
+        }
         KeyCode::Tab => {
             // Toggle between name and topic fields
             state.modal_queue.update_active(|modal| {
@@ -382,8 +390,16 @@ fn handle_chat_create_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
+                let topic = if modal_state.topic.trim().is_empty() {
+                    None
+                } else {
+                    Some(modal_state.topic.clone())
+                };
+
                 commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
                     name: modal_state.name.clone(),
+                    topic,
+                    members: modal_state.member_ids.clone(),
                 }));
                 state.modal_queue.dismiss();
             }
@@ -408,6 +424,57 @@ fn handle_chat_create_key_queue(
                         s.topic.pop();
                     }
                 }
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Handle chat member selection modal keys (queue-based)
+fn handle_chat_member_select_key_queue(
+    state: &mut TuiState,
+    _commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: ChatMemberSelectModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            let draft = modal_state.draft;
+            state.modal_queue.update_active(|modal| {
+                *modal = QueuedModal::ChatCreate(draft);
+            });
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ChatMemberSelect(ref mut s) = modal {
+                    s.picker.selected_index =
+                        navigate_list(s.picker.selected_index, s.picker.contacts.len(), NavKey::Up);
+                }
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ChatMemberSelect(ref mut s) = modal {
+                    s.picker.selected_index = navigate_list(
+                        s.picker.selected_index,
+                        s.picker.contacts.len(),
+                        NavKey::Down,
+                    );
+                }
+            });
+        }
+        KeyCode::Char(' ') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ChatMemberSelect(ref mut s) = modal {
+                    s.picker.toggle_selection();
+                }
+            });
+        }
+        KeyCode::Enter => {
+            let mut draft = modal_state.draft;
+            draft.member_ids = modal_state.picker.selected_ids.clone();
+            state.modal_queue.update_active(|modal| {
+                *modal = QueuedModal::ChatCreate(draft);
             });
         }
         _ => {}
@@ -510,24 +577,23 @@ fn handle_import_invitation_key_queue(
         // Some terminals report Ctrl+l as the control character (FF, 0x0c) with no modifiers.
         || matches!(key.code, KeyCode::Char('\u{c}'));
 
-    if is_ctrl_a {
-        let code = state.contacts.demo_alice_code.clone();
+    if is_ctrl_a || is_ctrl_l {
+        // Dismiss the demo hint toast since the user used a shortcut
+        state.toast_queue.dismiss();
+
+        let code = if is_ctrl_a {
+            state.contacts.demo_alice_code.clone()
+        } else {
+            state.contacts.demo_carol_code.clone()
+        };
+
         if !code.is_empty() {
             state.modal_queue.update_active(|modal| match modal {
                 QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
                 _ => {}
             });
-            return;
         }
-    } else if is_ctrl_l {
-        let code = state.contacts.demo_carol_code.clone();
-        if !code.is_empty() {
-            state.modal_queue.update_active(|modal| match modal {
-                QueuedModal::ContactsImport(ref mut s) => s.code = code.clone(),
-                _ => {}
-            });
-            return;
-        }
+        return;
     }
 
     match key.code {
@@ -561,6 +627,13 @@ fn handle_import_invitation_key_queue(
 }
 
 /// Handle create invitation modal keys (queue-based)
+///
+/// Field-focus navigation:
+/// - ↑/↓: Navigate between Type, Message, and TTL fields
+/// - ←/→: Change value (Type and TTL fields only)
+/// - Typing: Edit message when Message field is focused
+/// - Enter: Create invitation from any field
+/// - Esc: Cancel
 fn handle_create_invitation_key_queue(
     state: &mut TuiState,
     commands: &mut Vec<TuiCommand>,
@@ -572,110 +645,109 @@ fn handle_create_invitation_key_queue(
         KeyCode::Esc => {
             state.modal_queue.dismiss();
         }
-        KeyCode::Tab => {
-            // Navigate to next step
-            state.modal_queue.update_active(|modal| match modal {
-                QueuedModal::ContactsCreate(ref mut s) => s.next_step(),
-                _ => {}
-            });
-        }
-        KeyCode::BackTab => {
-            // Navigate to previous step
-            state.modal_queue.update_active(|modal| match modal {
-                QueuedModal::ContactsCreate(ref mut s) => s.prev_step(),
-                _ => {}
-            });
-        }
         KeyCode::Enter => {
-            // On final step, submit
-            if modal_state.step == 2 {
-                if modal_state.receiver_id.trim().is_empty() {
-                    commands.push(TuiCommand::ShowToast {
-                        message: "No receiver selected for invitation".to_string(),
-                        level: ToastLevel::Error,
-                    });
-                    return;
+            // Submit from any field
+            if modal_state.receiver_id.trim().is_empty() {
+                commands.push(TuiCommand::ShowToast {
+                    message: "No receiver selected for invitation".to_string(),
+                    level: ToastLevel::Error,
+                });
+                return;
+            }
+
+            // Convert type_index to stable invitation type string
+            let invitation_type = match modal_state.type_index {
+                0 => "guardian".to_string(),
+                1 => "contact".to_string(),
+                _ => "channel".to_string(),
+            };
+
+            commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
+                receiver_id: modal_state.receiver_id.clone(),
+                invitation_type,
+                message: (!modal_state.message.trim().is_empty())
+                    .then(|| modal_state.message.clone()),
+                ttl_secs: modal_state.ttl_secs(),
+            }));
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Up => {
+            // Navigate to previous field
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                    s.focus_prev();
                 }
-
-                // Convert type_index to stable invitation type string.
-                let invitation_type = match modal_state.type_index {
-                    0 => "guardian".to_string(),
-                    1 => "contact".to_string(),
-                    _ => "channel".to_string(),
-                };
-
-                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
-                    receiver_id: modal_state.receiver_id.clone(),
-                    invitation_type,
-                    message: (!modal_state.message.trim().is_empty())
-                        .then(|| modal_state.message.clone()),
-                    ttl_secs: modal_state.ttl_secs(),
-                }));
-                state.modal_queue.dismiss();
-            } else {
-                // Advance to next step
-                state.modal_queue.update_active(|modal| match modal {
-                    QueuedModal::ContactsCreate(ref mut s) => s.next_step(),
-                    _ => {}
-                });
-            }
+            });
         }
-        KeyCode::Up | KeyCode::Char('k') => {
-            // In step 0, cycle type selection
-            if modal_state.step == 0 {
-                state.modal_queue.update_active(|modal| match modal {
-                    QueuedModal::ContactsCreate(ref mut s) => {
-                        s.type_index = s.type_index.saturating_sub(1);
-                    }
-                    _ => {}
-                });
-            } else if modal_state.step == 2 {
-                // In step 2, increase TTL
-                state.modal_queue.update_active(|modal| match modal {
-                    QueuedModal::ContactsCreate(ref mut s) => {
-                        s.ttl_hours = s.ttl_hours.saturating_add(24);
-                    }
-                    _ => {}
-                });
-            }
+        KeyCode::Down => {
+            // Navigate to next field
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                    s.focus_next();
+                }
+            });
         }
-        KeyCode::Down | KeyCode::Char('j') => {
-            // In step 0, cycle type selection
-            if modal_state.step == 0 {
-                state.modal_queue.update_active(|modal| {
-                    match modal {
-                        QueuedModal::ContactsCreate(ref mut s) => {
-                            s.type_index = (s.type_index + 1).min(2); // 3 types max
+        KeyCode::Left => {
+            // Change value: cycle backward for Type and TTL fields
+            match modal_state.focused_field {
+                CreateInvitationField::Type => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                            s.type_prev();
                         }
-                        _ => {}
-                    }
-                });
-            } else if modal_state.step == 2 {
-                // In step 2, decrease TTL
-                state.modal_queue.update_active(|modal| match modal {
-                    QueuedModal::ContactsCreate(ref mut s) => {
-                        s.ttl_hours = s.ttl_hours.saturating_sub(24).max(1);
-                    }
-                    _ => {}
-                });
+                    });
+                }
+                CreateInvitationField::Ttl => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                            s.ttl_prev();
+                        }
+                    });
+                }
+                CreateInvitationField::Message => {
+                    // No-op for message field (could move cursor left in future)
+                }
+            }
+        }
+        KeyCode::Right => {
+            // Change value: cycle forward for Type and TTL fields
+            match modal_state.focused_field {
+                CreateInvitationField::Type => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                            s.type_next();
+                        }
+                    });
+                }
+                CreateInvitationField::Ttl => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                            s.ttl_next();
+                        }
+                    });
+                }
+                CreateInvitationField::Message => {
+                    // No-op for message field (could move cursor right in future)
+                }
             }
         }
         KeyCode::Char(c) => {
-            // In step 1, type message
-            if modal_state.step == 1 {
-                state.modal_queue.update_active(|modal| match modal {
-                    QueuedModal::ContactsCreate(ref mut s) => s.message.push(c),
-                    _ => {}
+            // Typing only works in Message field
+            if modal_state.focused_field == CreateInvitationField::Message {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                        s.message.push(c);
+                    }
                 });
             }
         }
         KeyCode::Backspace => {
-            if modal_state.step == 1 {
-                state.modal_queue.update_active(|modal| match modal {
-                    QueuedModal::ContactsCreate(ref mut s) => {
+            // Backspace only works in Message field
+            if modal_state.focused_field == CreateInvitationField::Message {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
                         s.message.pop();
                     }
-                    _ => {}
                 });
             }
         }

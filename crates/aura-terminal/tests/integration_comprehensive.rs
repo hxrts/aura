@@ -472,7 +472,7 @@ mod chat_screen {
         tui.send_enter();
 
         assert!(tui.has_dispatch(
-            |d| matches!(d, DispatchCommand::CreateChannel { name } if name == "general")
+            |d| matches!(d, DispatchCommand::CreateChannel { name, .. } if name == "general")
         ));
         assert!(!tui.has_modal());
     }

@@ -31,8 +31,6 @@ pub struct InvitationImportModalProps {
     pub on_import: Option<ImportCallback>,
     /// Callback when canceling
     pub on_cancel: Option<CancelCallback>,
-    /// Whether running in demo mode (enables quick-fill shortcuts)
-    pub demo_mode: bool,
 }
 
 /// Modal for importing invitation codes
@@ -47,36 +45,6 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
     let code = props.code.clone();
     let error = props.error.clone();
     let importing = props.importing;
-
-    #[cfg(feature = "development")]
-    let demo_hints: Option<AnyElement<'static>> = if props.demo_mode && code.is_empty() {
-        Some(
-            element! {
-                View(
-                    width: 100pct,
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::Center,
-                    padding: 1,
-                    border_style: BorderStyle::Single,
-                    border_edges: Edges::Bottom,
-                    border_color: Theme::WARNING,
-                ) {
-                    Text(content: "[DEMO] ", color: Theme::WARNING, weight: Weight::Bold)
-                    Text(content: "Press ", color: Theme::TEXT_MUTED)
-                    Text(content: "Ctrl+a", color: Theme::SECONDARY, weight: Weight::Bold)
-                    Text(content: " for Alice's code, ", color: Theme::TEXT_MUTED)
-                    Text(content: "Ctrl+l", color: Theme::SECONDARY, weight: Weight::Bold)
-                    Text(content: " for Carol's code", color: Theme::TEXT_MUTED)
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    };
-
-    #[cfg(not(feature = "development"))]
-    let demo_hints: Option<AnyElement<'static>> = None;
 
     // Determine border color based on state
     let border_color = if !error.is_empty() {
@@ -182,8 +150,6 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                     None
                 })
             }
-
-            #(demo_hints)
 
             // Footer with key hints
             View(

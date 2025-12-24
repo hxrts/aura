@@ -277,17 +277,16 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
                 color: Theme::TEXT_MUTED,
             )
 
-            // Threshold selector - compact
+            // Threshold selector - vertical layout for up/down controls
             View(
                 margin_top: Spacing::SM,
                 margin_bottom: Spacing::SM,
-                flex_direction: FlexDirection::Row,
+                flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                gap: 2,
             ) {
                 Text(
-                    content: Icons::ARROW_DOUBLE_LEFT,
-                    color: if k > 1 { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                    content: Icons::ARROW_UP,
+                    color: if k < n { Theme::PRIMARY } else { Theme::TEXT_MUTED },
                     weight: Weight::Bold,
                 )
                 View(
@@ -303,8 +302,8 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
                     )
                 }
                 Text(
-                    content: Icons::ARROW_DOUBLE_RIGHT,
-                    color: if k < n { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                    content: Icons::ARROW_DOWN,
+                    color: if k > 1 { Theme::PRIMARY } else { Theme::TEXT_MUTED },
                     weight: Weight::Bold,
                 )
             }
@@ -393,7 +392,7 @@ fn render_key_hints(step: &GuardianSetupStep) -> AnyElement<'static> {
         GuardianSetupStep::SelectContacts => element! {
             View(flex_direction: FlexDirection::Row, gap: Spacing::LG) {
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "j/k", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "↑/↓", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Navigate", color: Theme::TEXT_MUTED)
                 }
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
@@ -414,7 +413,7 @@ fn render_key_hints(step: &GuardianSetupStep) -> AnyElement<'static> {
         GuardianSetupStep::ChooseThreshold => element! {
             View(flex_direction: FlexDirection::Row, gap: Spacing::LG) {
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "←/→", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "↑/↓", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Adjust", color: Theme::TEXT_MUTED)
                 }
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {

@@ -8,7 +8,7 @@ use crate::tui::types::{RecoveryTab, SettingsSection};
 
 use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::{ContactSelectModalState, QueuedModal};
-use super::super::toast::ToastLevel;
+use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
     AddDeviceModalState, BlockFocus, ChatFocus, CreateChannelModalState, DisplayNameModalState,
     ImportInvitationModalState,
@@ -236,6 +236,16 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             state.modal_queue.enqueue(QueuedModal::ContactsImport(
                 ImportInvitationModalState::default(),
             ));
+
+            // In demo mode, show a toast with shortcut hints
+            if !state.contacts.demo_alice_code.is_empty() {
+                state.next_toast_id += 1;
+                state.toast_queue.enqueue(QueuedToast::new(
+                    state.next_toast_id,
+                    "[DEMO] Auto-fill: Ctrl+a for Alice, Ctrl+l for Carol",
+                    ToastLevel::Info,
+                ));
+            }
         }
         KeyCode::Char('n') => {
             // Open create invitation modal via dispatch (shell will populate receiver details)

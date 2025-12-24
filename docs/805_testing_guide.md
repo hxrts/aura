@@ -601,27 +601,29 @@ This enables:
 
 ### Test Types
 
-**1. State Machine Unit Tests** (`tests/tui_deterministic.rs`):
+**1. State Machine Unit Tests** (`tests/unit_state_machine.rs`):
 ```rust
-use aura_terminal::testing::{TestTui, event_builders::*};
+mod support;
+use support::TestTui;
+use aura_terminal::tui::screens::Screen;
 
 #[test]
 fn test_screen_navigation() {
     let mut tui = TestTui::new();
 
     tui.assert_screen(Screen::Block);
-    tui.send_event(char('2'));  // Navigate to Chat
-    tui.assert_screen(Screen::Chat);
+    tui.send_char('2');  // Navigate to Neighborhood
+    tui.assert_screen(Screen::Neighborhood);
 }
 
 #[test]
 fn test_insert_mode() {
     let mut tui = TestTui::new();
 
-    tui.send_event(char('i'));  // Enter insert mode
+    tui.send_char('i');  // Enter insert mode
     tui.assert_insert_mode();
 
-    tui.send_event(escape());   // Exit insert mode
+    tui.send_escape();   // Exit insert mode
     tui.assert_normal_mode();
 }
 ```
@@ -655,7 +657,7 @@ proptest! {
 }
 ```
 
-**3. ITF Trace Replay** (`tests/itf_trace_replay.rs`):
+**3. ITF Trace Replay** (`tests/verification_itf_replay.rs`):
 ```rust
 use aura_terminal::testing::itf_replay::ITFTraceReplayer;
 
@@ -684,20 +686,91 @@ fn test_generative_replay() {
 }
 ```
 
+### Test Organization
+
+Tests in `aura-terminal` are organized by category with consistent naming prefixes:
+
+| Prefix | Category | Description |
+|--------|----------|-------------|
+| `unit_*` | Unit | Pure state machine / deterministic tests |
+| `integration_*` | Integration | Tests with AppCore/IoContext |
+| `e2e_*` | E2E | PTY-based end-to-end tests (deprecated) |
+| `demo_*` | Demo | Demo flow tests |
+| `verification_*` | Verification | ITF replay, generative, Quint-backed tests |
+
+### Support Module (`tests/support/`)
+
+The `tests/support/` module provides reusable test infrastructure:
+
+```rust
+mod support;
+use support::{TestTui, SimpleTestEnv, wait_for_chat};
+```
+
+**Available modules:**
+
+- **`support::state_machine`** - `TestTui` wrapper for pure state machine testing
+- **`support::env`** - Test environment setup (`SimpleTestEnv`, `FullTestEnv`)
+- **`support::signals`** - Signal waiting helpers (`wait_for_chat`, `wait_for_contacts`, etc.)
+- **`support::demo`** - Demo-specific helpers (invite code generation, agent IDs)
+
+**TestTui Usage:**
+```rust
+mod support;
+use support::TestTui;
+use aura_terminal::tui::screens::Screen;
+
+#[test]
+fn test_navigation() {
+    let mut tui = TestTui::new();
+
+    tui.assert_screen(Screen::Block);
+    tui.send_char('3');
+    tui.assert_screen(Screen::Chat);
+
+    // Access state for assertions
+    assert_eq!(tui.state().chat.focus, ChatFocus::Channels);
+
+    // Mutate state for test setup
+    tui.state_mut().chat.channel_count = 10;
+}
+```
+
+**Signal Waiting:**
+```rust
+mod support;
+use support::{wait_for_chat, wait_for_contacts, DEFAULT_TIMEOUT};
+
+#[tokio::test]
+async fn test_async_flow() {
+    let env = SimpleTestEnv::new("test").await;
+
+    // Wait for chat state to satisfy a predicate
+    let chat = wait_for_chat(&env.app_core, |s| !s.messages.is_empty()).await;
+    assert!(!chat.messages.is_empty());
+}
+```
+
 ### Running TUI Tests
 
 ```bash
 # Fast deterministic tests (recommended)
-cargo test --package aura-terminal --test tui_deterministic
+cargo test --package aura-terminal --test unit_state_machine
 
 # ITF trace replay tests
-cargo test --package aura-terminal --features testing --test itf_trace_replay
+cargo test --package aura-terminal --features testing --test verification_itf_replay
 
 # Generative tests (slower, more thorough)
-cargo test --package aura-terminal --features testing --test itf_trace_replay -- --ignored
+cargo test --package aura-terminal --features testing --test verification_itf_replay -- --ignored
 
 # Legacy PTY tests (deprecated, may be flaky)
-cargo test --package aura-terminal --test tui_e2e
+cargo test --package aura-terminal --test e2e_legacy_pty
+
+# Run all unit tests
+cargo test --package aura-terminal --test 'unit_*'
+
+# Run all integration tests
+cargo test --package aura-terminal --test 'integration_*'
 ```
 
 ### Quint Model Verification

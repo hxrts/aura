@@ -3,6 +3,15 @@
 //! Invitation codes are managed from the Contacts screen (workflow + modals),
 //! but the modal state types are shared.
 
+/// Focused field in create invitation modal
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CreateInvitationField {
+    #[default]
+    Type,
+    Message,
+    Ttl,
+}
+
 /// State for create invitation modal
 ///
 /// Note: Visibility is controlled by ModalQueue, not a `visible` field.
@@ -12,19 +21,22 @@ pub struct CreateInvitationModalState {
     pub receiver_id: String,
     /// Best-effort receiver display name (for UI hints)
     pub receiver_name: String,
-    /// Invitation type selection index
+    /// Invitation type selection index (0=Guardian, 1=Contact, 2=Channel)
     pub type_index: usize,
     /// Optional message
     pub message: String,
     /// TTL in hours
     pub ttl_hours: u64,
-    /// Current step (0 = type, 1 = message, 2 = ttl)
-    pub step: usize,
+    /// Currently focused field
+    pub focused_field: CreateInvitationField,
     /// Error message if any
     pub error: Option<String>,
 }
 
 impl CreateInvitationModalState {
+    /// TTL preset values in hours
+    const TTL_PRESETS: [u64; 6] = [1, 24, 72, 168, 720, 0]; // 1h, 1d, 3d, 1w, 30d, never
+
     /// Create new modal state with defaults
     pub fn new() -> Self {
         Self {
@@ -33,7 +45,7 @@ impl CreateInvitationModalState {
             type_index: 0,
             message: String::new(),
             ttl_hours: 24, // Default 24 hours
-            step: 0,
+            focused_field: CreateInvitationField::Type,
             error: None,
         }
     }
@@ -54,20 +66,64 @@ impl CreateInvitationModalState {
         self.type_index = 0;
         self.message.clear();
         self.ttl_hours = 24;
-        self.step = 0;
+        self.focused_field = CreateInvitationField::Type;
         self.error = None;
     }
 
-    pub fn next_step(&mut self) {
-        if self.step < 2 {
-            self.step += 1;
-        }
+    /// Move focus to next field
+    pub fn focus_next(&mut self) {
+        self.focused_field = match self.focused_field {
+            CreateInvitationField::Type => CreateInvitationField::Message,
+            CreateInvitationField::Message => CreateInvitationField::Ttl,
+            CreateInvitationField::Ttl => CreateInvitationField::Type,
+        };
     }
 
-    pub fn prev_step(&mut self) {
-        if self.step > 0 {
-            self.step -= 1;
-        }
+    /// Move focus to previous field
+    pub fn focus_prev(&mut self) {
+        self.focused_field = match self.focused_field {
+            CreateInvitationField::Type => CreateInvitationField::Ttl,
+            CreateInvitationField::Message => CreateInvitationField::Type,
+            CreateInvitationField::Ttl => CreateInvitationField::Message,
+        };
+    }
+
+    /// Cycle type to next option
+    pub fn type_next(&mut self) {
+        self.type_index = (self.type_index + 1) % 3;
+    }
+
+    /// Cycle type to previous option
+    pub fn type_prev(&mut self) {
+        self.type_index = if self.type_index == 0 {
+            2
+        } else {
+            self.type_index - 1
+        };
+    }
+
+    /// Cycle TTL to next preset
+    pub fn ttl_next(&mut self) {
+        let current_idx = Self::TTL_PRESETS
+            .iter()
+            .position(|&h| h == self.ttl_hours)
+            .unwrap_or(1); // Default to 24h index
+        let next_idx = (current_idx + 1) % Self::TTL_PRESETS.len();
+        self.ttl_hours = Self::TTL_PRESETS[next_idx];
+    }
+
+    /// Cycle TTL to previous preset
+    pub fn ttl_prev(&mut self) {
+        let current_idx = Self::TTL_PRESETS
+            .iter()
+            .position(|&h| h == self.ttl_hours)
+            .unwrap_or(1); // Default to 24h index
+        let prev_idx = if current_idx == 0 {
+            Self::TTL_PRESETS.len() - 1
+        } else {
+            current_idx - 1
+        };
+        self.ttl_hours = Self::TTL_PRESETS[prev_idx];
     }
 
     pub fn ttl_secs(&self) -> Option<u64> {

@@ -21,7 +21,7 @@ required-features = ["terminal"]
 
 # Integration tests requiring the testing module
 [[test]]
-name = "itf_trace_replay"
+name = "verification_itf_replay"
 required-features = ["testing"]
 
 [[test]]
@@ -110,6 +110,6 @@ futures = "0.3"  # For mock terminal testing with streams
 proptest = { workspace = true }  # Property-based testing for TUI state machine
 
 # PTY-based integration testing (optional - only used by some e2e tests)
-# These tests are slow and flaky; prefer deterministic tests in tui_deterministic.rs
+# These tests are slow and flaky; prefer deterministic tests in unit_state_machine.rs
 expectrl = "0.7"  # Terminal automation (like expect)
 escargot = "0.5"  # Build binary for integration tests

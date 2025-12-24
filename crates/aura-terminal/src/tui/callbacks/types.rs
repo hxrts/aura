@@ -23,6 +23,10 @@ pub type ThreeStringCallback = Arc<dyn Fn(String, String, String) + Send + Sync>
 /// Callback that takes a string and optional string.
 pub type StringOptStringCallback = Arc<dyn Fn(String, Option<String>) + Send + Sync>;
 
+/// Callback that takes a string, optional string, and a list of strings.
+pub type StringOptStringVecCallback =
+    Arc<dyn Fn(String, Option<String>, Vec<String>) + Send + Sync>;
+
 /// Callback that takes two u8 values.
 pub type ThresholdCallback = Arc<dyn Fn(u8, u8) + Send + Sync>;
 
@@ -43,7 +47,7 @@ pub type CreateInvitationCallbackType =
 // --- Chat Screen ---
 pub type SendCallback = TwoStringCallback;
 pub type ChannelSelectCallback = IdCallback;
-pub type CreateChannelCallback = StringOptStringCallback;
+pub type CreateChannelCallback = StringOptStringVecCallback;
 pub type RetryMessageCallback = ThreeStringCallback;
 pub type SetTopicCallback = TwoStringCallback;
 

@@ -27,6 +27,7 @@ mod modal;
 mod nav_bar;
 mod panel;
 mod scrollable;
+mod selectable_item;
 mod status_indicator;
 mod tab_bar;
 mod text_input;
@@ -58,6 +59,7 @@ pub use modal::{ConfirmModal, InputModal, ModalContent, ModalFrame};
 pub use nav_bar::{NavBar, NavBarProps};
 pub use panel::{Panel, PanelStyle};
 pub use scrollable::{calculate_scroll, ScrollDirection, Scrollable};
+pub use selectable_item::SimpleSelectableItem;
 pub use status_indicator::{
     DeliveryStatusIndicator, ProgressDots, Status, StatusDot, StatusIndicator, SyncIndicatorStatus,
     SyncStatusIndicator,
