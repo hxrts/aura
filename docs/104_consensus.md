@@ -747,13 +747,104 @@ stateDiagram-v2
 - **FallbackGossip**: witnesses exchange proposal sets until `CheckThreshold` succeeds.
 - **Completed**: commit fact accepted and timers stopped.
 
+### Design Trade-offs: Latency vs Availability
+
+The two protocol paths optimize for different objectives:
+
+| Property | Fast Path | Slow Path |
+|----------|-----------|-----------|
+| **Primary Goal** | Latency (speed) | Availability (robustness) |
+| **Completion Time** | 2δ (network speed) | Eventual (no tight bound) |
+| **Synchrony Assumption** | Yes (GST reached) | No (works during partitions) |
+| **Coordination** | Leader-driven (initiator) | Leaderless gossip |
+| **Failure Tolerance** | Requires all/most online | Tolerates n-k failures |
+
+**Why leaderless gossip for fallback?**
+
+We intentionally sacrifice tight timing bounds (the theoretical 2Δ from [optimal protocols](https://decentralizedthoughts.github.io/2020-06-12-optimal-optimistic-responsiveness/)) for:
+
+1. **Partition tolerance**: Any connected component with k honest witnesses can complete independently. No leader election needed across partitions.
+
+2. **No single point of failure**: If the initiator fails, any witness can drive completion. View-based protocols require leader handoff.
+
+3. **Simpler protocol**: No view numbers, no leader election, no synchronization barriers. Witnesses simply gossip until threshold is reached.
+
+4. **Natural CRDT integration**: Evidence propagates as a CRDT set. Gossip naturally merges evidence without coordination.
+
+**What we can prove:**
+- Fast path: Commits within 2δ when all witnesses online (verified: `TemporalFastPathBound`)
+- Slow path: Commits when any connected component has k honest witnesses (not time-bounded)
+- Safety: Always holds regardless of network conditions
+
+**What we cannot prove (by design):**
+- Slow path completion in fixed time (would require synchrony assumption)
+- Termination under permanent partition (FLP impossibility)
+
 ### Parameter Guidance
 
 - `T_fallback`: set to roughly `2–3 ×` the median witness RTT. Too aggressive causes unnecessary fallback; too lax delays recovery when an initiator stalls.
-- Gossip fanout `k`: use 3–5 peers per round for WAN deployments. Lower values reduce bandwidth but increase convergence time; higher values increase robustness at the cost of traffic.
+- Gossip fanout `f`: see the fanout adequacy analysis below for principled selection.
 - Gossip interval: 250–500 ms is a good default. Ensure at least a few gossip rounds occur before timers retrigger, giving the network time to converge.
 
 These parameters should be tuned per deployment, but the ranges above keep fallback responsive without overwhelming the network.
+
+### Fanout Adequacy for Slow Path
+
+The slow path requires the gossip network to be connected for evidence propagation. The key question: **how many gossip peers (fanout f) do we need?**
+
+**Random Graph Connectivity Theory**
+
+For a random graph G(n, p) to be connected with high probability (w.h.p.), the classical Erdős-Rényi result states:
+
+```
+p ≥ (1 + ε) × ln(n) / n    for any ε > 0
+```
+
+Translating to gossip: each node selects `f` random peers, giving edge probability p ≈ f/n. For connectivity:
+
+```
+f ≥ c × ln(n)    where c ≈ 1.1-1.2 for practical certainty
+```
+
+**Recommended Fanout by Witness Count**
+
+| Witnesses (n) | Minimum Fanout (f) | Recommended | Notes |
+|---------------|-------------------|-------------|-------|
+| 3 | 2 | 2 | All must connect (fully connected) |
+| 5 | 2 | 3 | ln(5) ≈ 1.6, add margin |
+| 7 | 3 | 3-4 | ln(7) ≈ 1.9 |
+| 10 | 3 | 4 | ln(10) ≈ 2.3 |
+| 15 | 4 | 4-5 | ln(15) ≈ 2.7 |
+| 21 | 4 | 5 | ln(21) ≈ 3.0 |
+| 50 | 5 | 6 | ln(50) ≈ 3.9 |
+
+**Failure Tolerance**
+
+With fanout f and n witnesses, the graph remains connected under random node failures as long as:
+- At least `f + 1` nodes remain (sufficient edges for spanning tree)
+- Failed nodes are randomly distributed (not targeted attacks)
+
+For k-of-n threshold where `k ≤ n - f`:
+- The `k` honest witnesses form a connected subgraph w.h.p.
+- Each honest witness can reach at least one other honest witness via gossip
+- Evidence propagates to all honest witnesses in O(log(n)) gossip rounds
+
+**Adversarial Considerations**
+
+Random graph analysis assumes non-adversarial peer selection. Against Byzantine adversaries:
+1. **Eclipse attacks**: If adversary controls gossip peer selection, connectivity guarantees fail
+2. **Mitigation**: Use deterministic peer selection based on witness IDs (e.g., consistent hashing)
+3. **Stronger bound**: For Byzantine tolerance, use `f ≥ 2t + 1` where t is Byzantine threshold
+
+**Verified Properties (Quint)**
+
+The following properties are model-checked in `protocol_consensus_liveness.qnt`:
+
+- `PropertyQuorumSufficient`: k honest witnesses in same connected component can progress
+- `PropertyPartitionTolerance`: largest connected component with k honest succeeds
+- `AvailabilityGuarantee`: combined availability invariant
+
+With adequate fanout, these properties ensure slow path completion when quorum exists.
 
 ## 16. Relation to FROST
 

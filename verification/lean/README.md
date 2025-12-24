@@ -171,6 +171,32 @@ def Journal.equiv (j1 j2 : Journal) : Prop :=
   ∀ f, f ∈ j1 ↔ f ∈ j2
 ```
 
+## Rust Pure Core Correspondence
+
+The Lean proofs correspond to a pure, effect-free Rust implementation for direct testing:
+
+| Lean Module | Rust Module | Correspondence |
+|-------------|-------------|----------------|
+| `Consensus.Types` | `aura-protocol/consensus/core/state.rs` | State structures |
+| `Consensus.Agreement` | `aura-protocol/consensus/core/validation.rs` | Invariant checks |
+| `Consensus.Evidence` | `aura-protocol/consensus/core/transitions.rs` | State transitions |
+
+### ITF Trace Conformance
+
+The Rust pure core can be tested against Quint ITF traces:
+
+```bash
+# Generate traces
+cd verification/quint
+quint run --out-itf=consensus_trace.itf.json protocol_consensus.qnt
+
+# Run conformance tests
+cargo test -p aura-protocol --test consensus_itf_conformance
+```
+
+ITF loader: `aura-protocol/src/consensus/core/itf_loader.rs`
+Conformance tests: `aura-protocol/tests/consensus_itf_conformance.rs`
+
 ## Differential Testing
 
 The Lean oracle supports differential testing against Rust:

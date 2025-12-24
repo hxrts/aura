@@ -7,10 +7,6 @@
 // This specification ensures that ALL state-modifying commands
 // properly propagate their changes to the signal system.
 //
-// Related bugs fixed:
-// - ImportInvitation not adding contacts to CONTACTS_SIGNAL
-// - CreateChannel not adding channels to CHAT_SIGNAL
-//
 // See: crates/aura-terminal/tests/effect_command_propagation.rs
 
 module tui_signal_propagation {
