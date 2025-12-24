@@ -22,6 +22,7 @@ pub mod state;
 pub mod transitions;
 pub mod validation;
 pub mod reference;
+pub mod divergence;
 
 #[cfg(feature = "simulation")]
 pub mod quint_mapping;
@@ -40,3 +41,4 @@ pub use validation::{
     check_invariants, is_equivocator, shares_consistent, validate_commit, validate_share,
     ValidationError,
 };
+pub use divergence::{DivergenceReport, FieldDiff, InstanceDiff, StateDiff};
