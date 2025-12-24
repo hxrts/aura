@@ -261,6 +261,9 @@ pub enum UiUpdate {
     // =========================================================================
     // Contacts
     // =========================================================================
+    /// Contact list count changed (for keyboard navigation)
+    ContactCountChanged(usize),
+
     /// A contact's nickname was updated
     NicknameUpdated {
         /// The contact ID

@@ -17,6 +17,7 @@ use aura_app::signal_defs::{
 
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Invitation, Message, PendingRequest, Resident};
+use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
 pub struct NavStatusSignals {
     pub syncing: State<bool>,
@@ -135,7 +136,14 @@ impl SharedContacts {
 /// contents whenever contacts change, so readers always get current data.
 ///
 /// Uses std::sync::RwLock so dispatch handlers can read synchronously.
-pub fn use_contacts_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> SharedContacts {
+///
+/// If `update_tx` is provided, sends `ContactCountChanged` whenever the contact count changes.
+/// This keeps `TuiState.contacts.contact_count` in sync for keyboard navigation.
+pub fn use_contacts_subscription(
+    hooks: &mut Hooks,
+    app_ctx: &AppCoreContext,
+    update_tx: Option<UiUpdateSender>,
+) -> SharedContacts {
     // Create the shared contacts holder - use_ref ensures it persists across renders.
     let shared_contacts_ref = hooks.use_ref(SharedContacts::new);
     let shared_contacts: SharedContacts = shared_contacts_ref.read().clone();
@@ -152,8 +160,15 @@ pub fn use_contacts_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) ->
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
                     contacts_state.contacts.iter().map(Contact::from).collect();
+                let new_count = contact_list.len();
+
                 if let Ok(mut guard) = contacts.write() {
                     *guard = contact_list;
+                }
+
+                // Send contact count update for keyboard navigation
+                if let Some(ref tx) = update_tx {
+                    let _ = tx.send(UiUpdate::ContactCountChanged(new_count));
                 }
 
                 // Avoid spawning an unbounded number of refresh tasks if contacts update rapidly.

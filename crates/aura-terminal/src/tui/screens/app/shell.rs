@@ -281,7 +281,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // This replaces polling loops and detached tokio::spawn patterns.
     // =========================================================================
     let update_rx_holder = props.update_rx.clone();
-    let _update_tx_holder = props.update_tx.clone();
+    let update_tx_holder = props.update_tx.clone();
 
     // Display name state - State<T> automatically triggers re-renders on .set()
     let display_name_state = hooks.use_state({
@@ -309,7 +309,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Unlike props.contacts (which is empty), this Arc is kept up-to-date
     // by a reactive subscription. Dispatch handler closures capture the Arc,
     // not the data, so they always read current contacts.
-    let shared_contacts = use_contacts_subscription(&mut hooks, &app_ctx);
+    // Also sends ContactCountChanged updates to keep TuiState in sync for navigation.
+    let shared_contacts =
+        use_contacts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Messages subscription: SharedMessages for dispatch handlers to read
@@ -898,6 +900,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         // Contacts
                         // =========================================================================
+                        UiUpdate::ContactCountChanged(count) => {
+                            // Update contact count for keyboard navigation (navigate_list)
+                            tui.with_mut(|state| {
+                                state.contacts.contact_count = count;
+                            });
+                        }
                         UiUpdate::NicknameUpdated {
                             contact_id: _,
                             nickname: _,

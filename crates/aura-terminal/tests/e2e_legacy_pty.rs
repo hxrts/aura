@@ -805,10 +805,8 @@ async fn test_invitation_import() {
 use aura_terminal::tui::components::{AccountSetupState, ContactSelectState, TextInputState};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_terminal::tui::screens::Screen;
-use aura_terminal::tui::screens::{
-    ChatCreateState, InvitationCodeState, InvitationCreateState, InvitationImportState,
-};
-use aura_terminal::tui::types::{Contact, ContactStatus, InvitationType};
+use aura_terminal::tui::screens::{ChatCreateState, InvitationCodeState, InvitationImportState};
+use aura_terminal::tui::types::{Contact, ContactStatus};
 
 /// Test the complete account creation callback flow
 /// This tests the IoContext::create_account() method directly, which is what the
@@ -1368,38 +1366,8 @@ fn test_account_setup_state_machine() {
     println!("✓ AccountSetupState state machine works correctly");
 }
 
-/// Test invitation create modal state
-#[test]
-fn test_invitation_create_state_machine() {
-    let mut state = InvitationCreateState::new();
-
-    assert!(!state.visible);
-
-    // Show modal - sets type to Contact
-    state.show();
-    assert!(state.visible);
-    assert_eq!(state.invitation_type, InvitationType::Contact);
-
-    // Cycle through types
-    state.next_type();
-    assert_eq!(state.invitation_type, InvitationType::Guardian);
-
-    state.next_type();
-    assert_eq!(state.invitation_type, InvitationType::Channel);
-
-    state.next_type(); // Wraps back
-    assert_eq!(state.invitation_type, InvitationType::Contact);
-
-    // Set message
-    state.set_message("Join my block!".to_string());
-    assert_eq!(state.message, "Join my block!");
-
-    // Hide
-    state.hide();
-    assert!(!state.visible);
-
-    println!("✓ InvitationCreateState state machine works correctly");
-}
+// NOTE: test_invitation_create_state_machine was removed - InvitationCreateState
+// was deprecated in favor of the modal queue system (QueuedModal).
 
 /// Test contact select modal state
 #[test]
