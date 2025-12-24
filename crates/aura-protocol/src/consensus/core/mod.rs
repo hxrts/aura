@@ -21,6 +21,7 @@
 pub mod state;
 pub mod transitions;
 pub mod validation;
+pub mod reference;
 
 #[cfg(feature = "simulation")]
 pub mod quint_mapping;
