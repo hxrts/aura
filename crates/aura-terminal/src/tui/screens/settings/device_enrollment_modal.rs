@@ -27,12 +27,14 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
     }
 
     // Format long codes into multiple lines for readability.
-    let formatted_code = if props.enrollment_code.len() > 40 {
+    // Available width: 80 (total) - 2 (border) - 4 (modal padding) - 2 (box border) - 2 (box padding) = 70
+    let chunk_width = 68;
+    let formatted_code = if props.enrollment_code.len() > chunk_width {
         props
             .enrollment_code
             .chars()
             .collect::<Vec<_>>()
-            .chunks(40)
+            .chunks(chunk_width)
             .map(|c| c.iter().collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
