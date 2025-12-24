@@ -30,6 +30,9 @@
 //! - **Relational contexts**: Multi-authority facts enable cross-authority accountability
 //! - **Effect system**: Uses PhysicalTimeEffects and RandomEffects for deterministic testing
 
+// Pure core - effect-free state machine for verification
+pub mod core;
+
 // Core modules
 pub mod frost;
 pub mod messages;
