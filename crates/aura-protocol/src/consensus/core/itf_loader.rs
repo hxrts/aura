@@ -14,7 +14,7 @@
 
 use aura_core::AuraError;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use super::state::{ConsensusPhase, ConsensusState, PureCommitFact, ShareData, ShareProposal};
@@ -166,7 +166,7 @@ fn parse_bigint(value: Option<&Value>) -> Option<u64> {
 }
 
 /// Parse a Quint #set value
-fn parse_set_strings(value: Option<&Value>) -> HashSet<String> {
+fn parse_set_strings(value: Option<&Value>) -> BTreeSet<String> {
     value
         .and_then(|v| v.get("#set"))
         .and_then(|arr| arr.as_array())

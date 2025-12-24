@@ -236,7 +236,7 @@ pub fn check_threshold_met(state: &ConsensusState) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
 
     use super::*;
     use crate::consensus::core::state::PathSelection;
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_check_invariants_valid() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let state = ConsensusState::new(
             "cns1".to_string(),
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_check_invariants_insufficient_witnesses() {
-        let witnesses: HashSet<_> = ["w1"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1"].iter().map(|s| s.to_string()).collect();
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),

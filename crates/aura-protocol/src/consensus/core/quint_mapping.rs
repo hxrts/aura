@@ -306,7 +306,7 @@ impl QuintMappable for ConsensusState {
             .ok_or_else(|| aura_core::AuraError::invalid("missing threshold"))?
             as usize;
 
-        let witnesses: std::collections::HashSet<String> = obj
+        let witnesses: std::collections::BTreeSet<String> = obj
             .get("witnesses")
             .and_then(|v| v.as_array())
             .ok_or_else(|| aura_core::AuraError::invalid("missing witnesses"))?
@@ -352,7 +352,7 @@ impl QuintMappable for ConsensusState {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let equivocators: std::collections::HashSet<String> = obj
+        let equivocators: std::collections::BTreeSet<String> = obj
             .get("equivocators")
             .and_then(|v| v.as_array())
             .unwrap_or(&vec![])
@@ -383,7 +383,7 @@ impl QuintMappable for ConsensusState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
 
     #[test]
     fn test_consensus_phase_roundtrip() {
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_consensus_state_roundtrip() {
-        let mut witnesses = HashSet::new();
+        let mut witnesses = BTreeSet::new();
         witnesses.insert("w1".to_string());
         witnesses.insert("w2".to_string());
         witnesses.insert("w3".to_string());
@@ -479,7 +479,7 @@ mod tests {
             proposals: vec![],
             commit_fact: None,
             fallback_timer_active: false,
-            equivocators: HashSet::new(),
+            equivocators: BTreeSet::new(),
         };
 
         let quint = state.to_quint();
@@ -495,7 +495,7 @@ mod tests {
 
     #[test]
     fn test_consensus_state_with_commit_fact() {
-        let mut witnesses = HashSet::new();
+        let mut witnesses = BTreeSet::new();
         witnesses.insert("w1".to_string());
         witnesses.insert("w2".to_string());
 
@@ -515,7 +515,7 @@ mod tests {
                 prestate_hash: "pre".to_string(),
             }),
             fallback_timer_active: false,
-            equivocators: HashSet::new(),
+            equivocators: BTreeSet::new(),
         };
 
         let quint = state.to_quint();

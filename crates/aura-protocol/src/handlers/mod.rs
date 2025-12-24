@@ -214,10 +214,10 @@ pub use aura_composition::{CompositeHandler, EffectRegistry, RegistrableHandler}
 
 // Context management
 pub mod context;
-pub mod context_immutable;
 pub use context::{
-    AgentContext, AuraContext, ChoreographicContext, MetricsContext, PlatformInfo,
-    SimulationContext, TracingContext,
+    AgentContext, AuraContext, AuthenticationState, ChoreographicContext, FaultInjectionSettings,
+    MetricsContext, PlatformInfo, PropertyCheckingConfig, SessionMetadata, SimulationContext,
+    TracingContext,
 };
 
 // Bridge adapters

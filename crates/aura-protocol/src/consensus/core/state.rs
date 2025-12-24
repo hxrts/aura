@@ -12,7 +12,11 @@
 //! - `ConsensusPhase` ↔ `ConsensusPhase` in Types.lean
 //! - `ShareProposal` ↔ `WitnessVote` in Types.lean
 
-use std::collections::{HashMap, HashSet};
+// The pure consensus core uses BTreeSet for deterministic, reproducible state.
+// This matches Quint's Set semantics (deterministic iteration order) and ensures
+// consensus execution is fully reproducible across replicas and test runs.
+// HashMap is only used for local counting operations within single functions.
+use std::collections::{BTreeSet, HashMap};
 
 /// Consensus phase matching Quint's ConsensusPhase sum type.
 ///
@@ -149,7 +153,7 @@ pub struct ConsensusState {
 
     /// Set of eligible witnesses
     /// Quint: witnesses: Set[AuthorityId]
-    pub witnesses: HashSet<String>,
+    pub witnesses: BTreeSet<String>,
 
     /// Initiator of this consensus instance
     /// Quint: initiator: AuthorityId
@@ -173,7 +177,7 @@ pub struct ConsensusState {
 
     /// Set of detected equivocators
     /// Quint: equivocators: Set[AuthorityId]
-    pub equivocators: HashSet<String>,
+    pub equivocators: BTreeSet<String>,
 }
 
 impl ConsensusState {
@@ -185,7 +189,7 @@ impl ConsensusState {
         operation: String,
         prestate_hash: String,
         threshold: usize,
-        witnesses: HashSet<String>,
+        witnesses: BTreeSet<String>,
         initiator: String,
         path: PathSelection,
     ) -> Self {
@@ -205,7 +209,7 @@ impl ConsensusState {
             proposals: Vec::new(),
             commit_fact: None,
             fallback_timer_active: path == PathSelection::SlowPath,
-            equivocators: HashSet::new(),
+            equivocators: BTreeSet::new(),
         }
     }
 
@@ -281,7 +285,7 @@ pub struct GlobalConsensusState {
     pub committed_facts: HashMap<String, PureCommitFact>,
 
     /// Global set of witnesses
-    pub global_witnesses: HashSet<String>,
+    pub global_witnesses: BTreeSet<String>,
 
     /// Current epoch for nonce validity
     pub current_epoch: u64,
@@ -292,7 +296,7 @@ pub struct GlobalConsensusState {
 
 impl GlobalConsensusState {
     /// Create a new empty global state.
-    pub fn new(witnesses: HashSet<String>, epoch: u64) -> Self {
+    pub fn new(witnesses: BTreeSet<String>, epoch: u64) -> Self {
         let witness_nonces = witnesses
             .iter()
             .map(|w| (w.clone(), None))
@@ -323,7 +327,7 @@ impl GlobalConsensusState {
     /// Select path based on nonce availability.
     ///
     /// Quint: selectPath(witnesses, nonces, epoch, validityWindow)
-    pub fn select_path(&self, witnesses: &HashSet<String>, validity_window: u64) -> PathSelection {
+    pub fn select_path(&self, witnesses: &BTreeSet<String>, validity_window: u64) -> PathSelection {
         let all_valid = witnesses.iter().all(|w| {
             self.witness_nonces
                 .get(w)
@@ -351,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_consensus_state_new() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let state = ConsensusState::new(
             "cns1".to_string(),
@@ -370,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_has_proposal() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
@@ -400,7 +404,7 @@ mod tests {
 
     #[test]
     fn test_threshold_met() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
@@ -441,7 +445,7 @@ mod tests {
 
     #[test]
     fn test_is_terminal() {
-        let witnesses: HashSet<_> = ["w1", "w2"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2"].iter().map(|s| s.to_string()).collect();
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),

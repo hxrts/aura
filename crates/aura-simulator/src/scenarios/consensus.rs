@@ -37,7 +37,7 @@ use aura_protocol::consensus::core::state::{
     ConsensusPhase, ConsensusState, PathSelection, PureCommitFact, ShareData, ShareProposal,
 };
 use aura_protocol::consensus::core::transitions::{apply_share, trigger_fallback};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// Network partition configuration
 #[derive(Debug, Clone)]
@@ -74,8 +74,9 @@ impl NetworkPartition {
 /// Message loss configuration
 #[derive(Debug, Clone)]
 pub struct MessageLossConfig {
-    /// Probability of dropping each message (0.0 to 1.0)
-    pub drop_rate: f64,
+    /// Drop rate as parts per 65536 (0 = never drop, 65536 = always drop, 32768 = 50%)
+    /// Using integer for deterministic behavior across platforms.
+    pub drop_rate: u32,
     /// Specific message types to target (None = all)
     pub target_types: Option<Vec<MessageType>>,
     /// Specific witnesses to target (None = all)
@@ -91,19 +92,23 @@ pub enum MessageType {
 }
 
 impl MessageLossConfig {
-    /// Drop messages at a fixed rate
-    pub fn fixed_rate(rate: f64) -> Self {
+    /// Drop messages at a fixed rate (parts per 65536).
+    /// Use `MessageLossConfig::HALF` for 50% drop rate.
+    pub fn fixed_rate(rate: u32) -> Self {
         Self {
-            drop_rate: rate,
+            drop_rate: rate.min(65536),
             target_types: None,
             target_witnesses: None,
         }
     }
 
+    /// 50% drop rate constant
+    pub const HALF: u32 = 32768;
+
     /// Drop all messages from specific witnesses
     pub fn from_witnesses(witnesses: Vec<&str>) -> Self {
         Self {
-            drop_rate: 1.0,
+            drop_rate: 65536, // Always drop
             target_types: None,
             target_witnesses: Some(witnesses.into_iter().map(String::from).collect()),
         }
@@ -244,10 +249,13 @@ impl SimulatedNetwork {
         self.random_bool(loss.drop_rate)
     }
 
-    fn random_bool(&mut self, probability: f64) -> bool {
+    /// Deterministic random bool using pure integer arithmetic.
+    /// threshold is parts per 65536 (0 = never true, 65536 = always true).
+    fn random_bool(&mut self, threshold: u32) -> bool {
         self.rng_state = self.rng_state.wrapping_mul(1103515245).wrapping_add(12345);
-        let random = (self.rng_state >> 16) as f64 / u16::MAX as f64;
-        random < probability
+        // Extract 16 bits as our random value in [0, 65535]
+        let random_value = ((self.rng_state >> 16) & 0xFFFF) as u32;
+        random_value < threshold
     }
 }
 
@@ -274,7 +282,7 @@ impl ConsensusSimulation {
         let prestate = "sim_prestate".to_string();
         let operation = "sim_operation".to_string();
 
-        let witness_set: HashSet<String> = witnesses.iter().map(|w| w.to_string()).collect();
+        let witness_set: BTreeSet<String> = witnesses.iter().map(|w| w.to_string()).collect();
 
         let states: HashMap<String, ConsensusState> = witnesses
             .iter()
@@ -584,7 +592,7 @@ mod tests {
     #[test]
     fn test_message_loss() {
         let witnesses = vec!["w1", "w2", "w3"];
-        let loss = MessageLossConfig::fixed_rate(0.5);
+        let loss = MessageLossConfig::fixed_rate(MessageLossConfig::HALF);
 
         let mut sim = ConsensusSimulation::new(witnesses, 2, 42).with_loss(loss);
 

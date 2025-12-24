@@ -230,7 +230,7 @@ impl ConsensusProtocol {
                     proposals: Vec::new(),
                     commit_fact: None,
                     fallback_timer_active: false,
-                    equivocators: std::collections::HashSet::new(),
+                    equivocators: std::collections::BTreeSet::new(),
                 };
 
                 // Initialize witness instance

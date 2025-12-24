@@ -1419,6 +1419,44 @@ test-quint-pipeline:
     echo "Quint specification files at /tmp/dkd_spec.json"
 
 # ============================================================================
+# Kani Bounded Model Checking
+# ============================================================================
+
+# Run Kani verification on consensus module (requires nightly shell)
+# First time setup: just kani-setup
+kani package="aura-protocol" unwind="10":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Running Kani bounded model checking on {{package}}..."
+    echo "Unwind bound: {{unwind}}"
+    echo ""
+    # Use nix develop .#nightly to get the correct environment
+    nix develop .#nightly --command cargo kani --package {{package}} --default-unwind {{unwind}}
+
+# Run a specific Kani harness
+kani-harness harness package="aura-protocol" unwind="10":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Running Kani harness: {{harness}}"
+    nix develop .#nightly --command cargo kani --package {{package}} --harness {{harness}} --default-unwind {{unwind}}
+
+# Setup Kani (first time only)
+kani-setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Setting up Kani verifier..."
+    echo ""
+    echo "Step 1: Installing kani-verifier..."
+    nix develop .#nightly --command cargo install --locked kani-verifier
+    echo ""
+    echo "Step 2: Running Kani setup (downloads CBMC and toolchain)..."
+    nix develop .#nightly --command cargo kani setup
+    echo ""
+    echo "✓ Kani setup complete!"
+    echo ""
+    echo "Run 'just kani' to verify the consensus module."
+
+# ============================================================================
 # Lean Verification Tasks
 # ============================================================================
 

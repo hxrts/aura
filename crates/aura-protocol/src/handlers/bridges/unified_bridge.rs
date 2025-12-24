@@ -10,9 +10,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::effects::*;
-use crate::handlers::{
-    context_immutable::AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
-};
+use crate::handlers::{AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 use aura_core::hash::hash;
 use aura_mpst::LocalSessionType;
 

@@ -31,11 +31,18 @@
 //!
 //! These bounds are sufficient to find most bugs while keeping
 //! verification times reasonable (< 5 minutes per harness).
+//!
+//! ## Platform Notes
+//!
+//! On macOS, Kani cannot model `CCRandomGenerateBytes` (Apple's secure RNG).
+//! We now use BTreeSet throughout for deterministic behavior.
+//! The harnesses use BTreeSet (deterministic ordering) to avoid this issue.
+//! CI runs on Linux where this is not a problem.
 
 // Only compile this module when Kani is running
 #![cfg(kani)]
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 use super::state::{ConsensusPhase, ConsensusState, PathSelection, ShareData, ShareProposal};
 use super::transitions::{apply_share, fail_consensus, trigger_fallback, TransitionResult};
@@ -93,11 +100,11 @@ fn any_share_proposal() -> ShareProposal {
 }
 
 /// Generate a symbolic witness set of bounded size
-fn any_witness_set(min_size: usize, max_size: usize) -> HashSet<String> {
+fn any_witness_set(min_size: usize, max_size: usize) -> BTreeSet<String> {
     let size: usize = kani::any();
     kani::assume(size >= min_size && size <= max_size);
 
-    let mut witnesses = HashSet::new();
+    let mut witnesses = BTreeSet::new();
     // Add specific witnesses based on size
     if size >= 1 {
         witnesses.insert("w1".to_string());

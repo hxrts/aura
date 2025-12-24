@@ -16,7 +16,7 @@
 //! 3. Deterministic: same inputs always produce same outputs
 //! 4. Verifiable: each function maps to exactly one Quint action
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 use super::state::{
     ConsensusPhase, ConsensusState, PathSelection, PureCommitFact, ShareProposal,
@@ -64,7 +64,7 @@ pub fn start_consensus(
     operation: String,
     prestate_hash: String,
     threshold: usize,
-    witnesses: HashSet<String>,
+    witnesses: BTreeSet<String>,
     initiator: String,
     path: PathSelection,
 ) -> TransitionResult {
@@ -167,7 +167,7 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
 
         // Create commit fact
         if let Some(rid) = new_state.majority_result() {
-            let attesters: HashSet<String> = new_state
+            let attesters: BTreeSet<String> = new_state
                 .proposals
                 .iter()
                 .filter(|p| p.result_id == rid)
@@ -294,7 +294,7 @@ pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &str) -> Trans
     new_state.phase = ConsensusPhase::Committed;
 
     // Create commit fact
-    let attesters: HashSet<String> = state
+    let attesters: BTreeSet<String> = state
         .proposals
         .iter()
         .filter(|p| p.result_id == winning_rid)
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_start_consensus() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let result = start_consensus(
             "cns1".to_string(),
@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_start_consensus_insufficient_witnesses() {
-        let witnesses: HashSet<_> = ["w1"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1"].iter().map(|s| s.to_string()).collect();
 
         let result = start_consensus(
             "cns1".to_string(),
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn test_apply_share_reaches_threshold() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn test_apply_share_detects_equivocation() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn test_trigger_fallback() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let state = ConsensusState::new(
             "cns1".to_string(),
@@ -466,7 +466,7 @@ mod tests {
 
     #[test]
     fn test_trigger_fallback_not_fast_path() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let state = ConsensusState::new(
             "cns1".to_string(),
@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_complete_via_fallback() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn test_fail_consensus() {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
         let state = ConsensusState::new(
             "cns1".to_string(),
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn test_fail_consensus_already_committed() {
-        let witnesses: HashSet<_> = ["w1", "w2"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2"].iter().map(|s| s.to_string()).collect();
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),

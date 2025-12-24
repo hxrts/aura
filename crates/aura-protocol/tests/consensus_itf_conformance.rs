@@ -618,10 +618,10 @@ fn test_itf_state_comparison_with_divergence() {
 #[test]
 fn test_divergence_report_format() {
     use aura_protocol::consensus::core::state::{PathSelection, ShareData, ShareProposal};
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
 
     // Create two states with known differences
-    let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+    let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
     let state1 = ConsensusState::new(
         "cns_test".to_string(),
@@ -679,9 +679,9 @@ fn test_divergence_report_format() {
 #[test]
 fn test_invariant_violation_with_divergence() {
     use aura_protocol::consensus::core::state::{PathSelection, ShareData, ShareProposal};
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
 
-    let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+    let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
 
     // Create a valid state
     let mut state = ConsensusState::new(

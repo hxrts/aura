@@ -39,12 +39,13 @@ fn witness_strategy() -> impl Strategy<Value = (Vec<String>, usize)> {
 
 /// Strategy for generating message loss configurations
 /// Biased toward no loss (5:2:1 ratio) to exercise both healthy and degraded paths
+/// Drop rates are in parts per 65536 (6554 = ~10%, 32768 = 50%)
 fn loss_strategy() -> impl Strategy<Value = Option<MessageLossConfig>> {
     prop_oneof![
         5 => Just(None),  // No loss most of the time
-        2 => (0.1..0.5f64).prop_map(|rate| Some(MessageLossConfig::fixed_rate(rate))),
+        2 => (6554u32..32768u32).prop_map(|rate| Some(MessageLossConfig::fixed_rate(rate))),
         1 => Just(Some(MessageLossConfig {
-            drop_rate: 1.0,
+            drop_rate: 65536,  // Always drop (100%)
             target_types: Some(vec![MessageType::ShareProposal]),
             target_witnesses: None,
         })),

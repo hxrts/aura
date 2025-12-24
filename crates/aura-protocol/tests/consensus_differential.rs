@@ -23,7 +23,7 @@ use aura_protocol::consensus::core::{
     validation::{check_invariants, is_equivocator, shares_consistent},
 };
 use proptest::prelude::*;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 // ============================================================================
 // PROPTEST STRATEGIES
@@ -47,7 +47,7 @@ proptest! {
         n_witnesses in 3usize..=7,
         n_proposals in 0usize..=7,
     ) {
-        let witnesses: HashSet<String> = (0..n_witnesses)
+        let witnesses: BTreeSet<String> = (0..n_witnesses)
             .map(|i| format!("w{}", i))
             .collect();
         let threshold = (n_witnesses + 1) / 2;
@@ -287,7 +287,7 @@ proptest! {
         n_existing_proposals in 0usize..=2,
         new_witness_idx in 0usize..=4,
     ) {
-        let witnesses: HashSet<String> = (0..n_witnesses)
+        let witnesses: BTreeSet<String> = (0..n_witnesses)
             .map(|i| format!("w{}", i))
             .collect();
         let threshold = (n_witnesses + 1) / 2;
@@ -346,7 +346,7 @@ proptest! {
         n_witnesses in 3usize..=5,
         n_proposals in 0usize..=2,
     ) {
-        let witnesses: HashSet<String> = (0..n_witnesses)
+        let witnesses: BTreeSet<String> = (0..n_witnesses)
             .map(|i| format!("w{}", i))
             .collect();
         let threshold = (n_witnesses + 1) / 2;
@@ -395,7 +395,7 @@ proptest! {
         n_witnesses in 3usize..=5,
         proposal_sequence in prop::collection::vec(0usize..5, 1..=5),
     ) {
-        let witnesses: HashSet<String> = (0..n_witnesses)
+        let witnesses: BTreeSet<String> = (0..n_witnesses)
             .map(|i| format!("w{}", i))
             .collect();
         let threshold = (n_witnesses + 1) / 2;
@@ -465,7 +465,7 @@ proptest! {
         new_witness_idx in 0usize..=4,
         same_result in prop::bool::ANY,
     ) {
-        let witnesses: HashSet<String> = (0..n_witnesses)
+        let witnesses: BTreeSet<String> = (0..n_witnesses)
             .map(|i| format!("w{}", i))
             .collect();
         let threshold = (n_witnesses + 1) / 2;
@@ -554,7 +554,7 @@ proptest! {
         n_witnesses in 3usize..=5,
         start_in_fallback in prop::bool::ANY,
     ) {
-        let witnesses: HashSet<String> = (0..n_witnesses)
+        let witnesses: BTreeSet<String> = (0..n_witnesses)
             .map(|i| format!("w{}", i))
             .collect();
         let threshold = (n_witnesses + 1) / 2;
@@ -606,7 +606,7 @@ proptest! {
         n_witnesses in 3usize..=5,
         phase_idx in 0usize..=4,
     ) {
-        let witnesses: HashSet<String> = (0..n_witnesses)
+        let witnesses: BTreeSet<String> = (0..n_witnesses)
             .map(|i| format!("w{}", i))
             .collect();
         let threshold = (n_witnesses + 1) / 2;
@@ -660,7 +660,7 @@ proptest! {
         n_proposals in 0usize..=3,
         has_invalid_proposal in prop::bool::ANY,
     ) {
-        let witnesses: HashSet<String> = (0..n_witnesses)
+        let witnesses: BTreeSet<String> = (0..n_witnesses)
             .map(|i| format!("w{}", i))
             .collect();
 
@@ -741,7 +741,7 @@ fn test_threshold_equivalence_exact() {
         })
         .collect();
 
-    let witnesses: HashSet<_> = (0..5).map(|i| format!("w{}", i)).collect();
+    let witnesses: BTreeSet<_> = (0..5).map(|i| format!("w{}", i)).collect();
 
     // threshold = 2: should pass with 3 proposals
     assert!(check_threshold_ref(&proposals, 2));

@@ -25,7 +25,7 @@
 
 use crate::effects::params::{RandomBytesParams, RandomRangeParams};
 use crate::effects::*;
-use crate::handlers::{context::immutable::AuraContext, AuraHandler, EffectType, HandlerUtils};
+use crate::handlers::{AuraContext, AuraHandler, EffectType, HandlerUtils};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::crypto::single_signer::SigningMode;
@@ -484,7 +484,7 @@ mod tests {
     async fn test_crypto_effects_bridge() {
         let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let handler = ErasedAuraHandlerFactory::for_testing(device_id);
-        let ctx = crate::handlers::context_immutable::AuraContext::for_testing(device_id);
+        let ctx = crate::handlers::AuraContext::for_testing(device_id);
 
         // Test that we can call effects through the handler interface - only test supported effects
         if handler.supports_effect(EffectType::Random) {

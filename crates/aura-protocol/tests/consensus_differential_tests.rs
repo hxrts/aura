@@ -374,12 +374,13 @@ proptest! {
 // DIFFERENTIAL TESTS: EVIDENCE MERGE (CRDT PROPERTIES)
 // ============================================================================
 
-/// Generate random evidence
+/// Generate random evidence with unique equivocators (no duplicates)
 fn arb_evidence() -> impl Strategy<Value = Evidence> {
     (
         "cns[0-9]{1,2}".prop_map(String::from),
         prop::collection::vec(arb_vote(), 0..5),
-        prop::collection::vec(arb_witness(), 0..3),
+        // Use hash_set to ensure unique equivocators - duplicates would violate CRDT properties
+        prop::collection::hash_set(arb_witness(), 0..3).prop_map(|set| set.into_iter().collect::<Vec<_>>()),
     )
         .prop_map(|(consensus_id, votes, equivocators)| Evidence {
             consensus_id,

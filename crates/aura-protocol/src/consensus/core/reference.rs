@@ -20,7 +20,7 @@
 //! 3. **Property annotations**: Document which theorem each function relates to
 
 use super::state::{ConsensusState, PureCommitFact, ShareProposal};
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 /// Reference evidence structure for CRDT merge
 /// Lean: Aura.Consensus.Types.Evidence
@@ -190,8 +190,8 @@ pub fn aggregate_shares_ref(
 /// - `detection_soundness`: detected witness has conflicting votes
 /// - `detection_completeness`: all equivocators are detected
 /// - `honest_never_detected`: honest witness never falsely accused
-pub fn detect_equivocators_ref(votes: &[Vote]) -> HashSet<String> {
-    let mut equivocators = HashSet::new();
+pub fn detect_equivocators_ref(votes: &[Vote]) -> BTreeSet<String> {
+    let mut equivocators = BTreeSet::new();
 
     // Check each pair of votes for conflicts
     for i in 0..votes.len() {
@@ -424,7 +424,7 @@ pub fn check_invariants_ref(state: &ConsensusState) -> Option<String> {
     }
 
     // Invariant 6: no witness has multiple proposals (no duplicate entries)
-    let mut seen_witnesses: HashSet<&str> = HashSet::new();
+    let mut seen_witnesses: BTreeSet<&str> = BTreeSet::new();
     for proposal in &state.proposals {
         if seen_witnesses.contains(proposal.witness.as_str()) {
             return Some(format!("duplicate proposal from witness: {}", proposal.witness));

@@ -29,7 +29,7 @@
 //! ```
 
 use super::state::{ConsensusState, PureCommitFact, ShareProposal};
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::fmt;
 
 /// A single field difference between expected and actual state
@@ -230,7 +230,7 @@ impl StateDiff {
     }
 
     /// Compare two sets and return differences
-    fn compare_sets(expected: &HashSet<String>, actual: &HashSet<String>) -> Vec<FieldDiff> {
+    fn compare_sets(expected: &BTreeSet<String>, actual: &BTreeSet<String>) -> Vec<FieldDiff> {
         let mut diffs = Vec::new();
 
         let missing: Vec<_> = expected.difference(actual).collect();
@@ -255,7 +255,7 @@ impl StateDiff {
     }
 
     /// Format a set for display
-    fn format_set(set: &HashSet<String>) -> String {
+    fn format_set(set: &BTreeSet<String>) -> String {
         let mut items: Vec<_> = set.iter().collect();
         items.sort();
         format!(
@@ -582,7 +582,7 @@ mod tests {
     use crate::consensus::core::state::{ConsensusPhase, PathSelection, ShareData};
 
     fn make_test_state() -> ConsensusState {
-        let witnesses: HashSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
         ConsensusState::new(
             "cns1".to_string(),
             "update_policy".to_string(),
@@ -675,8 +675,8 @@ mod tests {
 
     #[test]
     fn test_set_comparison() {
-        let set1: HashSet<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
-        let set2: HashSet<String> = ["b", "c", "d"].iter().map(|s| s.to_string()).collect();
+        let set1: BTreeSet<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let set2: BTreeSet<String> = ["b", "c", "d"].iter().map(|s| s.to_string()).collect();
 
         let diffs = StateDiff::compare_sets(&set1, &set2);
         assert_eq!(diffs.len(), 2); // missing and extra

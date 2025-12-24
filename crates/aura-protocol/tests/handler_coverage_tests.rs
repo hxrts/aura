@@ -20,7 +20,7 @@
 
 use aura_composition::{CompositeHandler, Handler, HandlerContext};
 use aura_core::identifiers::DeviceId;
-use aura_protocol::handlers::context_immutable::AuraContext;
+use aura_protocol::handlers::AuraContext;
 use aura_protocol::handlers::{
     core::erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, EffectRegistry, EffectType,
     ExecutionMode, RegistrableHandler,

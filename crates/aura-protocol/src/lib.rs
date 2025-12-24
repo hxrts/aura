@@ -124,7 +124,6 @@ pub mod amp;
 pub mod authorization; // Biscuit-based authorization (moved up from authorization/ subdirectory)
 pub mod choreography;
 pub mod consensus; // Real Aura Consensus implementation
-pub mod context;
 pub mod effects;
 pub mod error;
 pub mod facades; // High-level facade traits (Layer 4 appropriate - traits only, implementations in Layer 6)
