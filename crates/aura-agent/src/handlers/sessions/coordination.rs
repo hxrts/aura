@@ -8,10 +8,10 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::transport::TransportEnvelope;
-use aura_core::effects::{RandomEffects, StorageEffects, TransportEffects};
+use aura_core::effects::{RandomEffects, SessionType, StorageEffects, TransportEffects};
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use aura_macros::choreography;
-use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, SessionType};
+use aura_protocol::effects::{ChoreographicRole, EffectApiEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -293,7 +293,7 @@ impl SessionOperations {
         if effects.is_testing() {
             return Ok(());
         }
-        let guard = aura_protocol::guards::send_guard::create_send_guard(
+        let guard = aura_protocol::guards::chain::create_send_guard(
             operation.to_string(),
             self.guard_context(),
             self.authority_context.authority_id,

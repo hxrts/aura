@@ -18,20 +18,13 @@
 //! 3. **Verifiable**: All transitions map to Quint actions
 //! 4. **Invariant-checked**: Every transition maintains well-formedness
 
+// Production modules
 pub mod state;
 pub mod transitions;
 pub mod validation;
-pub mod reference;
-pub mod divergence;
 
-#[cfg(feature = "simulation")]
-pub mod quint_mapping;
-
-pub mod itf_loader;
-
-// Kani bounded model checking proofs - only compiled when running Kani
-#[cfg(kani)]
-pub mod kani_proofs;
+// Verification infrastructure (not compiled into production)
+pub mod verification;
 
 // Re-export core types for convenience
 pub use state::{
@@ -45,4 +38,10 @@ pub use validation::{
     check_invariants, is_equivocator, shares_consistent, validate_commit, validate_share,
     ValidationError,
 };
-pub use divergence::{DivergenceReport, FieldDiff, InstanceDiff, StateDiff};
+
+// Verification infrastructure organization:
+// - verification/quint_mapping.rs: Quint ITF correspondence (simulation feature)
+// - verification/kani_proofs.rs: Bounded model checking (Kani only)
+// - tests/common/reference.rs: Reference implementations for Lean-proven primitives
+// - tests/common/divergence.rs: Divergence reporting for ITF conformance tests
+// - tests/common/itf_loader.rs: ITF trace loading for Quint model checking

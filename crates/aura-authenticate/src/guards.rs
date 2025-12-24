@@ -26,7 +26,7 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
-use aura_protocol::guards::feature;
+use aura_protocol::guards::types;
 use aura_verify::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
@@ -278,7 +278,7 @@ impl RecoveryContext {
 }
 
 /// Decision type shared across Layer 5 feature crates.
-pub type GuardDecision = feature::GuardDecision;
+pub type GuardDecision = types::GuardDecision;
 
 // =============================================================================
 // Effect Command
@@ -382,19 +382,19 @@ pub enum EffectCommand {
 }
 
 /// Outcome type shared across Layer 5 feature crates.
-pub type GuardOutcome = feature::GuardOutcome<EffectCommand>;
+pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
 // =============================================================================
 // Guard Helpers
 // =============================================================================
 
-impl feature::CapabilitySnapshot for GuardSnapshot {
+impl types::CapabilitySnapshot for GuardSnapshot {
     fn has_capability(&self, cap: &str) -> bool {
         GuardSnapshot::has_capability(self, cap)
     }
 }
 
-impl feature::FlowBudgetSnapshot for GuardSnapshot {
+impl types::FlowBudgetSnapshot for GuardSnapshot {
     fn flow_budget_remaining(&self) -> u32 {
         self.flow_budget_remaining
     }
@@ -402,12 +402,12 @@ impl feature::FlowBudgetSnapshot for GuardSnapshot {
 
 /// Check capability and return denied outcome if missing
 pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<GuardOutcome> {
-    feature::check_capability(snapshot, required_cap)
+    types::check_capability(snapshot, required_cap)
 }
 
 /// Check flow budget and return denied outcome if insufficient
 pub fn check_flow_budget(snapshot: &GuardSnapshot, required_cost: u32) -> Option<GuardOutcome> {
-    feature::check_flow_budget(snapshot, required_cost)
+    types::check_flow_budget(snapshot, required_cost)
 }
 
 /// Check if challenge has expired

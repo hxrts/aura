@@ -3,9 +3,9 @@
 //! Tests for the SessionService public API exposed through AuraAgent.
 
 use aura_agent::{AgentBuilder, AuthorityId, EffectContext, ExecutionMode};
+use aura_core::effects::SessionType;
 use aura_core::hash::hash;
 use aura_core::identifiers::ContextId;
-use aura_protocol::effects::SessionType;
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {

@@ -99,9 +99,6 @@ impl Default for StorageAccessCoordinator {
     }
 }
 
-// StorageCapabilityToken removed - use Biscuit tokens via effect system for authorization
-// Legacy capability token type has been replaced by Biscuit-based authorization
-
 /// Resource access constraints
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ResourceConstraint {

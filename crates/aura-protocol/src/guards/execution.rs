@@ -8,9 +8,9 @@
 //! 5. Return comprehensive execution results
 
 use super::{
-    deltas::apply_delta_facts, effect_system_trait::GuardContextProvider,
-    privacy::track_leakage_consumption, BiscuitGuardEvaluator, ExecutionMetrics, GuardEffects,
-    GuardError, GuardResult, GuardedExecutionResult, ProtocolGuard,
+    deltas::apply_delta_facts, privacy::track_leakage_consumption, traits::GuardContextProvider,
+    BiscuitGuardEvaluator, ExecutionMetrics, GuardEffects, GuardError, GuardResult,
+    GuardedExecutionResult, ProtocolGuard,
 };
 use crate::authorization::BiscuitAuthorizationBridge;
 use aura_core::{epochs::Epoch, AuraError, AuraResult, FlowBudget};

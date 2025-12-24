@@ -4,8 +4,9 @@
 
 use super::{coordination::SessionOperations, shared::*};
 use crate::core::{AgentError, AgentResult};
+use aura_core::effects::SessionType;
 use aura_core::identifiers::DeviceId;
-use aura_protocol::effects::{EffectApiEffects, SessionType};
+use aura_protocol::effects::EffectApiEffects;
 
 impl SessionOperations {
     /// Create threshold operation session

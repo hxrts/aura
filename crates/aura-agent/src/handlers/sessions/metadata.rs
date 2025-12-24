@@ -112,8 +112,8 @@ impl SessionOperations {
 mod tests {
     use super::*;
     use crate::core::AuthorityContext;
+    use aura_core::effects::SessionType;
     use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
-    use aura_protocol::effects::SessionType;
     use std::sync::Arc;
 
     #[tokio::test]

@@ -26,12 +26,14 @@
 //! cargo test -p aura-protocol --test consensus_itf_conformance
 //! ```
 
+mod common;
+
 use aura_protocol::consensus::core::{
-    divergence::{DivergenceReport, InstanceDiff, StateDiff},
-    itf_loader::{load_itf_trace, parse_itf_trace, ITFState},
     state::{ConsensusPhase, ConsensusState},
     validation::check_invariants,
 };
+use common::divergence::{DivergenceReport, InstanceDiff, StateDiff};
+use common::itf_loader::{load_itf_trace, parse_itf_trace, ITFState};
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -310,8 +312,8 @@ impl fmt::Display for InferredAction {
 
 /// Infer action from state difference
 fn infer_action(
-    prev: &aura_protocol::consensus::core::itf_loader::ITFState,
-    curr: &aura_protocol::consensus::core::itf_loader::ITFState,
+    prev: &ITFState,
+    curr: &ITFState,
 ) -> Vec<InferredAction> {
     let mut actions = Vec::new();
 

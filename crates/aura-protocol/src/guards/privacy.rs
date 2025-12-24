@@ -4,7 +4,7 @@
 //! as specified in the formal model. It provides observer models for external,
 //! neighbor, and in-group adversaries with appropriate privacy guarantees.
 
-use super::{effect_system_trait::GuardContextProvider, GuardEffects, LeakageBudget};
+use super::{traits::GuardContextProvider, GuardEffects, LeakageBudget};
 use aura_core::{effects::PhysicalTimeEffects, identifiers::AuthorityId, AuraError, AuraResult};
 // TimeEffects removed - using PhysicalTimeEffects directly
 use tracing::{debug, info, warn};

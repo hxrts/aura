@@ -27,8 +27,6 @@ pub struct CryptoMessage {
 /// Union of all cryptographic protocol payloads
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CryptoPayload {
-    /// DKD protocol messages - Use future aura-dkd crate for DKD operations
-    // Dkd(DkdMessage), // REMOVED: DKD messages moved to future aura-dkd feature crate
     /// Resharing protocol messages
     Resharing(ResharingMessage),
 }
@@ -54,7 +52,6 @@ impl CryptoMessage {
     /// Get the protocol type for this message
     pub fn protocol_type(&self) -> &'static str {
         match &self.payload {
-            // CryptoPayload::Dkd(_) => "dkd", // REMOVED: DKD messages moved to future aura-dkd feature crate
             CryptoPayload::Resharing(_) => "resharing",
         }
     }

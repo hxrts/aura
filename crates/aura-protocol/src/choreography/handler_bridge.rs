@@ -8,7 +8,6 @@ use crate::guards::LeakageBudget;
 use aura_core::identifiers::ContextId;
 use aura_core::identifiers::DeviceId;
 use biscuit_auth::Biscuit;
-// use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use rumpsteak_aura_choreography::effects::ChoreoHandler;
 use serde_json::Value;
 

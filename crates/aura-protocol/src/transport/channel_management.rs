@@ -1,8 +1,7 @@
 //! Channel Management Choreographic Protocols
 //!
 //! Layer 4: Multi-party channel coordination using choreographic protocols.
-//! YES choreography - complex setup/teardown coordination with multiple participants.
-//! Target: <250 lines, focused on choreographic channel lifecycle.
+//! Complex setup/teardown coordination with multiple participants.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
 use aura_core::effects::PhysicalTimeEffects;

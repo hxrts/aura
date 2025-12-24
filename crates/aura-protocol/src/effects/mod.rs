@@ -1,69 +1,68 @@
 //! Layer 4: Protocol-Specific Effect Traits
 //!
-//! Effect traits extending core capabilities (aura-core Layer 1) with protocol-level concerns.
-//! Maintains strict separation between core (Layer 1) and protocol (Layer 4) effect hierarchies.
+//! This module provides protocol-level effect traits that extend the core effect system
+//! from `aura-core` (Layer 1) with multi-party coordination capabilities.
 //!
-//! **Effect Hierarchy** (per docs/001_system_architecture.md, docs/106_effect_system_and_runtime.md):
-//! - **Core effects** (aura-core): Network, Crypto, Storage, Time, Random, Console, Random
-//!   - Layer 1, foundational, no dependencies
-//! - **Protocol effects** (aura-protocol): Choreographic, EffectAPI, Tree, Semilattice, Sync
-//!   - Layer 4, compose core effects for distributed coordination
-//! - **Domain effects** (aura-journal, aura-wot, etc.): Journal, Authorization, Capability
-//!   - Layer 2, domain-specific application effects
-//! - **UI effects** (aura-terminal): TUI-specific effects for terminal user interface
-//!   - Layer 7, user interface abstractions
+//! ## Import Guidelines
 //!
-//! **Key Protocol Effect Traits**:
-//! - **Choreographic**: Multi-party protocol coordination, choreographic projections
-//! - **EffectAPI**: Event sourcing, audit trail, authorization tracking (transaction log)
-//! - **Tree**: Commitment tree operations, group key management
-//! - **Semilattice**: CRDT coordination with mathematical invariants (⊔, ⊓)
-//! - **Sync**: Anti-entropy, state reconciliation, gossip protocols
+//! - **Core effects** (`aura_core::effects`): Import directly for `CryptoEffects`,
+//!   `NetworkEffects`, `StorageEffects`, `*TimeEffects`, `SessionType`, etc.
+//! - **Protocol effects** (this module): Use for `ChoreographicEffects`, `EffectApiEffects`,
+//!   `TreeEffects`, `SyncEffects`, and `AuraEffects` composite trait.
 //!
-//! **Guard Chain Integration**: Each protocol message expands through effects in order
-//! (per docs/109_authorization.md): Authorization → FlowBudget → Leakage → Journal → Transport.
+//! ## Effect Hierarchy
+//!
+//! | Layer | Crate | Effects |
+//! |-------|-------|---------|
+//! | 1 | `aura-core` | Network, Crypto, Storage, Time, Random, Console, Session |
+//! | 2 | Domain crates | Journal, Authorization, Capability |
+//! | 4 | `aura-protocol` | Choreographic, EffectAPI, Tree, Semilattice, Sync |
+//! | 7 | `aura-terminal` | TUI-specific effects |
+//!
+//! ## Protocol Effect Traits
+//!
+//! - [`ChoreographicEffects`]: Multi-party protocol coordination and projections
+//! - [`EffectApiEffects`]: Event sourcing, audit trail, authorization tracking
+//! - [`TreeEffects`]: Commitment tree operations and group key management
+//! - [`SyncEffects`]: Anti-entropy, state reconciliation, gossip protocols
+//! - Semilattice types: CRDT coordination with mathematical invariants
+//!
+//! ## Guard Chain
+//!
+//! Protocol messages expand through effects in order (per docs/109_authorization.md):
+//! Authorization → FlowBudget → Leakage → Journal → Transport.
+//!
+//! ## Example
 //!
 //! ```rust,ignore
-//! use crate::effects::{NetworkEffects, CryptoEffects, PhysicalTimeEffects};
+//! use aura_core::effects::{CryptoEffects, NetworkEffects, PhysicalTimeEffects};
+//! use aura_protocol::effects::{ChoreographicEffects, AuraEffects};
 //!
-//! // Pure protocol function that accepts effects
-//! async fn execute_protocol_phase<E>(
-//!     state: ProtocolState,
-//!     effects: &E,
-//! ) -> Result<ProtocolState, ProtocolError>
+//! async fn execute_protocol_phase<E>(state: ProtocolState, effects: &E)
+//!     -> Result<ProtocolState, ProtocolError>
 //! where
-//!     E: NetworkEffects + CryptoEffects + PhysicalTimeEffects,
+//!     E: CryptoEffects + NetworkEffects + ChoreographicEffects,
 //! {
-//!     // Use effects for side-effect operations
 //!     let signature = effects.ed25519_sign(&data, &key).await?;
-//!     effects.send_to_peer(peer_id, message).await?;
-//!
-//!     // Pure logic using the effect results
 //!     Ok(state.with_signature(signature))
 //! }
 //! ```
 
-// Effect trait definitions
-// NOTE: Agent effect traits moved to aura-core (Layer 1) - foundational capability definitions
+// Protocol-specific effect traits (Layer 4)
 pub mod choreographic;
 pub mod effect_api;
 pub mod params;
 pub mod semilattice;
-pub mod sync;
 pub mod tree;
 
-// Re-export agent effect traits from aura-core (moved to Layer 1)
-pub use aura_core::effects::{
-    AgentEffects, AgentHealthStatus, AuthMethod, AuthenticationEffects, AuthenticationResult,
-    BiometricType, ConfigError, ConfigValidationError, ConfigurationEffects, CredentialBackup,
-    DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
-    SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
-};
+// Protocol effect re-exports
 pub use choreographic::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics,
 };
-// Import core effects from aura-core
+
+// Core effect re-exports (convenience - prefer importing from aura_core::effects directly)
+// These are provided for backward compatibility and ergonomics in protocol code.
 pub use aura_core::effects::{
     AuthorizationEffects, ConsoleEffects, CryptoEffects, CryptoError, JournalEffects,
     LeakageEffects, NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream,
@@ -71,13 +70,12 @@ pub use aura_core::effects::{
     StorageStats, SystemEffects, SystemError, ThresholdSigningEffects, TimeError, TimeoutHandle,
     WakeCondition,
 };
-// Domain-specific time traits (unified time system)
+
+// Time effect re-exports (unified time system)
 pub use aura_core::effects::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
 
-// Import crypto-specific types from crypto module
+// Crypto types (convenience re-export)
 pub use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
-// Note: Removed duplicate re-exports to avoid conflicts with aura_core imports
-// Only re-export types that are protocol-specific and don't conflict with aura-core
 
 pub use effect_api::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 pub use params::*; // Re-export all parameter types
@@ -85,7 +83,8 @@ pub use semilattice::{
     CausalContext, CmHandler, CvHandler, DeliveryConfig, DeliveryEffect, DeliveryGuarantee,
     DeltaHandler, GossipStrategy, TopicId,
 };
-pub use sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
+// Sync effects re-exported from consolidated module
+pub use crate::sync::effects::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
 pub use tree::TreeEffects;
 
 // Re-export unified error system

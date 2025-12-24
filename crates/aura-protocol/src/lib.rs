@@ -133,6 +133,7 @@ pub mod messages;
 pub mod moderation; // Query/reduction layer for moderation state from journal facts
 pub mod session; // Session orchestration types (SessionStatus, SessionOutcome)
 pub mod state;
+pub mod sync; // Consolidated sync module (effects, handlers)
 pub mod transport;
 pub mod types; // Protocol orchestration types
 
@@ -258,33 +259,6 @@ pub mod internal {
 
 // Core effect trait - for protocol interfaces
 pub use effects::AuraEffects;
-
-// Note: AuraEffectSystem, EffectRegistry, and effect bundles are in aura-agent runtime
-// aura-protocol (Layer 4) should not depend on aura-agent (Layer 6)
-// See: docs/001_system_architecture.md for correct layering
-//
-// Legacy re-exports removed (v0.2.0). Use qualified paths from appropriate modules:
-// - orchestration::* for coordination types
-// - effect_traits::* for effect trait definitions
-// - composition::* for handler composition
-
-// IntentState and PeerView removed - only used in internal tests
-
-// Only export authorization types actually used by other crates
-// pub use authorization_bridge::{ // Module removed - replaced by authorization module
-//     AuthorizationContext, AuthorizationError, AuthorizationMetadata, AuthorizationRequest,
-//     AuthorizationService, AuthorizedEvent, PermissionGrant,
-// };
-
-// Verification module removed from public API - test-only code
-// (verification module still exists for internal tests)
-
-// Transport coordination removed from public API - never used by dependent crates
-// Decision needed: evaluate if transport/ should move to aura-transport crate
-
-// Clean API - no legacy compatibility
-
-// Prelude module removed - zero usage across workspace
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

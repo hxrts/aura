@@ -28,7 +28,6 @@
 //! - **core**: Base effect handler traits and registry
 //! - **tree**: Commitment tree operations
 //! - **memory**: In-memory implementations for testing
-//! - **agent**: Device auth, session management
 //! - **bridges**: Adapters for integration
 //! - **storage**: Storage coordination
 //! - **context**: Context management for handler operations
@@ -284,25 +283,14 @@ mod tests {
 }
 
 // Remaining handler modules
-// NOTE: agent module temporarily disabled - uses AuraEffectSystem from aura-agent (Layer 6)
-// aura-protocol (Layer 4) should not depend on aura-agent types
-// Refactor agent handlers to use only aura-core effect traits before re-enabling
-// pub mod agent;
 pub mod storage;
-// REMOVED: pub mod system; // Moved to aura-effects (Layer 3) - basic handlers
 pub mod tree;
-pub use tree::InMemoryTreeHandler;
-pub mod sync;
+pub use tree::{InMemoryTreeHandler, PersistentTreeHandler};
+// Sync handlers consolidated under crate::sync
+pub use crate::sync::{AntiEntropyHandler, BroadcastConfig, BroadcasterHandler, LocalSyncHandler};
 
-// Flattened handlers (previously in subdirectories)
-pub mod sync_anti_entropy;
-pub use sync_anti_entropy::AntiEntropyHandler;
-pub mod sync_broadcaster;
-pub use sync::LocalSyncHandler;
-pub use sync_broadcaster::{BroadcastConfig, BroadcasterHandler};
-
-pub mod time_enhanced;
-pub use time_enhanced::EnhancedTimeHandler;
+pub mod time_handler;
+pub use time_handler::EnhancedTimeHandler;
 
 pub mod timeout_coordinator;
 pub use timeout_coordinator::TimeoutCoordinator;
@@ -314,7 +302,3 @@ pub use transport_coordinator::{
     TransportCoordinationError, TransportCoordinator,
 };
 
-// External re-exports
-// REMOVED: Users should import MockJournalHandler directly from aura-effects
-// pub use aura_effects::journal::MockJournalHandler;
-// REMOVED: MockHandler moved to aura-testkit (Layer 8) per architectural guidelines

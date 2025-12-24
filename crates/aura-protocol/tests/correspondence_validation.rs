@@ -13,10 +13,10 @@
 //! - Evidence merge properties (associative, commutative, idempotent)
 //! - Threshold arithmetic correctness
 
-use aura_protocol::consensus::core::{
-    reference::{detect_equivocators_ref, merge_evidence_ref, Evidence, Vote},
-    state::{ShareData, ShareProposal},
-};
+mod common;
+
+use aura_protocol::consensus::core::state::{ShareData, ShareProposal};
+use common::reference::{detect_equivocators_ref, merge_evidence_ref, Evidence, Vote};
 use proptest::prelude::*;
 use std::collections::HashSet;
 
@@ -225,7 +225,7 @@ proptest! {
         count in 0usize..20,
         threshold in 0usize..25,
     ) {
-        use aura_protocol::consensus::core::reference::check_threshold_ref;
+        use crate::common::reference::check_threshold_ref;
 
         let proposals: Vec<ShareProposal> = (0..count)
             .map(|i| ShareProposal {

@@ -88,41 +88,37 @@
 //! }).await?;
 //! ```
 
-// pub mod capability; // Removed - replaced by biscuit_evaluator
+// Guard implementations
+pub mod chain; // SendGuardChain (guard chain orchestration)
 pub mod deltas;
-pub mod effect_policy_guard;
-pub mod effect_system_trait;
-pub mod feature;
-// pub mod evaluation; // Legacy capability evaluation removed - use BiscuitAuthorizationBridge instead
+pub mod executor;
 pub mod execution;
 pub mod flow;
-pub mod journal_coupler;
+pub mod journal; // JournalCoupler
+pub mod policy; // Effect policy guards
 pub mod privacy;
 pub mod pure;
-pub mod pure_executor;
-pub mod send_guard;
+pub mod traits; // GuardContextProvider
+pub mod types; // Shared guard types
 
-// Biscuit-based guards (new implementation)
+// Biscuit-based capability guards
 pub mod biscuit_evaluator;
-pub mod capability_guard; // Authority-based capability guards
+pub mod capability_guard;
 
-pub use effect_system_trait::GuardContextProvider;
-// Legacy guard evaluation removed - use BiscuitAuthorizationBridge instead
+// Core re-exports
+pub use traits::GuardContextProvider;
 pub use flow::FlowGuard;
-// FlowBudgetEffects and FlowHint moved to aura-core
 pub use aura_core::effects::{FlowBudgetEffects, FlowHint};
-pub use journal_coupler::{
+pub use journal::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
-pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
+pub use chain::{create_send_guard, SendGuardChain, SendGuardResult};
 
-// use crate::wot::EffectSystemInterface; // Legacy interface removed - use Biscuit authorization instead
 use aura_core::effects::{
     AuthorizationEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
     StorageEffects,
 };
 use aura_core::AuraResult;
-// use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use aura_core::AuthorityId;
 use biscuit_auth::{Biscuit, PublicKey};
 use std::future::Future;
@@ -265,7 +261,7 @@ impl ProtocolGuard {
         operation: F,
     ) -> AuraResult<GuardedExecutionResult<T>>
     where
-        E: GuardEffects + aura_core::TimeEffects + effect_system_trait::GuardContextProvider,
+        E: GuardEffects + aura_core::TimeEffects + traits::GuardContextProvider,
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
@@ -365,13 +361,13 @@ pub use privacy::*;
 pub use biscuit_evaluator::{BiscuitGuardEvaluator, GuardError, GuardResult};
 pub use capability_guard::{CapabilityGuard, CapabilityGuardExt};
 
-// Re-export effect policy guard types
-pub use effect_policy_guard::{
+// Re-export policy guard types
+pub use policy::{
     EffectPolicyError, EffectPolicyExt, EffectPolicyGuard, EffectPolicyResult,
 };
 
-// Re-export pure executor functions for choreography integration
-pub use pure_executor::{
+// Re-export executor functions for choreography integration
+pub use executor::{
     execute_effect_commands, execute_guarded_choreography, BorrowedEffectInterpreter,
     ChoreographyCommand, ChoreographyResult, EffectSystemInterpreter, GuardChainExecutor,
     GuardChainResult,

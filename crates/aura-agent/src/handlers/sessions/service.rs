@@ -7,8 +7,8 @@ use super::coordination::SessionOperations;
 use super::shared::{SessionHandle, SessionStats};
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
+use aura_core::effects::SessionType;
 use aura_core::identifiers::{AccountId, DeviceId};
-use aura_protocol::effects::SessionType;
 use std::sync::Arc;
 
 /// Session management service

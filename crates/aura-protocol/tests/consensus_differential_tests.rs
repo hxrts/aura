@@ -28,13 +28,15 @@
 //! PROPTEST_CASES=1000 cargo test -p aura-protocol --test consensus_differential_tests
 //! ```
 
+mod common;
+
 use aura_protocol::consensus::core::{
-    reference::{
-        check_threshold_ref, detect_equivocators_ref, merge_evidence_ref, shares_consistent_ref,
-        Evidence, Vote,
-    },
     state::{ShareData, ShareProposal},
     validation::{is_equivocator, shares_consistent},
+};
+use common::reference::{
+    check_threshold_ref, detect_equivocators_ref, merge_evidence_ref, shares_consistent_ref,
+    Evidence, Vote,
 };
 use proptest::prelude::*;
 use std::collections::HashSet;

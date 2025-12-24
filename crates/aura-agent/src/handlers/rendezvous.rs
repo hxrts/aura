@@ -11,7 +11,7 @@ use aura_core::effects::RandomEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
 use aura_protocol::effects::EffectApiEffects;
-use aura_protocol::guards::send_guard::create_send_guard;
+use aura_protocol::guards::chain::create_send_guard;
 use aura_rendezvous::{
     EffectCommand, GuardSnapshot, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
     RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,

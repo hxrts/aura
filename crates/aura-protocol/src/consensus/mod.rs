@@ -12,8 +12,9 @@
 //! - **witness**: Unified witness management and state tracking
 //! - **frost**: FROST cryptography integration with pipelining optimization
 //! - **protocol**: Main consensus protocol coordination and execution
-//! - **amp**: AMP channel epoch bump consensus adapter
 //! - **relational**: Relational consensus adapter for cross-authority operations
+//!
+//! Note: AMP consensus adapter is consolidated under `crate::amp::consensus`.
 //!
 //! ## Protocol Design (per docs/104_consensus.md)
 //!
@@ -41,7 +42,6 @@ pub mod types;
 pub mod witness;
 
 // Adapters
-pub mod amp;
 pub mod relational;
 
 // Re-export core types
@@ -52,8 +52,8 @@ pub use protocol::{run_consensus, ConsensusProtocol};
 pub use types::{CommitFact, ConflictFact, ConsensusConfig, ConsensusId, ConsensusResult};
 pub use witness::{WitnessInstance, WitnessSet, WitnessState, WitnessTracker};
 
-// Re-export AMP adapter functions
-pub use amp::{
+// Re-export AMP adapter functions (now consolidated under crate::amp::consensus)
+pub use crate::amp::consensus::{
     finalize_amp_bump_with_journal, finalize_amp_bump_with_journal_default,
     run_amp_channel_epoch_bump,
 };

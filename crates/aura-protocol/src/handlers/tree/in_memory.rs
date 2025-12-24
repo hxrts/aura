@@ -12,9 +12,12 @@ use std::sync::{Arc, RwLock};
 
 /// In-memory commitment tree handler backed by an OpLog buffer.
 ///
-/// This provides a deterministic, side-effect-free implementation suitable for
-/// simulation, testing, and local runtime assembly until a persistent journal-backed
-/// handler is wired.
+/// This is the **current production implementation** used by `AuraEffectSystem`.
+/// It provides deterministic, side-effect-free tree operations by reducing an
+/// in-memory OpLog to derive current tree state.
+///
+/// The in-memory approach works well for single-device scenarios. A persistent
+/// journal-backed handler will eventually replace this for cross-device sync.
 #[derive(Clone)]
 pub struct InMemoryTreeHandler {
     oplog: Arc<RwLock<Vec<AttestedOp>>>,

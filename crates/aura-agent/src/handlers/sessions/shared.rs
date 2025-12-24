@@ -2,9 +2,9 @@
 //!
 //! Common types and utilities used across all session management modules.
 
+use aura_core::effects::SessionType;
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_protocol::effects::ChoreographicRole;
-use aura_protocol::effects::SessionType;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

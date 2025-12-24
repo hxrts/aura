@@ -5,7 +5,7 @@
 //! producing an explicit list of `EffectCommand` values for an async interpreter.
 
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_protocol::guards::feature;
+use aura_protocol::guards::types;
 
 use crate::facts::ChatFact;
 
@@ -75,20 +75,20 @@ impl GuardSnapshot {
     }
 }
 
-impl feature::CapabilitySnapshot for GuardSnapshot {
+impl types::CapabilitySnapshot for GuardSnapshot {
     fn has_capability(&self, cap: &str) -> bool {
         GuardSnapshot::has_capability(self, cap)
     }
 }
 
-impl feature::FlowBudgetSnapshot for GuardSnapshot {
+impl types::FlowBudgetSnapshot for GuardSnapshot {
     fn flow_budget_remaining(&self) -> u32 {
         self.flow_budget_remaining
     }
 }
 
 /// Decision type shared across Layer 5 feature crates.
-pub type GuardDecision = feature::GuardDecision;
+pub type GuardDecision = types::GuardDecision;
 
 // =============================================================================
 // Effect Command
@@ -111,7 +111,7 @@ pub enum EffectCommand {
 }
 
 /// Outcome type shared across Layer 5 feature crates.
-pub type GuardOutcome = feature::GuardOutcome<EffectCommand>;
+pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
 // =============================================================================
 // Guard Helpers
@@ -119,10 +119,10 @@ pub type GuardOutcome = feature::GuardOutcome<EffectCommand>;
 
 /// Check capability and return a denied outcome if missing.
 pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<GuardOutcome> {
-    feature::check_capability(snapshot, required_cap)
+    types::check_capability(snapshot, required_cap)
 }
 
 /// Check flow budget and return a denied outcome if insufficient.
 pub fn check_flow_budget(snapshot: &GuardSnapshot, required_cost: u32) -> Option<GuardOutcome> {
-    feature::check_flow_budget(snapshot, required_cost)
+    types::check_flow_budget(snapshot, required_cost)
 }

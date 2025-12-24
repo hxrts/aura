@@ -9,7 +9,7 @@ use crate::facts::{RendezvousDescriptor, RendezvousFact, TransportHint};
 use crate::protocol::{guards, HandshakeComplete, HandshakeInit, NoiseHandshake};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
-use aura_protocol::guards::feature;
+use aura_protocol::guards::types;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
@@ -70,13 +70,13 @@ pub struct GuardSnapshot {
     pub epoch: u64,
 }
 
-impl feature::CapabilitySnapshot for GuardSnapshot {
+impl types::CapabilitySnapshot for GuardSnapshot {
     fn has_capability(&self, cap: &str) -> bool {
         self.capabilities.iter().any(|c| c == cap)
     }
 }
 
-impl feature::FlowBudgetSnapshot for GuardSnapshot {
+impl types::FlowBudgetSnapshot for GuardSnapshot {
     fn flow_budget_remaining(&self) -> u32 {
         self.flow_budget_remaining
     }
@@ -102,7 +102,7 @@ pub enum GuardRequest {
 }
 
 /// Decision type shared across Layer 5 feature crates.
-pub type GuardDecision = feature::GuardDecision;
+pub type GuardDecision = types::GuardDecision;
 
 /// Effect command to be executed after guard approval
 #[derive(Debug, Clone)]
@@ -129,7 +129,7 @@ pub enum EffectCommand {
 }
 
 /// Outcome type shared across Layer 5 feature crates.
-pub type GuardOutcome = feature::GuardOutcome<EffectCommand>;
+pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
 // =============================================================================
 // Rendezvous Service
@@ -193,12 +193,12 @@ impl RendezvousService {
         now_ms: u64,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = feature::check_capability(snapshot, guards::CAP_RENDEZVOUS_PUBLISH) {
+        if let Some(outcome) = types::check_capability(snapshot, guards::CAP_RENDEZVOUS_PUBLISH) {
             return outcome;
         }
 
         // Check flow budget
-        if let Some(outcome) = feature::check_flow_budget(snapshot, guards::DESCRIPTOR_PUBLISH_COST)
+        if let Some(outcome) = types::check_flow_budget(snapshot, guards::DESCRIPTOR_PUBLISH_COST)
         {
             return outcome;
         }
@@ -223,7 +223,7 @@ impl RendezvousService {
             },
         ];
 
-        if let Err(reason) = feature::validate_charge_before_send(
+        if let Err(reason) = types::validate_charge_before_send(
             &effects,
             |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
             |c| {
@@ -272,12 +272,12 @@ impl RendezvousService {
         psk: &[u8; 32],
     ) -> AuraResult<GuardOutcome> {
         // Check capability
-        if let Some(outcome) = feature::check_capability(snapshot, guards::CAP_RENDEZVOUS_CONNECT) {
+        if let Some(outcome) = types::check_capability(snapshot, guards::CAP_RENDEZVOUS_CONNECT) {
             return Ok(outcome);
         }
 
         // Check flow budget
-        if let Some(outcome) = feature::check_flow_budget(snapshot, guards::CONNECT_DIRECT_COST) {
+        if let Some(outcome) = types::check_flow_budget(snapshot, guards::CONNECT_DIRECT_COST) {
             return Ok(outcome);
         }
 
@@ -317,7 +317,7 @@ impl RendezvousService {
             },
         ];
 
-        if let Err(reason) = feature::validate_charge_before_send(
+        if let Err(reason) = types::validate_charge_before_send(
             &effects,
             |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
             |c| {
@@ -352,12 +352,12 @@ impl RendezvousService {
         psk: &[u8; 32],
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = feature::check_capability(snapshot, guards::CAP_RENDEZVOUS_CONNECT) {
+        if let Some(outcome) = types::check_capability(snapshot, guards::CAP_RENDEZVOUS_CONNECT) {
             return outcome;
         }
 
         // Check flow budget
-        if let Some(outcome) = feature::check_flow_budget(snapshot, guards::CONNECT_DIRECT_COST) {
+        if let Some(outcome) = types::check_flow_budget(snapshot, guards::CONNECT_DIRECT_COST) {
             return outcome;
         }
 
@@ -406,7 +406,7 @@ impl RendezvousService {
             },
         ];
 
-        if let Err(reason) = feature::validate_charge_before_send(
+        if let Err(reason) = types::validate_charge_before_send(
             &effects,
             |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
             |c| {
@@ -545,7 +545,7 @@ impl RendezvousService {
         snapshot: &GuardSnapshot,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = feature::check_capability(snapshot, guards::CAP_RENDEZVOUS_RELAY) {
+        if let Some(outcome) = types::check_capability(snapshot, guards::CAP_RENDEZVOUS_RELAY) {
             return outcome;
         }
 

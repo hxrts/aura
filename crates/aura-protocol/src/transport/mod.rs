@@ -18,12 +18,8 @@
 //! **Flow Budget Enforcement**: Each message send atomically increments spent counter;
 //! receipts prove charges for relayed messages
 
-pub mod amp;
-pub mod amp_choreo;
 pub mod channel_management;
 pub mod websocket;
-
-// Legacy tests removed - contained references to non-existent modules
 
 pub use channel_management::{ChannelEstablishmentCoordinator, ChannelTeardownCoordinator};
 pub use websocket::{WebSocketHandshakeCoordinator, WebSocketSessionCoordinator};
