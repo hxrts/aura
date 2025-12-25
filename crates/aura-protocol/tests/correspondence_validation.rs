@@ -84,17 +84,17 @@ proptest! {
 // EVIDENCE MERGE PROPERTIES
 // ============================================================================
 
-/// Generate a random evidence structure
+/// Generate a random evidence structure with unique equivocators
 fn arb_evidence() -> impl Strategy<Value = Evidence> {
     (
         "cns[0-9]{1,2}",
         prop::collection::vec(arb_vote(), 0..5),
-        prop::collection::vec("[a-z]{2,4}", 0..3),
+        prop::collection::hash_set("[a-z]{2,4}", 0..3),
     )
         .prop_map(|(consensus_id, votes, equivocators)| Evidence {
             consensus_id,
             votes,
-            equivocators,
+            equivocators: equivocators.into_iter().collect(),
             commit_fact: None,
         })
 }
@@ -259,8 +259,11 @@ proptest! {
     /// Detected witnesses actually equivocated.
     #[test]
     fn prop_equivocation_detection_sound(
-        witnesses in prop::collection::vec("[a-z]{2,4}", 1..5),
+        witnesses in prop::collection::hash_set("[a-z]{2,4}", 1..5),
     ) {
+        // Convert to vec for indexed access (order doesn't matter for this test)
+        let witnesses: Vec<_> = witnesses.into_iter().collect();
+
         // Create votes where first witness equivocates
         let mut votes = Vec::new();
         for (i, w) in witnesses.iter().enumerate() {
@@ -286,7 +289,7 @@ proptest! {
         prop_assert!(equivocators.contains(&witnesses[0]),
             "Equivocator not detected: {:?}", witnesses[0]);
 
-        // Other witnesses should not be detected
+        // Other witnesses should not be detected (they're guaranteed unique now)
         for w in &witnesses[1..] {
             prop_assert!(!equivocators.contains(w),
                 "Honest witness falsely accused: {:?}", w);

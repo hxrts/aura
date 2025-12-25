@@ -46,9 +46,8 @@ use super::{AuraHandlerConfig, FactoryError};
 ///
 /// # Example Implementation
 ///
-/// ```rust,no_run
-/// use aura_protocol::handlers::factory::{AuraHandlerFactory, AuraHandlerConfig, FactoryError};
-/// use aura_protocol::handlers::erased::BoxedHandler;
+/// ```rust,ignore
+/// use aura_protocol::handlers::core::{AuraHandlerFactory, AuraHandlerConfig, FactoryError, BoxedHandler};
 /// use aura_protocol::effects::EffectType;
 ///
 /// pub struct MyHandlerFactory;
