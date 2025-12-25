@@ -119,6 +119,7 @@ pub mod foundation;
 pub mod handlers; // Test and mock handlers moved from aura-protocol
 pub mod infrastructure;
 pub mod mock_effects;
+pub mod mock_runtime_bridge;
 pub mod mocks;
 pub mod simulation;
 pub mod stateful_effects;
@@ -140,6 +141,7 @@ pub use fixtures::*;
 pub use foundation::*;
 pub use infrastructure::*;
 pub use mock_effects::MockEffects;
+pub use mock_runtime_bridge::MockRuntimeBridge;
 pub use mocks::*;
 // Re-export simulation components (excluding ambiguous transport)
 pub use simulation::transport as simulation_transport;

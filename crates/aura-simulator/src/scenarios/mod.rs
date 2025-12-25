@@ -1,3 +1,5 @@
 //! Simulator scenarios (tests)
 pub mod consensus;
-pub mod invariant_tests;
+
+#[cfg(test)]
+mod invariant_tests;

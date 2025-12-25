@@ -45,18 +45,22 @@ use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_terminal::tui::types::MfaPolicy;
+use aura_testkit::MockRuntimeBridge;
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
 
-/// Create a test environment with IoContext and AppCore
+/// Create a test environment with IoContext and AppCore using MockRuntimeBridge
 async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{}", name));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    // Create MockRuntimeBridge for testing
+    let mock_bridge = Arc::new(MockRuntimeBridge::new());
+    let app_core =
+        AppCore::with_runtime(AppConfig::default(), mock_bridge).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
     let initialized_app_core = InitializedAppCore::new(app_core.clone())
         .await
@@ -75,6 +79,11 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     ctx.create_account(&format!("TestUser-{}", name))
         .await
         .expect("Failed to create account");
+
+    // Refresh settings from mock runtime to populate signal
+    aura_app::workflows::settings::refresh_settings_from_runtime(&app_core)
+        .await
+        .expect("Failed to refresh settings from runtime");
 
     (Arc::new(ctx), app_core)
 }
@@ -165,7 +174,6 @@ async fn wait_for_recovery(
 /// 2. UpdateNickname dispatch succeeds
 /// 3. IoContext returns the NEW nickname after update
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_settings_nickname_actually_changes() {
     println!("\n=== Settings Nickname Actually Changes Test ===\n");
 
@@ -231,7 +239,6 @@ async fn test_settings_nickname_actually_changes() {
 /// 3. IoContext returns the NEW policy after update
 /// 4. Policy can be toggled multiple times
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_settings_mfa_policy_actually_changes() {
     println!("\n=== Settings MFA Policy Actually Changes Test ===\n");
 
@@ -888,7 +895,6 @@ async fn test_context_switching_works() {
 /// 2. Result is available immediately
 /// 3. State changes are visible after return
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_dispatch_and_wait_completes() {
     println!("\n=== Dispatch And Wait Completes Test ===\n");
 
@@ -991,7 +997,6 @@ async fn test_invalid_operations_return_errors() {
 
 /// Test complete settings flow: nickname → MFA → verify all persisted
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_complete_settings_flow_persists() {
     println!("\n=== Complete Settings Flow Persists Test ===\n");
 
@@ -1031,7 +1036,6 @@ async fn test_complete_settings_flow_persists() {
 
 /// Test that IoContext snapshot methods return current state
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_snapshot_methods_return_current_state() {
     println!("\n=== Snapshot Methods Return Current State Test ===\n");
 

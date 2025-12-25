@@ -62,6 +62,7 @@ use aura_core::identifiers::AuthorityId;
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
+use aura_testkit::MockRuntimeBridge;
 use base64::Engine;
 use uuid::Uuid;
 
@@ -70,6 +71,9 @@ use uuid::Uuid;
 // ============================================================================
 
 /// Generate a deterministic invite code (mirrors demo hints.rs)
+///
+/// Creates a Contact invitation (not Guardian) so that the workflow auto-accepts
+/// and adds the sender as a contact, which updates the CONTACTS_SIGNAL.
 fn generate_demo_invite_code(name: &str, seed: u64) -> String {
     let authority_entropy = hash(format!("demo:{}:{}:authority", seed, name).as_bytes());
     let sender_id = AuthorityId::new_from_entropy(authority_entropy);
@@ -81,12 +85,12 @@ fn generate_demo_invite_code(name: &str, seed: u64) -> String {
         "invitation_id": invitation_id.to_string(),
         "sender_id": sender_id.uuid().to_string(),
         "invitation_type": {
-            "Guardian": {
-                "subject_authority": sender_id.uuid().to_string()
+            "Contact": {
+                "nickname": name
             }
         },
         "expires_at": null,
-        "message": format!("Guardian invitation from {} (demo)", name)
+        "message": format!("Contact invitation from {} (demo)", name)
     });
 
     let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
@@ -94,13 +98,16 @@ fn generate_demo_invite_code(name: &str, seed: u64) -> String {
     format!("aura:v1:{}", b64)
 }
 
-/// Create test environment with IoContext and AppCore
+/// Create test environment with IoContext and AppCore using MockRuntimeBridge
 async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let test_dir = std::env::temp_dir().join(format!("aura-propagation-test-{}", name));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    // Create MockRuntimeBridge for testing
+    let mock_bridge = Arc::new(MockRuntimeBridge::new());
+    let app_core =
+        AppCore::with_runtime(AppConfig::default(), mock_bridge).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
     let initialized_app_core = InitializedAppCore::new(app_core.clone())
         .await
@@ -119,6 +126,11 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         .await
         .expect("Failed to create account");
 
+    // Refresh settings from mock runtime to populate signal
+    aura_app::workflows::settings::refresh_settings_from_runtime(&app_core)
+        .await
+        .expect("Failed to refresh settings from runtime");
+
     (Arc::new(ctx), app_core)
 }
 
@@ -133,7 +145,6 @@ fn cleanup_test_dir(name: &str) {
 
 /// Property: After ImportInvitation, CONTACTS_SIGNAL contains the new contact
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_import_invitation_propagates_to_contacts_signal() {
     println!("\n=== ImportInvitation → CONTACTS_SIGNAL Propagation Test ===\n");
 
@@ -181,7 +192,6 @@ async fn test_import_invitation_propagates_to_contacts_signal() {
 
 /// Property: After multiple ImportInvitation calls, all contacts appear
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_multiple_imports_all_propagate() {
     println!("\n=== Multiple ImportInvitation Propagation Test ===\n");
 
@@ -229,7 +239,6 @@ async fn test_multiple_imports_all_propagate() {
 
 /// Property: StartDirectChat creates a channel and it appears in CHAT_SIGNAL
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_start_direct_chat_propagates_to_chat_signal() {
     println!("\n=== StartDirectChat → CHAT_SIGNAL Propagation Test ===\n");
 
@@ -291,11 +300,8 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
         "CHAT_SIGNAL should have new DM channel after StartDirectChat"
     );
 
-    // Verify it's a DM channel
-    let dm_channel = final_state
-        .channels
-        .iter()
-        .find(|c| c.id.to_string().starts_with("dm:"));
+    // Verify it's a DM channel (check is_dm flag, not ID format)
+    let dm_channel = final_state.channels.iter().find(|c| c.is_dm);
     assert!(dm_channel.is_some(), "Should have a DM channel");
 
     cleanup_test_dir("direct-chat");
@@ -304,7 +310,6 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
 
 /// Property: Subscriber receives signal updates (not just state reads)
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_subscriber_receives_updates() {
     println!("\n=== Subscriber Update Propagation Test ===\n");
 
@@ -401,7 +406,6 @@ async fn test_failed_command_does_not_propagate() {
 
 /// Verify duplicate imports don't create duplicate contacts
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_duplicate_import_idempotent() {
     println!("\n=== Duplicate Import Idempotency Test ===\n");
 
@@ -440,7 +444,6 @@ async fn test_duplicate_import_idempotent() {
 
 /// Property: UpdateContactNickname updates CONTACTS_SIGNAL with new nickname
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_update_nickname_propagates_to_contacts_signal() {
     println!("\n=== UpdateContactNickname → CONTACTS_SIGNAL Propagation Test ===\n");
 
@@ -505,7 +508,6 @@ async fn test_update_nickname_propagates_to_contacts_signal() {
 
 /// Property: ToggleContactGuardian updates both CONTACTS_SIGNAL and RECOVERY_SIGNAL
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_toggle_guardian_propagates_to_signals() {
     println!("\n=== ToggleContactGuardian → CONTACTS_SIGNAL + RECOVERY_SIGNAL Test ===\n");
 
@@ -585,7 +587,6 @@ async fn test_toggle_guardian_propagates_to_signals() {
 
 /// Property: CreateChannel adds channel to CHAT_SIGNAL
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_create_channel_propagates_to_chat_signal() {
     println!("\n=== CreateChannel → CHAT_SIGNAL Propagation Test ===\n");
 
@@ -666,7 +667,6 @@ async fn test_create_channel_propagates_to_chat_signal() {
 
 /// Property: AcceptInvitation removes from pending and adds to contacts
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_accept_invitation_propagates_to_signals() {
     println!("\n=== AcceptInvitation → INVITATIONS_SIGNAL + CONTACTS_SIGNAL Test ===\n");
 
@@ -729,7 +729,6 @@ async fn test_accept_invitation_propagates_to_signals() {
 
 /// Property: DeclineInvitation removes from pending without adding to contacts
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_decline_invitation_propagates_to_signal() {
     println!("\n=== DeclineInvitation → INVITATIONS_SIGNAL Test ===\n");
 
@@ -795,7 +794,6 @@ async fn test_decline_invitation_propagates_to_signal() {
 
 /// Property: SendMessage adds message to CHAT_SIGNAL
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_send_message_propagates_to_chat_signal() {
     println!("\n=== SendMessage → CHAT_SIGNAL Propagation Test ===\n");
 
@@ -941,7 +939,6 @@ async fn test_create_block_propagates_to_block_signal() {
 
 /// Property: SendBlockInvitation sends invitation to contact for block membership
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_send_block_invitation_propagates_to_signals() {
     use aura_app::signal_defs::BLOCK_SIGNAL;
 
@@ -1009,7 +1006,6 @@ async fn test_send_block_invitation_propagates_to_signals() {
 
 /// Property: Full Social Graph flow - Import contact, create block, update nickname
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_social_graph_full_flow() {
     use aura_app::signal_defs::BLOCK_SIGNAL;
 

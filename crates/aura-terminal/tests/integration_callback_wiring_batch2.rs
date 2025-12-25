@@ -38,6 +38,7 @@ use aura_core::identifiers::ChannelId;
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
+use aura_testkit::MockRuntimeBridge;
 
 /// Helper to create a DM channel ID the same way the messaging workflow does
 fn dm_channel_id(target: &str) -> ChannelId {
@@ -49,13 +50,16 @@ fn dm_channel_id(target: &str) -> ChannelId {
 // Test Helpers
 // ============================================================================
 
-/// Create a test environment with IoContext and AppCore
+/// Create a test environment with IoContext and AppCore using MockRuntimeBridge
 async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let test_dir = std::env::temp_dir().join(format!("aura-callback-test2-{}", name));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+    // Create MockRuntimeBridge for testing
+    let mock_bridge = Arc::new(MockRuntimeBridge::new());
+    let app_core =
+        AppCore::with_runtime(AppConfig::default(), mock_bridge).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
     let initialized_app_core = InitializedAppCore::new(app_core.clone())
         .await
@@ -74,6 +78,11 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     ctx.create_account(&format!("TestUser-{}", name))
         .await
         .expect("Failed to create account");
+
+    // Refresh settings from mock runtime to populate signal
+    aura_app::workflows::settings::refresh_settings_from_runtime(&app_core)
+        .await
+        .expect("Failed to refresh settings from runtime");
 
     (Arc::new(ctx), app_core)
 }
@@ -118,7 +127,6 @@ fn cleanup_test_dir(name: &str) {
 /// 2. Code has correct format (aura:v1: prefix)
 /// 3. Invitation ID is preserved
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_invitation_export_produces_valid_code() {
     println!("\n=== Invitation Export Produces Valid Code Test ===\n");
 
@@ -172,7 +180,6 @@ async fn test_invitation_export_produces_valid_code() {
 /// 2. Import parses the code correctly
 /// 3. Invitation ID is preserved through round-trip
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_invitation_roundtrip_preserves_data() {
     println!("\n=== Invitation Roundtrip Preserves Data Test ===\n");
 
@@ -505,7 +512,6 @@ async fn test_peer_management_operations() {
 /// 2. Sync status signal updates appropriately
 /// 3. Sync completes (even in offline/demo mode)
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_force_sync_updates_status() {
     println!("\n=== Force Sync Updates Status Test ===\n");
 
@@ -688,7 +694,6 @@ async fn test_steward_grant_revoke_operations() {
 /// 2. Admin commands may require elevated privileges
 /// 3. Authorization errors are properly returned
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_command_authorization_levels() {
     println!("\n=== Command Authorization Levels Test ===\n");
 
@@ -874,14 +879,12 @@ async fn test_all_snapshots_consistent() {
 
 /// Test complete DM flow: start chat -> send messages -> verify
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_complete_dm_flow() {
     println!("\n=== Complete DM Flow Test ===\n");
 
     let (ctx, app_core) = setup_test_env("dm-flow").await;
 
     let contact_id = "alice-for-dm";
-    let dm_channel_id = format!("dm:{}", contact_id);
 
     // Phase 1: Start direct chat
     println!("Phase 1: Start direct chat with Alice");
@@ -918,18 +921,17 @@ async fn test_complete_dm_flow() {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
 
-        // Find DM channel
-        let dm_channel = chat
-            .channels
-            .iter()
-            .find(|c| c.id.to_string() == dm_channel_id);
+        // Find DM channel by is_dm flag (not by ID string format)
+        let dm_channel = chat.channels.iter().find(|c| c.is_dm);
         assert!(dm_channel.is_some(), "DM channel should exist");
+        let dm_channel = dm_channel.unwrap();
+        let dm_channel_id = dm_channel.id;
 
         // Count messages in DM channel
         let dm_messages: Vec<_> = chat
             .messages
             .iter()
-            .filter(|m| m.channel_id.to_string() == dm_channel_id)
+            .filter(|m| m.channel_id == dm_channel_id)
             .collect();
         assert_eq!(dm_messages.len(), 2, "Should have 2 messages in DM");
 
@@ -956,7 +958,6 @@ async fn test_complete_dm_flow() {
 
 /// Test complete sync flow: force sync -> check status -> verify completion
 #[tokio::test]
-#[ignore = "Requires RuntimeBridge"]
 async fn test_complete_sync_flow() {
     println!("\n=== Complete Sync Flow Test ===\n");
 

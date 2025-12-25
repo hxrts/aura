@@ -29,6 +29,9 @@ aura-social = { path = "../aura-social" }
 aura-transport = { path = "../aura-transport" }
 aura-wot = { path = "../aura-wot" }
 
+# App core for RuntimeBridge trait and types
+aura-app = { path = "../aura-app" }
+
 # Optional: Full effect system from Layer 6 (only for higher-layer tests)
 aura-agent = { path = "../aura-agent", optional = true }
 
@@ -61,6 +64,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
+base64 = { workspace = true }
 
 # Property testing
 proptest = { workspace = true }
