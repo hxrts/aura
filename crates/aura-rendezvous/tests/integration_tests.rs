@@ -102,77 +102,6 @@ fn test_descriptor_publication_flow() {
     assert!(has_append, "Should include journal append");
 }
 
-#[test]
-fn test_descriptor_caching_and_lookup() {
-    let alice = test_authority(1);
-    let bob = test_authority(2);
-    let context = test_context(100);
-
-    let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
-
-    // Create Bob's descriptor
-    let bob_descriptor = test_descriptor(bob, context);
-
-    // Cache it
-    service.cache_descriptor(bob_descriptor.clone());
-
-    // Lookup should succeed
-    let cached = service.get_cached_descriptor(context, bob);
-    assert!(cached.is_some());
-    assert_eq!(cached.unwrap().authority_id, bob);
-
-    // Lookup for unknown peer should fail
-    let unknown = test_authority(99);
-    let not_cached = service.get_cached_descriptor(context, unknown);
-    assert!(not_cached.is_none());
-}
-
-#[test]
-fn test_descriptor_expiry_and_pruning() {
-    let alice = test_authority(1);
-    let bob = test_authority(2);
-    let context = test_context(100);
-
-    let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
-
-    // Create descriptor valid until time 1000
-    let mut descriptor = test_descriptor(bob, context);
-    descriptor.valid_until = 1000;
-
-    service.cache_descriptor(descriptor);
-
-    // At time 500, should still be cached
-    service.prune_expired_descriptors(500);
-    assert!(service.get_cached_descriptor(context, bob).is_some());
-
-    // At time 1500, should be pruned
-    service.prune_expired_descriptors(1500);
-    assert!(service.get_cached_descriptor(context, bob).is_none());
-}
-
-#[test]
-fn test_descriptor_refresh_detection() {
-    let alice = test_authority(1);
-    let context = test_context(100);
-
-    let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
-
-    // Create Alice's own descriptor valid until 10000
-    let mut descriptor = test_descriptor(alice, context);
-    descriptor.valid_until = 10_000;
-
-    service.cache_descriptor(descriptor);
-
-    // With 2000ms refresh window, should NOT need refresh at time 7000
-    // (10000 - 2000 = 8000 threshold)
-    assert!(!service.needs_refresh(context, 7000, 2000));
-
-    // Should need refresh at time 8500 (past threshold)
-    assert!(service.needs_refresh(context, 8500, 2000));
-}
 
 // =============================================================================
 // Channel Establishment Tests
@@ -186,17 +115,15 @@ fn test_channel_establishment_flow() {
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
+    let service = RendezvousService::new(alice, config);
 
-    // Cache Bob's descriptor first
     let bob_descriptor = test_descriptor(bob, context);
-    service.cache_descriptor(bob_descriptor);
 
     let snapshot = test_snapshot(alice, context);
 
     // Act: Prepare channel establishment
     let outcome = service
-        .prepare_establish_channel(&snapshot, context, bob, &psk)
+        .prepare_establish_channel(&snapshot, context, bob, &psk, 1000, &bob_descriptor)
         .unwrap();
 
     // Assert: Should be allowed
@@ -221,11 +148,46 @@ fn test_channel_establishment_requires_descriptor() {
     let service = RendezvousService::new(alice, config);
 
     let snapshot = test_snapshot(alice, context);
+    let other_context = test_context(101);
+    let mismatched_descriptor = test_descriptor(bob, other_context);
 
-    // Try to establish channel without Bob's descriptor cached
-    let result = service.prepare_establish_channel(&snapshot, context, bob, &psk);
+    let result = service.prepare_establish_channel(
+        &snapshot,
+        context,
+        bob,
+        &psk,
+        1000,
+        &mismatched_descriptor,
+    );
 
     // Should fail - no descriptor
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_channel_establishment_rejects_expired_descriptor() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
+    let psk = [42u8; 32];
+
+    let config = RendezvousConfig::default();
+    let service = RendezvousService::new(alice, config);
+
+    let snapshot = test_snapshot(alice, context);
+
+    let mut expired_descriptor = test_descriptor(bob, context);
+    expired_descriptor.valid_until = 900;
+
+    let result = service.prepare_establish_channel(
+        &snapshot,
+        context,
+        bob,
+        &psk,
+        1000,
+        &expired_descriptor,
+    );
+
     assert!(result.is_err());
 }
 
@@ -292,14 +254,10 @@ fn test_handshake_psk_mismatch_detection() {
     let context = test_context(100);
 
     let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(bob, config);
+    let service = RendezvousService::new(bob, config);
 
     // Bob's expected PSK
     let expected_psk = [42u8; 32];
-
-    // Create Bob's descriptor and cache it
-    let bob_descriptor = test_descriptor(bob, context);
-    service.cache_descriptor(bob_descriptor);
 
     let snapshot = test_snapshot(bob, context);
 
@@ -428,16 +386,15 @@ fn test_missing_capability_blocks_connect() {
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
-
-    // Cache Bob's descriptor
-    service.cache_descriptor(test_descriptor(bob, context));
+    let service = RendezvousService::new(alice, config);
+    let bob_descriptor = test_descriptor(bob, context);
 
     // Snapshot WITHOUT connect capability
     let mut snapshot = test_snapshot(alice, context);
     snapshot.capabilities = vec![guards::CAP_RENDEZVOUS_PUBLISH.to_string()]; // Only publish
 
-    let result = service.prepare_establish_channel(&snapshot, context, bob, &psk);
+    let result =
+        service.prepare_establish_channel(&snapshot, context, bob, &psk, 1000, &bob_descriptor);
 
     // Should be denied
     assert!(result.is_ok());
@@ -463,7 +420,7 @@ fn test_complete_discovery_to_channel_flow() {
 
     // Both create services
     let config = RendezvousConfig::default();
-    let mut alice_service = RendezvousService::new(alice, config.clone());
+    let alice_service = RendezvousService::new(alice, config.clone());
     let bob_service = RendezvousService::new(bob, config);
 
     // Step 1: Bob publishes his descriptor
@@ -477,12 +434,11 @@ fn test_complete_discovery_to_channel_flow() {
 
     // Step 2: Alice receives Bob's descriptor (simulated journal sync)
     let bob_descriptor = test_descriptor(bob, context);
-    alice_service.cache_descriptor(bob_descriptor);
 
     // Step 3: Alice initiates channel establishment
     let alice_snapshot = test_snapshot(alice, context);
     let establish_outcome = alice_service
-        .prepare_establish_channel(&alice_snapshot, context, bob, &psk)
+        .prepare_establish_channel(&alice_snapshot, context, bob, &psk, 1000, &bob_descriptor)
         .unwrap();
     assert!(matches!(establish_outcome.decision, GuardDecision::Allow));
 
@@ -534,54 +490,6 @@ fn test_complete_discovery_to_channel_flow() {
     assert!(bob_channels.find_by_context_peer(context, alice).is_some());
 }
 
-#[test]
-fn test_multi_context_isolation() {
-    let alice = test_authority(1);
-    let bob = test_authority(2);
-    let context1 = test_context(100);
-    let context2 = test_context(200);
-
-    let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
-
-    // Bob's descriptor for context1
-    let mut bob_desc1 = test_descriptor(bob, context1);
-    bob_desc1.transport_hints = vec![TransportHint::QuicDirect {
-        addr: "10.0.0.1:8443".to_string(),
-    }];
-
-    // Bob's descriptor for context2
-    let mut bob_desc2 = test_descriptor(bob, context2);
-    bob_desc2.transport_hints = vec![TransportHint::QuicDirect {
-        addr: "10.0.0.2:9443".to_string(),
-    }];
-
-    service.cache_descriptor(bob_desc1);
-    service.cache_descriptor(bob_desc2);
-
-    // Should find correct descriptor per context
-    let found1 = service.get_cached_descriptor(context1, bob).unwrap();
-    let found2 = service.get_cached_descriptor(context2, bob).unwrap();
-
-    assert_eq!(
-        found1.transport_hints[0],
-        TransportHint::QuicDirect {
-            addr: "10.0.0.1:8443".to_string()
-        }
-    );
-    assert_eq!(
-        found2.transport_hints[0],
-        TransportHint::QuicDirect {
-            addr: "10.0.0.2:9443".to_string()
-        }
-    );
-
-    // Cross-context lookup should fail
-    let unknown_context = test_context(99);
-    assert!(service
-        .get_cached_descriptor(unknown_context, bob)
-        .is_none());
-}
 
 // =============================================================================
 // Transport Selection Tests

@@ -159,6 +159,9 @@ pub struct RendezvousManager {
 
     /// LAN-discovered peers (authority_id -> DiscoveredPeer)
     lan_discovered_peers: Arc<RwLock<HashMap<AuthorityId, DiscoveredPeer>>>,
+
+    /// Cached peer descriptors by (context, authority)
+    descriptor_cache: Arc<RwLock<HashMap<(ContextId, AuthorityId), RendezvousDescriptor>>>,
 }
 
 impl RendezvousManager {
@@ -173,6 +176,7 @@ impl RendezvousManager {
             lan_discovery: Arc::new(RwLock::new(None)),
             lan_tasks: Arc::new(RwLock::new(None)),
             lan_discovered_peers: Arc::new(RwLock::new(HashMap::new())),
+            descriptor_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -259,9 +263,9 @@ impl RendezvousManager {
 
     /// Start the background cleanup task
     async fn start_cleanup_task(&self) {
-        let service = self.service.clone();
         let interval = self.config.cleanup_interval;
         let state = self.state.clone();
+        let descriptor_cache = self.descriptor_cache.clone();
         let clock = PhysicalTimeHandler::new();
 
         let handle = tokio::spawn(async move {
@@ -276,10 +280,11 @@ impl RendezvousManager {
                 }
 
                 // Perform cleanup
-                if let Some(ref mut svc) = *service.write().await {
-                    let now_ms = clock.physical_time_now_ms();
-                    svc.prune_expired_descriptors(now_ms);
-                }
+                let now_ms = clock.physical_time_now_ms();
+                descriptor_cache
+                    .write()
+                    .await
+                    .retain(|_, descriptor| descriptor.is_valid(now_ms));
             }
         });
 
@@ -328,9 +333,10 @@ impl RendezvousManager {
 
     /// Cache a peer's descriptor
     pub async fn cache_descriptor(&self, descriptor: RendezvousDescriptor) -> Result<(), String> {
-        let mut service = self.service.write().await;
-        let service = service.as_mut().ok_or("Rendezvous manager not started")?;
-        service.cache_descriptor(descriptor);
+        self.descriptor_cache
+            .write()
+            .await
+            .insert((descriptor.context_id, descriptor.authority_id), descriptor);
         Ok(())
     }
 
@@ -340,36 +346,43 @@ impl RendezvousManager {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> Option<RendezvousDescriptor> {
-        let service = self.service.read().await;
-        service
-            .as_ref()
-            .and_then(|s| s.get_cached_descriptor(context_id, peer).cloned())
+        self.descriptor_cache
+            .read()
+            .await
+            .get(&(context_id, peer))
+            .cloned()
     }
 
     /// Check if our descriptor needs refresh in a context
     pub async fn needs_refresh(&self, context_id: ContextId, now_ms: u64) -> bool {
-        let service = self.service.read().await;
-        service
-            .as_ref()
-            .map(|s| {
-                s.needs_refresh(
-                    context_id,
-                    now_ms,
-                    self.config.refresh_window.as_millis() as u64,
-                )
+        self.descriptor_cache
+            .read()
+            .await
+            .get(&(context_id, self.authority_id))
+            .map(|desc| {
+                let refresh_threshold = desc
+                    .valid_until
+                    .saturating_sub(self.config.refresh_window.as_millis() as u64);
+                now_ms >= refresh_threshold
             })
             .unwrap_or(true)
     }
 
     /// Get contexts needing descriptor refresh
     pub async fn contexts_needing_refresh(&self, now_ms: u64) -> Vec<ContextId> {
-        let service = self.service.read().await;
-        service
-            .as_ref()
-            .map(|s| {
-                s.contexts_needing_refresh(now_ms, self.config.refresh_window.as_millis() as u64)
+        let refresh_window_ms = self.config.refresh_window.as_millis() as u64;
+        self.descriptor_cache
+            .read()
+            .await
+            .iter()
+            .filter(|((_, auth), desc)| {
+                *auth == self.authority_id && {
+                    let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
+                    now_ms >= refresh_threshold
+                }
             })
-            .unwrap_or_default()
+            .map(|((ctx, _), _)| *ctx)
+            .collect()
     }
 
     // ========================================================================
@@ -382,13 +395,21 @@ impl RendezvousManager {
         context_id: ContextId,
         peer: AuthorityId,
         psk: &[u8; 32],
+        now_ms: u64,
         snapshot: &aura_rendezvous::GuardSnapshot,
     ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self.service.read().await;
         let service = service.as_ref().ok_or("Rendezvous manager not started")?;
+        let descriptor = self
+            .descriptor_cache
+            .read()
+            .await
+            .get(&(context_id, peer))
+            .cloned()
+            .ok_or("Peer descriptor not found in cache")?;
 
         service
-            .prepare_establish_channel(snapshot, context_id, peer, psk)
+            .prepare_establish_channel(snapshot, context_id, peer, psk, now_ms, &descriptor)
             .map_err(|e| format!("Failed to prepare channel: {e}"))
     }
 
@@ -433,20 +454,26 @@ impl RendezvousManager {
     /// Returns unique AuthorityIds for all peers with cached descriptors.
     /// Useful for peer discovery integration with sync.
     pub async fn list_cached_peers(&self) -> Vec<AuthorityId> {
-        let service = self.service.read().await;
-        service
-            .as_ref()
-            .map(|s| s.list_cached_peers())
-            .unwrap_or_default()
+        self.descriptor_cache
+            .read()
+            .await
+            .keys()
+            .filter(|(_, auth)| *auth != self.authority_id)
+            .map(|(_, auth)| *auth)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     /// List all cached peers for a specific context (excluding self)
     pub async fn list_cached_peers_for_context(&self, context_id: ContextId) -> Vec<AuthorityId> {
-        let service = self.service.read().await;
-        service
-            .as_ref()
-            .map(|s| s.list_cached_peers_for_context(context_id))
-            .unwrap_or_default()
+        self.descriptor_cache
+            .read()
+            .await
+            .keys()
+            .filter(|(ctx, auth)| *ctx == context_id && *auth != self.authority_id)
+            .map(|(_, auth)| *auth)
+            .collect()
     }
 
     // ========================================================================
@@ -471,7 +498,7 @@ impl RendezvousManager {
 
         // Set up callback to cache discovered peers
         let discovered_peers = self.lan_discovered_peers.clone();
-        let service = self.service.clone();
+        let descriptor_cache = self.descriptor_cache.clone();
 
         let (announcer_handle, listener_handle) = lan_service.start(move |peer: DiscoveredPeer| {
             let discovered_peers = discovered_peers.clone();
@@ -486,10 +513,14 @@ impl RendezvousManager {
                     peers.insert(peer_clone.authority_id, peer_clone.clone());
                 }
 
-                // Also cache the descriptor in the rendezvous service
-                if let Some(ref mut svc) = *service.write().await {
-                    svc.cache_descriptor(peer_clone.descriptor);
-                }
+                // Also cache the descriptor locally for rendezvous resolution.
+                descriptor_cache
+                    .write()
+                    .await
+                    .insert(
+                        (peer_clone.descriptor.context_id, peer_clone.descriptor.authority_id),
+                        peer_clone.descriptor,
+                    );
 
                 tracing::info!(
                     authority = %peer.authority_id,

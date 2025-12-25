@@ -309,6 +309,9 @@ impl FactReducer for InvitationFactReducer {
         }
 
         let fact: InvitationFact = serde_json::from_slice(binding_data).ok()?;
+        if fact.context_id() != context_id {
+            return None;
+        }
 
         let (sub_type, data) = match &fact {
             InvitationFact::Sent { invitation_id, .. } => (
@@ -431,6 +434,26 @@ mod tests {
             binding.binding_type,
             RelationalBindingType::Generic(ref s) if s == "invitation-sent"
         ));
+    }
+
+    #[test]
+    fn test_reducer_rejects_context_mismatch() {
+        let reducer = InvitationFactReducer;
+
+        let fact = InvitationFact::sent_ms(
+            test_context_id(),
+            "inv-789".to_string(),
+            test_authority_id(4),
+            test_authority_id(5),
+            "contact".to_string(),
+            0,
+            None,
+            None,
+        );
+
+        let other_context = ContextId::new_from_entropy([24u8; 32]);
+        let binding = reducer.reduce(other_context, INVITATION_FACT_TYPE_ID, &fact.to_bytes());
+        assert!(binding.is_none());
     }
 
     #[test]

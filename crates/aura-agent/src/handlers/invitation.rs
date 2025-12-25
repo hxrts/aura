@@ -8,7 +8,7 @@
 
 use super::invitation_bridge::execute_guard_outcome;
 use super::shared::{HandlerContext, HandlerUtilities};
-use crate::core::{AgentResult, AuthorityContext};
+use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::storage::StorageEffects;
 use aura_core::effects::RandomEffects;
@@ -192,6 +192,81 @@ impl InvitationHandler {
         )
     }
 
+    async fn validate_cached_invitation_accept(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &str,
+        now_ms: u64,
+    ) -> AgentResult<()> {
+        if let Some(invitation) = self
+            .get_invitation_with_storage(effects, invitation_id)
+            .await
+        {
+            if !invitation.is_pending() {
+                return Err(AgentError::invalid(format!(
+                    "Invitation {} is not pending (status: {:?})",
+                    invitation_id, invitation.status
+                )));
+            }
+
+            if invitation.is_expired(now_ms) {
+                return Err(AgentError::invalid(format!(
+                    "Invitation {} has expired",
+                    invitation_id
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn validate_cached_invitation_decline(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &str,
+    ) -> AgentResult<()> {
+        if let Some(invitation) = self
+            .get_invitation_with_storage(effects, invitation_id)
+            .await
+        {
+            if !invitation.is_pending() {
+                return Err(AgentError::invalid(format!(
+                    "Invitation {} is not pending (status: {:?})",
+                    invitation_id, invitation.status
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn validate_cached_invitation_cancel(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &str,
+    ) -> AgentResult<()> {
+        if let Some(invitation) = self
+            .get_invitation_with_storage(effects, invitation_id)
+            .await
+        {
+            if !invitation.is_pending() {
+                return Err(AgentError::invalid(format!(
+                    "Invitation {} is not pending (status: {:?})",
+                    invitation_id, invitation.status
+                )));
+            }
+
+            if invitation.sender_id != self.context.authority.authority_id {
+                return Err(AgentError::invalid(format!(
+                    "Only sender can cancel invitation {}",
+                    invitation_id
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Create an invitation
     pub async fn create_invitation(
         &self,
@@ -255,6 +330,10 @@ impl InvitationHandler {
         invitation_id: &str,
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
+
+        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        self.validate_cached_invitation_accept(effects, invitation_id, now_ms)
+            .await?;
 
         // Build snapshot and prepare through service
         let snapshot = self.build_snapshot(effects).await;
@@ -611,6 +690,9 @@ impl InvitationHandler {
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
+        self.validate_cached_invitation_decline(effects, invitation_id)
+            .await?;
+
         // Build snapshot and prepare through service
         let snapshot = self.build_snapshot(effects).await;
         let outcome = self
@@ -643,6 +725,9 @@ impl InvitationHandler {
         invitation_id: &str,
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
+
+        self.validate_cached_invitation_cancel(effects, invitation_id)
+            .await?;
 
         // Build snapshot and prepare through service
         let snapshot = self.build_snapshot(effects).await;

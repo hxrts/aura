@@ -55,7 +55,9 @@ pub struct ChannelResult {
 pub struct RendezvousHandler {
     context: HandlerContext,
     /// Inner rendezvous service for guard chain operations
-    service: Arc<RwLock<RendezvousService>>,
+    service: RendezvousService,
+    /// Cached peer descriptors by (context, authority)
+    descriptor_cache: Arc<RwLock<HashMap<(ContextId, AuthorityId), RendezvousDescriptor>>>,
     /// Pending channel establishments
     pending_channels: Arc<RwLock<HashMap<(ContextId, AuthorityId), PendingChannel>>>,
 }
@@ -79,7 +81,8 @@ impl RendezvousHandler {
 
         Ok(Self {
             context: HandlerContext::new(authority),
-            service: Arc::new(RwLock::new(service)),
+            service,
+            descriptor_cache: Arc::new(RwLock::new(HashMap::new())),
             pending_channels: Arc::new(RwLock::new(HashMap::new())),
         })
     }
@@ -129,10 +132,9 @@ impl RendezvousHandler {
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
         // Prepare the descriptor through the service
-        let outcome = {
-            let service = self.service.read().await;
-            service.prepare_publish_descriptor(&snapshot, context_id, transport_hints, current_time)
-        };
+        let outcome =
+            self.service
+                .prepare_publish_descriptor(&snapshot, context_id, transport_hints, current_time);
 
         // Check guard outcome and execute effects via the bridge
         if !outcome.decision.is_allowed() {
@@ -150,8 +152,8 @@ impl RendezvousHandler {
                 fact: RendezvousFact::Descriptor(desc),
             } = effect
             {
-                let mut service = self.service.write().await;
-                service.cache_descriptor(desc.clone());
+                let mut cache = self.descriptor_cache.write().await;
+                cache.insert((desc.context_id, desc.authority_id), desc.clone());
             }
         }
 
@@ -168,8 +170,8 @@ impl RendezvousHandler {
 
     /// Cache a peer's descriptor received via journal sync
     pub async fn cache_peer_descriptor(&self, descriptor: RendezvousDescriptor) {
-        let mut service = self.service.write().await;
-        service.cache_descriptor(descriptor);
+        let mut cache = self.descriptor_cache.write().await;
+        cache.insert((descriptor.context_id, descriptor.authority_id), descriptor);
     }
 
     /// Get a peer's cached descriptor
@@ -178,8 +180,8 @@ impl RendezvousHandler {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> Option<RendezvousDescriptor> {
-        let service = self.service.read().await;
-        service.get_cached_descriptor(context_id, peer).cloned()
+        let cache = self.descriptor_cache.read().await;
+        cache.get(&(context_id, peer)).cloned()
     }
 
     /// Check if our descriptor needs refresh
@@ -189,8 +191,14 @@ impl RendezvousHandler {
         now_ms: u64,
         refresh_window_ms: u64,
     ) -> bool {
-        let service = self.service.read().await;
-        service.needs_refresh(context_id, now_ms, refresh_window_ms)
+        let cache = self.descriptor_cache.read().await;
+        cache
+            .get(&(context_id, self.context.authority.authority_id))
+            .map(|desc| {
+                let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
+                now_ms >= refresh_threshold
+            })
+            .unwrap_or(true)
     }
 
     // ========================================================================
@@ -236,12 +244,23 @@ impl RendezvousHandler {
         psk[..16].copy_from_slice(psk_uuid.as_bytes());
 
         // Prepare channel establishment
-        let outcome = {
-            let service = self.service.read().await;
-            service
-                .prepare_establish_channel(&snapshot, context_id, peer, &psk)
-                .map_err(|e| AgentError::effects(format!("prepare channel failed: {e}")))?
-        };
+        let peer_descriptor = {
+            let cache = self.descriptor_cache.read().await;
+            cache.get(&(context_id, peer)).cloned()
+        }
+        .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
+
+        let outcome = self
+            .service
+            .prepare_establish_channel(
+                &snapshot,
+                context_id,
+                peer,
+                &psk,
+                current_time,
+                &peer_descriptor,
+            )
+            .map_err(|e| AgentError::effects(format!("prepare channel failed: {e}")))?;
 
         // Check guard outcome
         if !outcome.decision.is_allowed() {
@@ -299,10 +318,9 @@ impl RendezvousHandler {
         }
 
         // Create channel established fact
-        let fact = {
-            let service = self.service.read().await;
-            service.create_channel_established_fact(context_id, peer, channel_id, epoch)
-        };
+        let fact = self
+            .service
+            .create_channel_established_fact(context_id, peer, channel_id, epoch);
 
         // Journal the fact
         HandlerUtilities::append_generic_fact(
@@ -363,10 +381,9 @@ impl RendezvousHandler {
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
         // Prepare relay request
-        let outcome = {
-            let service = self.service.read().await;
-            service.prepare_relay_request(context_id, relay, target, &snapshot)
-        };
+        let outcome = self
+            .service
+            .prepare_relay_request(context_id, relay, target, &snapshot);
 
         if !outcome.decision.is_allowed() {
             return Ok(RendezvousResult {
@@ -410,8 +427,8 @@ impl RendezvousHandler {
 
     /// Cleanup expired descriptors
     pub async fn cleanup_expired(&self, now_ms: u64) {
-        let mut service = self.service.write().await;
-        service.prune_expired_descriptors(now_ms);
+        let mut cache = self.descriptor_cache.write().await;
+        cache.retain(|_, descriptor| descriptor.is_valid(now_ms));
     }
 }
 

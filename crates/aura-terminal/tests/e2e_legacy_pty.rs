@@ -3142,31 +3142,6 @@ async fn test_channel_mode_operations() {
     println!("\n=== Channel Mode Operations Test PASSED ===\n");
 }
 
-// NOTE: TopicModalState moved to state machine (pure view refactor)
-// These tests should be rewritten to use TuiState modal types
-#[tokio::test]
-#[ignore = "TopicModalState removed in pure view refactor - use TuiState.chat.topic_modal instead"]
-async fn test_topic_editing_ui() {
-    // Test body removed - TopicModalState is now in TuiState
-    // See state_machine::tests for modal state testing
-}
-
-// NOTE: ChannelInfoModalState moved to state machine (pure view refactor)
-#[tokio::test]
-#[ignore = "ChannelInfoModalState removed in pure view refactor - use TuiState.chat.info_modal instead"]
-async fn test_channel_info_modal_ui() {
-    // Test body removed - ChannelInfoModalState is now in TuiState
-    // See state_machine::tests for modal state testing
-}
-
-// NOTE: ChannelInfoModalState moved to state machine (pure view refactor)
-#[tokio::test]
-#[ignore = "ChannelInfoModalState removed in pure view refactor - use TuiState.chat.info_modal instead"]
-async fn test_participant_management() {
-    // Test body removed - ChannelInfoModalState is now in TuiState
-    // See state_machine::tests for modal state testing
-}
-
 #[tokio::test]
 async fn test_request_state_sync() {
     use aura_terminal::tui::effects::EffectCommand;

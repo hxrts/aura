@@ -25,7 +25,6 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 // =============================================================================
 // Service Configuration
@@ -202,8 +201,6 @@ pub struct InvitationService {
     authority_id: AuthorityId,
     /// Service configuration
     config: InvitationConfig,
-    /// Cached invitations by invitation_id
-    invitation_cache: HashMap<String, Invitation>,
 }
 
 impl InvitationService {
@@ -212,7 +209,6 @@ impl InvitationService {
         Self {
             authority_id,
             config,
-            invitation_cache: HashMap::new(),
         }
     }
 
@@ -341,21 +337,6 @@ impl InvitationService {
             return outcome;
         }
 
-        // Check if invitation exists and is pending
-        if let Some(invitation) = self.invitation_cache.get(invitation_id) {
-            if !invitation.is_pending() {
-                return GuardOutcome::denied(format!(
-                    "Invitation {} is not pending (status: {:?})",
-                    invitation_id, invitation.status
-                ));
-            }
-
-            if invitation.is_expired(snapshot.now_ms) {
-                return GuardOutcome::denied(format!("Invitation {} has expired", invitation_id));
-            }
-        }
-        // Note: If not in cache, we allow the operation and let journal validation handle it
-
         // Create acceptance fact
         let fact = InvitationFact::Accepted {
             invitation_id: invitation_id.to_string(),
@@ -401,16 +382,6 @@ impl InvitationService {
         // Check flow budget
         if let Some(outcome) = check_flow_budget(snapshot, costs::INVITATION_DECLINE_COST) {
             return outcome;
-        }
-
-        // Check if invitation exists and is pending
-        if let Some(invitation) = self.invitation_cache.get(invitation_id) {
-            if !invitation.is_pending() {
-                return GuardOutcome::denied(format!(
-                    "Invitation {} is not pending (status: {:?})",
-                    invitation_id, invitation.status
-                ));
-            }
         }
 
         // Create decline fact
@@ -460,23 +431,6 @@ impl InvitationService {
             return outcome;
         }
 
-        // Check if invitation exists, is pending, and sender matches
-        if let Some(invitation) = self.invitation_cache.get(invitation_id) {
-            if !invitation.is_pending() {
-                return GuardOutcome::denied(format!(
-                    "Invitation {} is not pending (status: {:?})",
-                    invitation_id, invitation.status
-                ));
-            }
-
-            if invitation.sender_id != snapshot.authority_id {
-                return GuardOutcome::denied(format!(
-                    "Only sender can cancel invitation {}",
-                    invitation_id
-                ));
-            }
-        }
-
         // Create cancellation fact
         let fact = InvitationFact::Cancelled {
             invitation_id: invitation_id.to_string(),
@@ -502,67 +456,6 @@ impl InvitationService {
         GuardOutcome::allowed(effects)
     }
 
-    // =========================================================================
-    // Cache Management
-    // =========================================================================
-
-    /// Cache an invitation
-    pub fn cache_invitation(&mut self, invitation: Invitation) {
-        self.invitation_cache
-            .insert(invitation.invitation_id.clone(), invitation);
-    }
-
-    /// Get a cached invitation
-    pub fn get_cached_invitation(&self, invitation_id: &str) -> Option<&Invitation> {
-        self.invitation_cache.get(invitation_id)
-    }
-
-    /// Update invitation status in cache
-    pub fn update_invitation_status(&mut self, invitation_id: &str, status: InvitationStatus) {
-        if let Some(invitation) = self.invitation_cache.get_mut(invitation_id) {
-            invitation.status = status;
-        }
-    }
-
-    /// Remove expired invitations from cache
-    pub fn prune_expired_invitations(&mut self, now_ms: u64) {
-        self.invitation_cache
-            .retain(|_, inv| !inv.is_expired(now_ms));
-    }
-
-    /// List pending invitations from cache
-    pub fn list_pending_invitations(&self) -> Vec<&Invitation> {
-        self.invitation_cache
-            .values()
-            .filter(|inv| inv.is_pending())
-            .collect()
-    }
-
-    /// List invitations where current authority is the receiver
-    pub fn list_received_invitations(&self) -> Vec<&Invitation> {
-        self.invitation_cache
-            .values()
-            .filter(|inv| inv.receiver_id == self.authority_id)
-            .collect()
-    }
-
-    /// List invitations where current authority is the sender
-    pub fn list_sent_invitations(&self) -> Vec<&Invitation> {
-        self.invitation_cache
-            .values()
-            .filter(|inv| inv.sender_id == self.authority_id)
-            .collect()
-    }
-
-    /// Clear all cached invitations
-    pub fn clear_cache(&mut self) {
-        self.invitation_cache.clear();
-    }
-
-    /// Get count of cached invitations
-    pub fn cache_size(&self) -> usize {
-        self.invitation_cache.len()
-    }
 }
 
 // =============================================================================
@@ -719,124 +612,6 @@ mod tests {
 
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 3);
-    }
-
-    #[test]
-    fn test_cache_invitation() {
-        let mut service = InvitationService::new(test_authority(), InvitationConfig::default());
-
-        let invitation = Invitation {
-            invitation_id: "inv-123".to_string(),
-            context_id: test_context(),
-            sender_id: test_authority(),
-            receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { nickname: None },
-            status: InvitationStatus::Pending,
-            created_at: 1000,
-            expires_at: Some(2000),
-            message: None,
-        };
-
-        service.cache_invitation(invitation);
-
-        let cached = service.get_cached_invitation("inv-123");
-        assert!(cached.is_some());
-        assert_eq!(cached.unwrap().invitation_id, "inv-123");
-    }
-
-    #[test]
-    fn test_prune_expired_invitations() {
-        let mut service = InvitationService::new(test_authority(), InvitationConfig::default());
-
-        // Add an expired invitation
-        service.cache_invitation(Invitation {
-            invitation_id: "inv-expired".to_string(),
-            context_id: test_context(),
-            sender_id: test_authority(),
-            receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { nickname: None },
-            status: InvitationStatus::Pending,
-            created_at: 500,
-            expires_at: Some(1000),
-            message: None,
-        });
-
-        // Add a valid invitation
-        service.cache_invitation(Invitation {
-            invitation_id: "inv-valid".to_string(),
-            context_id: test_context(),
-            sender_id: test_authority(),
-            receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { nickname: None },
-            status: InvitationStatus::Pending,
-            created_at: 500,
-            expires_at: Some(3000),
-            message: None,
-        });
-
-        assert_eq!(service.cache_size(), 2);
-
-        // Prune at time 1500 (first is expired, second is valid)
-        service.prune_expired_invitations(1500);
-
-        assert_eq!(service.cache_size(), 1);
-        assert!(service.get_cached_invitation("inv-expired").is_none());
-        assert!(service.get_cached_invitation("inv-valid").is_some());
-    }
-
-    #[test]
-    fn test_list_pending_invitations() {
-        let mut service = InvitationService::new(test_authority(), InvitationConfig::default());
-
-        service.cache_invitation(Invitation {
-            invitation_id: "inv-pending".to_string(),
-            context_id: test_context(),
-            sender_id: test_authority(),
-            receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { nickname: None },
-            status: InvitationStatus::Pending,
-            created_at: 1000,
-            expires_at: None,
-            message: None,
-        });
-
-        service.cache_invitation(Invitation {
-            invitation_id: "inv-accepted".to_string(),
-            context_id: test_context(),
-            sender_id: test_authority(),
-            receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { nickname: None },
-            status: InvitationStatus::Accepted,
-            created_at: 1000,
-            expires_at: None,
-            message: None,
-        });
-
-        let pending = service.list_pending_invitations();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].invitation_id, "inv-pending");
-    }
-
-    #[test]
-    fn test_update_invitation_status() {
-        let mut service = InvitationService::new(test_authority(), InvitationConfig::default());
-
-        service.cache_invitation(Invitation {
-            invitation_id: "inv-123".to_string(),
-            context_id: test_context(),
-            sender_id: test_authority(),
-            receiver_id: test_receiver(),
-            invitation_type: InvitationType::Contact { nickname: None },
-            status: InvitationStatus::Pending,
-            created_at: 1000,
-            expires_at: None,
-            message: None,
-        });
-
-        service.update_invitation_status("inv-123", InvitationStatus::Accepted);
-
-        let cached = service.get_cached_invitation("inv-123").unwrap();
-        assert_eq!(cached.status, InvitationStatus::Accepted);
     }
 
     #[test]

@@ -1,42 +1,9 @@
-//! Integration test for ProductionEffectInterpreter
-//!
-//! This test demonstrates using the ProductionEffectInterpreter with mock effect handlers.
+//! Integration test for guard effect types
 
 use aura_core::{
     effects::guard::{EffectCommand, GuardOutcome},
     identifiers::{AuthorityId, ContextId},
 };
-
-// Mock trait implementations would go here...
-// (Omitted for brevity - in real code you'd implement all the trait methods)
-
-#[tokio::test]
-#[ignore = "Requires mock implementations"]
-async fn test_production_interpreter_basic() {
-    // This test is a placeholder to show the structure
-    // In a real implementation, you'd provide proper mock handlers
-
-    // Test that we can create the interpreter
-    // let interpreter = ProductionEffectInterpreter::new(
-    //     Arc::new(MockJournal),
-    //     Arc::new(MockFlowBudget),
-    //     Arc::new(MockLeakage),
-    //     Arc::new(MockStorage),
-    //     Arc::new(MockNetwork),
-    //     Arc::new(MockRandom),
-    //     authority,
-    // );
-
-    // Test executing a simple command
-    // let cmd = EffectCommand::GenerateNonce { bytes: 32 };
-    // let result = interpreter.execute(cmd).await.unwrap();
-
-    // Verify result
-    // match result {
-    //     EffectResult::Nonce(nonce) => assert_eq!(nonce.len(), 32),
-    //     _ => panic!("Expected nonce result"),
-    // }
-}
 
 #[test]
 fn test_guard_outcome_creation() {

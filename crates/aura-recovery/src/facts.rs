@@ -669,6 +669,9 @@ impl FactReducer for RecoveryFactReducer {
         }
 
         let fact: RecoveryFact = serde_json::from_slice(binding_data).ok()?;
+        if fact.context_id() != context_id {
+            return None;
+        }
         let sub_type = fact.sub_type().to_string();
 
         // For the binding data, we include key identifiers based on fact type
@@ -903,6 +906,21 @@ mod tests {
             binding.binding_type,
             RelationalBindingType::Generic(ref s) if s == "guardian-accepted"
         ));
+    }
+
+    #[test]
+    fn test_reducer_rejects_context_mismatch() {
+        let reducer = RecoveryFactReducer;
+
+        let fact = RecoveryFact::GuardianAccepted {
+            context_id: test_context_id(),
+            guardian_id: test_authority_id(5),
+            accepted_at: pt(1234567890),
+        };
+
+        let other_context = ContextId::new_from_entropy([7u8; 32]);
+        let binding = reducer.reduce(other_context, RECOVERY_FACT_TYPE_ID, &fact.to_bytes());
+        assert!(binding.is_none());
     }
 
     #[test]

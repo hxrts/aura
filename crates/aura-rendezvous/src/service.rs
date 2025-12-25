@@ -11,7 +11,6 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
 use aura_protocol::guards::types;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 
 /// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
 fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
@@ -145,8 +144,6 @@ pub struct RendezvousService {
     transport_selector: TransportSelector,
     /// Descriptor builder
     descriptor_builder: DescriptorBuilder,
-    /// Cached peer descriptors by (context, authority)
-    descriptor_cache: HashMap<(ContextId, AuthorityId), RendezvousDescriptor>,
 }
 
 impl RendezvousService {
@@ -164,7 +161,6 @@ impl RendezvousService {
             config,
             transport_selector,
             descriptor_builder,
-            descriptor_cache: HashMap::new(),
         }
     }
 
@@ -262,14 +258,16 @@ impl RendezvousService {
 
     /// Prepare to establish a channel with a peer.
     ///
-    /// This queries the peer's descriptor from the cache, selects a transport,
-    /// and prepares the handshake initiation.
+    /// This selects a transport based on the provided descriptor and prepares
+    /// the handshake initiation.
     pub fn prepare_establish_channel(
         &self,
         snapshot: &GuardSnapshot,
         context_id: ContextId,
         peer: AuthorityId,
         psk: &[u8; 32],
+        now_ms: u64,
+        peer_descriptor: &RendezvousDescriptor,
     ) -> AuraResult<GuardOutcome> {
         // Check capability
         if let Some(outcome) = types::check_capability(snapshot, guards::CAP_RENDEZVOUS_CONNECT) {
@@ -281,14 +279,17 @@ impl RendezvousService {
             return Ok(outcome);
         }
 
-        // Get peer descriptor from cache
-        let descriptor = self
-            .descriptor_cache
-            .get(&(context_id, peer))
-            .ok_or_else(|| AuraError::not_found("Peer descriptor not found in cache"))?;
+        if peer_descriptor.context_id != context_id || peer_descriptor.authority_id != peer {
+            return Err(AuraError::invalid(
+                "Peer descriptor does not match context or peer",
+            ));
+        }
+        if !peer_descriptor.is_valid(now_ms) {
+            return Err(AuraError::invalid("Peer descriptor is expired or not yet valid"));
+        }
 
         // Select transport
-        let _transport = self.transport_selector.select(descriptor)?;
+        let _transport = self.transport_selector.select(peer_descriptor)?;
 
         // Compute PSK commitment
         let psk_commitment = compute_psk_commitment(psk);
@@ -423,99 +424,6 @@ impl RendezvousService {
         }
 
         GuardOutcome::allowed(effects)
-    }
-
-    // =========================================================================
-    // Descriptor Cache Management
-    // =========================================================================
-
-    /// Cache a peer's descriptor
-    pub fn cache_descriptor(&mut self, descriptor: RendezvousDescriptor) {
-        let context_id = descriptor.context_id;
-        let authority_id = descriptor.authority_id;
-        self.descriptor_cache
-            .insert((context_id, authority_id), descriptor);
-    }
-
-    /// Get a cached descriptor
-    pub fn get_cached_descriptor(
-        &self,
-        context_id: ContextId,
-        peer: AuthorityId,
-    ) -> Option<&RendezvousDescriptor> {
-        self.descriptor_cache.get(&(context_id, peer))
-    }
-
-    /// Remove expired descriptors from cache
-    pub fn prune_expired_descriptors(&mut self, now_ms: u64) {
-        self.descriptor_cache
-            .retain(|_, descriptor| descriptor.is_valid(now_ms));
-    }
-
-    /// Get all descriptors for a context that need refresh
-    pub fn descriptors_needing_refresh(
-        &self,
-        context_id: ContextId,
-        now_ms: u64,
-    ) -> Vec<AuthorityId> {
-        self.descriptor_cache
-            .iter()
-            .filter(|((ctx, _), desc)| *ctx == context_id && desc.needs_refresh(now_ms))
-            .map(|((_, auth), _)| *auth)
-            .collect()
-    }
-
-    /// Check if our descriptor for a context needs refresh
-    pub fn needs_refresh(
-        &self,
-        context_id: ContextId,
-        now_ms: u64,
-        refresh_window_ms: u64,
-    ) -> bool {
-        self.descriptor_cache
-            .get(&(context_id, self.authority_id))
-            .map(|desc| {
-                let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
-                now_ms >= refresh_threshold
-            })
-            .unwrap_or(true) // No descriptor = needs refresh
-    }
-
-    /// Get all contexts where our descriptor needs refresh
-    pub fn contexts_needing_refresh(&self, now_ms: u64, refresh_window_ms: u64) -> Vec<ContextId> {
-        self.descriptor_cache
-            .iter()
-            .filter(|((_, auth), desc)| {
-                *auth == self.authority_id && {
-                    let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
-                    now_ms >= refresh_threshold
-                }
-            })
-            .map(|((ctx, _), _)| *ctx)
-            .collect()
-    }
-
-    /// List all cached peer authorities (excluding self)
-    ///
-    /// Returns unique AuthorityIds for all peers with cached descriptors.
-    /// Useful for peer discovery integration with sync.
-    pub fn list_cached_peers(&self) -> Vec<AuthorityId> {
-        self.descriptor_cache
-            .keys()
-            .filter(|(_, auth)| *auth != self.authority_id)
-            .map(|(_, auth)| *auth)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect()
-    }
-
-    /// List all cached peers for a specific context (excluding self)
-    pub fn list_cached_peers_for_context(&self, context_id: ContextId) -> Vec<AuthorityId> {
-        self.descriptor_cache
-            .keys()
-            .filter(|(ctx, auth)| *ctx == context_id && *auth != self.authority_id)
-            .map(|(_, auth)| *auth)
-            .collect()
     }
 
     /// Create a channel established fact
@@ -685,58 +593,6 @@ mod tests {
         assert!(outcome.decision.is_denied());
     }
 
-    #[test]
-    fn test_descriptor_cache() {
-        let mut service = RendezvousService::new(test_authority(), RendezvousConfig::default());
-        let peer = AuthorityId::new_from_entropy([3u8; 32]);
-
-        let descriptor = RendezvousDescriptor {
-            authority_id: peer,
-            context_id: test_context(),
-            transport_hints: vec![],
-            handshake_psk_commitment: [0u8; 32],
-            valid_from: 0,
-            valid_until: 2000,
-            nonce: [0u8; 32],
-            display_name: None,
-        };
-
-        service.cache_descriptor(descriptor);
-
-        let cached = service.get_cached_descriptor(test_context(), peer);
-        assert!(cached.is_some());
-    }
-
-    #[test]
-    fn test_prune_expired_descriptors() {
-        let mut service = RendezvousService::new(test_authority(), RendezvousConfig::default());
-        let peer = AuthorityId::new_from_entropy([3u8; 32]);
-
-        let descriptor = RendezvousDescriptor {
-            authority_id: peer,
-            context_id: test_context(),
-            transport_hints: vec![],
-            handshake_psk_commitment: [0u8; 32],
-            valid_from: 0,
-            valid_until: 1000,
-            nonce: [0u8; 32],
-            display_name: None,
-        };
-
-        service.cache_descriptor(descriptor);
-
-        // At time 500, descriptor is still valid
-        service.prune_expired_descriptors(500);
-        assert!(service
-            .get_cached_descriptor(test_context(), peer)
-            .is_some());
-
-        // At time 1500, descriptor is expired
-        service.prune_expired_descriptors(1500);
-        assert!(service
-            .get_cached_descriptor(test_context(), peer)
-            .is_none());
-    }
 
     #[test]
     fn test_psk_commitment() {
@@ -820,31 +676,4 @@ mod tests {
         assert!(outcome.decision.is_denied());
     }
 
-    #[test]
-    fn test_descriptors_needing_refresh() {
-        let mut service = RendezvousService::new(test_authority(), RendezvousConfig::default());
-        let peer = AuthorityId::new_from_entropy([3u8; 32]);
-
-        let descriptor = RendezvousDescriptor {
-            authority_id: peer,
-            context_id: test_context(),
-            transport_hints: vec![],
-            handshake_psk_commitment: [0u8; 32],
-            valid_from: 0,
-            valid_until: 1000,
-            nonce: [0u8; 32],
-            display_name: None,
-        };
-
-        service.cache_descriptor(descriptor);
-
-        // At time 800, we're within 10% of expiry (threshold is 900)
-        let needing_refresh = service.descriptors_needing_refresh(test_context(), 800);
-        assert!(needing_refresh.is_empty());
-
-        // At time 910, we need refresh
-        let needing_refresh = service.descriptors_needing_refresh(test_context(), 910);
-        assert_eq!(needing_refresh.len(), 1);
-        assert_eq!(needing_refresh[0], peer);
-    }
 }

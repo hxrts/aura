@@ -339,6 +339,56 @@ impl AuthFact {
             AuthFact::RecoveryFailed { context_id, .. } => *context_id,
         }
     }
+
+    /// Derive the relational binding subtype and key data for this fact.
+    pub fn binding_key(&self) -> (String, Vec<u8>) {
+        match self {
+            AuthFact::ChallengeGenerated { session_id, .. } => (
+                "auth-challenge-generated".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::ProofSubmitted { session_id, .. } => (
+                "auth-proof-submitted".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::AuthVerified { session_id, .. } => (
+                "auth-verified".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::AuthFailed { session_id, .. } => (
+                "auth-failed".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::SessionIssued { session_id, .. } => (
+                "auth-session-issued".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::SessionRevoked { session_id, .. } => (
+                "auth-session-revoked".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::GuardianApprovalRequested { request_id, .. } => (
+                "auth-guardian-approval-requested".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+            AuthFact::GuardianApproved { request_id, .. } => (
+                "auth-guardian-approved".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+            AuthFact::GuardianDenied { request_id, .. } => (
+                "auth-guardian-denied".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+            AuthFact::RecoveryCompleted { request_id, .. } => (
+                "auth-recovery-completed".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+            AuthFact::RecoveryFailed { request_id, .. } => (
+                "auth-recovery-failed".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+        }
+    }
 }
 
 // =============================================================================
@@ -469,53 +519,11 @@ impl FactReducer for AuthFactReducer {
         }
 
         let fact: AuthFact = serde_json::from_slice(binding_data).ok()?;
+        if fact.context_id() != context_id {
+            return None;
+        }
 
-        let (sub_type, data) = match &fact {
-            AuthFact::ChallengeGenerated { session_id, .. } => (
-                "auth-challenge-generated".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::ProofSubmitted { session_id, .. } => (
-                "auth-proof-submitted".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::AuthVerified { session_id, .. } => (
-                "auth-verified".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::AuthFailed { session_id, .. } => (
-                "auth-failed".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::SessionIssued { session_id, .. } => (
-                "auth-session-issued".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::SessionRevoked { session_id, .. } => (
-                "auth-session-revoked".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::GuardianApprovalRequested { request_id, .. } => (
-                "auth-guardian-approval-requested".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
-            AuthFact::GuardianApproved { request_id, .. } => (
-                "auth-guardian-approved".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
-            AuthFact::GuardianDenied { request_id, .. } => (
-                "auth-guardian-denied".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
-            AuthFact::RecoveryCompleted { request_id, .. } => (
-                "auth-recovery-completed".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
-            AuthFact::RecoveryFailed { request_id, .. } => (
-                "auth-recovery-failed".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
-        };
+        let (sub_type, data) = fact.binding_key();
 
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(sub_type),
@@ -695,6 +703,7 @@ mod tests {
     #[test]
     fn test_fact_serialization() {
         let fact = AuthFact::ChallengeGenerated {
+            context_id: test_context_id(),
             session_id: "session_123".to_string(),
             authority_id: test_authority(),
             device_id: None,
@@ -710,5 +719,39 @@ mod tests {
         // Compare session IDs since AuthFact doesn't implement PartialEq (SessionScope lacks it)
         assert_eq!(fact.session_id(), deserialized.session_id());
         assert_eq!(fact.timestamp_ms(), deserialized.timestamp_ms());
+    }
+
+    #[test]
+    fn test_reducer_rejects_context_mismatch() {
+        let reducer = AuthFactReducer::new();
+        let fact = AuthFact::SessionIssued {
+            context_id: test_context_id(),
+            session_id: "session_456".to_string(),
+            authority_id: test_authority(),
+            device_id: Some(test_device()),
+            scope: SessionScope::Protocol {
+                protocol_type: "test".to_string(),
+            },
+            issued_at_ms: 1000,
+            expires_at_ms: 2000,
+        };
+
+        let other_context = ContextId::new_from_entropy([10u8; 32]);
+        let binding = reducer.reduce(other_context, AUTH_FACT_TYPE_ID, &fact.to_bytes());
+        assert!(binding.is_none());
+    }
+
+    #[test]
+    fn test_binding_key_derivation() {
+        let fact = AuthFact::GuardianApproved {
+            context_id: test_context_id(),
+            request_id: "req-123".to_string(),
+            guardian_id: test_authority(),
+            approved_at_ms: 1234,
+        };
+
+        let (sub_type, data) = fact.binding_key();
+        assert_eq!(sub_type, "auth-guardian-approved");
+        assert_eq!(data, b"req-123".to_vec());
     }
 }

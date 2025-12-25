@@ -168,6 +168,11 @@ impl FactReducer for RendezvousFactReducer {
         }
 
         let fact: RendezvousFact = serde_json::from_slice(binding_data).ok()?;
+        if let RendezvousFact::Descriptor(descriptor) = &fact {
+            if descriptor.context_id != context_id {
+                return None;
+            }
+        }
 
         // Extract the primary key for this fact
         let key_data = match &fact {
@@ -321,6 +326,28 @@ mod tests {
 
         let binding = reducer.reduce(test_context(), RENDEZVOUS_FACT_TYPE_ID, &bytes);
         assert!(binding.is_some());
+    }
+
+    #[test]
+    fn test_reducer_rejects_context_mismatch_for_descriptor() {
+        let reducer = RendezvousFactReducer;
+
+        let descriptor = RendezvousDescriptor {
+            authority_id: test_authority(),
+            context_id: test_context(),
+            transport_hints: vec![],
+            handshake_psk_commitment: [0u8; 32],
+            valid_from: 0,
+            valid_until: 1000,
+            nonce: [7u8; 32],
+            display_name: None,
+        };
+
+        let fact = RendezvousFact::Descriptor(descriptor);
+        let bytes = fact.to_bytes();
+        let other_context = ContextId::new_from_entropy([9u8; 32]);
+        let binding = reducer.reduce(other_context, RENDEZVOUS_FACT_TYPE_ID, &bytes);
+        assert!(binding.is_none());
     }
 
     #[test]
