@@ -13,6 +13,7 @@ use crate::effects::*;
 use crate::handlers::{AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 use aura_core::hash::hash;
 use aura_mpst::LocalSessionType;
+use serde::Serialize;
 
 /// Type-erased bridge for dynamic handler composition
 ///
@@ -42,6 +43,19 @@ impl fmt::Debug for UnifiedAuraHandlerBridge {
 }
 
 impl UnifiedAuraHandlerBridge {
+    fn serialize_result<T: Serialize>(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        value: &T,
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        bincode::serialize(value).map_err(|e| AuraHandlerError::EffectSerialization {
+            effect_type,
+            operation: operation.to_string(),
+            source: e.into(),
+        })
+    }
+
     /// Create a new unified bridge wrapping the given effects implementation
     pub fn new(effects: impl AuraEffects + 'static, execution_mode: ExecutionMode) -> Self {
         let supported_effects = EffectType::all()
@@ -265,7 +279,7 @@ impl UnifiedAuraHandlerBridge {
                     }
                 })?;
 
-                Ok(bincode::serialize(&()).unwrap_or_default())
+                self.serialize_result(EffectType::Network, operation, &())
             }
             "broadcast" => {
                 let message: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
@@ -278,7 +292,7 @@ impl UnifiedAuraHandlerBridge {
                     }
                 })?;
 
-                Ok(bincode::serialize(&()).unwrap_or_default())
+                self.serialize_result(EffectType::Network, operation, &())
             }
             "receive" => {
                 let result =
@@ -289,11 +303,11 @@ impl UnifiedAuraHandlerBridge {
                             source: Box::new(e),
                         })?;
 
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Network, operation, &result)
             }
             "connected_peers" => {
                 let result = effects.connected_peers().await;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Network, operation, &result)
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::Network,
@@ -322,7 +336,7 @@ impl UnifiedAuraHandlerBridge {
                     }
                 })?;
 
-                Ok(bincode::serialize(&()).unwrap_or_default())
+                self.serialize_result(EffectType::Storage, operation, &())
             }
             "retrieve" => {
                 let key: String = bincode::deserialize(parameters).map_err(|e| {
@@ -335,7 +349,7 @@ impl UnifiedAuraHandlerBridge {
                     }
                 })?;
 
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Storage, operation, &result)
             }
             "remove" => {
                 let key: String = bincode::deserialize(parameters).map_err(|e| {
@@ -350,7 +364,7 @@ impl UnifiedAuraHandlerBridge {
                             source: Box::new(e),
                         })?;
 
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Storage, operation, &result)
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::Storage,
@@ -373,7 +387,7 @@ impl UnifiedAuraHandlerBridge {
                 })?;
 
                 let result = hash(&data);
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Crypto, operation, &result)
             }
             "random_bytes" => {
                 let len: usize = bincode::deserialize(parameters).map_err(|e| {
@@ -381,7 +395,7 @@ impl UnifiedAuraHandlerBridge {
                 })?;
 
                 let result = effects.random_bytes(len).await;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Crypto, operation, &result)
             }
             "ed25519_generate_keypair" => {
                 let result = effects.ed25519_generate_keypair().await.map_err(|e| {
@@ -390,7 +404,7 @@ impl UnifiedAuraHandlerBridge {
                     }
                 })?;
 
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Crypto, operation, &result)
             }
             "ed25519_sign" => {
                 let (message, private_key): (Vec<u8>, Vec<u8>) = bincode::deserialize(parameters)
@@ -405,7 +419,7 @@ impl UnifiedAuraHandlerBridge {
                         source: Box::new(e),
                     })?;
 
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Crypto, operation, &result)
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::Crypto,
@@ -428,7 +442,7 @@ impl UnifiedAuraHandlerBridge {
                     .await
                     .map_err(|e| AuraHandlerError::ExecutionFailed { source: e.into() })?
                     .ts_ms;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Time, operation, &result)
             }
             "current_timestamp" => {
                 let result = effects
@@ -436,7 +450,7 @@ impl UnifiedAuraHandlerBridge {
                     .await
                     .map_err(|e| AuraHandlerError::ExecutionFailed { source: e.into() })?
                     .ts_ms;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Time, operation, &result)
             }
             "sleep_ms" => {
                 let ms: u64 = bincode::deserialize(parameters).map_err(|e| {
@@ -447,7 +461,7 @@ impl UnifiedAuraHandlerBridge {
                     .sleep_ms(ms)
                     .await
                     .map_err(|e| AuraHandlerError::ExecutionFailed { source: e.into() })?;
-                Ok(bincode::serialize(&()).unwrap_or_default())
+                self.serialize_result(EffectType::Time, operation, &())
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::Time,
@@ -484,7 +498,7 @@ impl UnifiedAuraHandlerBridge {
                         source: Box::new(e),
                     }
                 })?;
-                Ok(bincode::serialize(&()).unwrap_or_default())
+                self.serialize_result(EffectType::Console, operation, &())
             }
             "log_error" => {
                 let (message, fields): (String, Vec<(String, String)>) =
@@ -506,7 +520,7 @@ impl UnifiedAuraHandlerBridge {
                         source: Box::new(e),
                     }
                 })?;
-                Ok(bincode::serialize(&()).unwrap_or_default())
+                self.serialize_result(EffectType::Console, operation, &())
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::Console,
@@ -529,15 +543,15 @@ impl UnifiedAuraHandlerBridge {
                 })?;
 
                 let result = effects.random_bytes(len).await;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Random, operation, &result)
             }
             "random_bytes_32" => {
                 let result = effects.random_bytes_32().await;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Random, operation, &result)
             }
             "random_u64" => {
                 let result = effects.random_u64().await;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Random, operation, &result)
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::Random,
@@ -560,7 +574,7 @@ impl UnifiedAuraHandlerBridge {
                     .map_err(|e| AuraHandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::EffectApi, operation, &result)
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::EffectApi,
@@ -585,7 +599,7 @@ impl UnifiedAuraHandlerBridge {
                         .map_err(|e| AuraHandlerError::ExecutionFailed {
                             source: Box::new(e),
                         })?;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Journal, operation, &result)
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::Journal,
@@ -608,7 +622,7 @@ impl UnifiedAuraHandlerBridge {
                         source: Box::new(e),
                     }
                 })?;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Tree, operation, &result)
             }
             "get_current_commitment" => {
                 let result = effects.get_current_commitment().await.map_err(|e| {
@@ -616,7 +630,7 @@ impl UnifiedAuraHandlerBridge {
                         source: Box::new(e),
                     }
                 })?;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::Tree, operation, &result)
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::Tree,
@@ -646,7 +660,7 @@ impl UnifiedAuraHandlerBridge {
                         source: Box::new(e),
                     })?;
 
-                Ok(bincode::serialize(&()).unwrap_or_default())
+                self.serialize_result(EffectType::Choreographic, operation, &())
             }
             "broadcast_bytes" => {
                 let message: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
@@ -659,7 +673,7 @@ impl UnifiedAuraHandlerBridge {
                     }
                 })?;
 
-                Ok(bincode::serialize(&()).unwrap_or_default())
+                self.serialize_result(EffectType::Choreographic, operation, &())
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::Choreographic,
@@ -689,7 +703,7 @@ impl UnifiedAuraHandlerBridge {
                         source: Box::new(e),
                     })?;
 
-                Ok(bincode::serialize(&()).unwrap_or_default())
+                self.serialize_result(EffectType::System, operation, &())
             }
             "health_check" => {
                 let result = effects.health_check().await.map_err(|e| {
@@ -697,7 +711,7 @@ impl UnifiedAuraHandlerBridge {
                         source: Box::new(e),
                     }
                 })?;
-                Ok(bincode::serialize(&result).unwrap_or_default())
+                self.serialize_result(EffectType::System, operation, &result)
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
                 effect_type: EffectType::System,

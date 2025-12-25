@@ -31,12 +31,30 @@ pub struct WitnessSet {
 
 impl WitnessSet {
     /// Create a new witness set
-    pub fn new(threshold: u16, witnesses: Vec<AuthorityId>) -> Self {
-        Self {
+    pub fn new(threshold: u16, witnesses: Vec<AuthorityId>) -> Result<Self> {
+        if witnesses.is_empty() {
+            return Err(aura_core::AuraError::invalid(
+                "Consensus requires at least one witness",
+            ));
+        }
+
+        if threshold == 0 {
+            return Err(aura_core::AuraError::invalid(
+                "Consensus threshold must be >= 1",
+            ));
+        }
+
+        if witnesses.len() < threshold as usize {
+            return Err(aura_core::AuraError::invalid(
+                "Consensus threshold exceeds witness set size",
+            ));
+        }
+
+        Ok(Self {
             threshold,
             witnesses,
             states: Arc::new(RwLock::new(HashMap::new())),
-        }
+        })
     }
 
     /// Check if we have sufficient witnesses for consensus
@@ -344,7 +362,7 @@ mod tests {
             AuthorityId::new_from_entropy([2u8; 32]),
             AuthorityId::new_from_entropy([3u8; 32]),
         ];
-        let witness_set = WitnessSet::new(2, witnesses.clone());
+        let witness_set = WitnessSet::new(2, witnesses.clone()).unwrap();
 
         // Initially no cached commitments
         assert!(!witness_set.has_fast_path_quorum(Epoch::from(1)).await);

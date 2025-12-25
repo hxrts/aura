@@ -41,7 +41,7 @@ pub async fn run_consensus<T: Serialize>(
     // Simple majority threshold
     let threshold = (witnesses.len() as u16).div_ceil(2).max(1);
 
-    let config = ConsensusConfig::new(threshold, witnesses, epoch);
+    let config = ConsensusConfig::new(threshold, witnesses, epoch)?;
 
     run_consensus_with_config(
         prestate,
@@ -181,7 +181,7 @@ impl RelationalConsensusBuilder {
             (self.witnesses.len() as u16).div_ceil(2).max(1)
         });
 
-        let mut config = ConsensusConfig::new(threshold, self.witnesses, self.epoch);
+        let mut config = ConsensusConfig::new(threshold, self.witnesses, self.epoch)?;
 
         if let Some(timeout_ms) = self.timeout_ms {
             config.timeout_ms = timeout_ms;

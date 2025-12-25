@@ -340,6 +340,11 @@ impl AuthFact {
         }
     }
 
+    /// Validate that this fact is eligible to reduce under the provided context.
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        self.context_id() == context_id
+    }
+
     /// Derive the relational binding subtype and key data for this fact.
     pub fn binding_key(&self) -> (String, Vec<u8>) {
         match self {
@@ -519,7 +524,7 @@ impl FactReducer for AuthFactReducer {
         }
 
         let fact: AuthFact = serde_json::from_slice(binding_data).ok()?;
-        if fact.context_id() != context_id {
+        if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
@@ -753,5 +758,27 @@ mod tests {
         let (sub_type, data) = fact.binding_key();
         assert_eq!(sub_type, "auth-guardian-approved");
         assert_eq!(data, b"req-123".to_vec());
+    }
+
+    #[test]
+    fn test_reducer_idempotence() {
+        let reducer = AuthFactReducer::new();
+        let context_id = test_context_id();
+        let fact = AuthFact::SessionIssued {
+            context_id,
+            session_id: "session_123".to_string(),
+            authority_id: test_authority(),
+            device_id: Some(test_device()),
+            scope: SessionScope::Protocol {
+                protocol_type: "test".to_string(),
+            },
+            issued_at_ms: 1000,
+            expires_at_ms: 2000,
+        };
+
+        let bytes = fact.to_bytes();
+        let binding1 = reducer.reduce(context_id, AUTH_FACT_TYPE_ID, &bytes);
+        let binding2 = reducer.reduce(context_id, AUTH_FACT_TYPE_ID, &bytes);
+        assert_eq!(binding1, binding2);
     }
 }

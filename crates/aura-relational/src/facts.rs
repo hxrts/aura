@@ -204,6 +204,12 @@ impl DomainFact for ContactFact {
     }
 }
 
+impl ContactFact {
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        self.context_id() == context_id
+    }
+}
+
 /// Reducer for contact facts
 ///
 /// Converts contact facts to relational bindings during journal reduction.
@@ -225,6 +231,9 @@ impl FactReducer for ContactFactReducer {
         }
 
         let fact: ContactFact = serde_json::from_slice(binding_data).ok()?;
+        if !fact.validate_for_reduction(context_id) {
+            return None;
+        }
 
         let (sub_type, data) = match &fact {
             ContactFact::Added { contact_id, .. } => {
@@ -280,6 +289,10 @@ impl GuardianBindingDetailsFact {
             binding,
         }
     }
+
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        self.context_id == context_id
+    }
 }
 
 impl DomainFact for GuardianBindingDetailsFact {
@@ -322,7 +335,7 @@ impl FactReducer for GuardianBindingDetailsFactReducer {
         }
 
         let fact: GuardianBindingDetailsFact = bincode::deserialize(binding_data).ok()?;
-        if fact.context_id != context_id {
+        if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
@@ -358,6 +371,10 @@ impl RecoveryGrantDetailsFact {
 
     pub fn grant_hash(&self) -> Hash32 {
         Hash32::from_bytes(&hash::hash(&self.to_bytes()))
+    }
+
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        self.context_id == context_id
     }
 }
 
@@ -401,7 +418,7 @@ impl FactReducer for RecoveryGrantDetailsFactReducer {
         }
 
         let fact: RecoveryGrantDetailsFact = bincode::deserialize(binding_data).ok()?;
-        if fact.context_id != context_id {
+        if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
@@ -465,6 +482,24 @@ mod tests {
         } else {
             panic!("Expected Generic variant");
         }
+    }
+
+    #[test]
+    fn test_contact_reducer_idempotence() {
+        let reducer = ContactFactReducer;
+        let context_id = test_context_id();
+        let fact = ContactFact::added_with_timestamp_ms(
+            context_id,
+            test_authority_id(1),
+            test_authority_id(2),
+            "Alice".to_string(),
+            1234567890,
+        );
+
+        let bytes = fact.to_bytes();
+        let binding1 = reducer.reduce(context_id, CONTACT_FACT_TYPE_ID, &bytes);
+        let binding2 = reducer.reduce(context_id, CONTACT_FACT_TYPE_ID, &bytes);
+        assert_eq!(binding1, binding2);
     }
 
     #[test]

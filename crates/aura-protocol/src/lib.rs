@@ -13,9 +13,10 @@
     clippy::get_first,
     clippy::single_range_in_vec_init,
     clippy::disallowed_methods,  // Orchestration layer coordinates time/random effects
-    clippy::disallowed_types,
     deprecated  // Deprecated time/random functions used intentionally for effect coordination
 )]
+#![deny(clippy::await_holding_lock)]
+#![deny(clippy::disallowed_types)]
 //! # Aura Protocol - Layer 4: Orchestration (Multi-Party Coordination)
 //!
 //! **Purpose**: Multi-party coordination and distributed protocol orchestration.

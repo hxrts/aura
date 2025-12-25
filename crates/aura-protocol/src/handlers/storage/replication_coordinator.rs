@@ -196,19 +196,18 @@ impl ReplicationCoordinator {
 
     /// Get nodes storing a specific chunk
     pub fn get_chunk_locations(&self, chunk_id: &ChunkId) -> Vec<DeviceId> {
-        self.chunk_placement
-            .get(chunk_id)
-            .map(|nodes| nodes.iter().cloned().collect())
-            .unwrap_or_default()
+        match self.chunk_placement.get(chunk_id) {
+            Some(nodes) => nodes.iter().cloned().collect(),
+            None => Vec::new(),
+        }
     }
 
     /// Check if chunk is adequately replicated
     pub fn is_chunk_replicated(&self, chunk_id: &ChunkId) -> bool {
-        let current_replicas = self
-            .chunk_placement
-            .get(chunk_id)
-            .map(|nodes| nodes.len())
-            .unwrap_or(0);
+        let current_replicas = match self.chunk_placement.get(chunk_id) {
+            Some(nodes) => nodes.len(),
+            None => 0,
+        };
 
         let required_replicas = match &self.strategy {
             ReplicationStrategy::SimpleReplication { replica_count } => *replica_count,

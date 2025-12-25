@@ -1,5 +1,7 @@
 use super::effects::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError, SyncMetrics};
-use crate::guards::chain::create_send_guard;
+use super::pure;
+use crate::guards::chain::create_send_guard_op;
+use crate::guards::GuardOperation;
 use crate::guards::traits::GuardContextProvider;
 use crate::guards::GuardEffects;
 use async_lock::RwLock;
@@ -61,8 +63,8 @@ impl AntiEntropyHandler {
         let peer_authority = AuthorityId::from(peer_id);
 
         // Create and evaluate guard chain for digest request
-        let guard_chain = create_send_guard(
-            "sync:request_digest".to_string(),
+        let guard_chain = create_send_guard_op(
+            GuardOperation::SyncRequestDigest,
             self.context_id,
             peer_authority,
             10, // low cost for digest request
@@ -108,26 +110,12 @@ impl AntiEntropyHandler {
         remote: &BloomDigest,
     ) -> Result<Vec<AttestedOp>, SyncError> {
         let oplog = self.oplog.read().await;
-        let mut result = Vec::new();
-
-        for op in oplog.iter() {
-            let cid = Hash32::from(op.op.parent_commitment);
-            if local.cids.contains(&cid) && !remote.cids.contains(&cid) {
-                result.push(op.clone());
-            }
-        }
-
-        Ok(result)
+        pure::compute_ops_to_push(&oplog, local, remote)
     }
 
     /// Compute which CIDs we should pull from peer
     fn compute_cids_to_pull(&self, local: &BloomDigest, remote: &BloomDigest) -> Vec<Hash32> {
-        remote
-            .cids
-            .iter()
-            .filter(|&cid| !local.cids.contains(cid))
-            .copied()
-            .collect()
+        pure::compute_cids_to_pull(local, remote).into_iter().collect()
     }
 
     /// Verify operation before storing
@@ -293,8 +281,8 @@ impl AntiEntropyHandler {
         let peer_authority = AuthorityId::from(peer_id);
         let cost = cids.len() as u32 * 5;
 
-        let guard_chain = create_send_guard(
-            "sync:request_ops".to_string(),
+        let guard_chain = create_send_guard_op(
+            GuardOperation::SyncRequestOps,
             self.context_id,
             peer_authority,
             cost,
@@ -355,8 +343,8 @@ impl AntiEntropyHandler {
         for &peer_uuid in peers.iter() {
             let peer_authority = AuthorityId::from(peer_uuid);
 
-            let guard_chain = create_send_guard(
-                "sync:announce_op".to_string(),
+            let guard_chain = create_send_guard_op(
+                GuardOperation::SyncAnnounceOp,
                 self.context_id,
                 peer_authority,
                 5, // low cost for announcement
@@ -424,8 +412,8 @@ impl AntiEntropyHandler {
             let peer_authority = AuthorityId::from(*peer_uuid);
             let cost = 50; // moderate cost for op push
 
-            let guard_chain = create_send_guard(
-                "sync:push_op".to_string(),
+            let guard_chain = create_send_guard_op(
+                GuardOperation::SyncPushOp,
                 self.context_id,
                 peer_authority,
                 cost,

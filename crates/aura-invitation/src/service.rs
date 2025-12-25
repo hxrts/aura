@@ -26,6 +26,12 @@ use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, thiserror::Error)]
+enum InvitationGuardError {
+    #[error("Message too long: {length} > {max}")]
+    MessageTooLong { length: usize, max: usize },
+}
+
 // =============================================================================
 // Service Configuration
 // =============================================================================
@@ -267,11 +273,13 @@ impl InvitationService {
         // Validate message length
         if let Some(ref msg) = message {
             if msg.len() > self.config.max_message_length {
-                return GuardOutcome::denied(format!(
-                    "Message too long: {} > {} max",
-                    msg.len(),
-                    self.config.max_message_length
-                ));
+                return GuardOutcome::denied(
+                    InvitationGuardError::MessageTooLong {
+                        length: msg.len(),
+                        max: self.config.max_message_length,
+                    }
+                    .to_string(),
+                );
             }
         }
 

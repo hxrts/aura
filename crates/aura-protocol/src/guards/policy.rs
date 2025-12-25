@@ -227,7 +227,7 @@ impl std::fmt::Display for EffectPolicyError {
                     operation.as_str(),
                     context_id
                         .map(|c| format!(" in context {}", c))
-                        .unwrap_or_default()
+                        .unwrap_or_else(String::new)
                 )
             }
             EffectPolicyError::CeremonyRequired {

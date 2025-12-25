@@ -79,6 +79,18 @@ pub mod guardian_auth_relational;
 /// Distributed Key Derivation (DKD) protocol implementation
 pub mod dkd;
 
+/// Operation category map (A/B/C) for protocol gating and review.
+///
+/// Note: Categories should be reviewed against `docs/117_operation_categories.md`.
+pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    ("auth:challenge", "A"),
+    ("auth:proof", "A"),
+    ("auth:session-issue", "A"),
+    ("auth:session-revoke", "A"),
+    ("auth:guardian-approval", "C"),
+    ("auth:recovery-complete", "C"),
+];
+
 // Re-export core types from aura-core (Layer 1)
 pub use aura_core::{AccountId, AuraError, AuraResult, Journal};
 

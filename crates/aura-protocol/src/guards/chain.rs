@@ -5,6 +5,7 @@
 //! that enforces both authorization and budget constraints at every protocol send site.
 
 use super::traits::{require_biscuit_metadata, GuardContextProvider};
+use super::types::GuardOperation;
 use super::GuardEffects;
 use crate::authorization::BiscuitAuthorizationBridge;
 use crate::guards::biscuit_evaluator::BiscuitGuardEvaluator;
@@ -454,6 +455,16 @@ pub fn create_send_guard(
     cost: u32,
 ) -> SendGuardChain {
     SendGuardChain::new(message_authorization, context, peer, cost)
+}
+
+/// Create send guard with typed operation identifier.
+pub fn create_send_guard_op(
+    operation: GuardOperation,
+    context: ContextId,
+    peer: AuthorityId,
+    cost: u32,
+) -> SendGuardChain {
+    SendGuardChain::new(operation.into(), context, peer, cost)
 }
 
 #[cfg(test)]

@@ -218,6 +218,11 @@ impl ChatFact {
         }
     }
 
+    /// Validate that this fact can be reduced under the provided context.
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        self.context_id() == context_id
+    }
+
     /// Create a ChannelCreated fact with millisecond timestamp (backward compatibility)
     pub fn channel_created_ms(
         context_id: ContextId,
@@ -478,18 +483,7 @@ impl FactReducer for ChatFactReducer {
 
         let fact: ChatFact = serde_json::from_slice(binding_data).ok()?;
 
-        let fact_context_id = match &fact {
-            ChatFact::ChannelCreated { context_id, .. } => *context_id,
-            ChatFact::ChannelClosed { context_id, .. } => *context_id,
-            ChatFact::ChannelUpdated { context_id, .. } => *context_id,
-            ChatFact::MessageSentSealed { context_id, .. } => *context_id,
-            ChatFact::MessageRead { context_id, .. } => *context_id,
-            ChatFact::MessageDelivered { context_id, .. } => *context_id,
-            ChatFact::DeliveryAcknowledged { context_id, .. } => *context_id,
-            ChatFact::MessageEdited { context_id, .. } => *context_id,
-            ChatFact::MessageDeleted { context_id, .. } => *context_id,
-        };
-        if fact_context_id != context_id {
+        if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
@@ -784,6 +778,26 @@ mod tests {
             binding.binding_type,
             RelationalBindingType::Generic(ref s) if s == "delivery-acknowledged"
         ));
+    }
+
+    #[test]
+    fn test_reducer_idempotence() {
+        let reducer = ChatFactReducer;
+        let context_id = test_context_id();
+        let fact = ChatFact::channel_created_ms(
+            context_id,
+            test_channel_id(),
+            "general".to_string(),
+            None,
+            false,
+            0,
+            test_authority_id(),
+        );
+
+        let bytes = fact.to_bytes();
+        let binding1 = reducer.reduce(context_id, CHAT_FACT_TYPE_ID, &bytes);
+        let binding2 = reducer.reduce(context_id, CHAT_FACT_TYPE_ID, &bytes);
+        assert_eq!(binding1, binding2);
     }
 
     #[test]

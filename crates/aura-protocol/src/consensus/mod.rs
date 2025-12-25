@@ -50,7 +50,7 @@ pub use messages::{
 };
 pub use protocol::{run_consensus, ConsensusProtocol};
 pub use types::{CommitFact, ConflictFact, ConsensusConfig, ConsensusId, ConsensusResult};
-pub use witness::{WitnessInstance, WitnessSet, WitnessState, WitnessTracker};
+// Intentionally avoid re-exporting witness internals to reduce coupling.
 
 // Re-export AMP adapter functions (now consolidated under crate::amp::consensus)
 pub use crate::amp::consensus::{

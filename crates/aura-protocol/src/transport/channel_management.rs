@@ -306,15 +306,17 @@ impl ChannelEstablishmentCoordinator {
         }
     }
 
-    fn now(&self) -> SystemTime {
+    fn now(&self) -> ChoreographicResult<SystemTime> {
         let ms = self.run_sync(async {
             self.time
                 .physical_time()
                 .await
                 .map(|p| p.ts_ms)
-                .unwrap_or_default()
-        });
-        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+                .map_err(|e| {
+                    ChoreographicError::ExecutionFailed(format!("time error: {e}"))
+                })
+        })?;
+        Ok(SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
     }
 
     /// Initiate channel establishment
@@ -330,12 +332,12 @@ impl ChannelEstablishmentCoordinator {
             ));
         }
 
+        let now = self.now()?;
         let channel_id = format!(
             "channel-{}-{}",
             &format!("{:?}", self.device_id)[..8],
-            self.now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
+            now.duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|e| ChoreographicError::ExecutionFailed(e.to_string()))?
                 .as_millis()
         );
 
@@ -343,7 +345,7 @@ impl ChannelEstablishmentCoordinator {
             channel_id: channel_id.clone(),
             participants: participants.clone(),
             phase: EstablishmentPhase::Initiating,
-            started_at: self.now(),
+            started_at: now,
             confirmations: HashMap::new(),
         };
 
@@ -419,15 +421,17 @@ impl ChannelTeardownCoordinator {
         }
     }
 
-    fn now(&self) -> SystemTime {
+    fn now(&self) -> ChoreographicResult<SystemTime> {
         let ms = self.run_sync(async {
             self.time
                 .physical_time()
                 .await
                 .map(|p| p.ts_ms)
-                .unwrap_or_default()
-        });
-        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+                .map_err(|e| {
+                    ChoreographicError::ExecutionFailed(format!("time error: {e}"))
+                })
+        })?;
+        Ok(SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
     }
 
     /// Initiate channel teardown
@@ -441,7 +445,7 @@ impl ChannelTeardownCoordinator {
             channel_id: channel_id.clone(),
             participants,
             phase: TeardownPhase::Initiating,
-            started_at: self.now(),
+            started_at: self.now()?,
             acknowledgments: HashMap::new(),
         };
 

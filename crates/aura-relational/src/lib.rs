@@ -79,6 +79,14 @@ pub mod guardian;
 pub mod guardian_request;
 pub mod guardian_service;
 
+/// Operation category map (A/B/C) for protocol gating and review.
+pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    ("relational:contact-add", "C"),
+    ("relational:contact-remove", "C"),
+    ("relational:guardian-bind", "C"),
+    ("relational:recovery-grant", "C"),
+];
+
 // Export domain fact types
 pub use facts::{
     ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,

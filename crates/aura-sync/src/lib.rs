@@ -154,6 +154,15 @@ pub mod services;
 /// using Merkle trees and Bloom filters from the IndexedJournalEffects.
 pub mod verification;
 
+/// Operation category map (A/B/C) for protocol gating and review.
+pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    ("sync:anti-entropy", "A"),
+    ("sync:journal-sync", "A"),
+    ("sync:snapshot", "A"),
+    ("sync:ota-ceremony", "C"),
+    ("sync:receipt-verify", "A"),
+];
+
 // Re-export core types for convenience
 pub use core::{
     MetricsCollector, SessionManager, SessionResult, SessionState, SyncConfig, SyncError,

@@ -44,6 +44,37 @@ pub enum RendezvousFact {
     },
 }
 
+impl RendezvousFact {
+    /// Derive the binding key data used by the reducer.
+    pub fn binding_key(&self) -> Vec<u8> {
+        match self {
+            RendezvousFact::Descriptor(descriptor) => {
+                let mut key = authority_hash_bytes(&descriptor.authority_id).to_vec();
+                key.extend_from_slice(&descriptor.nonce);
+                key
+            }
+            RendezvousFact::ChannelEstablished { channel_id, .. } => channel_id.to_vec(),
+            RendezvousFact::DescriptorRevoked {
+                authority_id,
+                nonce,
+            } => {
+                let mut key = authority_hash_bytes(authority_id).to_vec();
+                key.extend_from_slice(nonce);
+                key
+            }
+        }
+    }
+
+    /// Validate that this fact can be reduced under the provided context.
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        match self {
+            RendezvousFact::Descriptor(descriptor) => descriptor.context_id == context_id,
+            RendezvousFact::ChannelEstablished { .. }
+            | RendezvousFact::DescriptorRevoked { .. } => true,
+        }
+    }
+}
+
 /// Transport descriptor for peer discovery
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RendezvousDescriptor {
@@ -168,34 +199,11 @@ impl FactReducer for RendezvousFactReducer {
         }
 
         let fact: RendezvousFact = serde_json::from_slice(binding_data).ok()?;
-        if let RendezvousFact::Descriptor(descriptor) = &fact {
-            if descriptor.context_id != context_id {
-                return None;
-            }
+        if !fact.validate_for_reduction(context_id) {
+            return None;
         }
 
-        // Extract the primary key for this fact
-        let key_data = match &fact {
-            RendezvousFact::Descriptor(d) => {
-                // Key: authority_id + nonce
-                let mut key = authority_hash_bytes(&d.authority_id).to_vec();
-                key.extend_from_slice(&d.nonce);
-                key
-            }
-            RendezvousFact::ChannelEstablished { channel_id, .. } => {
-                // Key: channel_id
-                channel_id.to_vec()
-            }
-            RendezvousFact::DescriptorRevoked {
-                authority_id,
-                nonce,
-            } => {
-                // Key: authority_id + nonce
-                let mut key = authority_hash_bytes(authority_id).to_vec();
-                key.extend_from_slice(nonce);
-                key
-            }
-        };
+        let key_data = fact.binding_key();
 
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(RENDEZVOUS_FACT_TYPE_ID.to_string()),
@@ -348,6 +356,39 @@ mod tests {
         let other_context = ContextId::new_from_entropy([9u8; 32]);
         let binding = reducer.reduce(other_context, RENDEZVOUS_FACT_TYPE_ID, &bytes);
         assert!(binding.is_none());
+    }
+
+    #[test]
+    fn test_binding_key_derivation() {
+        let fact = RendezvousFact::DescriptorRevoked {
+            authority_id: test_authority(),
+            nonce: [9u8; 32],
+        };
+
+        let data = fact.binding_key();
+        assert_eq!(data.len(), 64);
+    }
+
+    #[test]
+    fn test_reducer_idempotence() {
+        let reducer = RendezvousFactReducer;
+        let context_id = test_context();
+        let descriptor = RendezvousDescriptor {
+            authority_id: test_authority(),
+            context_id,
+            transport_hints: vec![],
+            handshake_psk_commitment: [0u8; 32],
+            valid_from: 0,
+            valid_until: 1000,
+            nonce: [7u8; 32],
+            display_name: None,
+        };
+
+        let fact = RendezvousFact::Descriptor(descriptor);
+        let bytes = fact.to_bytes();
+        let binding1 = reducer.reduce(context_id, RENDEZVOUS_FACT_TYPE_ID, &bytes);
+        let binding2 = reducer.reduce(context_id, RENDEZVOUS_FACT_TYPE_ID, &bytes);
+        assert_eq!(binding1, binding2);
     }
 
     #[test]

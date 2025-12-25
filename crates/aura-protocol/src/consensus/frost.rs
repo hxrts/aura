@@ -65,16 +65,16 @@ impl FrostConsensusOrchestrator {
         config: ConsensusConfig,
         key_packages: HashMap<AuthorityId, Share>,
         group_public_key: PublicKeyPackage,
-    ) -> Self {
-        let witness_set = WitnessSet::new(config.threshold, config.witness_set.clone());
+    ) -> Result<Self> {
+        let witness_set = WitnessSet::new(config.threshold, config.witness_set.clone())?;
 
-        Self {
+        Ok(Self {
             config,
             witness_set,
             key_packages,
             group_public_key,
             instances: Arc::new(RwLock::new(HashMap::new())),
-        }
+        })
     }
 
     /// Run consensus on a request
@@ -84,7 +84,11 @@ impl FrostConsensusOrchestrator {
         random: &(impl RandomEffects + ?Sized),
         time: &(impl PhysicalTimeEffects + ?Sized),
     ) -> Result<ConsensusResponse> {
-        let start_time = time.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
+        let start_time = time
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("time error: {e}")))?
+            .ts_ms;
         let nonce = random.random_u64().await;
         let consensus_id = ConsensusId::new(request.prestate_hash, request.operation_hash, nonce);
 
@@ -109,7 +113,12 @@ impl FrostConsensusOrchestrator {
                 .await
         };
 
-        let duration_ms = time.physical_time().await.map(|t| t.ts_ms).unwrap_or(0) - start_time;
+        let duration_ms = time
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("time error: {e}")))?
+            .ts_ms
+            - start_time;
 
         match result {
             Ok(commit_fact) => Ok(ConsensusResponse {
@@ -164,7 +173,11 @@ impl FrostConsensusOrchestrator {
             tracker: WitnessTracker::new(),
             phase: ConsensusPhase::Execute,
             fast_path: true,
-            start_time_ms: time.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
+            start_time_ms: time
+                .physical_time()
+                .await
+                .map_err(|e| AuraError::internal(format!("time error: {e}")))?
+                .ts_ms,
         };
 
         self.instances.write().await.insert(consensus_id, instance);
@@ -225,7 +238,11 @@ impl FrostConsensusOrchestrator {
             tracker: WitnessTracker::new(),
             phase: ConsensusPhase::Execute,
             fast_path: false,
-            start_time_ms: time.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
+            start_time_ms: time
+                .physical_time()
+                .await
+                .map_err(|e| AuraError::internal(format!("time error: {e}")))?
+                .ts_ms,
         };
 
         self.instances.write().await.insert(consensus_id, instance);
@@ -303,7 +320,11 @@ impl FrostConsensusOrchestrator {
         // Create commit fact
         let timestamp = ProvenancedTime {
             stamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: time.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
+                ts_ms: time
+                    .physical_time()
+                    .await
+                    .map_err(|e| AuraError::internal(format!("time error: {e}")))?
+                    .ts_ms,
                 uncertainty: None,
             }),
             proofs: vec![],
@@ -546,13 +567,14 @@ mod tests {
     #[tokio::test]
     async fn test_orchestrator_creation() {
         let witnesses = vec![authority(1), authority(2), authority(3)];
-        let config = ConsensusConfig::new(2, witnesses, Epoch::from(1));
+        let config = ConsensusConfig::new(2, witnesses, Epoch::from(1)).unwrap();
 
         let orchestrator = FrostConsensusOrchestrator::new(
             config,
             HashMap::new(),
             PublicKeyPackage::new(vec![0u8; 32], std::collections::BTreeMap::new(), 1, 1),
-        );
+        )
+        .unwrap();
 
         // Should start with no cached commitments
         assert!(
@@ -566,13 +588,14 @@ mod tests {
     #[tokio::test]
     async fn test_epoch_change() {
         let witnesses = vec![authority(10), authority(11)];
-        let config = ConsensusConfig::new(2, witnesses, Epoch::from(1));
+        let config = ConsensusConfig::new(2, witnesses, Epoch::from(1)).unwrap();
 
         let orchestrator = FrostConsensusOrchestrator::new(
             config,
             HashMap::new(),
             PublicKeyPackage::new(vec![0u8; 32], std::collections::BTreeMap::new(), 1, 1),
-        );
+        )
+        .unwrap();
 
         // Handle epoch change
         orchestrator.handle_epoch_change(Epoch::from(2)).await;

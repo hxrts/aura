@@ -112,7 +112,8 @@ pub use aura_core::effects::{FlowBudgetEffects, FlowHint};
 pub use journal::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
-pub use chain::{create_send_guard, SendGuardChain, SendGuardResult};
+pub use chain::{create_send_guard, create_send_guard_op, SendGuardChain, SendGuardResult};
+pub use types::GuardOperation;
 
 use aura_core::effects::{
     AuthorizationEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,

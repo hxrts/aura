@@ -29,18 +29,16 @@ pub struct BloomDigest {
 
 impl BloomDigest {
     /// Create a digest from an OpLog using deterministic CIDs (hash of op bytes).
-    pub fn from_oplog(oplog: &OpLog) -> Self {
-        let cids = oplog
-            .list_ops()
-            .iter()
-            .map(|op| {
-                Hash32::from(aura_core::hash::hash(
-                    &bincode::serialize(op).unwrap_or_default(),
-                ))
-            })
-            .collect();
+    pub fn from_oplog(oplog: &OpLog) -> Result<Self, SyncError> {
+        let mut cids = BTreeSet::new();
 
-        Self { cids }
+        for op in oplog.list_ops().iter() {
+            let bytes = bincode::serialize(op)
+                .map_err(|e| SyncError::VerificationFailed(e.to_string()))?;
+            cids.insert(Hash32::from(aura_core::hash::hash(&bytes)));
+        }
+
+        Ok(Self { cids })
     }
 
     /// Create an empty digest

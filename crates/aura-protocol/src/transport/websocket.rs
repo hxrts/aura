@@ -211,15 +211,17 @@ impl WebSocketHandshakeCoordinator {
         }
     }
 
-    fn now(&self) -> SystemTime {
+    fn now(&self) -> ChoreographicResult<SystemTime> {
         let ms = self.run_sync(async {
             self.time
                 .physical_time()
                 .await
                 .map(|p| p.ts_ms)
-                .unwrap_or_default()
-        });
-        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+                .map_err(|e| {
+                    ChoreographicError::ExecutionFailed(format!("time error: {e}"))
+                })
+        })?;
+        Ok(SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
     }
 
     /// Initiate WebSocket handshake
@@ -235,12 +237,12 @@ impl WebSocketHandshakeCoordinator {
             ));
         }
 
+        let now = self.now()?;
         let session_id = format!(
             "ws-session-{}-{}",
             &format!("{:?}", self.device_id)[..8],
-            self.now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
+            now.duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|e| ChoreographicError::ExecutionFailed(e.to_string()))?
                 .as_millis()
         );
 
@@ -248,7 +250,7 @@ impl WebSocketHandshakeCoordinator {
             session_id: session_id.clone(),
             peer_id,
             phase: HandshakePhase::Initiated,
-            started_at: self.now(),
+            started_at: now,
             capabilities: self.config.required_capabilities.clone(),
         };
 
@@ -348,15 +350,17 @@ impl WebSocketSessionCoordinator {
         }
     }
 
-    fn now(&self) -> SystemTime {
+    fn now(&self) -> ChoreographicResult<SystemTime> {
         let ms = self.run_sync(async {
             self.time
                 .physical_time()
                 .await
                 .map(|p| p.ts_ms)
-                .unwrap_or_default()
-        });
-        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+                .map_err(|e| {
+                    ChoreographicError::ExecutionFailed(format!("time error: {e}"))
+                })
+        })?;
+        Ok(SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
     }
 
     /// Establish session from completed handshake
@@ -365,11 +369,12 @@ impl WebSocketSessionCoordinator {
         session_id: String,
         peer_id: DeviceId,
     ) -> ChoreographicResult<()> {
+        let now = self.now()?;
         let session_state = SessionState {
             session_id: session_id.clone(),
             peer_id,
-            established_at: self.now(),
-            last_activity: self.now(),
+            established_at: now,
+            last_activity: now,
             message_count: 0,
         };
 

@@ -305,6 +305,11 @@ impl RecoveryFact {
         }
     }
 
+    /// Validate that this fact can be reduced under the provided context.
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        self.get_context_id() == context_id
+    }
+
     /// Get the sub-type string for this fact variant
     pub fn sub_type(&self) -> &'static str {
         match self {
@@ -323,6 +328,67 @@ impl RecoveryFact {
             RecoveryFact::RecoveryDisputeFiled { .. } => "recovery-dispute-filed",
             RecoveryFact::RecoveryCompleted { .. } => "recovery-completed",
             RecoveryFact::RecoveryFailed { .. } => "recovery-failed",
+        }
+    }
+
+    /// Derive the relational binding key data for this fact.
+    pub fn binding_key(&self) -> Vec<u8> {
+        match self {
+            RecoveryFact::GuardianSetupInitiated { initiator_id, .. } => {
+                initiator_id.to_bytes().to_vec()
+            }
+            RecoveryFact::GuardianInvitationSent { guardian_id, .. } => {
+                guardian_id.to_bytes().to_vec()
+            }
+            RecoveryFact::GuardianAccepted { guardian_id, .. } => guardian_id.to_bytes().to_vec(),
+            RecoveryFact::GuardianDeclined { guardian_id, .. } => guardian_id.to_bytes().to_vec(),
+            RecoveryFact::GuardianSetupCompleted { .. } => Vec::new(),
+            RecoveryFact::GuardianSetupFailed { .. } => Vec::new(),
+            RecoveryFact::MembershipChangeProposed { proposal_hash, .. } => {
+                proposal_hash.0.to_vec()
+            }
+            RecoveryFact::MembershipVoteCast {
+                proposal_hash,
+                voter_id,
+                ..
+            } => {
+                let mut data = proposal_hash.0.to_vec();
+                data.extend_from_slice(&voter_id.to_bytes());
+                data
+            }
+            RecoveryFact::MembershipChangeCompleted { proposal_hash, .. } => proposal_hash.0.to_vec(),
+            RecoveryFact::MembershipChangeRejected { proposal_hash, .. } => proposal_hash.0.to_vec(),
+            RecoveryFact::RecoveryInitiated {
+                account_id,
+                request_hash,
+                ..
+            } => {
+                let mut data = account_id.to_bytes().to_vec();
+                data.extend_from_slice(&request_hash.0);
+                data
+            }
+            RecoveryFact::RecoveryShareSubmitted {
+                guardian_id,
+                share_hash,
+                ..
+            } => {
+                let mut data = guardian_id.to_bytes().to_vec();
+                data.extend_from_slice(&share_hash.0);
+                data
+            }
+            RecoveryFact::RecoveryDisputeFiled { disputer_id, .. } => {
+                disputer_id.to_bytes().to_vec()
+            }
+            RecoveryFact::RecoveryCompleted {
+                account_id,
+                evidence_hash,
+                ..
+            } => {
+                let mut data = account_id.to_bytes().to_vec();
+                data.extend_from_slice(&evidence_hash.0);
+                data
+            }
+            RecoveryFact::RecoveryFailed { account_id, .. } => account_id.to_bytes().to_vec(),
         }
     }
 
@@ -669,73 +735,12 @@ impl FactReducer for RecoveryFactReducer {
         }
 
         let fact: RecoveryFact = serde_json::from_slice(binding_data).ok()?;
-        if fact.context_id() != context_id {
+        if !fact.validate_for_reduction(context_id) {
             return None;
         }
         let sub_type = fact.sub_type().to_string();
 
-        // For the binding data, we include key identifiers based on fact type
-        let data = match &fact {
-            RecoveryFact::GuardianSetupInitiated { initiator_id, .. } => {
-                initiator_id.to_bytes().to_vec()
-            }
-            RecoveryFact::GuardianInvitationSent { guardian_id, .. } => {
-                guardian_id.to_bytes().to_vec()
-            }
-            RecoveryFact::GuardianAccepted { guardian_id, .. } => guardian_id.to_bytes().to_vec(),
-            RecoveryFact::GuardianDeclined { guardian_id, .. } => guardian_id.to_bytes().to_vec(),
-            RecoveryFact::GuardianSetupCompleted { .. } => Vec::new(),
-            RecoveryFact::GuardianSetupFailed { .. } => Vec::new(),
-            RecoveryFact::MembershipChangeProposed { proposal_hash, .. } => {
-                proposal_hash.0.to_vec()
-            }
-            RecoveryFact::MembershipVoteCast {
-                proposal_hash,
-                voter_id,
-                ..
-            } => {
-                let mut data = proposal_hash.0.to_vec();
-                data.extend_from_slice(&voter_id.to_bytes());
-                data
-            }
-            RecoveryFact::MembershipChangeCompleted { proposal_hash, .. } => {
-                proposal_hash.0.to_vec()
-            }
-            RecoveryFact::MembershipChangeRejected { proposal_hash, .. } => {
-                proposal_hash.0.to_vec()
-            }
-            RecoveryFact::RecoveryInitiated {
-                account_id,
-                request_hash,
-                ..
-            } => {
-                let mut data = account_id.to_bytes().to_vec();
-                data.extend_from_slice(&request_hash.0);
-                data
-            }
-            RecoveryFact::RecoveryShareSubmitted {
-                guardian_id,
-                share_hash,
-                ..
-            } => {
-                let mut data = guardian_id.to_bytes().to_vec();
-                data.extend_from_slice(&share_hash.0);
-                data
-            }
-            RecoveryFact::RecoveryDisputeFiled { disputer_id, .. } => {
-                disputer_id.to_bytes().to_vec()
-            }
-            RecoveryFact::RecoveryCompleted {
-                account_id,
-                evidence_hash,
-                ..
-            } => {
-                let mut data = account_id.to_bytes().to_vec();
-                data.extend_from_slice(&evidence_hash.0);
-                data
-            }
-            RecoveryFact::RecoveryFailed { account_id, .. } => account_id.to_bytes().to_vec(),
-        };
+        let data = fact.binding_key();
 
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(sub_type),
@@ -921,6 +926,36 @@ mod tests {
         let other_context = ContextId::new_from_entropy([7u8; 32]);
         let binding = reducer.reduce(other_context, RECOVERY_FACT_TYPE_ID, &fact.to_bytes());
         assert!(binding.is_none());
+    }
+
+    #[test]
+    fn test_binding_key_derivation() {
+        let fact = RecoveryFact::MembershipChangeProposed {
+            context_id: test_context_id(),
+            proposer_id: test_authority_id(3),
+            change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
+            proposal_hash: test_hash(2),
+            proposed_at: pt(0),
+        };
+
+        let data = fact.binding_key();
+        assert_eq!(data, test_hash(2).0.to_vec());
+    }
+
+    #[test]
+    fn test_reducer_idempotence() {
+        let reducer = RecoveryFactReducer;
+        let context_id = test_context_id();
+        let fact = RecoveryFact::GuardianAccepted {
+            context_id,
+            guardian_id: test_authority_id(5),
+            accepted_at: pt(1234567890),
+        };
+
+        let bytes = fact.to_bytes();
+        let binding1 = reducer.reduce(context_id, RECOVERY_FACT_TYPE_ID, &bytes);
+        let binding2 = reducer.reduce(context_id, RECOVERY_FACT_TYPE_ID, &bytes);
+        assert_eq!(binding1, binding2);
     }
 
     #[test]

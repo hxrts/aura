@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use std::sync::Arc;
-use std::sync::Mutex;
+use async_lock::Mutex;
 
 /// Memory-based effect_api handler for testing
 pub struct MemoryLedgerHandler {
@@ -69,31 +69,31 @@ impl DeterministicRandom {
 #[async_trait]
 impl RandomEffects for DeterministicRandom {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut rng = self.rng.lock().unwrap();
+        let mut rng = self.rng.lock().await;
         let mut bytes = vec![0u8; len];
         rng.fill_bytes(&mut bytes);
         bytes
     }
 
     async fn random_bytes_32(&self) -> [u8; 32] {
-        let mut rng = self.rng.lock().unwrap();
+        let mut rng = self.rng.lock().await;
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
         bytes
     }
 
     async fn random_u64(&self) -> u64 {
-        let mut rng = self.rng.lock().unwrap();
+        let mut rng = self.rng.lock().await;
         rng.next_u64()
     }
 
     async fn random_range(&self, min: u64, max: u64) -> u64 {
-        let mut rng = self.rng.lock().unwrap();
+        let mut rng = self.rng.lock().await;
         rng.gen_range(min..=max)
     }
 
     async fn random_uuid(&self) -> uuid::Uuid {
-        let mut rng = self.rng.lock().unwrap();
+        let mut rng = self.rng.lock().await;
         let mut bytes = [0u8; 16];
         rng.fill_bytes(&mut bytes);
         uuid::Uuid::from_bytes(bytes)
@@ -105,19 +105,19 @@ impl EffectApiEffects for MemoryLedgerHandler {
     // Removed old methods that are no longer part of the trait
 
     async fn append_event(&self, event: Vec<u8>) -> Result<(), EffectApiError> {
-        let mut events = self.events.lock().unwrap();
+        let mut events = self.events.lock().await;
         let next_epoch = (events.len() as u64) + 1;
         events.push((next_epoch, event));
         Ok(())
     }
 
     async fn current_epoch(&self) -> Result<u64, EffectApiError> {
-        let events = self.events.lock().unwrap();
+        let events = self.events.lock().await;
         Ok(events.len() as u64)
     }
 
     async fn events_since(&self, epoch: u64) -> Result<Vec<Vec<u8>>, EffectApiError> {
-        let events = self.events.lock().unwrap();
+        let events = self.events.lock().await;
         Ok(events
             .iter()
             .filter(|(e, _)| *e > epoch)

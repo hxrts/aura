@@ -12,6 +12,24 @@ use aura_core::{AuraError, AuraResult};
 use aura_protocol::guards::types;
 use sha2::{Digest, Sha256};
 
+#[derive(Debug)]
+enum RendezvousGuardError {
+    InvalidCommandOrdering { reason: String },
+}
+
+impl std::fmt::Display for RendezvousGuardError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RendezvousGuardError::InvalidCommandOrdering { reason } => write!(
+                f,
+                "Internal error: rendezvous guard command ordering invalid: {reason}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RendezvousGuardError {}
+
 /// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
 fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -230,9 +248,12 @@ impl RendezvousService {
                 )
             },
         ) {
-            return GuardOutcome::denied(format!(
-                "Internal error: rendezvous guard command ordering invalid: {reason}"
-            ));
+            return GuardOutcome::denied(
+                RendezvousGuardError::InvalidCommandOrdering {
+                    reason: reason.to_string(),
+                }
+                .to_string(),
+            );
         }
 
         GuardOutcome::allowed(effects)
@@ -329,9 +350,12 @@ impl RendezvousService {
                 )
             },
         ) {
-            return Ok(GuardOutcome::denied(format!(
-                "Internal error: rendezvous guard command ordering invalid: {reason}"
-            )));
+            return Ok(GuardOutcome::denied(
+                RendezvousGuardError::InvalidCommandOrdering {
+                    reason: reason.to_string(),
+                }
+                .to_string(),
+            ));
         }
 
         Ok(GuardOutcome::allowed(effects))
@@ -418,9 +442,12 @@ impl RendezvousService {
                 )
             },
         ) {
-            return GuardOutcome::denied(format!(
-                "Internal error: rendezvous guard command ordering invalid: {reason}"
-            ));
+            return GuardOutcome::denied(
+                RendezvousGuardError::InvalidCommandOrdering {
+                    reason: reason.to_string(),
+                }
+                .to_string(),
+            );
         }
 
         GuardOutcome::allowed(effects)

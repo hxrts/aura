@@ -7,7 +7,7 @@ use aura_core::{
     epochs::Epoch,
     frost::{PublicKeyPackage, ThresholdSignature},
     time::ProvenancedTime,
-    AuthorityId, Hash32,
+    AuraError, AuthorityId, Hash32, Result,
 };
 use frost_ed25519;
 use serde::{Deserialize, Serialize};
@@ -176,14 +176,30 @@ pub struct ConsensusConfig {
 
 impl ConsensusConfig {
     /// Create a new consensus configuration
-    pub fn new(threshold: u16, witness_set: Vec<AuthorityId>, epoch: Epoch) -> Self {
-        Self {
+    pub fn new(threshold: u16, witness_set: Vec<AuthorityId>, epoch: Epoch) -> Result<Self> {
+        if witness_set.is_empty() {
+            return Err(AuraError::invalid(
+                "Consensus requires at least one witness",
+            ));
+        }
+
+        if threshold == 0 {
+            return Err(AuraError::invalid("Consensus threshold must be >= 1"));
+        }
+
+        if witness_set.len() < threshold as usize {
+            return Err(AuraError::invalid(
+                "Consensus threshold exceeds witness set size",
+            ));
+        }
+
+        Ok(Self {
             threshold,
             witness_set,
             timeout_ms: 30000, // 30 seconds default
             enable_pipelining: true,
             epoch,
-        }
+        })
     }
 
     /// Check if we have sufficient witnesses for the threshold
@@ -253,7 +269,7 @@ mod tests {
             AuthorityId::new_from_entropy([2u8; 32]),
             AuthorityId::new_from_entropy([3u8; 32]),
         ];
-        let config = ConsensusConfig::new(2, witnesses, Epoch::from(1));
+        let config = ConsensusConfig::new(2, witnesses, Epoch::from(1)).unwrap();
 
         assert!(config.has_quorum());
         assert_eq!(config.threshold, 2);

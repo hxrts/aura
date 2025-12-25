@@ -163,6 +163,42 @@ pub fn validate_charge_before_send<C>(
     Ok(())
 }
 
+/// Typed guard operation identifiers to avoid stringly-typed call sites.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GuardOperation {
+    SyncRequestDigest,
+    SyncRequestOps,
+    SyncPushOps,
+    SyncAnnounceOp,
+    SyncPushOp,
+    Custom(String),
+}
+
+impl GuardOperation {
+    pub fn as_str(&self) -> &str {
+        match self {
+            GuardOperation::SyncRequestDigest => "sync:request_digest",
+            GuardOperation::SyncRequestOps => "sync:request_ops",
+            GuardOperation::SyncPushOps => "sync:push_ops",
+            GuardOperation::SyncAnnounceOp => "sync:announce_op",
+            GuardOperation::SyncPushOp => "sync:push_op",
+            GuardOperation::Custom(value) => value.as_str(),
+        }
+    }
+}
+
+impl From<GuardOperation> for String {
+    fn from(operation: GuardOperation) -> Self {
+        operation.as_str().to_string()
+    }
+}
+
+impl From<&str> for GuardOperation {
+    fn from(value: &str) -> Self {
+        GuardOperation::Custom(value.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

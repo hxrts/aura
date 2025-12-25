@@ -196,6 +196,11 @@ impl SocialFact {
         }
     }
 
+    /// Validate that this fact can be reduced under the provided context.
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        self.context_id() == context_id
+    }
+
     /// Create a BlockCreated fact with millisecond timestamp
     pub fn block_created_ms(
         block_id: BlockId,
@@ -332,8 +337,7 @@ impl FactReducer for SocialFactReducer {
 
         let fact: SocialFact = serde_json::from_slice(binding_data).ok()?;
 
-        let fact_context_id = fact.context_id();
-        if fact_context_id != context_id {
+        if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
@@ -510,5 +514,23 @@ mod tests {
             }
             _ => panic!("expected Generic binding type"),
         }
+    }
+
+    #[test]
+    fn test_reducer_idempotence() {
+        let reducer = SocialFactReducer;
+        let context_id = test_context_id();
+        let fact = SocialFact::block_created_ms(
+            test_block_id(),
+            context_id,
+            1234567890,
+            test_authority_id(),
+            "Test Block".to_string(),
+        );
+
+        let bytes = fact.to_bytes();
+        let binding1 = reducer.reduce(context_id, SOCIAL_FACT_TYPE_ID, &bytes);
+        let binding2 = reducer.reduce(context_id, SOCIAL_FACT_TYPE_ID, &bytes);
+        assert_eq!(binding1, binding2);
     }
 }

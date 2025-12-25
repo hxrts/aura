@@ -74,7 +74,8 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
                 );
                 total_flow_consumed += result.flow_consumed;
                 if let Some(depth) = result.delegation_depth {
-                    max_delegation_depth = Some(max_delegation_depth.unwrap_or(0).max(depth));
+                    max_delegation_depth =
+                        Some(max_delegation_depth.map_or(depth, |current| current.max(depth)));
                 }
             }
             Err(error) => {

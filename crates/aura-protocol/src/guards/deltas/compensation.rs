@@ -37,7 +37,11 @@ pub async fn generate_compensation_fact<E: TimeEffects>(
                     (
                         "timestamp".to_string(),
                         JsonValue::Number(serde_json::Number::from(
-                            effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
+                            effects
+                                .physical_time()
+                                .await
+                                .map_err(|e| aura_core::AuraError::internal(format!("time error: {e}")))?
+                                .ts_ms,
                         )),
                     ),
                 ]);

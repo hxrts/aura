@@ -161,7 +161,7 @@ async fn merge_json_fact<E: aura_core::effects::JournalEffects + TimeEffects>(
         .get_journal()
         .await
         .map_err(|e| AuraError::internal(format!("Failed to load journal: {}", e)))?;
-    let delta = journal_from_json_fact(fact);
+    let delta = journal_from_json_fact(fact)?;
 
     let merged = effect_system
         .merge_facts(&current, &delta)
@@ -202,7 +202,10 @@ impl<E: aura_core::effects::JournalEffects + TimeEffects> JournalOperationExt fo
                 device_fact_map.insert(
                     "timestamp".to_string(),
                     JsonValue::Number(serde_json::Number::from(
-                        self.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
+                        self.physical_time()
+                            .await
+                            .map_err(|e| AuraError::internal(format!("time error: {e}")))?
+                            .ts_ms,
                     )),
                 );
                 let device_fact = JsonValue::Object(device_fact_map);

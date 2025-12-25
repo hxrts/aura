@@ -57,6 +57,18 @@ pub mod storage;
 pub mod topology;
 pub mod traversal;
 
+/// Operation category map (A/B/C) for protocol gating and review.
+pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    ("social:block-create", "B"),
+    ("social:block-delete", "B"),
+    ("social:resident-join", "B"),
+    ("social:resident-leave", "B"),
+    ("social:steward-grant", "B"),
+    ("social:steward-revoke", "B"),
+    ("social:neighborhood-create", "B"),
+    ("social:neighborhood-join", "B"),
+];
+
 // Re-export primary types
 pub use availability::{BlockAvailability, NeighborhoodAvailability};
 pub use block::Block;

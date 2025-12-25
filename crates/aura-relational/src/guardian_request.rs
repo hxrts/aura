@@ -53,6 +53,10 @@ impl GuardianRequestFact {
             payload,
         }
     }
+
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        self.context_id() == context_id
+    }
 }
 
 impl DomainFact for GuardianRequestFact {
@@ -99,7 +103,7 @@ impl FactReducer for GuardianRequestFactReducer {
         }
 
         let fact: GuardianRequestFact = bincode::deserialize(binding_data).ok()?;
-        if fact.context_id() != context_id {
+        if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
@@ -125,4 +129,45 @@ pub fn parse_guardian_request(
         return None;
     }
     GuardianRequestFact::from_bytes(binding_data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::relational::GuardianParameters;
+    use aura_core::time::PhysicalTime;
+
+    fn test_context_id() -> ContextId {
+        ContextId::new_from_entropy([42u8; 32])
+    }
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_payload() -> GuardianRequestPayload {
+        GuardianRequestPayload {
+            account_commitment: Hash32::from_bytes(&hash::hash(b"account")),
+            guardian_commitment: Hash32::from_bytes(&hash::hash(b"guardian")),
+            requester: test_authority(1),
+            parameters: GuardianParameters::default(),
+            requested_at: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            }),
+            expires_at: None,
+        }
+    }
+
+    #[test]
+    fn test_guardian_request_reducer_idempotence() {
+        let reducer = GuardianRequestFactReducer;
+        let context_id = test_context_id();
+        let fact = GuardianRequestFact::requested(context_id, test_payload());
+        let bytes = fact.to_bytes();
+
+        let binding1 = reducer.reduce(context_id, GUARDIAN_REQUEST_FACT_TYPE_ID, &bytes);
+        let binding2 = reducer.reduce(context_id, GUARDIAN_REQUEST_FACT_TYPE_ID, &bytes);
+        assert_eq!(binding1, binding2);
+    }
 }

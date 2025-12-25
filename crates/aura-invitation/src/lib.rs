@@ -88,6 +88,15 @@ pub mod facts;
 /// View delta and reducer for invitation facts
 pub mod view;
 
+/// Operation category map (A/B/C) for protocol gating and review.
+pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    ("invitation:send", "C"),
+    ("invitation:accept", "C"),
+    ("invitation:decline", "C"),
+    ("invitation:cancel", "C"),
+    ("invitation:ceremony", "C"),
+];
+
 // =============================================================================
 // Legacy Modules
 // =============================================================================

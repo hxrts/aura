@@ -71,9 +71,9 @@ impl EnhancedTimeHandler {
     }
 
     /// Set a timeout and return a handle
-    pub async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
+    pub async fn set_timeout(&self, timeout_ms: u64) -> Result<TimeoutHandle> {
         let timeout_id = self.random_provider.random_uuid().await;
-        let current_ms = self.current_timestamp().await;
+        let current_ms = self.current_timestamp().await?;
         let expires_at_ms = current_ms.saturating_add(timeout_ms);
 
         let timeout_task = TimeoutTask {
@@ -93,7 +93,7 @@ impl EnhancedTimeHandler {
             stats.active_timeouts += 1;
         }
 
-        timeout_id
+        Ok(timeout_id)
     }
 
     /// Cancel a timeout
@@ -131,7 +131,7 @@ impl EnhancedTimeHandler {
         match condition {
             WakeCondition::Immediate => Ok(()),
             WakeCondition::TimeoutAt(target_timestamp) => {
-                let current = self.current_timestamp().await;
+                let current = self.current_timestamp().await?;
                 if current >= target_timestamp {
                     return Ok(());
                 }
@@ -169,7 +169,7 @@ impl EnhancedTimeHandler {
             }
             _ => {
                 // For other conditions, check if satisfied immediately
-                if self.check_wake_condition(&condition).await {
+                if self.check_wake_condition(&condition).await? {
                     Ok(())
                 } else {
                     Err(AuraError::invalid(
@@ -186,21 +186,21 @@ impl EnhancedTimeHandler {
     }
 
     /// Current timestamp in milliseconds
-    pub async fn current_timestamp(&self) -> u64 {
+    pub async fn current_timestamp(&self) -> Result<u64> {
         self.provider
             .physical_time()
             .await
             .map(|p| p.ts_ms)
-            .unwrap_or_default()
+            .map_err(|e| AuraError::internal(format!("time error: {e}")))
     }
 
     /// Current epoch in milliseconds (alias)
-    pub async fn current_epoch(&self) -> u64 {
+    pub async fn current_epoch(&self) -> Result<u64> {
         self.current_timestamp().await
     }
 
     /// Millisecond precision helper
-    pub async fn current_timestamp_millis(&self) -> u64 {
+    pub async fn current_timestamp_millis(&self) -> Result<u64> {
         self.current_timestamp().await
     }
 
@@ -238,8 +238,8 @@ impl EnhancedTimeHandler {
     }
 
     /// Cleanup expired timeouts
-    pub async fn cleanup_expired_timeouts(&self) {
-        let now_ms = self.current_timestamp().await;
+    pub async fn cleanup_expired_timeouts(&self) -> Result<()> {
+        let now_ms = self.current_timestamp().await?;
         let mut timeouts = self.timeouts.write().await;
 
         let expired_ids: Vec<TimeoutHandle> = timeouts
@@ -251,6 +251,7 @@ impl EnhancedTimeHandler {
         for id in expired_ids {
             timeouts.remove(&id);
         }
+        Ok(())
     }
 
     /// Cleanup completed scheduled tasks
@@ -276,8 +277,8 @@ impl EnhancedTimeHandler {
     }
 
     /// Process wake condition and return whether it's satisfied
-    async fn check_wake_condition(&self, condition: &WakeCondition) -> bool {
-        match condition {
+    async fn check_wake_condition(&self, condition: &WakeCondition) -> Result<bool> {
+        let satisfied = match condition {
             WakeCondition::Immediate => true,
             WakeCondition::NewEvents => {
                 // For simplicity, always true since we can't track "new" events
@@ -285,11 +286,11 @@ impl EnhancedTimeHandler {
                 true
             }
             WakeCondition::EpochReached { target } => {
-                let current_epoch = self.current_epoch().await;
+                let current_epoch = self.current_epoch().await?;
                 current_epoch >= *target
             }
             WakeCondition::TimeoutAt(target_timestamp) => {
-                let current_timestamp = self.current_timestamp().await;
+                let current_timestamp = self.current_timestamp().await?;
                 current_timestamp >= *target_timestamp
             }
             WakeCondition::EventMatching(_criteria) => {
@@ -302,14 +303,14 @@ impl EnhancedTimeHandler {
                 event_count >= *threshold
             }
             WakeCondition::TimeoutExpired { timeout_id } => {
-                let current = self.current_timestamp().await;
+                let current = self.current_timestamp().await?;
                 let mut timeouts = self.timeouts.write().await;
                 if let Some(task) = timeouts.get_mut(timeout_id) {
                     if !task.completed && current >= task.expires_at_ms {
                         task.completed = true;
                         let mut stats = self.stats.write().await;
                         stats.active_timeouts = stats.active_timeouts.saturating_sub(1);
-                        return true;
+                        return Ok(true);
                     }
                 }
                 false
@@ -318,7 +319,9 @@ impl EnhancedTimeHandler {
                 // Custom conditions would be handled by external logic
                 false
             }
-        }
+        };
+
+        Ok(satisfied)
     }
 }
 
@@ -360,9 +363,9 @@ mod tests {
     async fn test_time_operations() {
         let handler = EnhancedTimeHandler::default();
 
-        let current_epoch = handler.current_epoch().await;
-        let current_timestamp = handler.current_timestamp().await;
-        let current_timestamp_millis = handler.current_timestamp_millis().await;
+        let current_epoch = handler.current_epoch().await.unwrap();
+        let current_timestamp = handler.current_timestamp().await.unwrap();
+        let current_timestamp_millis = handler.current_timestamp_millis().await.unwrap();
 
         assert!(current_epoch > 0);
         assert!(current_timestamp > 0);
@@ -374,9 +377,9 @@ mod tests {
     async fn test_sleep_operations() {
         let handler = EnhancedTimeHandler::default();
 
-        let start_time = handler.current_timestamp().await;
+        let start_time = handler.current_timestamp().await.unwrap();
         handler.sleep_ms(1).await;
-        let end_time = handler.current_timestamp().await;
+        let end_time = handler.current_timestamp().await.unwrap();
 
         let stats = handler.get_statistics().await;
         assert_eq!(stats.total_sleeps, 1);
@@ -387,7 +390,7 @@ mod tests {
     async fn test_timeout_operations() {
         let handler = EnhancedTimeHandler::default();
 
-        let timeout_handle = handler.set_timeout(1).await;
+        let timeout_handle = handler.set_timeout(1).await.unwrap();
 
         let stats = handler.get_statistics().await;
         assert_eq!(stats.total_timeouts_set, 1);
@@ -431,7 +434,7 @@ mod tests {
     async fn test_yield_until_timeout() {
         let handler = EnhancedTimeHandler::default();
 
-        let current_time = handler.current_timestamp().await;
+        let current_time = handler.current_timestamp().await.unwrap();
         let future_time = current_time + 1; // 1ms in future
 
         let result = handler
@@ -475,11 +478,11 @@ mod tests {
     async fn test_cleanup_expired_timeouts() {
         let handler = EnhancedTimeHandler::default();
 
-        let timeout_handle = handler.set_timeout(1).await;
+        let timeout_handle = handler.set_timeout(1).await.unwrap();
 
         handler.sleep_ms(10).await;
 
-        handler.cleanup_expired_timeouts().await;
+        handler.cleanup_expired_timeouts().await.unwrap();
 
         let result = handler.cancel_timeout(timeout_handle).await;
         assert!(result.is_err());

@@ -153,17 +153,17 @@ impl ConsensusProtocol {
         config: ConsensusConfig,
         key_packages: HashMap<AuthorityId, Share>,
         group_public_key: PublicKeyPackage,
-    ) -> Self {
+    ) -> Result<Self> {
         let frost_orchestrator =
-            FrostConsensusOrchestrator::new(config.clone(), key_packages, group_public_key.clone());
+            FrostConsensusOrchestrator::new(config.clone(), key_packages, group_public_key.clone())?;
 
-        Self {
+        Ok(Self {
             authority_id,
             config,
             frost_orchestrator,
             group_public_key,
             instances: Arc::new(RwLock::new(HashMap::new())),
-        }
+        })
     }
 
     /// Run consensus as coordinator
@@ -245,7 +245,11 @@ impl ConsensusProtocol {
                     },
                     tracker: WitnessTracker::new(),
                     phase: ConsensusPhase::Execute,
-                    start_time_ms: time.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
+                    start_time_ms: time
+                        .physical_time()
+                        .await
+                        .map_err(|e| AuraError::internal(format!("time error: {e}")))?
+                        .ts_ms,
                     nonce_token: None,
                     core_state,
                 };
@@ -581,7 +585,7 @@ pub async fn run_consensus<T: serde::Serialize>(
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<CommitFact> {
-    let config = ConsensusConfig::new(params.threshold, params.witnesses, params.epoch);
+    let config = ConsensusConfig::new(params.threshold, params.witnesses, params.epoch)?;
     // Derive coordinator ID deterministically from the prestate hash to keep coordination scoped to the instance.
     let prestate_hash = prestate.compute_hash();
     let mut entropy = [0u8; 32];
@@ -593,7 +597,7 @@ pub async fn run_consensus<T: serde::Serialize>(
         config,
         params.key_packages,
         params.group_public_key,
-    );
+    )?;
 
     let response = protocol
         .run_consensus(prestate, operation, random, time)
@@ -615,7 +619,7 @@ mod tests {
             AuthorityId::new_from_entropy([1u8; 32]),
             AuthorityId::new_from_entropy([2u8; 32]),
         ];
-        let config = ConsensusConfig::new(2, witnesses, Epoch::from(1));
+        let config = ConsensusConfig::new(2, witnesses, Epoch::from(1)).unwrap();
         let authority_id = AuthorityId::new_from_entropy([3u8; 32]);
 
         let protocol = ConsensusProtocol::new(
@@ -623,7 +627,8 @@ mod tests {
             config,
             HashMap::new(),
             PublicKeyPackage::new(vec![0u8; 32], std::collections::BTreeMap::new(), 1, 1),
-        );
+        )
+        .unwrap();
 
         // Protocol should be created successfully
         let _ = protocol;

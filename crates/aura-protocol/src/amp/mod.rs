@@ -274,7 +274,10 @@ pub struct AmpEvidenceStore<'a, E: ?Sized + StorageEffects> {
 
 impl<'a, E: ?Sized + StorageEffects> AmpEvidenceStore<'a, E> {
     pub async fn merge_delta(&self, cid: ConsensusId, delta: EvidenceDelta) -> Result<()> {
-        let mut record = self.current(cid).await?.unwrap_or_default();
+        let mut record = match self.current(cid).await? {
+            Some(record) => record,
+            None => EvidenceRecord::default(),
+        };
         record.merge(delta);
         let bytes =
             serde_json::to_vec(&record).map_err(|e| AuraError::serialization(e.to_string()))?;

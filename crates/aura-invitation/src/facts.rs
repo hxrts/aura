@@ -158,6 +158,27 @@ impl InvitationFact {
         }
     }
 
+    /// Extract the context_id when present.
+    pub fn context_id_opt(&self) -> Option<ContextId> {
+        match self {
+            InvitationFact::Sent { context_id, .. } => Some(*context_id),
+            InvitationFact::Accepted { .. }
+            | InvitationFact::Declined { .. }
+            | InvitationFact::Cancelled { .. }
+            | InvitationFact::CeremonyInitiated { .. }
+            | InvitationFact::CeremonyAcceptanceReceived { .. }
+            | InvitationFact::CeremonyCommitted { .. }
+            | InvitationFact::CeremonyAborted { .. } => None,
+        }
+    }
+
+    /// Validate that this fact can be reduced under the provided context.
+    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
+        self.context_id_opt()
+            .map(|fact_context_id| fact_context_id == context_id)
+            .unwrap_or(true)
+    }
+
     /// Get the timestamp in milliseconds (backward compatibility)
     pub fn timestamp_ms(&self) -> u64 {
         match self {
@@ -170,6 +191,44 @@ impl InvitationFact {
             InvitationFact::CeremonyAcceptanceReceived { timestamp_ms, .. } => *timestamp_ms,
             InvitationFact::CeremonyCommitted { timestamp_ms, .. } => *timestamp_ms,
             InvitationFact::CeremonyAborted { timestamp_ms, .. } => *timestamp_ms,
+        }
+    }
+
+    /// Derive the relational binding subtype and key data for this fact.
+    pub fn binding_key(&self) -> (String, Vec<u8>) {
+        match self {
+            InvitationFact::Sent { invitation_id, .. } => (
+                "invitation-sent".to_string(),
+                invitation_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::Accepted { invitation_id, .. } => (
+                "invitation-accepted".to_string(),
+                invitation_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::Declined { invitation_id, .. } => (
+                "invitation-declined".to_string(),
+                invitation_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::Cancelled { invitation_id, .. } => (
+                "invitation-cancelled".to_string(),
+                invitation_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::CeremonyInitiated { ceremony_id, .. } => (
+                "ceremony-initiated".to_string(),
+                ceremony_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => (
+                "ceremony-acceptance-received".to_string(),
+                ceremony_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::CeremonyCommitted { ceremony_id, .. } => (
+                "ceremony-committed".to_string(),
+                ceremony_id.as_bytes().to_vec(),
+            ),
+            InvitationFact::CeremonyAborted { ceremony_id, .. } => (
+                "ceremony-aborted".to_string(),
+                ceremony_id.as_bytes().to_vec(),
+            ),
         }
     }
 
@@ -258,21 +317,8 @@ impl DomainFact for InvitationFact {
     }
 
     fn context_id(&self) -> ContextId {
-        match self {
-            InvitationFact::Sent { context_id, .. } => *context_id,
-            // For non-Sent variants, derive context from invitation_id
-            // In practice, these would lookup the original context from the Sent fact
-            InvitationFact::Accepted { .. }
-            | InvitationFact::Declined { .. }
-            | InvitationFact::Cancelled { .. }
-            | InvitationFact::CeremonyInitiated { .. }
-            | InvitationFact::CeremonyAcceptanceReceived { .. }
-            | InvitationFact::CeremonyCommitted { .. }
-            | InvitationFact::CeremonyAborted { .. } => {
-                // Return a deterministic placeholder - actual context comes from lookup
-                ContextId::new_from_entropy([0u8; 32])
-            }
-        }
+        self.context_id_opt()
+            .unwrap_or_else(|| ContextId::new_from_entropy([0u8; 32]))
     }
 
     #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
@@ -309,45 +355,11 @@ impl FactReducer for InvitationFactReducer {
         }
 
         let fact: InvitationFact = serde_json::from_slice(binding_data).ok()?;
-        if fact.context_id() != context_id {
+        if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
-        let (sub_type, data) = match &fact {
-            InvitationFact::Sent { invitation_id, .. } => (
-                "invitation-sent".to_string(),
-                invitation_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::Accepted { invitation_id, .. } => (
-                "invitation-accepted".to_string(),
-                invitation_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::Declined { invitation_id, .. } => (
-                "invitation-declined".to_string(),
-                invitation_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::Cancelled { invitation_id, .. } => (
-                "invitation-cancelled".to_string(),
-                invitation_id.as_bytes().to_vec(),
-            ),
-            // Ceremony facts
-            InvitationFact::CeremonyInitiated { ceremony_id, .. } => (
-                "ceremony-initiated".to_string(),
-                ceremony_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => (
-                "ceremony-acceptance-received".to_string(),
-                ceremony_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::CeremonyCommitted { ceremony_id, .. } => (
-                "ceremony-committed".to_string(),
-                ceremony_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::CeremonyAborted { ceremony_id, .. } => (
-                "ceremony-aborted".to_string(),
-                ceremony_id.as_bytes().to_vec(),
-            ),
-        };
+        let (sub_type, data) = fact.binding_key();
 
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(sub_type),
@@ -454,6 +466,40 @@ mod tests {
         let other_context = ContextId::new_from_entropy([24u8; 32]);
         let binding = reducer.reduce(other_context, INVITATION_FACT_TYPE_ID, &fact.to_bytes());
         assert!(binding.is_none());
+    }
+
+    #[test]
+    fn test_binding_key_derivation() {
+        let fact = InvitationFact::declined_ms(
+            "inv-42".to_string(),
+            test_authority_id(4),
+            1234,
+        );
+
+        let (sub_type, data) = fact.binding_key();
+        assert_eq!(sub_type, "invitation-declined");
+        assert_eq!(data, b"inv-42".to_vec());
+    }
+
+    #[test]
+    fn test_reducer_idempotence() {
+        let reducer = InvitationFactReducer;
+        let context_id = test_context_id();
+        let fact = InvitationFact::sent_ms(
+            context_id,
+            "inv-100".to_string(),
+            test_authority_id(1),
+            test_authority_id(2),
+            "contact".to_string(),
+            0,
+            None,
+            None,
+        );
+
+        let bytes = fact.to_bytes();
+        let binding1 = reducer.reduce(context_id, INVITATION_FACT_TYPE_ID, &bytes);
+        let binding2 = reducer.reduce(context_id, INVITATION_FACT_TYPE_ID, &bytes);
+        assert_eq!(binding1, binding2);
     }
 
     #[test]

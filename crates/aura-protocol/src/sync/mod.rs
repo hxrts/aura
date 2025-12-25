@@ -17,6 +17,7 @@
 pub mod anti_entropy;
 pub mod broadcaster;
 pub mod effects;
+pub mod pure;
 pub mod persistent;
 
 // Re-export effect types

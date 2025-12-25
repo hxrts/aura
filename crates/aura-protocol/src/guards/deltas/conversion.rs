@@ -51,16 +51,9 @@ pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOpera
         }
         "guardian_enrollment" => {
             // Parse guardian enrollment fact
-            let device_id =
-                parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
-            let guardian_id =
-                parse_guardian_id_from_fact(fact).unwrap_or_else(|_| "guardian".to_string());
-            let capabilities = parse_guardian_capabilities_from_fact(fact).unwrap_or_else(|_| {
-                vec![
-                    "recovery:approve".to_string(),
-                    "guardian:vote".to_string(),
-                ]
-            });
+            let device_id = parse_device_id_from_fact(fact)?;
+            let guardian_id = parse_guardian_id_from_fact(fact)?;
+            let capabilities = parse_guardian_capabilities_from_fact(fact)?;
 
             Ok(JournalOperation::EnrollGuardian {
                 guardian_id,
@@ -76,12 +69,9 @@ pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOpera
         )),
         "key_derivation" => {
             // Parse key derivation fact (DKD operations)
-            let derivation_id =
-                parse_derivation_id_from_fact(fact).unwrap_or_else(|_| "dkd_operation".to_string());
-            let context =
-                parse_derivation_context_from_fact(fact).unwrap_or_else(|_| "default".to_string());
-            let derived_for =
-                parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
+            let derivation_id = parse_derivation_id_from_fact(fact)?;
+            let context = parse_derivation_context_from_fact(fact)?;
+            let derived_for = parse_device_id_from_fact(fact)?;
 
             Ok(JournalOperation::DeriveKey {
                 derivation_id,
@@ -91,12 +81,14 @@ pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOpera
         }
         "flow_budget_update" => {
             // Parse flow budget update fact
-            let context_id = parse_context_id_from_fact(fact)
-                .unwrap_or_else(|_| "default_context".to_string());
-            let peer_id =
-                parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
-            let new_limit = parse_budget_limit_from_fact(fact).unwrap_or(10000);
-            let cost = parse_budget_cost_from_fact(fact).ok();
+            let context_id = parse_context_id_from_fact(fact)?;
+            let peer_id = parse_device_id_from_fact(fact)?;
+            let new_limit = parse_budget_limit_from_fact(fact)?;
+            let cost = if fact.get("cost").is_some() {
+                Some(parse_budget_cost_from_fact(fact)?)
+            } else {
+                None
+            };
 
             Ok(JournalOperation::UpdateFlowBudget {
                 context_id,
@@ -107,13 +99,10 @@ pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOpera
         }
         "recovery_initiation" => {
             // Parse recovery initiation fact
-            let recovery_id =
-                parse_recovery_id_from_fact(fact).unwrap_or_else(|_| "recovery_session".to_string());
-            let account_id =
-                parse_account_id_from_fact(fact).unwrap_or_else(|_| "unknown_account".to_string());
-            let requester =
-                parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
-            let guardians_required = parse_guardian_threshold_from_fact(fact).unwrap_or(2);
+            let recovery_id = parse_recovery_id_from_fact(fact)?;
+            let account_id = parse_account_id_from_fact(fact)?;
+            let requester = parse_device_id_from_fact(fact)?;
+            let guardians_required = parse_guardian_threshold_from_fact(fact)?;
 
             Ok(JournalOperation::InitiateRecovery {
                 recovery_id,
@@ -124,11 +113,9 @@ pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOpera
         }
         "storage_commitment" => {
             // Parse storage commitment fact (content-addressed storage)
-            let content_hash =
-                parse_content_hash_from_fact(fact).unwrap_or_else(|_| "unknown_hash".to_string());
-            let size = parse_content_size_from_fact(fact).unwrap_or(0);
-            let storage_nodes = parse_storage_nodes_from_fact(fact)
-                .unwrap_or_else(|_| vec!["local_node".to_string()]);
+            let content_hash = parse_content_hash_from_fact(fact)?;
+            let size = parse_content_size_from_fact(fact)?;
+            let storage_nodes = parse_storage_nodes_from_fact(fact)?;
 
             Ok(JournalOperation::CommitStorage {
                 content_hash,
@@ -138,11 +125,9 @@ pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOpera
         }
         "ota_deployment" => {
             // Parse OTA deployment fact
-            let version =
-                parse_ota_version_from_fact(fact).unwrap_or_else(|_| "unknown_version".to_string());
-            let target_epoch = parse_target_epoch_from_fact(fact).unwrap_or(1);
-            let deployment_hash =
-                parse_deployment_hash_from_fact(fact).unwrap_or_else(|_| "unknown_hash".to_string());
+            let version = parse_ota_version_from_fact(fact)?;
+            let target_epoch = parse_target_epoch_from_fact(fact)?;
+            let deployment_hash = parse_deployment_hash_from_fact(fact)?;
 
             Ok(JournalOperation::DeployOta {
                 version,
@@ -158,45 +143,48 @@ pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOpera
 }
 
 /// Convert JSON value to FactValue
-pub fn json_value_to_fact_value(value: &JsonValue) -> FactValue {
+pub fn json_value_to_fact_value(value: &JsonValue) -> AuraResult<FactValue> {
     match value {
-        JsonValue::String(s) => FactValue::String(s.clone()),
-        JsonValue::Number(n) => FactValue::Number(n.as_i64().unwrap_or_default()),
-        JsonValue::Bool(b) => FactValue::Number(if *b { 1 } else { 0 }),
+        JsonValue::String(s) => Ok(FactValue::String(s.clone())),
+        JsonValue::Number(n) => n
+            .as_i64()
+            .map(FactValue::Number)
+            .ok_or_else(|| AuraError::invalid("Numeric value out of range for i64")),
+        JsonValue::Bool(b) => Ok(FactValue::Number(if *b { 1 } else { 0 })),
         JsonValue::Array(items) => {
             let mut set = BTreeSet::new();
             for item in items {
                 set.insert(item.to_string());
             }
-            FactValue::Set(set)
+            Ok(FactValue::Set(set))
         }
         JsonValue::Object(map) => {
             let mut nested = Fact::new();
             for (key, nested_value) in map {
-                nested.insert(key.clone(), json_value_to_fact_value(nested_value));
+                nested.insert(key.clone(), json_value_to_fact_value(nested_value)?);
             }
-            FactValue::Nested(Box::new(nested))
+            Ok(FactValue::Nested(Box::new(nested)))
         }
-        JsonValue::Null => FactValue::String("null".to_string()),
+        JsonValue::Null => Ok(FactValue::String("null".to_string())),
     }
 }
 
 /// Create a Journal from a JSON fact
-pub fn journal_from_json_fact(fact: &JsonValue) -> Journal {
+pub fn journal_from_json_fact(fact: &JsonValue) -> AuraResult<Journal> {
     let mut delta = Journal::default();
     let mut fact_record = Fact::new();
 
     match fact {
         JsonValue::Object(map) => {
             for (key, value) in map {
-                fact_record.insert(key.clone(), json_value_to_fact_value(value));
+                fact_record.insert(key.clone(), json_value_to_fact_value(value)?);
             }
         }
         _ => {
-            fact_record.insert("value", json_value_to_fact_value(fact));
+            fact_record.insert("value", json_value_to_fact_value(fact)?);
         }
     }
 
     delta.merge_facts(fact_record);
-    delta
+    Ok(delta)
 }

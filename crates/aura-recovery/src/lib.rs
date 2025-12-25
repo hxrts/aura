@@ -95,6 +95,15 @@ pub mod recovery_ceremony;
 /// Shared types for guardian operations
 pub mod types;
 
+/// Operation category map (A/B/C) for protocol gating and review.
+pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    ("recovery:guardian-setup", "C"),
+    ("recovery:guardian-membership-change", "C"),
+    ("recovery:key-recovery", "C"),
+    ("recovery:guardian-approval", "C"),
+    ("recovery:ceremony", "C"),
+];
+
 // Core error types
 pub use aura_core::{AuraError, AuraResult};
 

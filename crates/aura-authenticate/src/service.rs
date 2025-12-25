@@ -33,6 +33,16 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_verify::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, thiserror::Error)]
+enum AuthGuardError {
+    #[error("Session duration {requested}s exceeds maximum {max}s")]
+    SessionDurationTooLong { requested: u64, max: u64 },
+    #[error("Guardian set modification requires recovery:approve capability")]
+    GuardianSetRequiresApproveCapability,
+    #[error("Emergency freeze requires recovery:initiate capability or emergency flag")]
+    EmergencyFreezeRequiresInitiateCapability,
+}
+
 // =============================================================================
 // Service Configuration
 // =============================================================================
@@ -221,10 +231,13 @@ impl AuthService {
 
         // Check duration
         if duration_seconds > self.config.max_session_duration_secs {
-            return GuardOutcome::denied(format!(
-                "Session duration {} exceeds maximum {}",
-                duration_seconds, self.config.max_session_duration_secs
-            ));
+            return GuardOutcome::denied(
+                AuthGuardError::SessionDurationTooLong {
+                    requested: duration_seconds,
+                    max: self.config.max_session_duration_secs,
+                }
+                .to_string(),
+            );
         }
 
         let session_id = generate_session_id(snapshot);
@@ -289,14 +302,14 @@ impl AuthService {
                 RecoveryOperationType::GuardianSetModification => {
                     if !snapshot.has_capability(costs::CAP_APPROVE_RECOVERY) {
                         return GuardOutcome::denied(
-                            "Guardian set modification requires recovery:approve capability",
+                            AuthGuardError::GuardianSetRequiresApproveCapability.to_string(),
                         );
                     }
                 }
                 RecoveryOperationType::EmergencyFreeze if !context.is_emergency => {
                     if !snapshot.has_capability(costs::CAP_INITIATE_RECOVERY) {
                         return GuardOutcome::denied(
-                            "Emergency freeze requires recovery:initiate capability or emergency flag",
+                            AuthGuardError::EmergencyFreezeRequiresInitiateCapability.to_string(),
                         );
                     }
                 }

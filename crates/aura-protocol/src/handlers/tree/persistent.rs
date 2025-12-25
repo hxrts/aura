@@ -143,12 +143,11 @@ impl PersistentTreeHandler {
                 .ops_cache
                 .read()
                 .expect("PersistentTreeHandler lock poisoned");
-            ops.iter()
-                .map(|op| {
-                    let bytes = bincode::serialize(op).unwrap_or_default();
-                    hash::hash(&bytes)
-                })
-                .collect()
+            let mut hashes = Vec::with_capacity(ops.len());
+            for op in ops.iter() {
+                hashes.push(Self::op_hash(op)?);
+            }
+            hashes
         };
 
         let index_bytes = bincode::serialize(&hashes)

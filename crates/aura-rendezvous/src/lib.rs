@@ -64,6 +64,14 @@ pub mod flood;
 /// Runtime UDP sockets and tasks live in the agent runtime (Layer 6).
 pub mod lan_discovery;
 
+/// Operation category map (A/B/C) for protocol gating and review.
+pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    ("rendezvous:publish-descriptor", "A"),
+    ("rendezvous:refresh-descriptor", "A"),
+    ("rendezvous:establish-channel", "A"),
+    ("rendezvous:relay-request", "A"),
+];
+
 // =============================================================================
 // RE-EXPORTS
 // =============================================================================

@@ -176,12 +176,13 @@ mod tests {
             1,
             vec![AuthorityId::new_from_entropy([55u8; 32])],
             Epoch::from(1),
-        );
+        )
+        .unwrap();
         assert!(validate_config(&config).is_ok());
 
         // Test empty witness set
         let config = ConsensusConfig::new(1, vec![], Epoch::from(1));
-        assert!(validate_config(&config).is_err());
+        assert!(config.is_err());
 
         // Test threshold too high
         let config = ConsensusConfig::new(
@@ -189,14 +190,15 @@ mod tests {
             vec![AuthorityId::new_from_entropy([56u8; 32])],
             Epoch::from(1),
         );
-        assert!(validate_config(&config).is_err());
+        assert!(config.is_err());
 
         // Test timeout too high
         let mut config = ConsensusConfig::new(
             1,
             vec![AuthorityId::new_from_entropy([57u8; 32])],
             Epoch::from(1),
-        );
+        )
+        .unwrap();
         config.timeout_ms = 400000;
         assert!(validate_config(&config).is_err());
 
@@ -205,7 +207,8 @@ mod tests {
             1,
             vec![AuthorityId::new_from_entropy([58u8; 32])],
             Epoch::from(1),
-        );
+        )
+        .unwrap();
         config.timeout_ms = 500;
         assert!(validate_config(&config).is_err());
     }

@@ -73,6 +73,18 @@ pub mod guards;
 pub mod types;
 pub mod view;
 
+/// Operation category map (A/B/C) for protocol gating and review.
+pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    ("chat:send-message", "A"),
+    ("chat:create-channel", "A"),
+    ("chat:add-member", "A"),
+    ("chat:update-topic", "A"),
+    ("chat:change-permissions", "B"),
+    ("chat:kick-member", "B"),
+    ("chat:create-group", "C"),
+    ("chat:add-member-group", "C"),
+];
+
 pub use fact_service::ChatFactService;
 pub use facts::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 pub use group::ChatGroup;
