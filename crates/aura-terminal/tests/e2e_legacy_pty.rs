@@ -202,6 +202,7 @@ impl TuiSession {
 
 /// Test that the TUI binary can be built and launched
 #[tokio::test]
+#[ignore] // PTY tests are flaky - use deterministic tests in tui_deterministic.rs
 async fn test_tui_launches() {
     let mut tui = TuiSession::spawn_demo().await.expect("Failed to spawn TUI");
 
@@ -229,6 +230,7 @@ async fn test_tui_launches() {
 /// 3. PTY can send keyboard input to the TUI
 /// 4. TUI responds to navigation keys after initial wait
 #[tokio::test]
+#[ignore] // PTY tests are flaky - use deterministic tests in tui_deterministic.rs
 async fn test_account_creation() {
     // Use a unique data directory to ensure fresh account setup
     let test_id = std::process::id();
@@ -383,6 +385,7 @@ async fn test_account_creation() {
 
 /// Test screen navigation
 #[tokio::test]
+#[ignore] // PTY tests are flaky - use deterministic tests in tui_deterministic.rs
 async fn test_screen_navigation() {
     let mut tui = TuiSession::spawn_demo().await.expect("Failed to spawn TUI");
 
@@ -430,6 +433,7 @@ async fn test_screen_navigation() {
 /// 7. Recovery flow is initiated
 /// 8. Post-recovery messaging works
 #[tokio::test]
+#[ignore] // PTY tests are flaky - use deterministic tests in tui_deterministic.rs
 async fn test_full_recovery_demo_flow() {
     println!("\n=== Full Recovery Demo Flow E2E Test ===\n");
 
@@ -708,6 +712,7 @@ async fn test_full_recovery_demo_flow() {
 
 /// Test that Tab navigation cycles through screens
 #[tokio::test]
+#[ignore] // PTY tests are flaky - use deterministic tests in tui_deterministic.rs
 async fn test_tab_navigation() {
     let mut tui = TuiSession::spawn_demo().await.expect("Failed to spawn TUI");
 
@@ -727,6 +732,7 @@ async fn test_tab_navigation() {
 
 /// Test keyboard shortcuts in Chat screen
 #[tokio::test]
+#[ignore] // PTY tests are flaky - use deterministic tests in tui_deterministic.rs
 async fn test_chat_keyboard_shortcuts() {
     let mut tui = TuiSession::spawn_demo().await.expect("Failed to spawn TUI");
 
@@ -769,6 +775,7 @@ async fn test_chat_keyboard_shortcuts() {
 
 /// Test the invitation import flow
 #[tokio::test]
+#[ignore] // PTY tests are flaky - use deterministic tests in tui_deterministic.rs
 async fn test_invitation_import() {
     let mut tui = TuiSession::spawn_demo().await.expect("Failed to spawn TUI");
 
@@ -5349,6 +5356,7 @@ async fn test_channel_lifecycle() {
 /// 3. PTY Enter key sends correct byte sequence
 /// 4. TUI handles Enter in insert mode without crashing
 #[tokio::test]
+#[ignore] // PTY tests are flaky - use deterministic tests in tui_deterministic.rs
 async fn test_message_send_enter_key() {
     use iocraft::prelude::{KeyCode, KeyEventKind};
     use std::sync::atomic::{AtomicBool, Ordering};
