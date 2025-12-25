@@ -31,10 +31,10 @@ use super::scheduler::ReactiveView;
 
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
-use aura_protocol::moderation::facts::{
+use aura_social::moderation::facts::{
     BlockPinFact, BlockUnpinFact, BLOCK_PIN_FACT_TYPE_ID, BLOCK_UNPIN_FACT_TYPE_ID,
 };
-use aura_protocol::moderation::{
+use aura_social::moderation::{
     BlockBanFact, BlockKickFact, BlockMuteFact, BlockUnbanFact, BlockUnmuteFact,
     BLOCK_BAN_FACT_TYPE_ID, BLOCK_KICK_FACT_TYPE_ID, BLOCK_MUTE_FACT_TYPE_ID,
     BLOCK_UNBAN_FACT_TYPE_ID, BLOCK_UNMUTE_FACT_TYPE_ID,
@@ -767,8 +767,8 @@ mod tests {
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
-    use aura_protocol::moderation::facts::{BlockPinFact, BlockUnpinFact};
-    use aura_protocol::moderation::BlockBanFact;
+    use aura_social::moderation::facts::{BlockPinFact, BlockUnpinFact};
+    use aura_social::moderation::BlockBanFact;
 
     async fn setup_blocks(reactive: &ReactiveHandler, context: ContextId) -> BlocksState {
         register_app_signals(reactive).await.unwrap();

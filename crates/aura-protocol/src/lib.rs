@@ -130,7 +130,6 @@ pub mod facades; // High-level facade traits (Layer 4 appropriate - traits only,
 pub mod guards;
 pub mod handlers;
 pub mod messages;
-pub mod moderation; // Query/reduction layer for moderation state from journal facts
 pub mod session; // Session orchestration types (SessionStatus, SessionOutcome)
 pub mod state;
 pub mod sync; // Consolidated sync module (effects, handlers)

@@ -258,7 +258,9 @@ impl DomainFact for ChannelMembershipFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("channel membership serialization")
+        let bytes = serde_json::to_vec(self);
+        debug_assert!(bytes.is_ok(), "failed to serialize channel membership");
+        bytes.unwrap_or_default()
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {

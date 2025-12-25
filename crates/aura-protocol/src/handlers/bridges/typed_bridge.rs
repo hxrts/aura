@@ -18,9 +18,11 @@
 //! let handler: Arc<RwLock<Box<dyn AuraHandler>>> = Arc::new(RwLock::new(
 //!     AuraHandlerFactory::for_testing(device_id).unwrap()
 //! ));
+//! let ctx = AuraContext::for_testing(device_id);
+//! let bridge = TypedHandlerBridge::new(handler, ctx);
 //!
 //! // Now can use typed traits
-//! let bytes = handler.random_bytes(32).await;
+//! let bytes = bridge.random_bytes(32).await;
 //! ```
 
 use crate::effects::params::{RandomBytesParams, RandomRangeParams};
@@ -35,39 +37,38 @@ use aura_core::AuraError;
 use std::sync::Arc;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Helper: Get or create thread-local context
-// ═══════════════════════════════════════════════════════════════════════════
-
-thread_local! {
-    static CURRENT_CONTEXT: std::cell::RefCell<Option<AuraContext>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Get current context or fail fast if none is set
-fn get_context() -> AuraContext {
-    CURRENT_CONTEXT.with(|ctx| {
-        ctx.borrow()
-            .clone()
-            .expect("AuraContext must be set before effect execution")
-    })
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Newtype Wrapper to Avoid Orphan Rules
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Newtype wrapper around Arc<RwLock<Box<dyn AuraHandler>>> to enable trait implementations
 /// without violating orphan rules.
-pub struct TypedHandlerBridge(Arc<RwLock<Box<dyn AuraHandler>>>);
+pub struct TypedHandlerBridge {
+    handler: Arc<RwLock<Box<dyn AuraHandler>>>,
+    context: Arc<RwLock<AuraContext>>,
+}
 
 impl TypedHandlerBridge {
     /// Create a new typed handler bridge
-    pub fn new(handler: Arc<RwLock<Box<dyn AuraHandler>>>) -> Self {
-        Self(handler)
+    pub fn new(handler: Arc<RwLock<Box<dyn AuraHandler>>>, context: AuraContext) -> Self {
+        Self {
+            handler,
+            context: Arc::new(RwLock::new(context)),
+        }
     }
 
     /// Get a reference to the underlying handler
     pub fn inner(&self) -> &Arc<RwLock<Box<dyn AuraHandler>>> {
-        &self.0
+        &self.handler
+    }
+
+    /// Replace the active context for subsequent effect executions.
+    pub async fn set_context(&self, context: AuraContext) {
+        let mut ctx = self.context.write().await;
+        *ctx = context;
+    }
+
+    async fn get_context(&self) -> AuraContext {
+        self.context.read().await.clone()
     }
 }
 
@@ -78,8 +79,8 @@ impl TypedHandlerBridge {
 #[async_trait]
 impl aura_core::effects::RandomEffects for TypedHandlerBridge {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         HandlerUtils::execute_typed_effect::<Vec<u8>>(
             &mut **handler,
@@ -89,12 +90,14 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
             &ctx,
         )
         .await
-        .unwrap_or_else(|_| vec![0u8; len])
+        .unwrap_or_else(|err| {
+            panic!("TypedHandlerBridge random_bytes failed: {err}");
+        })
     }
 
     async fn random_bytes_32(&self) -> [u8; 32] {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         HandlerUtils::execute_typed_effect::<[u8; 32]>(
             &mut **handler,
@@ -104,12 +107,14 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
             &ctx,
         )
         .await
-        .unwrap_or([0u8; 32])
+        .unwrap_or_else(|err| {
+            panic!("TypedHandlerBridge random_bytes_32 failed: {err}");
+        })
     }
 
     async fn random_u64(&self) -> u64 {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         HandlerUtils::execute_typed_effect::<u64>(
             &mut **handler,
@@ -119,12 +124,14 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
             &ctx,
         )
         .await
-        .unwrap_or(0)
+        .unwrap_or_else(|err| {
+            panic!("TypedHandlerBridge random_u64 failed: {err}");
+        })
     }
 
     async fn random_range(&self, min: u64, max: u64) -> u64 {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         HandlerUtils::execute_typed_effect::<u64>(
             &mut **handler,
@@ -137,7 +144,9 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
             &ctx,
         )
         .await
-        .unwrap_or(min)
+        .unwrap_or_else(|err| {
+            panic!("TypedHandlerBridge random_range failed: {err}");
+        })
     }
 
     async fn random_uuid(&self) -> uuid::Uuid {
@@ -157,8 +166,8 @@ impl CryptoEffects for TypedHandlerBridge {
     // Note: hash is NOT an algebraic effect - use aura_core::hash::hash() instead
 
     async fn ed25519_sign(&self, data: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         let params = (data.to_vec(), private_key.to_vec());
 
@@ -179,8 +188,8 @@ impl CryptoEffects for TypedHandlerBridge {
         signature: &[u8],
         public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         let params = (data.to_vec(), signature.to_vec(), public_key.to_vec());
 
@@ -196,8 +205,8 @@ impl CryptoEffects for TypedHandlerBridge {
     }
 
     async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         HandlerUtils::execute_typed_effect::<Result<(Vec<u8>, Vec<u8>), CryptoError>>(
             &mut **handler,
@@ -211,8 +220,8 @@ impl CryptoEffects for TypedHandlerBridge {
     }
 
     async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         HandlerUtils::execute_typed_effect::<Result<Vec<u8>, CryptoError>>(
             &mut **handler,
@@ -242,8 +251,8 @@ impl CryptoEffects for TypedHandlerBridge {
         info: &[u8],
         output_len: usize,
     ) -> Result<Vec<u8>, CryptoError> {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         let params = (ikm.to_vec(), salt.to_vec(), info.to_vec(), output_len);
 
@@ -265,8 +274,8 @@ impl CryptoEffects for TypedHandlerBridge {
         master_key: &[u8],
         context: &aura_core::effects::crypto::KeyDerivationContext,
     ) -> Result<Vec<u8>, CryptoError> {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
 
         let params = (master_key.to_vec(), context.clone());
 

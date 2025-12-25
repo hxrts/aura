@@ -14,6 +14,7 @@ categories = ["cryptography", "data-structures"]
 aura-core = { path = "../aura-core", version = "0.1.0" }
 aura-journal = { path = "../aura-journal", version = "0.1.0" }
 aura-protocol = { path = "../aura-protocol", version = "0.1.0" }  # Re-added for consensus implementation
+aura-effects = { path = "../aura-effects" }
 
 # Serialization
 serde = { workspace = true }

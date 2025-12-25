@@ -6,6 +6,12 @@ use aura_core::time::PhysicalTime;
 use aura_journal::DomainFact;
 use serde::{Deserialize, Serialize};
 
+fn serialize_fact<T: Serialize>(value: &T, label: &'static str) -> Vec<u8> {
+    let bytes = serde_json::to_vec(value);
+    debug_assert!(bytes.is_ok(), "failed to serialize {label}");
+    bytes.unwrap_or_default()
+}
+
 /// Fact representing a block-wide mute or channel-specific mute.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockMuteFact {
@@ -67,7 +73,7 @@ impl DomainFact for BlockMuteFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("serialize block mute fact")
+        serialize_fact(self, "block mute fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -122,7 +128,7 @@ impl DomainFact for BlockUnmuteFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("serialize block unmute fact")
+        serialize_fact(self, "block unmute fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -191,7 +197,7 @@ impl DomainFact for BlockBanFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("serialize block ban fact")
+        serialize_fact(self, "block ban fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -246,7 +252,7 @@ impl DomainFact for BlockUnbanFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("serialize block unban fact")
+        serialize_fact(self, "block unban fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -304,7 +310,7 @@ impl DomainFact for BlockKickFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("serialize block kick fact")
+        serialize_fact(self, "block kick fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -354,7 +360,7 @@ impl DomainFact for BlockPinFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("serialize block pin fact")
+        serialize_fact(self, "block pin fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -404,7 +410,7 @@ impl DomainFact for BlockUnpinFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("serialize block unpin fact")
+        serialize_fact(self, "block unpin fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -460,7 +466,7 @@ impl DomainFact for BlockGrantStewardFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("serialize block grant steward fact")
+        serialize_fact(self, "block grant steward fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -516,7 +522,7 @@ impl DomainFact for BlockRevokeStewardFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("serialize block revoke steward fact")
+        serialize_fact(self, "block revoke steward fact")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {

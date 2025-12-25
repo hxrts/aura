@@ -25,14 +25,15 @@
 //! | `aura-invitation` | `InvitationFact` | Invitation lifecycle |
 //! | `aura-relational` | `ContactFact` | Contact management |
 //! | `aura-recovery` | `RecoveryFact` | Guardian setup, membership, key recovery |
-//! | `aura-protocol/moderation` | `Block*Fact` | Block, mute, ban, kick |
+//! | `aura-social/moderation` | `Block*Fact` | Block, mute, ban, kick |
 //!
 //! Domain crates implement the `DomainFact` trait and provide a `FactReducer`.
 
+use aura_authenticate::{AuthFact, AuthFactReducer, AUTH_FACT_TYPE_ID};
 use aura_chat::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 use aura_invitation::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
 use aura_journal::FactRegistry;
-use aura_protocol::moderation::register_moderation_facts;
+use aura_social::moderation::register_moderation_facts;
 use aura_recovery::{RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
     ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
@@ -52,6 +53,7 @@ pub fn build_fact_registry() -> FactRegistry {
 
     // Domain-level facts: application-specific, reduced via registered FactReducer
     registry.register::<ChatFact>(CHAT_FACT_TYPE_ID, Box::new(ChatFactReducer));
+    registry.register::<AuthFact>(AUTH_FACT_TYPE_ID, Box::new(AuthFactReducer));
     registry.register::<InvitationFact>(INVITATION_FACT_TYPE_ID, Box::new(InvitationFactReducer));
     registry.register::<ContactFact>(CONTACT_FACT_TYPE_ID, Box::new(ContactFactReducer));
     registry.register::<GuardianRequestFact>(
@@ -81,6 +83,7 @@ mod tests {
     fn registry_contains_domain_fact_types() {
         let registry = build_fact_registry();
         assert!(registry.is_registered(CHAT_FACT_TYPE_ID));
+        assert!(registry.is_registered(AUTH_FACT_TYPE_ID));
         assert!(registry.is_registered(INVITATION_FACT_TYPE_ID));
         assert!(registry.is_registered(CONTACT_FACT_TYPE_ID));
         assert!(registry.is_registered(GUARDIAN_REQUEST_FACT_TYPE_ID));

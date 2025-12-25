@@ -30,8 +30,8 @@ use aura_effects::ReactiveHandler;
 use aura_journal::fact::RelationalFact;
 use aura_journal::DomainFact;
 use aura_protocol::effects::TreeEffects;
-use aura_protocol::moderation::facts::{BlockPinFact, BlockUnpinFact};
-use aura_protocol::moderation::{
+use aura_social::moderation::facts::{BlockPinFact, BlockUnpinFact};
+use aura_social::moderation::{
     BlockBanFact, BlockKickFact, BlockMuteFact, BlockUnbanFact, BlockUnmuteFact,
 };
 use serde::{Deserialize, Serialize};

@@ -148,7 +148,7 @@ Application-specific facts use `RelationalFact::Generic` and are reduced by regi
 | `aura-chat` | `ChatFact` | Channels, messages |
 | `aura-invitation` | `InvitationFact` | Invitation lifecycle |
 | `aura-relational` | `ContactFact` | Contact management |
-| `aura-protocol/moderation` | `Block*Fact` | Block, mute, ban, kick |
+| `aura-social/moderation` | `Block*Fact` | Block, mute, ban, kick |
 
 **Design Pattern**:
 1. **`aura-journal`** provides:

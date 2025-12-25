@@ -4,7 +4,7 @@
 //! and docs/101_auth_authz.md, providing the CapGuard → FlowGuard → JournalCoupler sequence
 //! that enforces both authorization and budget constraints at every protocol send site.
 
-use super::traits::GuardContextProvider;
+use super::traits::{require_biscuit_metadata, GuardContextProvider};
 use super::GuardEffects;
 use crate::authorization::BiscuitAuthorizationBridge;
 use crate::guards::biscuit_evaluator::BiscuitGuardEvaluator;
@@ -47,12 +47,7 @@ impl SendGuardChain {
             return Ok((true, "none".to_string()));
         }
 
-        let token_b64 = effect_system
-            .get_metadata("biscuit_token")
-            .ok_or_else(|| AuraError::invalid("missing biscuit_token metadata".to_string()))?;
-        let root_pk_b64 = effect_system
-            .get_metadata("biscuit_root_pk")
-            .ok_or_else(|| AuraError::invalid("missing biscuit_root_pk metadata".to_string()))?;
+        let (token_b64, root_pk_b64) = require_biscuit_metadata(effect_system)?;
 
         let root_bytes = BASE64
             .decode(&root_pk_b64)

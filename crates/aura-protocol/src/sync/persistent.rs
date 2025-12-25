@@ -14,7 +14,8 @@ use aura_core::tree::AttestedOp;
 use aura_core::Hash32;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use async_lock::RwLock;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Storage key prefix for tree operations (shared with PersistentTreeHandler)
@@ -71,10 +72,7 @@ impl PersistentSyncHandler {
     async fn ensure_initialized(&self) -> Result<(), aura_core::AuraError> {
         if !self.initialized.load(Ordering::Acquire) {
             let ops = Self::load_ops_from_storage(&*self.storage).await?;
-            let mut cache = self
-                .ops_cache
-                .write()
-                .expect("PersistentSyncHandler lock poisoned");
+            let mut cache = self.ops_cache.write().await;
             if !self.initialized.load(Ordering::Acquire) {
                 *cache = ops;
                 self.initialized.store(true, Ordering::Release);
@@ -141,16 +139,13 @@ impl PersistentSyncHandler {
 
         // Update the index
         let hashes: Vec<[u8; 32]> = {
-            let ops = self
-                .ops_cache
-                .read()
-                .expect("PersistentSyncHandler lock poisoned");
-            ops.iter()
-                .map(|op| {
-                    let bytes = bincode::serialize(op).unwrap_or_default();
-                    hash::hash(&bytes)
-                })
-                .collect()
+            let ops = self.ops_cache.read().await;
+            let mut hashes = Vec::with_capacity(ops.len());
+            for op in ops.iter() {
+                let op_hash = Self::op_hash(op)?;
+                hashes.push(op_hash);
+            }
+            hashes
         };
 
         let index_bytes = bincode::serialize(&hashes)
@@ -192,10 +187,7 @@ impl SyncEffects for PersistentSyncHandler {
             .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
-        let ops = self
-            .ops_cache
-            .read()
-            .expect("PersistentSyncHandler lock poisoned");
+        let ops = self.ops_cache.read().await;
 
         let mut cids = BTreeSet::new();
         for op in ops.iter() {
@@ -215,10 +207,7 @@ impl SyncEffects for PersistentSyncHandler {
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
         // Return full oplog; guard chain filters where needed
-        let ops = self
-            .ops_cache
-            .read()
-            .expect("PersistentSyncHandler lock poisoned");
+        let ops = self.ops_cache.read().await;
         Ok(ops.clone())
     }
 
@@ -242,10 +231,7 @@ impl SyncEffects for PersistentSyncHandler {
 
             // Check for duplicate
             let already = {
-                let store = self
-                    .ops_cache
-                    .read()
-                    .expect("PersistentSyncHandler lock poisoned");
+                let store = self.ops_cache.read().await;
                 store.iter().any(|existing| {
                     Self::op_hash(existing)
                         .map(|h| h == op_hash)
@@ -256,10 +242,7 @@ impl SyncEffects for PersistentSyncHandler {
             if !already {
                 // Add to cache
                 {
-                    let mut store = self
-                        .ops_cache
-                        .write()
-                        .expect("PersistentSyncHandler lock poisoned");
+                    let mut store = self.ops_cache.write().await;
                     store.push(op.clone());
                 }
 
@@ -281,10 +264,7 @@ impl SyncEffects for PersistentSyncHandler {
             .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
-        let store = self
-            .ops_cache
-            .read()
-            .expect("PersistentSyncHandler lock poisoned");
+        let store = self.ops_cache.read().await;
 
         for op in store.iter() {
             if let Ok(hash) = Self::op_hash(op) {
@@ -322,7 +302,7 @@ mod tests {
         let ops = handler
             .ops_cache
             .read()
-            .expect("lock poisoned in test");
+            .await;
         assert!(ops.is_empty());
     }
 
@@ -358,7 +338,7 @@ mod tests {
         let ops = handler2
             .ops_cache
             .read()
-            .expect("lock poisoned in test");
+            .await;
         assert!(ops.is_empty());
     }
 }

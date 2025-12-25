@@ -15,8 +15,6 @@ use aura_core::{
     relational::ConsensusProof,
     AuraError, AuthorityId, Prestate, Result,
 };
-use aura_effects::random::RealRandomHandler;
-use aura_effects::time::PhysicalTimeHandler;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -30,6 +28,8 @@ pub async fn run_consensus<T: Serialize>(
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<ConsensusProof> {
     // Extract witnesses from prestate
     let witnesses: Vec<_> = prestate
@@ -43,7 +43,16 @@ pub async fn run_consensus<T: Serialize>(
 
     let config = ConsensusConfig::new(threshold, witnesses, epoch);
 
-    run_consensus_with_config(prestate, operation, config, key_packages, group_public_key).await
+    run_consensus_with_config(
+        prestate,
+        operation,
+        config,
+        key_packages,
+        group_public_key,
+        random,
+        time,
+    )
+    .await
 }
 
 /// Run consensus with explicit configuration for relational contexts
@@ -56,6 +65,8 @@ pub async fn run_consensus_with_config<T: Serialize>(
     config: ConsensusConfig,
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<ConsensusProof> {
     // Validate configuration
     if config.witness_set.is_empty() {
@@ -70,18 +81,14 @@ pub async fn run_consensus_with_config<T: Serialize>(
         ));
     }
 
-    // Run consensus protocol with provided effects
-    let random = RealRandomHandler;
-    let time = PhysicalTimeHandler;
-
     run_consensus_with_effects(
         prestate,
         operation,
         config,
         key_packages,
         group_public_key,
-        &random,
-        &time,
+        random,
+        time,
     )
     .await
 }

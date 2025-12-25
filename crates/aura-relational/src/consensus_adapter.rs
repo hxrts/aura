@@ -9,6 +9,8 @@ use aura_core::{
     frost::{PublicKeyPackage, Share},
 };
 use aura_core::{relational::ConsensusProof, AuraError, AuthorityId, Prestate, Result};
+use aura_effects::random::RealRandomHandler;
+use aura_effects::time::PhysicalTimeHandler;
 use aura_protocol::consensus::relational::{
     run_consensus as run_relational_consensus,
     run_consensus_with_config as run_relational_consensus_with_config,
@@ -33,7 +35,18 @@ pub async fn run_consensus<T: Serialize>(
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
 ) -> Result<ConsensusProof> {
-    run_relational_consensus(prestate, operation, key_packages, group_public_key, epoch).await
+    let random = RealRandomHandler;
+    let time = PhysicalTimeHandler;
+    run_relational_consensus(
+        prestate,
+        operation,
+        key_packages,
+        group_public_key,
+        epoch,
+        &random,
+        &time,
+    )
+    .await
 }
 
 /// Run consensus with explicit configuration for relational contexts
@@ -47,12 +60,16 @@ pub async fn run_consensus_with_config<T: Serialize>(
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
 ) -> Result<ConsensusProof> {
+    let random = RealRandomHandler;
+    let time = PhysicalTimeHandler;
     run_relational_consensus_with_config(
         prestate,
         operation,
         config,
         key_packages,
         group_public_key,
+        &random,
+        &time,
     )
     .await
 }
