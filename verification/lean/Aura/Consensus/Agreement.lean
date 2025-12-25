@@ -13,9 +13,9 @@ This is the fundamental safety property of consensus.
 - Invariant: `InvariantUniqueCommitPerInstance`
 
 ## Rust Correspondence
-- File: crates/aura-protocol/src/consensus/types.rs
+- File: crates/aura-consensus/src/consensus/types.rs
 - Type: `CommitFact` - the committed result with threshold signature
-- File: crates/aura-protocol/src/consensus/protocol.rs
+- File: crates/aura-consensus/src/consensus/protocol.rs
 - Function: `verify_commit` - validates commit facts
 
 ## Expose

@@ -85,6 +85,14 @@ pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("chat:add-member-group", "C"),
 ];
 
+/// Lookup the operation category (A/B/C) for a given operation.
+pub fn operation_category(operation: &str) -> Option<&'static str> {
+    OPERATION_CATEGORIES
+        .iter()
+        .find(|(op, _)| *op == operation)
+        .map(|(_, category)| *category)
+}
+
 pub use fact_service::ChatFactService;
 pub use facts::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 pub use group::ChatGroup;

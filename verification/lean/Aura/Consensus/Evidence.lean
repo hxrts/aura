@@ -12,7 +12,7 @@ This ensures replicas can merge evidence in any order and converge.
 - Predicates: Evidence is implicitly a CRDT through proposals/equivocators sets
 
 ## Rust Correspondence
-- File: crates/aura-protocol/src/consensus/protocol.rs
+- File: crates/aura-consensus/src/consensus/protocol.rs
 - Evidence merge would be part of consensus state reconciliation
 
 ## Expose

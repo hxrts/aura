@@ -91,6 +91,14 @@ pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("auth:recovery-complete", "C"),
 ];
 
+/// Lookup the operation category (A/B/C) for a given operation.
+pub fn operation_category(operation: &str) -> Option<&'static str> {
+    OPERATION_CATEGORIES
+        .iter()
+        .find(|(op, _)| *op == operation)
+        .map(|(_, category)| *category)
+}
+
 // Re-export core types from aura-core (Layer 1)
 pub use aura_core::{AccountId, AuraError, AuraResult, Journal};
 

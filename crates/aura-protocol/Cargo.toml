@@ -20,6 +20,10 @@ aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
 aura-composition = { path = "../aura-composition" }
 aura-journal = { path = "../aura-journal" }
+aura-guards = { path = "../aura-guards" }
+aura-consensus = { path = "../aura-consensus" }
+aura-amp = { path = "../aura-amp" }
+aura-anti-entropy = { path = "../aura-anti-entropy" }
 # Note: do NOT depend on aura-relational to avoid cycles (Layer 4 -> Layer 5).
 # Guardian coordinator will be in Layer 4; relational helpers stay in aura-relational.
 aura-wot = { path = "../aura-wot" }

@@ -198,18 +198,52 @@ pub enum EffectCommand {
 /// Outcome type shared across Layer 5 feature crates.
 pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
+/// Typed guard rejection for consistent error reporting.
+#[derive(Debug, Clone, Copy)]
+pub struct GuardReject {
+    pub code: &'static str,
+    pub category: &'static str,
+    pub message: &'static str,
+}
+
+impl std::fmt::Display for GuardReject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}:{}] {}", self.category, self.code, self.message)
+    }
+}
+
+fn deny(reject: GuardReject) -> GuardOutcome {
+    GuardOutcome::denied(reject.to_string())
+}
+
 // =============================================================================
 // Guard Helpers
 // =============================================================================
 
 /// Check capability and return denied outcome if missing
 pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<GuardOutcome> {
-    types::check_capability(snapshot, required_cap)
+    if snapshot.has_capability(required_cap) {
+        None
+    } else {
+        Some(deny(GuardReject {
+            code: "capability-missing",
+            category: "invitation",
+            message: "Required capability missing",
+        }))
+    }
 }
 
 /// Check flow budget and return denied outcome if insufficient
 pub fn check_flow_budget(snapshot: &GuardSnapshot, required_cost: u32) -> Option<GuardOutcome> {
-    types::check_flow_budget(snapshot, required_cost)
+    if snapshot.flow_budget_remaining >= required_cost {
+        None
+    } else {
+        Some(deny(GuardReject {
+            code: "flow-budget-insufficient",
+            category: "invitation",
+            message: "Flow budget insufficient",
+        }))
+    }
 }
 
 impl types::CapabilitySnapshot for GuardSnapshot {

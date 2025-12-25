@@ -11,7 +11,7 @@ No observable network behavior may occur without successful authorization, flow 
 ### Enforcement Locus
 
 1. **Primary Enforcement**: Guard chain composition
-   - Module: `aura-protocol/src/guards/mod.rs`
+   - Module: `crates/aura-guards/src/guards/mod.rs`
    - Function: `GuardChain::execute()`
    - Sequence: `CapGuard` → `FlowGuard` → `JournalCoupler` → `TransportEffects`
 

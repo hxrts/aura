@@ -13,8 +13,8 @@ Proves that honest majority can commit despite Byzantine behavior.
 - Invariants: InvariantByzantineThreshold, InvariantEquivocationDetected
 
 ## Rust Correspondence
-- File: crates/aura-protocol/src/consensus/types.rs (ConflictFact)
-- File: crates/aura-protocol/src/consensus/witness.rs
+- File: crates/aura-consensus/src/consensus/types.rs (ConflictFact)
+- File: crates/aura-consensus/src/consensus/witness.rs
 
 ## Expose
 

@@ -240,7 +240,7 @@ Link to Rust implementation for spec-impl traceability:
 
 ```lean
 ## Rust Correspondence
-- File: crates/aura-protocol/src/consensus/types.rs
+- File: crates/aura-consensus/src/consensus/types.rs
 - Type: `CommitFact`
 - Function: `verify_commit`
 ```

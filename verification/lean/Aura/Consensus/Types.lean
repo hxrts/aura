@@ -11,8 +11,8 @@ the protocol state and messages for threshold agreement.
 - Section: TYPES
 
 ## Rust Correspondence
-- File: crates/aura-protocol/src/consensus/types.rs
-- File: crates/aura-protocol/src/consensus/messages.rs
+- File: crates/aura-consensus/src/consensus/types.rs
+- File: crates/aura-consensus/src/consensus/messages.rs
 
 ## Expose
 
@@ -131,7 +131,7 @@ These correspond to Quint `str` types and Rust newtype wrappers.
 -/
 
 /-- Unique identifier for a consensus instance.
-    Rust: aura-protocol/src/consensus/types.rs::ConsensusId
+    Rust: crates/aura-consensus/src/consensus/types.rs::ConsensusId
     Quint: protocol_consensus.qnt::ConsensusId -/
 structure ConsensusId where
   value : String
@@ -169,7 +169,7 @@ instance : LawfulBEq AuthorityId where
     exact beq_self_eq_true v
 
 /-- Hash of prestate for deterministic binding.
-    Rust: aura-protocol/src/consensus/types.rs (PrestateHash)
+    Rust: crates/aura-consensus/src/consensus/types.rs (PrestateHash)
     Quint: protocol_consensus.qnt::PrestateHash -/
 structure PrestateHash where
   value : String
@@ -188,7 +188,7 @@ instance : LawfulBEq PrestateHash where
     exact beq_self_eq_true v
 
 /-- Identifier for a proposed result value.
-    Rust: aura-protocol/src/consensus/types.rs (ResultId)
+    Rust: crates/aura-consensus/src/consensus/types.rs (ResultId)
     Quint: protocol_consensus.qnt::ResultId -/
 structure ResultId where
   value : String
@@ -213,7 +213,7 @@ Models the state machine phases from the Quint specification.
 -/
 
 /-- Protocol phase enumeration.
-    Rust: aura-protocol/src/consensus/messages.rs::ConsensusPhase
+    Rust: crates/aura-consensus/src/consensus/messages.rs::ConsensusPhase
     Quint: protocol_consensus.qnt::ConsensusPhase -/
 inductive ConsensusPhase where
   | Pending      : ConsensusPhase  -- Waiting to start
@@ -247,7 +247,7 @@ instance : LawfulBEq ShareData where
   rfl {a} := decide_eq_true rfl
 
 /-- A witness's vote on a consensus instance.
-    Rust: aura-protocol/src/consensus/types.rs::WitnessVote
+    Rust: crates/aura-consensus/src/consensus/types.rs::WitnessVote
     Quint: protocol_consensus.qnt::ShareProposal -/
 structure WitnessVote where
   witness : AuthorityId
@@ -284,7 +284,7 @@ These are the key types for agreement proofs.
 
 /-- A committed consensus result with threshold signature.
     This is the output of successful consensus.
-    Rust: aura-protocol/src/consensus/types.rs::CommitFact
+    Rust: crates/aura-consensus/src/consensus/types.rs::CommitFact
     Quint: protocol_consensus.qnt::CommitFact -/
 structure CommitFact where
   consensusId : ConsensusId
@@ -295,7 +295,7 @@ structure CommitFact where
 
 /-- Proof that a witness equivocated (signed conflicting values).
     Used for Byzantine fault detection.
-    Rust: aura-protocol/src/consensus/types.rs::ConflictFact
+    Rust: crates/aura-consensus/src/consensus/types.rs::ConflictFact
     Quint: protocol_consensus_adversary.qnt (equivocators set) -/
 structure EquivocationProof where
   witness : AuthorityId

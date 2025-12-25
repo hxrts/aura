@@ -241,6 +241,9 @@ pub enum OTACeremonyFact {
     /// Ceremony initiated by coordinator
     CeremonyInitiated {
         ceremony_id: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         proposal_id: String,
         package_id: String,
         version: String,
@@ -253,6 +256,9 @@ pub enum OTACeremonyFact {
     /// Device commitment received
     CommitmentReceived {
         ceremony_id: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         device: String,
         ready: bool,
         reason: Option<String>,
@@ -261,6 +267,9 @@ pub enum OTACeremonyFact {
     /// Threshold reached
     ThresholdReached {
         ceremony_id: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         ready_count: usize,
         ready_devices: Vec<String>,
         timestamp_ms: u64,
@@ -268,6 +277,9 @@ pub enum OTACeremonyFact {
     /// Ceremony committed (activation will occur at epoch)
     CeremonyCommitted {
         ceremony_id: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         activation_epoch: u64,
         ready_devices: Vec<String>,
         threshold_signature: Vec<u8>,
@@ -276,6 +288,9 @@ pub enum OTACeremonyFact {
     /// Ceremony aborted
     CeremonyAborted {
         ceremony_id: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         reason: String,
         timestamp_ms: u64,
     },
@@ -770,9 +785,16 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         ceremony_id: OTACeremonyId,
         proposal: &UpgradeProposal,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        let timestamp_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
+        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
         let fact = OTACeremonyFact::CeremonyInitiated {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: ceremony_id_hex.clone(),
+            trace_id: Some(ceremony_id_hex.clone()),
             proposal_id: proposal.proposal_id.to_string(),
             package_id: proposal.package_id.to_string(),
             version: proposal.version.to_string(),
@@ -784,7 +806,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         };
 
         let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:initiated:{}", hex::encode(ceremony_id.0.as_bytes()));
+        let key = format!("ota:initiated:{}", ceremony_id_hex);
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
         journal.facts.insert(key, FactValue::Bytes(fact_bytes));
@@ -799,9 +821,16 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         ceremony_id: OTACeremonyId,
         commitment: &ReadinessCommitment,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        let timestamp_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
+        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
         let fact = OTACeremonyFact::CommitmentReceived {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: ceremony_id_hex.clone(),
+            trace_id: Some(ceremony_id_hex.clone()),
             device: hex::encode(commitment.device.0.as_bytes()),
             ready: commitment.ready,
             reason: commitment.reason.clone(),
@@ -811,7 +840,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         let mut journal = self.effects.get_journal().await?;
         let key = format!(
             "ota:commitment:{}:{}",
-            hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id_hex,
             hex::encode(commitment.device.0.as_bytes())
         );
         let fact_bytes =
@@ -824,7 +853,13 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
 
     /// Emit threshold reached fact.
     async fn emit_threshold_reached_fact(&self, ceremony_id: OTACeremonyId) -> AuraResult<()> {
-        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        let timestamp_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
+        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
 
         let (ready_count, ready_devices) = {
             let ceremony = self
@@ -842,14 +877,15 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         };
 
         let fact = OTACeremonyFact::ThresholdReached {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: ceremony_id_hex.clone(),
+            trace_id: Some(ceremony_id_hex.clone()),
             ready_count,
             ready_devices,
             timestamp_ms,
         };
 
         let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:threshold:{}", hex::encode(ceremony_id.0.as_bytes()));
+        let key = format!("ota:threshold:{}", ceremony_id_hex);
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
         journal.facts.insert(key, FactValue::Bytes(fact_bytes));
@@ -866,9 +902,16 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         ready_devices: &[DeviceId],
         threshold_signature: &[u8],
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        let timestamp_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
+        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
         let fact = OTACeremonyFact::CeremonyCommitted {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: ceremony_id_hex.clone(),
+            trace_id: Some(ceremony_id_hex.clone()),
             activation_epoch,
             ready_devices: ready_devices
                 .iter()
@@ -879,7 +922,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         };
 
         let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:committed:{}", hex::encode(ceremony_id.0.as_bytes()));
+        let key = format!("ota:committed:{}", ceremony_id_hex);
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
         journal.facts.insert(key, FactValue::Bytes(fact_bytes));
@@ -894,15 +937,22 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         ceremony_id: OTACeremonyId,
         reason: &str,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        let timestamp_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
+        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
         let fact = OTACeremonyFact::CeremonyAborted {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: ceremony_id_hex.clone(),
+            trace_id: Some(ceremony_id_hex.clone()),
             reason: reason.to_string(),
             timestamp_ms,
         };
 
         let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:aborted:{}", hex::encode(ceremony_id.0.as_bytes()));
+        let key = format!("ota:aborted:{}", ceremony_id_hex);
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
         journal.facts.insert(key, FactValue::Bytes(fact_bytes));
@@ -1084,6 +1134,7 @@ mod tests {
     fn test_ota_ceremony_fact_serialization() {
         let fact = OTACeremonyFact::CeremonyInitiated {
             ceremony_id: "abc123".to_string(),
+            trace_id: None,
             proposal_id: "prop-1".to_string(),
             package_id: "pkg-1".to_string(),
             version: "2.0.0".to_string(),

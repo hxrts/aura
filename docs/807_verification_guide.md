@@ -423,7 +423,7 @@ fn test_consensus_matches_quint() {
 3. **ITF Trace Generation**: Generate traces covering relevant scenarios
 
 **Implemented protocols:**
-- **Consensus**: `aura-protocol/src/consensus/core/` - Pure state machine with QuintMappable. Tests in `aura-protocol/tests/consensus_itf_conformance.rs`. ITF loader in `consensus/core/itf_loader.rs`.
+- **Consensus**: `crates/aura-consensus/src/consensus/core/` - Pure state machine with QuintMappable. Tests in `crates/aura-protocol/tests/consensus_itf_conformance.rs`. ITF loader in `consensus/core/itf_loader.rs`.
 
 ### Approach 2: Generative Exploration
 

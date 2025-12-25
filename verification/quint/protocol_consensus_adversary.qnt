@@ -22,9 +22,9 @@
 // Axioms: Aura.Assumptions (byzantine_threshold)
 //
 // == Rust Correspondence ==
-// - Types: crates/aura-protocol/src/consensus/types.rs::ConflictFact
-// - Detection: crates/aura-protocol/src/consensus/types.rs::detect_conflict
-// - Witness logic: crates/aura-protocol/src/consensus/witness.rs
+// - Types: crates/aura-consensus/src/consensus/types.rs::ConflictFact
+// - Detection: crates/aura-consensus/src/consensus/types.rs::detect_conflict
+// - Witness logic: crates/aura-consensus/src/consensus/witness.rs
 //
 // See: docs/004_distributed_systems_contract.md (§6.2 Byzantine Witness Model)
 

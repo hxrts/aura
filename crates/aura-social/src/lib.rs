@@ -69,6 +69,14 @@ pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("social:neighborhood-join", "B"),
 ];
 
+/// Lookup the operation category (A/B/C) for a given operation.
+pub fn operation_category(operation: &str) -> Option<&'static str> {
+    OPERATION_CATEGORIES
+        .iter()
+        .find(|(op, _)| *op == operation)
+        .map(|(_, category)| *category)
+}
+
 // Re-export primary types
 pub use availability::{BlockAvailability, NeighborhoodAvailability};
 pub use block::Block;

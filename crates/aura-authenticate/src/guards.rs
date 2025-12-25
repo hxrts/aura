@@ -384,6 +384,24 @@ pub enum EffectCommand {
 /// Outcome type shared across Layer 5 feature crates.
 pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
+/// Typed guard rejection for consistent error reporting.
+#[derive(Debug, Clone, Copy)]
+pub struct GuardReject {
+    pub code: &'static str,
+    pub category: &'static str,
+    pub message: &'static str,
+}
+
+impl std::fmt::Display for GuardReject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}:{}] {}", self.category, self.code, self.message)
+    }
+}
+
+fn deny(reject: GuardReject) -> GuardOutcome {
+    GuardOutcome::denied(reject.to_string())
+}
+
 // =============================================================================
 // Guard Helpers
 // =============================================================================
@@ -402,12 +420,28 @@ impl types::FlowBudgetSnapshot for GuardSnapshot {
 
 /// Check capability and return denied outcome if missing
 pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<GuardOutcome> {
-    types::check_capability(snapshot, required_cap)
+    if snapshot.has_capability(required_cap) {
+        None
+    } else {
+        Some(deny(GuardReject {
+            code: "capability-missing",
+            category: "auth",
+            message: "Required capability missing",
+        }))
+    }
 }
 
 /// Check flow budget and return denied outcome if insufficient
 pub fn check_flow_budget(snapshot: &GuardSnapshot, required_cost: u32) -> Option<GuardOutcome> {
-    types::check_flow_budget(snapshot, required_cost)
+    if snapshot.flow_budget_remaining >= required_cost {
+        None
+    } else {
+        Some(deny(GuardReject {
+            code: "flow-budget-insufficient",
+            category: "auth",
+            message: "Flow budget insufficient",
+        }))
+    }
 }
 
 /// Check if challenge has expired
@@ -416,7 +450,11 @@ pub fn check_challenge_expiry(
     expires_at_ms: u64,
 ) -> Option<GuardOutcome> {
     if snapshot.now_ms > expires_at_ms {
-        Some(GuardOutcome::denied("Challenge has expired"))
+        Some(deny(GuardReject {
+            code: "challenge-expired",
+            category: "auth",
+            message: "Challenge has expired",
+        }))
     } else {
         None
     }
@@ -427,10 +465,11 @@ pub fn check_session_duration(duration_seconds: u64) -> Option<GuardOutcome> {
     const MAX_SESSION_DURATION_SECS: u64 = 86400; // 24 hours
 
     if duration_seconds > MAX_SESSION_DURATION_SECS {
-        Some(GuardOutcome::denied(format!(
-            "Session duration {} exceeds maximum {}",
-            duration_seconds, MAX_SESSION_DURATION_SECS
-        )))
+        Some(deny(GuardReject {
+            code: "session-duration-too-long",
+            category: "auth",
+            message: "Session duration exceeds maximum",
+        }))
     } else {
         None
     }
@@ -450,17 +489,21 @@ pub fn check_recovery_operation(
         RecoveryOperationType::GuardianSetModification => {
             // Guardian set modifications require explicit capability
             if !snapshot.has_capability(costs::CAP_APPROVE_RECOVERY) {
-                return Some(GuardOutcome::denied(
-                    "Guardian set modification requires recovery:approve capability",
-                ));
+                return Some(deny(GuardReject {
+                    code: "guardian-set-approval-required",
+                    category: "auth",
+                    message: "Guardian set modification requires recovery:approve capability",
+                }));
             }
         }
         RecoveryOperationType::EmergencyFreeze => {
             // Emergency freeze requires emergency flag or explicit capability
             if !snapshot.has_capability(costs::CAP_INITIATE_RECOVERY) {
-                return Some(GuardOutcome::denied(
-                    "Emergency freeze requires recovery:initiate capability",
-                ));
+                return Some(deny(GuardReject {
+                    code: "emergency-freeze-requires-capability",
+                    category: "auth",
+                    message: "Emergency freeze requires recovery:initiate capability",
+                }));
             }
         }
         _ => {

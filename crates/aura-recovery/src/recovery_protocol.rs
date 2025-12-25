@@ -331,6 +331,7 @@ impl RecoveryProtocolHandler {
         let initiated_fact = RecoveryFact::RecoveryInitiated {
             context_id,
             account_id: request.account_authority,
+            trace_id: Some(request.recovery_id.clone()),
             request_hash,
             initiated_at: PhysicalTime {
                 ts_ms: timestamp,
@@ -364,6 +365,7 @@ impl RecoveryProtocolHandler {
         let share_fact = RecoveryFact::RecoveryShareSubmitted {
             context_id,
             guardian_id: approval.guardian_id,
+            trace_id: Some(approval.recovery_id.clone()),
             share_hash,
             submitted_at: PhysicalTime {
                 ts_ms: timestamp,
@@ -449,6 +451,7 @@ impl RecoveryProtocolHandler {
         let completed_fact = RecoveryFact::RecoveryCompleted {
             context_id,
             account_id: self.protocol.account_authority,
+            trace_id: Some(recovery_id.to_string()),
             evidence_hash,
             completed_at: PhysicalTime {
                 ts_ms: timestamp,

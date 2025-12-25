@@ -194,7 +194,7 @@ quint run --out-itf=consensus_trace.itf.json protocol_consensus.qnt
 cargo test -p aura-protocol --test consensus_itf_conformance
 ```
 
-ITF loader: `aura-protocol/src/consensus/core/itf_loader.rs`
+ITF loader: `crates/aura-consensus/src/consensus/core/itf_loader.rs`
 Conformance tests: `aura-protocol/tests/consensus_itf_conformance.rs`
 
 ## Differential Testing

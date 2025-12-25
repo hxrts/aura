@@ -14,9 +14,9 @@ valid prestate binding. This ensures consensus only commits well-formed values.
 - Invariant: `InvariantPrestateBinding` (implicit)
 
 ## Rust Correspondence
-- File: crates/aura-protocol/src/consensus/types.rs
+- File: crates/aura-consensus/src/consensus/types.rs
 - Type: `CommitFact` with `prestateHash` binding
-- File: crates/aura-protocol/src/consensus/protocol.rs
+- File: crates/aura-consensus/src/consensus/protocol.rs
 - Function: `verify_prestate_binding`
 
 ## Expose

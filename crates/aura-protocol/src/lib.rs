@@ -121,24 +121,23 @@
 //! ```
 
 // Core modules following unified effect system architecture
-pub mod amp;
-pub mod authorization; // Biscuit-based authorization (moved up from authorization/ subdirectory)
+pub use aura_amp as amp;
+pub use aura_anti_entropy as sync;
+pub use aura_consensus as consensus;
+pub use aura_guards as guards;
 pub mod choreography;
-pub mod consensus; // Real Aura Consensus implementation
 pub mod effects;
 pub mod error;
 pub mod facades; // High-level facade traits (Layer 4 appropriate - traits only, implementations in Layer 6)
-pub mod guards;
 pub mod handlers;
 pub mod messages;
 pub mod session; // Session orchestration types (SessionStatus, SessionOutcome)
 pub mod state;
-pub mod sync; // Consolidated sync module (effects, handlers)
 pub mod transport;
 pub mod types; // Protocol orchestration types
 
 // Re-export authorization types for convenient access
-pub use authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
+pub use aura_guards::{AuthorizationResult, BiscuitAuthorizationBridge};
 pub use error::ProtocolError;
 
 // Re-export session types for convenient access

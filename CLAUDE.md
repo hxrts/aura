@@ -74,7 +74,7 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 3. **Implementation** (`aura-effects` + `aura-composition`): Stateless, single-party handlers (`aura-effects`) and handler composition infrastructure (`aura-composition`). Production handlers implement core effect traits (crypto, network, storage, randomness, console, etc.). Mock/test handlers are in `aura-testkit`.
    - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects` and persists the master key via `SecureStorageEffects` (Keychain/TPM/Keystore; filesystem fallback during bring-up). Application code should not implement ad-hoc storage encryption (e.g., `LocalStore`).
 
-4. **Orchestration** (`aura-protocol`): Multi-party coordination and guard infrastructure: handler adapters, CrdtCoordinator, GuardChain (CapGuard → FlowGuard → JournalCoupler), Capability evaluator, Aura Consensus runtime, anti-entropy/snapshot helpers.
+4. **Orchestration** (`aura-protocol` + `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`): Multi-party coordination and guard infrastructure: handler adapters, CrdtCoordinator, GuardChain (CapGuard → FlowGuard → JournalCoupler), Consensus runtime, AMP orchestration, anti-entropy/snapshot helpers.
 
 5. **Feature/Protocol** (`aura-authenticate`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates (auth, secure messaging, guardian recovery, rendezvous, social topology, storage, etc.) built atop the orchestration layer. `aura-frost` is deprecated; FROST primitives live in `aura-core::crypto::tree_signing`.
 
@@ -83,6 +83,14 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 7. **User Interface** (`aura-terminal`): Terminal-based CLI and TUI entry points. Imports only from `aura-app` (never `aura-agent` directly). Uses `AppCore` as the unified backend interface for all operations. Exposes scenario/admin/recovery/invitation flows plus authority/context inspection commands.
 
 8. **Testing & Tools** (`aura-testkit`, `aura-quint`): Shared fixtures, simulation harnesses, property tests, Quint interop.
+
+### Layer 5 Conventions
+- Each Layer 5 crate includes `ARCHITECTURE.md` describing facts, invariants, and operation categories.
+- Each Layer 5 crate exposes `OPERATION_CATEGORIES` mapping operations to A/B/C classes.
+- Runtime-owned caches (e.g., invitation/rendezvous descriptors) must live in Layer 6 handlers.
+- Layer 5 facts use versioned binary encoding (bincode) with JSON fallback for debug; bump per-crate schema constants on breaking changes.
+- FactKey helper types are required for reducers/views to avoid ad-hoc key drift.
+- Ceremony facts include optional `trace_id` for correlation (typically set to the ceremony id).
 
 **Where does my code go?** See the docs under `docs/001_system_architecture.md` and `docs/100_authority_and_identity.md` for the latest authority-centric guidance.
 
@@ -111,8 +119,8 @@ Reference `docs/003_information_flow_contract.md` for the unified flow-budget/me
 ## Authorization Systems
 
 1. **Traditional Capability Semantics** (`aura-wot`): Meet-semilattice capability evaluation for local checks.
-2. **Biscuit Tokens** (`aura-wot/src/biscuit/`, `aura-protocol/src/authorization.rs`): Cryptographically verifiable, attenuated tokens.
-3. **Guard Integration**: `aura-protocol::guards::{CapGuard, FlowGuard, JournalCoupler, LeakageTracker}` enforce Biscuit/policy requirements, flow budgets, journal commits, and leakage budgets per message.
+2. **Biscuit Tokens** (`aura-wot/src/biscuit/`, `aura-guards/src/authorization.rs`): Cryptographically verifiable, attenuated tokens.
+3. **Guard Integration**: `aura-guards::{CapGuard, FlowGuard, JournalCoupler, LeakageTracker}` enforce Biscuit/policy requirements, flow budgets, journal commits, and leakage budgets per message.
 
 ## Unified Time System
 
@@ -153,7 +161,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 
 ### "Where does my code go?" Decision Tree
 - **Single-party stateless operation** → `aura-effects`
-- **Multi-party coordination** → `aura-protocol`
+- **Multi-party coordination** → `aura-protocol` + Layer 4 subcrates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`)
 - **Domain-specific logic** → Domain crate (`aura-journal`, etc.)
 - **Domain service handler (stateless)** → Domain crate `*Handler` (e.g., `aura-chat::ChatHandler`)
 - **RwLock wrapper service** → `aura-agent/src/handlers/*_service.rs`
@@ -166,7 +174,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **Building choreography**: `docs/107_mpst_and_choreography.md` → `docs/803_coordination_guide.md`
 - **Understanding authorities**: `docs/100_authority_and_identity.md` → `docs/102_journal.md`
 - **Debugging architecture**: `docs/999_project_structure.md` + `just check-arch`
-- **Implementing consensus**: `docs/104_consensus.md` → `aura-protocol/src/consensus/`
+- **Implementing consensus**: `docs/104_consensus.md` → `crates/aura-consensus/src/consensus/`
 - **Working with journals**: `docs/102_journal.md` → `aura-journal/src/`
 - **Creating recovery flows**: `docs/103_relational_contexts.md` → `aura-recovery/`
 
@@ -253,3 +261,4 @@ To conserve agent usage, prefer:
 - Quick reference skills over re-reading documentation
 - Batch operations and parallel tool calls when possible
 - Use `.claude/skills/` for project-specific knowledge
+- Note: `work/` is ignored; do not commit files from this directory

@@ -87,6 +87,14 @@ pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("relational:recovery-grant", "C"),
 ];
 
+/// Lookup the operation category (A/B/C) for a given operation.
+pub fn operation_category(operation: &str) -> Option<&'static str> {
+    OPERATION_CATEGORIES
+        .iter()
+        .find(|(op, _)| *op == operation)
+        .map(|(_, category)| *category)
+}
+
 // Export domain fact types
 pub use facts::{
     ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,

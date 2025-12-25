@@ -80,7 +80,7 @@ These properties are assumed based on cryptographic security proofs:
 
 ## Rust Implementation Coverage
 
-### Consensus Module (`crates/aura-protocol/src/consensus/`)
+### Consensus Module (`crates/aura-consensus/src/consensus/`)
 
 | File | Key Functions | Verified Spec | Coverage |
 |------|---------------|---------------|----------|

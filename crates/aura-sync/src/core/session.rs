@@ -1007,8 +1007,6 @@ mod tests {
     use super::*;
     use crate::SyncError;
     use aura_testkit::builders::test_device_id;
-    use std::thread;
-    use std::time::Duration as StdDuration;
 
     /// Helper function to create PhysicalTime for tests
     fn test_time(ts_ms: u64) -> PhysicalTime {
@@ -1176,7 +1174,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Needs rewrite for timestamp-based API - requires manual time advancement"]
     fn test_session_timeout() {
         let config = SessionConfig {
             timeout: Duration::from_millis(100),
@@ -1189,22 +1186,21 @@ mod tests {
             .create_session(vec![test_device_id(1)], &now)
             .unwrap();
 
-        // Wait for timeout
-        thread::sleep(StdDuration::from_millis(150));
+        // Advance time past timeout (100ms timeout, we advance 200ms)
+        let future_time = test_time(1000200);
 
         // Try to activate - should fail due to timeout
         let state = TestProtocolState {
             phase: "test".to_string(),
             data: vec![],
         };
-        let result = manager.activate_session(session_id, state, &test_time(1000200));
+        let result = manager.activate_session(session_id, state, &future_time);
         assert!(result.is_err());
         // Timeout errors now map to Internal
         assert!(matches!(result.unwrap_err(), SyncError::Internal { .. }));
     }
 
     #[test]
-    #[ignore = "Needs rewrite for timestamp-based API - requires manual time advancement"]
     fn test_cleanup_stale_sessions() {
         let config = SessionConfig {
             cleanup_interval: Duration::from_millis(50),
@@ -1228,12 +1224,11 @@ mod tests {
 
         assert_eq!(manager.sessions.len(), 1);
 
-        // Wait for cleanup interval
-        thread::sleep(StdDuration::from_millis(100));
+        // Advance time past cleanup interval (50ms interval, we advance 200ms total)
+        let cleanup_time = test_time(1000200);
 
         // Cleanup should remove completed sessions
-        let now_cleanup = test_time(1000200); // Future timestamp after cleanup interval
-        let removed = manager.cleanup_stale_sessions(&now_cleanup).unwrap();
+        let removed = manager.cleanup_stale_sessions(&cleanup_time).unwrap();
         assert!(removed > 0);
     }
 

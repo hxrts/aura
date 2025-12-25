@@ -16,7 +16,7 @@ ensuring signature aggregation only uses valid, consistent shares.
 ## Rust Correspondence
 - File: crates/aura-core/src/crypto/tree_signing.rs
 - Functions: `aggregate_signatures`, `verify_share`
-- File: crates/aura-protocol/src/consensus/frost.rs
+- File: crates/aura-consensus/src/consensus/frost.rs
 - Type: `FrostConsensusOrchestrator`
 
 ## Expose

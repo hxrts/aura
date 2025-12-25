@@ -33,16 +33,16 @@ Lean proves the mathematical properties that Quint assumes.
 
 | Lean Type | Rust Type | Location |
 |-----------|-----------|----------|
-| `ConsensusId` | `ConsensusId` | `aura-protocol/src/consensus/core/state.rs` |
-| `AuthorityId` | `String` | `aura-protocol/src/consensus/core/state.rs` |
-| `PrestateHash` | `String` | `aura-protocol/src/consensus/core/state.rs` |
-| `ResultId` | `String` | `aura-protocol/src/consensus/core/state.rs` |
-| `ShareData` | `ShareData` | `aura-protocol/src/consensus/core/state.rs` |
-| `WitnessVote` | `ShareProposal` | `aura-protocol/src/consensus/core/state.rs` |
-| `CommitFact` | `PureCommitFact` | `aura-protocol/src/consensus/core/state.rs` |
-| `Evidence` | `Evidence` | `aura-protocol/src/consensus/core/reference.rs` |
-| `EquivocationProof` | detected via `is_equivocator` | `aura-protocol/src/consensus/core/validation.rs` |
-| `ConsensusPhase` | `ConsensusPhase` | `aura-protocol/src/consensus/core/state.rs` |
+| `ConsensusId` | `ConsensusId` | `crates/aura-consensus/src/consensus/core/state.rs` |
+| `AuthorityId` | `String` | `crates/aura-consensus/src/consensus/core/state.rs` |
+| `PrestateHash` | `String` | `crates/aura-consensus/src/consensus/core/state.rs` |
+| `ResultId` | `String` | `crates/aura-consensus/src/consensus/core/state.rs` |
+| `ShareData` | `ShareData` | `crates/aura-consensus/src/consensus/core/state.rs` |
+| `WitnessVote` | `ShareProposal` | `crates/aura-consensus/src/consensus/core/state.rs` |
+| `CommitFact` | `PureCommitFact` | `crates/aura-consensus/src/consensus/core/state.rs` |
+| `Evidence` | `Evidence` | `crates/aura-consensus/src/consensus/core/reference.rs` |
+| `EquivocationProof` | detected via `is_equivocator` | `crates/aura-consensus/src/consensus/core/validation.rs` |
+| `ConsensusPhase` | `ConsensusPhase` | `crates/aura-consensus/src/consensus/core/state.rs` |
 
 ### Functions
 

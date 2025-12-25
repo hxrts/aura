@@ -10,7 +10,7 @@ the guard chain security enforcement layer.
 - Properties: Guard evaluation is pure and deterministic
 
 ## Rust Correspondence
-- File: crates/aura-protocol/src/guards/mod.rs
+- File: crates/aura-guards/src/guards/mod.rs
 - Type: `CapGuard`, `FlowGuard`, `JournalCoupler`
 - Function: `evaluate` - pure guard chain evaluation
 
@@ -43,7 +43,7 @@ Guard chain data structures.
 -/
 
 /-- Capability requirements follow a lattice: none < read < write.
-    Rust: crates/aura-protocol/src/guards/cap_guard.rs -/
+    Rust: crates/aura-guards/src/guards/cap_guard.rs -/
 inductive CapRequirement where
   | none : CapRequirement
   | read : CapRequirement

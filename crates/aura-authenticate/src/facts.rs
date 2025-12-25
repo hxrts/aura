@@ -33,6 +33,19 @@ use crate::guards::RecoveryOperationType;
 
 /// Fact type identifier for authentication facts
 pub const AUTH_FACT_TYPE_ID: &str = "aura.authenticate.v1";
+pub const AUTH_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VersionedAuthFact {
+    schema_version: u32,
+    fact: AuthFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthFactKey {
+    pub sub_type: &'static str,
+    pub data: Vec<u8>,
+}
 
 // =============================================================================
 // Authentication Facts
@@ -346,52 +359,52 @@ impl AuthFact {
     }
 
     /// Derive the relational binding subtype and key data for this fact.
-    pub fn binding_key(&self) -> (String, Vec<u8>) {
+    pub fn binding_key(&self) -> AuthFactKey {
         match self {
-            AuthFact::ChallengeGenerated { session_id, .. } => (
-                "auth-challenge-generated".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::ProofSubmitted { session_id, .. } => (
-                "auth-proof-submitted".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::AuthVerified { session_id, .. } => (
-                "auth-verified".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::AuthFailed { session_id, .. } => (
-                "auth-failed".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::SessionIssued { session_id, .. } => (
-                "auth-session-issued".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::SessionRevoked { session_id, .. } => (
-                "auth-session-revoked".to_string(),
-                session_id.as_bytes().to_vec(),
-            ),
-            AuthFact::GuardianApprovalRequested { request_id, .. } => (
-                "auth-guardian-approval-requested".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
-            AuthFact::GuardianApproved { request_id, .. } => (
-                "auth-guardian-approved".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
-            AuthFact::GuardianDenied { request_id, .. } => (
-                "auth-guardian-denied".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
-            AuthFact::RecoveryCompleted { request_id, .. } => (
-                "auth-recovery-completed".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
-            AuthFact::RecoveryFailed { request_id, .. } => (
-                "auth-recovery-failed".to_string(),
-                request_id.as_bytes().to_vec(),
-            ),
+            AuthFact::ChallengeGenerated { session_id, .. } => AuthFactKey {
+                sub_type: "auth-challenge-generated",
+                data: session_id.as_bytes().to_vec(),
+            },
+            AuthFact::ProofSubmitted { session_id, .. } => AuthFactKey {
+                sub_type: "auth-proof-submitted",
+                data: session_id.as_bytes().to_vec(),
+            },
+            AuthFact::AuthVerified { session_id, .. } => AuthFactKey {
+                sub_type: "auth-verified",
+                data: session_id.as_bytes().to_vec(),
+            },
+            AuthFact::AuthFailed { session_id, .. } => AuthFactKey {
+                sub_type: "auth-failed",
+                data: session_id.as_bytes().to_vec(),
+            },
+            AuthFact::SessionIssued { session_id, .. } => AuthFactKey {
+                sub_type: "auth-session-issued",
+                data: session_id.as_bytes().to_vec(),
+            },
+            AuthFact::SessionRevoked { session_id, .. } => AuthFactKey {
+                sub_type: "auth-session-revoked",
+                data: session_id.as_bytes().to_vec(),
+            },
+            AuthFact::GuardianApprovalRequested { request_id, .. } => AuthFactKey {
+                sub_type: "auth-guardian-approval-requested",
+                data: request_id.as_bytes().to_vec(),
+            },
+            AuthFact::GuardianApproved { request_id, .. } => AuthFactKey {
+                sub_type: "auth-guardian-approved",
+                data: request_id.as_bytes().to_vec(),
+            },
+            AuthFact::GuardianDenied { request_id, .. } => AuthFactKey {
+                sub_type: "auth-guardian-denied",
+                data: request_id.as_bytes().to_vec(),
+            },
+            AuthFact::RecoveryCompleted { request_id, .. } => AuthFactKey {
+                sub_type: "auth-recovery-completed",
+                data: request_id.as_bytes().to_vec(),
+            },
+            AuthFact::RecoveryFailed { request_id, .. } => AuthFactKey {
+                sub_type: "auth-recovery-failed",
+                data: request_id.as_bytes().to_vec(),
+            },
         }
     }
 }
@@ -408,13 +421,27 @@ impl DomainFact for AuthFact {
 
     #[allow(clippy::expect_used)]
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("AuthFact must serialize")
+        bincode::serialize(&VersionedAuthFact {
+            schema_version: AUTH_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .expect("AuthFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
+        if let Ok(versioned) = bincode::deserialize::<VersionedAuthFact>(bytes) {
+            if versioned.schema_version == AUTH_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
+        if let Ok(versioned) = serde_json::from_slice::<VersionedAuthFact>(bytes) {
+            if versioned.schema_version == AUTH_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         serde_json::from_slice(bytes).ok()
     }
 }
@@ -523,17 +550,17 @@ impl FactReducer for AuthFactReducer {
             return None;
         }
 
-        let fact: AuthFact = serde_json::from_slice(binding_data).ok()?;
+        let fact = AuthFact::from_bytes(binding_data)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
-        let (sub_type, data) = fact.binding_key();
+        let key = fact.binding_key();
 
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(sub_type),
+            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
             context_id,
-            data,
+            data: key.data,
         })
     }
 }
@@ -755,9 +782,9 @@ mod tests {
             approved_at_ms: 1234,
         };
 
-        let (sub_type, data) = fact.binding_key();
-        assert_eq!(sub_type, "auth-guardian-approved");
-        assert_eq!(data, b"req-123".to_vec());
+        let key = fact.binding_key();
+        assert_eq!(key.sub_type, "auth-guardian-approved");
+        assert_eq!(key.data, b"req-123".to_vec());
     }
 
     #[test]

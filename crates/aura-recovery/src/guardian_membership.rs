@@ -260,6 +260,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         let proposed_fact = RecoveryFact::MembershipChangeProposed {
             context_id,
             proposer_id: request.base.initiator_id,
+            trace_id: Some(change_id.clone()),
             change_type: Self::to_fact_change_type(&request.change),
             proposal_hash,
             proposed_at: PhysicalTime {
@@ -296,6 +297,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
                 RecoveryFact::MembershipChangeRejected {
                     context_id,
                     proposal_hash,
+                    trace_id: Some(change_id.clone()),
                     reason: format!(
                         "Insufficient guardian approvals: got {}, need {}",
                         approvals.len(),
@@ -328,6 +330,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
                 RecoveryFact::MembershipChangeRejected {
                     context_id,
                     proposal_hash,
+                    trace_id: Some(change_id.clone()),
                     reason: format!(
                         "Invalid configuration: {} guardians cannot satisfy threshold of {}",
                         new_guardian_set.len(),
@@ -365,6 +368,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         let completed_fact = RecoveryFact::MembershipChangeCompleted {
             context_id,
             proposal_hash,
+            trace_id: Some(change_id.clone()),
             new_guardian_ids: new_guardian_set.iter().map(|g| g.authority_id).collect(),
             new_threshold: final_threshold as u16,
             completed_at: self
@@ -434,6 +438,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         let vote_fact = RecoveryFact::MembershipVoteCast {
             context_id,
             voter_id: guardian_id,
+            trace_id: Some(proposal.change_id.clone()),
             proposal_hash,
             approved,
             voted_at: physical_time.clone(),

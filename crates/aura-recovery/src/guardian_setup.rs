@@ -281,6 +281,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         let initiated_fact = RecoveryFact::GuardianSetupInitiated {
             context_id,
             initiator_id: request.initiator_id,
+            trace_id: Some(setup_id.clone()),
             guardian_ids: guardian_ids.clone(),
             threshold: request.threshold as u16,
             initiated_at: PhysicalTime {
@@ -295,6 +296,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             let failed_fact = RecoveryFact::GuardianSetupFailed {
                 context_id,
                 reason: "No guardians specified".to_string(),
+                trace_id: Some(setup_id.clone()),
                 failed_at: PhysicalTime {
                     ts_ms: now_ms,
                     uncertainty: None,
@@ -328,6 +330,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                     acceptances.len(),
                     request.threshold
                 ),
+                trace_id: Some(setup_id.clone()),
                 failed_at: self
                     .effect_system()
                     .physical_time()
@@ -456,6 +459,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         let completed_fact = RecoveryFact::GuardianSetupCompleted {
             context_id,
             guardian_ids: shares.iter().map(|s| s.guardian_id).collect(),
+            trace_id: Some(setup_id.clone()),
             threshold: request.threshold as u16,
             completed_at: self
                 .effect_system()
@@ -536,6 +540,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         let accepted_fact = RecoveryFact::GuardianAccepted {
             context_id,
             guardian_id,
+            trace_id: Some(invitation.setup_id.clone()),
             accepted_at: physical_time.clone(),
         };
         self.emit_fact(accepted_fact).await?;

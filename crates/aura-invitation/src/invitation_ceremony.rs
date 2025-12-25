@@ -48,6 +48,7 @@
 //! relationship invitations (contacts/guardian/channel).
 
 use aura_core::domain::FactValue;
+use aura_journal::DomainFact;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::ThresholdSignature;
@@ -118,6 +119,13 @@ pub enum AcceptanceResponse {
         /// Reason for rejection
         reason: String,
     },
+}
+
+/// Pure effect commands emitted by invitation ceremonies.
+#[derive(Debug, Clone)]
+pub enum InvitationCeremonyCommand {
+    /// Append a ceremony fact to the journal.
+    JournalAppend { key: String, fact: InvitationFact },
 }
 
 /// Current status of an invitation ceremony.
@@ -245,25 +253,21 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     /// Initiate a new invitation ceremony.
     ///
     /// Returns the ceremony ID that both parties will use.
-    pub async fn initiate_ceremony(
+    pub fn plan_initiate_ceremony(
         &mut self,
+        prestate_hash: Hash32,
+        now_ms: u64,
         sender: AuthorityId,
         invitation: InvitationOffer,
         expected_acceptor: Option<AuthorityId>,
-    ) -> AuraResult<InvitationCeremonyId> {
-        // Get current prestate
-        let prestate_hash = self.compute_prestate_hash().await?;
-
+    ) -> AuraResult<(InvitationCeremonyId, Vec<InvitationCeremonyCommand>)> {
         // Compute invitation hash
         let invitation_bytes =
             serde_json::to_vec(&invitation).map_err(|e| AuraError::serialization(e.to_string()))?;
         let invitation_hash = Hash32::from_bytes(&invitation_bytes);
 
-        // Generate nonce from current time
-        let nonce = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
-
         // Create ceremony ID
-        let ceremony_id = InvitationCeremonyId::new(&prestate_hash, &invitation_hash, nonce);
+        let ceremony_id = InvitationCeremonyId::new(&prestate_hash, &invitation_hash, now_ms);
 
         // Create ceremony state
         let state = InvitationCeremonyState {
@@ -273,16 +277,43 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             expected_acceptor,
             status: CeremonyStatus::AwaitingAcceptance,
             acceptance: None,
-            started_at_ms: nonce,
+            started_at_ms: now_ms,
             timeout_ms: self.default_timeout_ms,
         };
 
         // Store ceremony
         self.ceremonies.insert(ceremony_id, state);
 
-        // Emit ceremony initiated fact
-        self.emit_ceremony_initiated_fact(ceremony_id, sender)
-            .await?;
+        let command = Self::build_ceremony_initiated_command(ceremony_id, sender, now_ms);
+
+        Ok((ceremony_id, vec![command]))
+    }
+
+    pub async fn initiate_ceremony(
+        &mut self,
+        sender: AuthorityId,
+        invitation: InvitationOffer,
+        expected_acceptor: Option<AuthorityId>,
+    ) -> AuraResult<InvitationCeremonyId> {
+        let prestate_hash = self.compute_prestate_hash().await?;
+        let now_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
+
+        let (ceremony_id, commands) = self.plan_initiate_ceremony(
+            prestate_hash,
+            now_ms,
+            sender,
+            invitation,
+            expected_acceptor,
+        )?;
+
+        for command in commands {
+            self.apply_command(command).await?;
+        }
 
         Ok(ceremony_id)
     }
@@ -295,10 +326,32 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         ceremony_id: InvitationCeremonyId,
         proposal: AcceptanceProposal,
     ) -> AuraResult<bool> {
-        // Get current prestate before borrowing ceremonies
         let current_prestate = self.compute_prestate_hash().await?;
-        let now = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        let now_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
 
+        let (accepted, commands) =
+            self.plan_process_acceptance(ceremony_id, proposal, current_prestate, now_ms)?;
+
+        for command in commands {
+            self.apply_command(command).await?;
+        }
+
+        Ok(accepted)
+    }
+
+    /// Pure acceptance processing that returns ceremony commands.
+    pub fn plan_process_acceptance(
+        &mut self,
+        ceremony_id: InvitationCeremonyId,
+        proposal: AcceptanceProposal,
+        current_prestate: Hash32,
+        now_ms: u64,
+    ) -> AuraResult<(bool, Vec<InvitationCeremonyCommand>)> {
         // Perform validation and updates in a block to limit mutable borrow scope
         {
             let ceremony = self
@@ -338,11 +391,11 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             }
 
             // Check timeout
-            if now > ceremony.started_at_ms + ceremony.timeout_ms {
+            if now_ms > ceremony.started_at_ms + ceremony.timeout_ms {
                 ceremony.status = CeremonyStatus::Aborted {
                     reason: "Ceremony timed out".to_string(),
                 };
-                return Ok(false);
+                return Ok((false, Vec::new()));
             }
 
             // Store acceptance and update status
@@ -350,10 +403,8 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             ceremony.status = CeremonyStatus::AwaitingConsensus;
         }
 
-        // Emit acceptance received fact after releasing mutable borrow
-        self.emit_acceptance_received_fact(ceremony_id).await?;
-
-        Ok(true)
+        let command = Self::build_acceptance_received_command(ceremony_id, now_ms);
+        Ok((true, vec![command]))
     }
 
     /// Commit the ceremony after consensus.
@@ -363,6 +414,50 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         &mut self,
         ceremony_id: InvitationCeremonyId,
     ) -> AuraResult<String> {
+        let timestamp_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
+
+        let (relationship_id, commands) = self.plan_commit_ceremony(ceremony_id, timestamp_ms)?;
+        for command in commands {
+            self.apply_command(command).await?;
+        }
+
+        Ok(relationship_id)
+    }
+
+    /// Abort the ceremony.
+    ///
+    /// Can be called by sender at any point before commit.
+    pub async fn abort_ceremony(
+        &mut self,
+        ceremony_id: InvitationCeremonyId,
+        reason: &str,
+    ) -> AuraResult<()> {
+        let timestamp_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
+
+        let commands = self.plan_abort_ceremony(ceremony_id, reason, timestamp_ms)?;
+        for command in commands {
+            self.apply_command(command).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Pure commit processing that returns ceremony commands.
+    pub fn plan_commit_ceremony(
+        &mut self,
+        ceremony_id: InvitationCeremonyId,
+        timestamp_ms: u64,
+    ) -> AuraResult<(String, Vec<InvitationCeremonyCommand>)> {
         // First, get ceremony and validate + compute relationship ID
         let relationship_id = {
             let ceremony = self
@@ -391,21 +486,19 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             ceremony.status = CeremonyStatus::Committed;
         }
 
-        // Emit committed fact
-        self.emit_ceremony_committed_fact(ceremony_id, &relationship_id)
-            .await?;
+        let command =
+            Self::build_ceremony_committed_command(ceremony_id, &relationship_id, timestamp_ms);
 
-        Ok(relationship_id)
+        Ok((relationship_id, vec![command]))
     }
 
-    /// Abort the ceremony.
-    ///
-    /// Can be called by sender at any point before commit.
-    pub async fn abort_ceremony(
+    /// Pure abort processing that returns ceremony commands.
+    pub fn plan_abort_ceremony(
         &mut self,
         ceremony_id: InvitationCeremonyId,
         reason: &str,
-    ) -> AuraResult<()> {
+        timestamp_ms: u64,
+    ) -> AuraResult<Vec<InvitationCeremonyCommand>> {
         let ceremony = self
             .ceremonies
             .get_mut(&ceremony_id)
@@ -417,7 +510,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
                 return Err(AuraError::invalid("Cannot abort committed ceremony"));
             }
             CeremonyStatus::Aborted { .. } => {
-                return Ok(()); // Already aborted, idempotent
+                return Ok(Vec::new()); // Already aborted, idempotent
             }
             _ => {}
         }
@@ -426,10 +519,8 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             reason: reason.to_string(),
         };
 
-        // Emit aborted fact
-        self.emit_ceremony_aborted_fact(ceremony_id, reason).await?;
-
-        Ok(())
+        let command = Self::build_ceremony_aborted_command(ceremony_id, reason, timestamp_ms);
+        Ok(vec![command])
     }
 
     // =========================================================================
@@ -470,13 +561,30 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             AuraError::internal(format!("Failed to sign invitation acceptance: {}", e))
         })?;
 
-        Ok(AcceptanceProposal {
+        Ok(Self::build_acceptance_proposal(
+            invitation,
+            acceptor,
+            message,
+            prestate_hash,
+            signature,
+        ))
+    }
+
+    /// Pure constructor for acceptance proposals.
+    pub fn build_acceptance_proposal(
+        invitation: &InvitationOffer,
+        acceptor: AuthorityId,
+        message: Option<String>,
+        prestate_hash: Hash32,
+        signature: ThresholdSignature,
+    ) -> AcceptanceProposal {
+        AcceptanceProposal {
             invitation_id: invitation.invitation_id.clone(),
             acceptor,
             prestate_hash,
             message,
             signature,
-        })
+        }
     }
 
     // =========================================================================
@@ -506,104 +614,91 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         format!("rel-{}", hex::encode(&hash.as_bytes()[..8]))
     }
 
-    /// Emit ceremony initiated fact.
-    async fn emit_ceremony_initiated_fact(
-        &self,
+    fn ceremony_id_hex(ceremony_id: InvitationCeremonyId) -> String {
+        hex::encode(ceremony_id.0.as_bytes())
+    }
+
+    fn build_ceremony_initiated_command(
         ceremony_id: InvitationCeremonyId,
         sender: AuthorityId,
-    ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        timestamp_ms: u64,
+    ) -> InvitationCeremonyCommand {
+        let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyInitiated {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: ceremony_id_hex.clone(),
             sender: sender.to_string(),
+            trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!(
-            "ceremony:initiated:{}",
-            hex::encode(ceremony_id.0.as_bytes())
-        );
-        // Serialize fact to bytes and store
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
+        InvitationCeremonyCommand::JournalAppend {
+            key: format!("ceremony:initiated:{}", ceremony_id_hex),
+            fact,
+        }
     }
 
-    /// Emit acceptance received fact.
-    async fn emit_acceptance_received_fact(
-        &self,
+    fn build_acceptance_received_command(
         ceremony_id: InvitationCeremonyId,
-    ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        timestamp_ms: u64,
+    ) -> InvitationCeremonyCommand {
+        let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyAcceptanceReceived {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: ceremony_id_hex.clone(),
+            trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!(
-            "ceremony:accepted:{}",
-            hex::encode(ceremony_id.0.as_bytes())
-        );
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
+        InvitationCeremonyCommand::JournalAppend {
+            key: format!("ceremony:accepted:{}", ceremony_id_hex),
+            fact,
+        }
     }
 
-    /// Emit ceremony committed fact.
-    async fn emit_ceremony_committed_fact(
-        &self,
+    fn build_ceremony_committed_command(
         ceremony_id: InvitationCeremonyId,
         relationship_id: &str,
-    ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        timestamp_ms: u64,
+    ) -> InvitationCeremonyCommand {
+        let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyCommitted {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: ceremony_id_hex.clone(),
             relationship_id: relationship_id.to_string(),
+            trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!(
-            "ceremony:committed:{}",
-            hex::encode(ceremony_id.0.as_bytes())
-        );
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
+        InvitationCeremonyCommand::JournalAppend {
+            key: format!("ceremony:committed:{}", ceremony_id_hex),
+            fact,
+        }
     }
 
-    /// Emit ceremony aborted fact.
-    async fn emit_ceremony_aborted_fact(
-        &self,
+    fn build_ceremony_aborted_command(
         ceremony_id: InvitationCeremonyId,
         reason: &str,
-    ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        timestamp_ms: u64,
+    ) -> InvitationCeremonyCommand {
+        let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyAborted {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: ceremony_id_hex.clone(),
             reason: reason.to_string(),
+            trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
+        InvitationCeremonyCommand::JournalAppend {
+            key: format!("ceremony:aborted:{}", ceremony_id_hex),
+            fact,
+        }
+    }
 
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!("ceremony:aborted:{}", hex::encode(ceremony_id.0.as_bytes()));
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
+    async fn apply_command(&self, command: InvitationCeremonyCommand) -> AuraResult<()> {
+        match command {
+            InvitationCeremonyCommand::JournalAppend { key, fact } => {
+                let mut journal = self.effects.get_journal().await?;
+                journal
+                    .facts
+                    .insert(key, FactValue::Bytes(DomainFact::to_bytes(&fact)));
+                self.effects.persist_journal(&journal).await?;
+                Ok(())
+            }
+        }
     }
 
     /// Get ceremony state.

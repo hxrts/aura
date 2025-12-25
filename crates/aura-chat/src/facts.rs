@@ -45,6 +45,19 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for chat facts
 pub const CHAT_FACT_TYPE_ID: &str = "chat";
+pub const CHAT_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VersionedChatFact {
+    schema_version: u32,
+    fact: ChatFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatFactKey {
+    pub sub_type: &'static str,
+    pub data: Vec<u8>,
+}
 
 /// Chat domain fact types
 ///
@@ -221,6 +234,48 @@ impl ChatFact {
     /// Validate that this fact can be reduced under the provided context.
     pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
         self.context_id() == context_id
+    }
+
+    /// Derive the relational binding subtype and key data for this fact.
+    pub fn binding_key(&self) -> ChatFactKey {
+        match self {
+            ChatFact::ChannelCreated { channel_id, .. } => ChatFactKey {
+                sub_type: "channel-created",
+                data: channel_id.to_string().into_bytes(),
+            },
+            ChatFact::ChannelClosed { channel_id, .. } => ChatFactKey {
+                sub_type: "channel-closed",
+                data: channel_id.to_string().into_bytes(),
+            },
+            ChatFact::ChannelUpdated { channel_id, .. } => ChatFactKey {
+                sub_type: "channel-updated",
+                data: channel_id.to_string().into_bytes(),
+            },
+            ChatFact::MessageSentSealed { message_id, .. } => ChatFactKey {
+                sub_type: "message-sent",
+                data: message_id.as_bytes().to_vec(),
+            },
+            ChatFact::MessageRead { message_id, .. } => ChatFactKey {
+                sub_type: "message-read",
+                data: message_id.as_bytes().to_vec(),
+            },
+            ChatFact::MessageDelivered { message_id, .. } => ChatFactKey {
+                sub_type: "message-delivered",
+                data: message_id.as_bytes().to_vec(),
+            },
+            ChatFact::DeliveryAcknowledged { message_id, .. } => ChatFactKey {
+                sub_type: "delivery-acknowledged",
+                data: message_id.as_bytes().to_vec(),
+            },
+            ChatFact::MessageEdited { message_id, .. } => ChatFactKey {
+                sub_type: "message-edited",
+                data: message_id.as_bytes().to_vec(),
+            },
+            ChatFact::MessageDeleted { message_id, .. } => ChatFactKey {
+                sub_type: "message-deleted",
+                data: message_id.as_bytes().to_vec(),
+            },
+        }
     }
 
     /// Create a ChannelCreated fact with millisecond timestamp (backward compatibility)
@@ -450,13 +505,27 @@ impl DomainFact for ChatFact {
 
     #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("ChatFact must serialize")
+        bincode::serialize(&VersionedChatFact {
+            schema_version: CHAT_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .expect("ChatFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
+        if let Ok(versioned) = bincode::deserialize::<VersionedChatFact>(bytes) {
+            if versioned.schema_version == CHAT_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
+        if let Ok(versioned) = serde_json::from_slice::<VersionedChatFact>(bytes) {
+            if versioned.schema_version == CHAT_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         serde_json::from_slice(bytes).ok()
     }
 }
@@ -481,53 +550,18 @@ impl FactReducer for ChatFactReducer {
             return None;
         }
 
-        let fact: ChatFact = serde_json::from_slice(binding_data).ok()?;
+        let fact = ChatFact::from_bytes(binding_data)?;
 
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
-        let (sub_type, data) = match &fact {
-            ChatFact::ChannelCreated { channel_id, .. } => (
-                "channel-created".to_string(),
-                channel_id.to_string().into_bytes(),
-            ),
-            ChatFact::ChannelClosed { channel_id, .. } => (
-                "channel-closed".to_string(),
-                channel_id.to_string().into_bytes(),
-            ),
-            ChatFact::ChannelUpdated { channel_id, .. } => (
-                "channel-updated".to_string(),
-                channel_id.to_string().into_bytes(),
-            ),
-            ChatFact::MessageSentSealed { message_id, .. } => {
-                ("message-sent".to_string(), message_id.as_bytes().to_vec())
-            }
-            ChatFact::MessageRead { message_id, .. } => {
-                ("message-read".to_string(), message_id.as_bytes().to_vec())
-            }
-            ChatFact::MessageDelivered { message_id, .. } => (
-                "message-delivered".to_string(),
-                message_id.as_bytes().to_vec(),
-            ),
-            ChatFact::DeliveryAcknowledged { message_id, .. } => (
-                "delivery-acknowledged".to_string(),
-                message_id.as_bytes().to_vec(),
-            ),
-            ChatFact::MessageEdited { message_id, .. } => (
-                "message-edited".to_string(),
-                message_id.as_bytes().to_vec(),
-            ),
-            ChatFact::MessageDeleted { message_id, .. } => (
-                "message-deleted".to_string(),
-                message_id.as_bytes().to_vec(),
-            ),
-        };
+        let key = fact.binding_key();
 
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(sub_type),
+            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
             context_id,
-            data,
+            data: key.data,
         })
     }
 }

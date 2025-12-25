@@ -181,7 +181,7 @@ Layer 3 → Layer 4 → Layer 5 → Layer 6
 
 1. **aura-effects** provides stateless, single-party handlers
 2. **aura-composition** assembles them via `EffectRegistry` and builder patterns
-3. **aura-protocol** orchestrates multi-party coordination using assembled systems
+3. **aura-protocol** orchestrates multi-party coordination using assembled systems, with Layer 4 split into focused crates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`)
 4. **Feature crates** (Layer 5) compose handlers without pulling in runtime infrastructure
 5. **aura-agent** (Layer 6) provides final runtime assembly for production deployment
 
@@ -399,7 +399,11 @@ The codebase follows strict 8-layer architecture with zero circular dependencies
 
 Layer 1 Foundation contains `aura-core` with effect traits, domain types, cryptographic utilities (including FROST primitives in `crypto::tree_signing`), semilattice traits, and unified errors. Layer 2 Specification contains domain crates, `aura-mpst`, and `aura-macros` that define semantics without implementations. Layer 3 Implementation contains `aura-effects` and `aura-composition` for stateless handlers and composition infrastructure. The legacy `aura-frost` crate has been removed; higher-level ceremonies should be colocated with their callers and use the core primitives via adapters/effects.
 
-Layer 4 Orchestration contains `aura-protocol` for multi-party coordination and guard infrastructure. Layer 5 Feature contains protocol crates for authentication, recovery, rendezvous, and storage. Layer 6 Runtime contains `aura-agent`, `aura-simulator`, and `aura-app` for system assembly and portable application core. Layer 7 Interface contains `aura-terminal` for user applications. Layer 8 Testing contains `aura-testkit` and `aura-quint` for shared fixtures and verification.
+Layer 4 Orchestration contains `aura-protocol` plus focused crates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`) for guard enforcement, consensus, AMP, sync, and bridge adapters. Layer 5 Feature contains protocol crates for authentication, recovery, rendezvous, and storage. Layer 6 Runtime contains `aura-agent`, `aura-simulator`, and `aura-app` for system assembly and portable application core. Layer 7 Interface contains `aura-terminal` for user applications. Layer 8 Testing contains `aura-testkit` and `aura-quint` for shared fixtures and verification.
+
+Layer 5 facts are versioned and serialized using a binary encoding (bincode) with JSON fallback for debug/compatibility, and ceremony facts carry optional `trace_id` values for cross-protocol correlation.
+
+Layer 5 ceremony executors expose pure `plan_*` methods that take explicit inputs and return effect commands; runtime layers execute those commands against the effect system.
 
 ### 6.2 Code Location Decision Framework
 
@@ -407,7 +411,7 @@ Single-party operations belong in `aura-effects`. These are stateless, context-f
 
 Handler composition belongs in `aura-composition`. This includes assembling individual handlers into cohesive systems through `Handler` trait implementations and builders. The `EffectRegistry` for dynamic handler lookup resides in `aura-agent`. The focus is on handler assembly rather than protocol coordination.
 
-Multi-party coordination belongs in `aura-protocol`. These are stateful, context-specific orchestrations like `execute_anti_entropy` or `CrdtCoordinator`. Operations manage multiple handlers working together across network boundaries.
+Multi-party coordination belongs in `aura-protocol` and its Layer 4 subcrates. These are stateful, context-specific orchestrations like `execute_anti_entropy` (now in `aura-anti-entropy`) or `CrdtCoordinator`. Operations manage multiple handlers working together across network boundaries.
 
 ### 6.3 Dependency Management
 

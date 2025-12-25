@@ -25,9 +25,9 @@
 //! let bytes = bridge.random_bytes(32).await;
 //! ```
 
-use crate::effects::params::{RandomBytesParams, RandomRangeParams};
-use crate::effects::*;
-use crate::handlers::{AuraContext, AuraHandler, EffectType, HandlerUtils};
+use aura_protocol::effects::params::{RandomBytesParams, RandomRangeParams};
+use aura_protocol::effects::*;
+use aura_protocol::handlers::{AuraContext, AuraHandler, EffectType, HandlerUtils};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::crypto::single_signer::SigningMode;
@@ -486,14 +486,14 @@ impl aura_core::effects::ConsoleEffects for TypedHandlerBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handlers::core::erased::AuraHandlerFactory as ErasedAuraHandlerFactory;
+    use aura_protocol::handlers::core::erased::AuraHandlerFactory as ErasedAuraHandlerFactory;
     use aura_core::{DeviceId, ExecutionMode};
 
     #[tokio::test]
     async fn test_crypto_effects_bridge() {
         let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let handler = ErasedAuraHandlerFactory::for_testing(device_id);
-        let ctx = crate::handlers::AuraContext::for_testing(device_id);
+        let ctx = aura_protocol::handlers::AuraContext::for_testing(device_id);
 
         // Test that we can call effects through the handler interface - only test supported effects
         if handler.supports_effect(EffectType::Random) {

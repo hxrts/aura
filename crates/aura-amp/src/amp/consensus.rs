@@ -6,8 +6,8 @@
 //!
 //! Uses the new consensus protocol for executing channel epoch bumps.
 
-use crate::consensus::protocol::run_consensus;
-use crate::consensus::types::CommitFact;
+use aura_consensus::protocol::run_consensus;
+use aura_consensus::types::CommitFact;
 use super::AmpJournalEffects;
 // use aura_core::effects::{PhysicalTimeEffects, RandomEffects}; // Available if needed
 use aura_core::epochs::Epoch;
@@ -49,7 +49,7 @@ pub async fn run_amp_channel_epoch_bump(
     let time = PhysicalTimeHandler;
 
     // Consensus over the proposal itself; serialization is handled by `run_consensus`.
-    let params = crate::consensus::protocol::ConsensusParams {
+    let params = aura_consensus::protocol::ConsensusParams {
         witnesses,
         threshold,
         key_packages,

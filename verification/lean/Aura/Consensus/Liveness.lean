@@ -14,8 +14,8 @@ documents the assumptions and provides Lean-side type definitions.
 - Temporal: FastPathProgressCheck, SlowPathProgressCheck, ActiveMakesProgress
 
 ## Rust Correspondence
-- File: crates/aura-protocol/src/consensus/coordinator.rs
-- File: crates/aura-protocol/src/consensus/fallback.rs
+- File: crates/aura-consensus/src/consensus/coordinator.rs
+- File: crates/aura-consensus/src/consensus/fallback.rs
 
 ## Expose
 

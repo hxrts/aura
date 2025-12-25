@@ -1,9 +1,9 @@
 use super::effects::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use super::pure;
-use crate::guards::chain::create_send_guard_op;
-use crate::guards::GuardOperation;
-use crate::guards::traits::GuardContextProvider;
-use crate::guards::GuardEffects;
+use aura_guards::chain::create_send_guard_op;
+use aura_guards::traits::GuardContextProvider;
+use aura_guards::GuardEffects;
+use aura_guards::GuardOperation;
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::time::PhysicalTimeEffects;

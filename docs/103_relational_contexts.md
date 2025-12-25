@@ -522,7 +522,7 @@ The implementation provides concrete types (`RelationalContext`, `GuardianBindin
 - **Journal Facts**: `aura-journal/src/fact.rs` - Protocol-level RelationalFact with AMP variants
 - **Reduction**: `aura-journal/src/reduction.rs` - RelationalState, reduce_context()
 - **Context Management**: `aura-relational/src/lib.rs` - RelationalContext (context-scoped fact journal mirror + helpers)
-- **Consensus Integration**: `aura-protocol/src/consensus/relational.rs` - consensus implementation
+- **Consensus Integration**: `crates/aura-consensus/src/consensus/relational.rs` - consensus implementation
 - **Consensus Adapter**: `aura-relational/src/consensus_adapter.rs` - thin consensus delegation layer
 - **Prestate Computation**: `aura-core/src/domain/consensus.rs` - Prestate struct and methods
 - **Protocol Usage**: `aura-authenticate/src/guardian_auth_relational.rs` - Guardian authentication

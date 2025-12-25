@@ -572,6 +572,7 @@ mod tests {
 
         let facts = vec![
             AuthFact::SessionIssued {
+                context_id: test_context_id(),
                 session_id: "session_1".to_string(),
                 authority_id: test_authority(),
                 device_id: None,
@@ -582,6 +583,7 @@ mod tests {
                 expires_at_ms: 2000,
             },
             AuthFact::SessionIssued {
+                context_id: test_context_id(),
                 session_id: "session_2".to_string(),
                 authority_id: test_authority_2(),
                 device_id: None,
@@ -595,5 +597,41 @@ mod tests {
 
         let view = reducer.reduce_all(&facts);
         assert_eq!(view.active_sessions.len(), 2);
+    }
+
+    #[test]
+    fn test_reduce_all_commutes_for_disjoint_sessions() {
+        let reducer = AuthViewReducer::new();
+        let fact_a = AuthFact::SessionIssued {
+            context_id: test_context_id(),
+            session_id: "session_a".to_string(),
+            authority_id: test_authority(),
+            device_id: None,
+            scope: SessionScope::Protocol {
+                protocol_type: "test".to_string(),
+            },
+            issued_at_ms: 1000,
+            expires_at_ms: 2000,
+        };
+        let fact_b = AuthFact::SessionIssued {
+            context_id: test_context_id(),
+            session_id: "session_b".to_string(),
+            authority_id: test_authority_2(),
+            device_id: None,
+            scope: SessionScope::Protocol {
+                protocol_type: "test".to_string(),
+            },
+            issued_at_ms: 1000,
+            expires_at_ms: 2000,
+        };
+
+        let view1 = reducer.reduce_all(&[fact_a.clone(), fact_b.clone()]);
+        let view2 = reducer.reduce_all(&[fact_b, fact_a]);
+
+        assert_eq!(view1.active_sessions.len(), view2.active_sessions.len());
+        assert!(view1.active_sessions.contains_key("session_a"));
+        assert!(view1.active_sessions.contains_key("session_b"));
+        assert!(view2.active_sessions.contains_key("session_a"));
+        assert!(view2.active_sessions.contains_key("session_b"));
     }
 }

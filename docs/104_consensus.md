@@ -114,7 +114,7 @@ This structure identifies consensus instances. The result is identified by `H(Op
 A commit fact contains full consensus evidence including the operation, threshold signature, and participant list. Participants are recorded as `AuthorityId` values to preserve device privacy.
 
 ```rust
-/// From aura-protocol/src/consensus/types.rs
+/// From crates/aura-consensus/src/consensus/types.rs
 pub struct CommitFact {
     pub consensus_id: ConsensusId,
     pub prestate_hash: Hash32,
@@ -390,7 +390,7 @@ Consensus is also used for relational context operations. Guardian bindings use 
 Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key stored in the commitment tree. See [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) for details on the `TreeState` structure.
 
 ```rust
-/// From aura-protocol/src/consensus/messages.rs
+/// From crates/aura-consensus/src/consensus/messages.rs
 pub enum ConsensusMessage {
     SignShare {
         consensus_id: ConsensusId,

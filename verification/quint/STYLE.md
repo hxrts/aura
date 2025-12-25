@@ -140,7 +140,7 @@ Link Quint types to Lean structures:
 
 ```quint
 // Lean: Aura.Consensus.Types.CommitFact
-// Rust: crates/aura-protocol/src/consensus/types.rs::CommitFact
+// Rust: crates/aura-consensus/src/consensus/types.rs::CommitFact
 type CommitFact = { ... }
 ```
 

@@ -23,8 +23,8 @@
 // - Axioms: Aura.Assumptions
 //
 // == Rust Correspondence ==
-// - Types: crates/aura-protocol/src/consensus/types.rs
-// - Protocol: crates/aura-protocol/src/consensus/protocol.rs
+// - Types: crates/aura-consensus/src/consensus/types.rs
+// - Protocol: crates/aura-consensus/src/consensus/protocol.rs
 // - FROST: crates/aura-core/src/crypto/tree_signing.rs
 //
 // See: docs/104_consensus.md
@@ -122,7 +122,7 @@ module protocol_consensus {
 
     // The commit fact output - contains the aggregated threshold signature
     // Lean: Aura.Consensus.Types.CommitFact
-    // Rust: crates/aura-protocol/src/consensus/types.rs::CommitFact
+    // Rust: crates/aura-consensus/src/consensus/types.rs::CommitFact
     type CommitFact = {
         cid: ConsensusId,
         rid: ResultId,

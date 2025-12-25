@@ -18,7 +18,7 @@ pub mod consensus;
 pub mod transport;
 
 // Core dependencies
-use crate::consensus::ConsensusId;
+use aura_consensus::ConsensusId;
 use crate::effects::JournalEffects;
 use aura_core::effects::StorageEffects;
 use aura_core::hash::hash;

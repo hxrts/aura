@@ -74,6 +74,23 @@ impl Default for AuthServiceConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+struct AuthPolicy {
+    context_id: ContextId,
+    max_session_duration_secs: u64,
+    require_recovery_capability: bool,
+}
+
+impl AuthPolicy {
+    fn for_snapshot(config: &AuthServiceConfig, snapshot: &GuardSnapshot) -> Self {
+        Self {
+            context_id: snapshot.context_id,
+            max_session_duration_secs: config.max_session_duration_secs,
+            require_recovery_capability: config.require_recovery_capability,
+        }
+    }
+}
+
 fn derive_auth_context_id(snapshot: &GuardSnapshot) -> ContextId {
     snapshot.context_id.unwrap_or_else(|| {
         ContextId::new_from_entropy(hash(&snapshot.authority_id.to_bytes()))
@@ -219,6 +236,7 @@ impl AuthService {
         scope: SessionScope,
         duration_seconds: u64,
     ) -> GuardOutcome {
+        let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         // Check capability
         if let Some(outcome) = check_capability(snapshot, costs::CAP_CREATE_SESSION) {
             return outcome;
@@ -230,11 +248,11 @@ impl AuthService {
         }
 
         // Check duration
-        if duration_seconds > self.config.max_session_duration_secs {
+        if duration_seconds > policy.max_session_duration_secs {
             return GuardOutcome::denied(
                 AuthGuardError::SessionDurationTooLong {
                     requested: duration_seconds,
-                    max: self.config.max_session_duration_secs,
+                    max: policy.max_session_duration_secs,
                 }
                 .to_string(),
             );
@@ -286,6 +304,7 @@ impl AuthService {
         context: RecoveryContext,
         required_guardians: usize,
     ) -> GuardOutcome {
+        let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         // Check capability
         if let Some(outcome) = check_capability(snapshot, costs::CAP_REQUEST_GUARDIAN_APPROVAL) {
             return outcome;
@@ -297,7 +316,7 @@ impl AuthService {
         }
 
         // Check recovery operation type constraints
-        if self.config.require_recovery_capability {
+        if policy.require_recovery_capability {
             match context.operation_type {
                 RecoveryOperationType::GuardianSetModification => {
                     if !snapshot.has_capability(costs::CAP_APPROVE_RECOVERY) {

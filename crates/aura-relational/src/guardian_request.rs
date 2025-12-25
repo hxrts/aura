@@ -14,6 +14,19 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for guardian request facts.
 pub const GUARDIAN_REQUEST_FACT_TYPE_ID: &str = "guardian_request";
+pub const GUARDIAN_REQUEST_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct VersionedGuardianRequestFact {
+    schema_version: u32,
+    fact: GuardianRequestFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuardianRequestFactKey {
+    pub sub_type: &'static str,
+    pub data: Vec<u8>,
+}
 
 /// Structured guardian request payload stored inside the fact.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,6 +70,17 @@ impl GuardianRequestFact {
     pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
         self.context_id() == context_id
     }
+
+    pub fn binding_key(&self) -> GuardianRequestFactKey {
+        let sub_type = match self {
+            GuardianRequestFact::Requested { .. } => "guardian-requested",
+            GuardianRequestFact::Cancelled { .. } => "guardian-cancelled",
+        };
+        GuardianRequestFactKey {
+            sub_type,
+            data: hash::hash(&self.to_bytes()).to_vec(),
+        }
+    }
 }
 
 impl DomainFact for GuardianRequestFact {
@@ -73,13 +97,22 @@ impl DomainFact for GuardianRequestFact {
 
     #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(self).expect("GuardianRequestFact must serialize")
+        bincode::serialize(&VersionedGuardianRequestFact {
+            schema_version: GUARDIAN_REQUEST_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .expect("GuardianRequestFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
+        if let Ok(versioned) = bincode::deserialize::<VersionedGuardianRequestFact>(bytes) {
+            if versioned.schema_version == GUARDIAN_REQUEST_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         bincode::deserialize(bytes).ok()
     }
 }
@@ -107,15 +140,12 @@ impl FactReducer for GuardianRequestFactReducer {
             return None;
         }
 
-        let sub = match &fact {
-            GuardianRequestFact::Requested { .. } => "guardian-requested",
-            GuardianRequestFact::Cancelled { .. } => "guardian-cancelled",
-        };
+        let key = fact.binding_key();
 
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(sub.to_string()),
+            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
             context_id,
-            data: hash::hash(binding_data).to_vec(),
+            data: key.data,
         })
     }
 }

@@ -10,8 +10,8 @@ use super::telemetry::{
 use crate::amp::{
     consensus::finalize_amp_bump_with_journal_default, get_channel_state, AmpJournalEffects,
 };
-use crate::guards::traits::GuardContextProvider;
-use crate::guards::GuardEffects;
+use aura_guards::traits::GuardContextProvider;
+use aura_guards::GuardEffects;
 use aura_core::effects::NetworkEffects;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
@@ -103,9 +103,9 @@ fn build_amp_send_guard(
     context: aura_core::identifiers::ContextId,
     peer: aura_core::AuthorityId,
     flow_cost: Option<u32>,
-) -> crate::guards::chain::SendGuardChain {
-    use crate::guards::chain::SendGuardChain;
-    use crate::guards::journal::JournalCoupler;
+) -> aura_guards::chain::SendGuardChain {
+    use aura_guards::chain::SendGuardChain;
+    use aura_guards::journal::JournalCoupler;
 
     let cost = flow_cost.unwrap_or(1);
     SendGuardChain::new("amp:send".to_string(), context, peer, cost)
@@ -263,7 +263,7 @@ where
     };
 
     // Phase 3: Guard chain execution (authorization and flow budget) - timing captured by tracing span
-    let peer = crate::guards::traits::GuardContextProvider::authority_id(effects);
+    let peer = aura_guards::traits::GuardContextProvider::authority_id(effects);
     let flow_cost = 1u32; // Minimal cost for AMP message
     let guard_chain = build_amp_send_guard(context, peer, Some(flow_cost));
 

@@ -168,6 +168,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
             InvitationFact::CeremonyAcceptanceReceived {
                 ceremony_id,
                 timestamp_ms,
+                ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
                 ceremony_id,
                 status: "acceptance_received".to_string(),
@@ -179,6 +180,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 ceremony_id,
                 relationship_id,
                 timestamp_ms,
+                ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
                 ceremony_id,
                 status: "committed".to_string(),
@@ -190,6 +192,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 ceremony_id,
                 reason,
                 timestamp_ms,
+                ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
                 ceremony_id,
                 status: "aborted".to_string(),

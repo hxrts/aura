@@ -67,6 +67,27 @@ impl Default for InvitationConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+struct InvitationPolicy {
+    context_id: ContextId,
+    max_message_length: usize,
+    require_guardian_capability: bool,
+    require_channel_capability: bool,
+    require_device_capability: bool,
+}
+
+impl InvitationPolicy {
+    fn for_snapshot(config: &InvitationConfig, snapshot: &GuardSnapshot) -> Self {
+        Self {
+            context_id: snapshot.context_id,
+            max_message_length: config.max_message_length,
+            require_guardian_capability: config.require_guardian_capability,
+            require_channel_capability: config.require_channel_capability,
+            require_device_capability: config.require_device_capability,
+        }
+    }
+}
+
 // =============================================================================
 // Invitation Types
 // =============================================================================
@@ -244,6 +265,7 @@ impl InvitationService {
         expires_in_ms: Option<u64>,
         invitation_id: String,
     ) -> GuardOutcome {
+        let policy = InvitationPolicy::for_snapshot(&self.config, snapshot);
         // Check base capability
         if let Some(outcome) = check_capability(snapshot, costs::CAP_INVITATION_SEND) {
             return outcome;
@@ -252,10 +274,10 @@ impl InvitationService {
         // Check type-specific capability if required
         if let Some(type_cap) = invitation_type.required_capability() {
             let require_check = match &invitation_type {
-                InvitationType::Guardian { .. } => self.config.require_guardian_capability,
-                InvitationType::Channel { .. } => self.config.require_channel_capability,
+                InvitationType::Guardian { .. } => policy.require_guardian_capability,
+                InvitationType::Channel { .. } => policy.require_channel_capability,
                 InvitationType::Contact { .. } => false,
-                InvitationType::DeviceEnrollment { .. } => self.config.require_device_capability,
+                InvitationType::DeviceEnrollment { .. } => policy.require_device_capability,
             };
 
             if require_check {
@@ -272,11 +294,11 @@ impl InvitationService {
 
         // Validate message length
         if let Some(ref msg) = message {
-            if msg.len() > self.config.max_message_length {
+            if msg.len() > policy.max_message_length {
                 return GuardOutcome::denied(
                     InvitationGuardError::MessageTooLong {
                         length: msg.len(),
-                        max: self.config.max_message_length,
+                        max: policy.max_message_length,
                     }
                     .to_string(),
                 );

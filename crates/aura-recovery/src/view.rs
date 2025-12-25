@@ -422,6 +422,7 @@ mod tests {
         let fact = RecoveryFact::GuardianSetupInitiated {
             context_id: test_context_id(),
             initiator_id: test_authority_id(1),
+            trace_id: None,
             guardian_ids: vec![
                 test_authority_id(2),
                 test_authority_id(3),
@@ -457,6 +458,7 @@ mod tests {
         let fact = RecoveryFact::GuardianAccepted {
             context_id: test_context_id(),
             guardian_id: test_authority_id(5),
+            trace_id: None,
             accepted_at: pt(1234567899),
         };
 
@@ -480,6 +482,7 @@ mod tests {
         let fact = RecoveryFact::GuardianDeclined {
             context_id: test_context_id(),
             guardian_id: test_authority_id(6),
+            trace_id: None,
             declined_at: pt(1234567900),
         };
 
@@ -503,6 +506,7 @@ mod tests {
         let fact = RecoveryFact::RecoveryCompleted {
             context_id: test_context_id(),
             account_id: test_authority_id(1),
+            trace_id: None,
             evidence_hash: test_hash(99),
             completed_at: pt(1234567999),
         };
@@ -527,6 +531,7 @@ mod tests {
         let fact = RecoveryFact::MembershipChangeProposed {
             context_id: test_context_id(),
             proposer_id: test_authority_id(1),
+            trace_id: None,
             change_type: crate::facts::MembershipChangeType::UpdateThreshold { new_threshold: 3 },
             proposal_hash: test_hash(42),
             proposed_at: pt(1234567890),
@@ -569,6 +574,7 @@ mod tests {
         let fact = RecoveryFact::GuardianInvitationSent {
             context_id: test_context_id(),
             guardian_id: test_authority_id(2),
+            trace_id: None,
             invitation_hash: test_hash(10),
             sent_at: pt(1234567890),
         };
@@ -578,5 +584,68 @@ mod tests {
 
         // Invitation sent doesn't produce a separate delta
         assert!(deltas.is_empty());
+    }
+
+    #[test]
+    fn test_reduction_commutes_for_independent_facts() {
+        let reducer = RecoveryViewReducer;
+
+        let fact_a = RecoveryFact::GuardianAccepted {
+            context_id: test_context_id(),
+            guardian_id: test_authority_id(7),
+            trace_id: None,
+            accepted_at: pt(1111),
+        };
+
+        let fact_b = RecoveryFact::RecoveryCompleted {
+            context_id: test_context_id(),
+            account_id: test_authority_id(1),
+            trace_id: None,
+            evidence_hash: test_hash(55),
+            completed_at: pt(2222),
+        };
+
+        let mut deltas_ab = Vec::new();
+        deltas_ab.extend(reducer.reduce_fact(
+            RECOVERY_FACT_TYPE_ID,
+            &fact_a.to_bytes(),
+            None,
+        ));
+        deltas_ab.extend(reducer.reduce_fact(
+            RECOVERY_FACT_TYPE_ID,
+            &fact_b.to_bytes(),
+            None,
+        ));
+
+        let mut deltas_ba = Vec::new();
+        deltas_ba.extend(reducer.reduce_fact(
+            RECOVERY_FACT_TYPE_ID,
+            &fact_b.to_bytes(),
+            None,
+        ));
+        deltas_ba.extend(reducer.reduce_fact(
+            RECOVERY_FACT_TYPE_ID,
+            &fact_a.to_bytes(),
+            None,
+        ));
+
+        let mut keys_ab: Vec<String> = deltas_ab
+            .iter()
+            .map(|delta| {
+                let delta = downcast_delta::<RecoveryDelta>(delta).unwrap();
+                format!("{:?}", delta)
+            })
+            .collect();
+        let mut keys_ba: Vec<String> = deltas_ba
+            .iter()
+            .map(|delta| {
+                let delta = downcast_delta::<RecoveryDelta>(delta).unwrap();
+                format!("{:?}", delta)
+            })
+            .collect();
+
+        keys_ab.sort();
+        keys_ba.sort();
+        assert_eq!(keys_ab, keys_ba);
     }
 }

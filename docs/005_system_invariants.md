@@ -9,7 +9,7 @@ System invariants are properties that must always hold true for Aura to maintain
 ## Core System Invariants
 
 ### 1. **Charge-Before-Send**
-**Location**: [`crates/aura-protocol/src/guards/INVARIANTS.md`](../crates/aura-protocol/src/guards/INVARIANTS.md)
+**Location**: [`crates/aura-guards/src/guards/INVARIANTS.md`](../crates/aura-guards/src/guards/INVARIANTS.md)
 
 No observable network behavior may occur without successful authorization and flow budget charging. All messages must pass through the guard chain before reaching the network.
 

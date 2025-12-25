@@ -208,7 +208,7 @@ Audit Trail: All authorization decisions are logged for security monitoring.
 
 Core Cap Type: `aura-core/src/domain/journal.rs` contains the `Cap` type, which wraps serialized Biscuit tokens with optional root key storage. The `Cap::meet()` implementation computes capability intersection: tokens from the same issuer return the more attenuated token (more blocks = less authority); tokens from different issuers return bottom (empty). Use `Cap::from_biscuit_with_key()` to enable proper meet semantics.
 
-Biscuit Authorization Bridge: `aura-protocol/src/authorization.rs` contains `BiscuitAuthorizationBridge`.
+Biscuit Authorization Bridge: `crates/aura-guards/src/authorization.rs` contains `BiscuitAuthorizationBridge`.
 
 Biscuit Token Management: `aura-wot/src/biscuit_token.rs` contains `AccountAuthority`, `BiscuitTokenManager`, and attenuation logic.
 
@@ -216,6 +216,6 @@ Biscuit Authorization: `aura-wot/src/biscuit_authorization.rs` contains `Biscuit
 
 Authority-Based Resources: `aura-wot/src/resource_scope.rs` contains `ResourceScope`, `AuthorityOp`, and `ContextOp`.
 
-Guard Chain: `aura-protocol/src/guards/capability_guard.rs` contains `CapabilityGuard` for Biscuit integration.
+Guard Chain: `crates/aura-guards/src/guards/capability_guard.rs` contains `CapabilityGuard` for Biscuit integration.
 
 Storage Authorization: `aura-wot/src/storage_authorization.rs` contains storage-specific Biscuit authorization (moved from aura-store).

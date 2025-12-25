@@ -1,0 +1,83 @@
+Aura Development Environment
+============================
+
+Rust version: rustc 1.90.0 (1159e78c4 2025-09-14)
+Cargo version: cargo 1.90.0 (840b83a10 2025-07-30)
+Quint version: 0.25.1
+Apalache version: 0.45.4
+TLA+ tools: available
+Node.js version: v20.19.5
+Lean version: Lean (version 4.23.0, arm64-apple-darwin, commit v4.23.0, Release)
+Aeneas version: available
+
+Available commands:
+  just --list          Show all available tasks
+  just build           Build all crates
+  just test            Run all tests
+  just check           Run clippy and format check
+  just quint-parse     Parse Quint files to JSON
+  trunk serve          Serve console with hot reload (in console/)
+  quint --help         Formal verification with Quint
+  apalache-mc --help   Model checking with Apalache
+  lean --help          Kernel verification with Lean 4
+  aeneas --help        Rust-to-Lean translation
+  crate2nix --help     Generate hermetic Nix builds
+
+Hermetic builds:
+  nix build            Build with crate2nix (hermetic)
+  nix build .#aura-terminal Build specific package
+  nix run              Run aura CLI hermetically
+  nix flake check      Run hermetic tests
+
+# Aura Consensus - strong agreement protocol
+[package]
+name = "aura-consensus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+simulation = ["aura-core/simulation"]
+
+[dependencies]
+# Workspace crates
+aura-core = { path = "../aura-core" }
+aura-macros = { path = "../aura-macros" }
+
+# Cryptography
+frost-ed25519 = { workspace = true }
+curve25519-dalek = { workspace = true }
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+getrandom = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+hex = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# Testing infrastructure
+aura-testkit = { path = "../aura-testkit" }
+proptest = { workspace = true }

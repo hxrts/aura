@@ -45,6 +45,19 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for contact facts
 pub const CONTACT_FACT_TYPE_ID: &str = "contact";
+pub const CONTACT_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VersionedContactFact {
+    schema_version: u32,
+    fact: ContactFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContactFactKey {
+    pub sub_type: &'static str,
+    pub data: Vec<u8>,
+}
 
 /// Contact domain fact types
 ///
@@ -193,13 +206,27 @@ impl DomainFact for ContactFact {
 
     #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("ContactFact must serialize")
+        bincode::serialize(&VersionedContactFact {
+            schema_version: CONTACT_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .expect("ContactFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
+        if let Ok(versioned) = bincode::deserialize::<VersionedContactFact>(bytes) {
+            if versioned.schema_version == CONTACT_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
+        if let Ok(versioned) = serde_json::from_slice::<VersionedContactFact>(bytes) {
+            if versioned.schema_version == CONTACT_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         serde_json::from_slice(bytes).ok()
     }
 }
@@ -207,6 +234,23 @@ impl DomainFact for ContactFact {
 impl ContactFact {
     pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
         self.context_id() == context_id
+    }
+
+    pub fn binding_key(&self) -> ContactFactKey {
+        match self {
+            ContactFact::Added { contact_id, .. } => ContactFactKey {
+                sub_type: "contact-added",
+                data: contact_id.to_bytes().to_vec(),
+            },
+            ContactFact::Removed { contact_id, .. } => ContactFactKey {
+                sub_type: "contact-removed",
+                data: contact_id.to_bytes().to_vec(),
+            },
+            ContactFact::Renamed { contact_id, .. } => ContactFactKey {
+                sub_type: "contact-renamed",
+                data: contact_id.to_bytes().to_vec(),
+            },
+        }
     }
 }
 
@@ -230,29 +274,17 @@ impl FactReducer for ContactFactReducer {
             return None;
         }
 
-        let fact: ContactFact = serde_json::from_slice(binding_data).ok()?;
+        let fact = ContactFact::from_bytes(binding_data)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
-        let (sub_type, data) = match &fact {
-            ContactFact::Added { contact_id, .. } => {
-                ("contact-added".to_string(), contact_id.to_bytes().to_vec())
-            }
-            ContactFact::Removed { contact_id, .. } => (
-                "contact-removed".to_string(),
-                contact_id.to_bytes().to_vec(),
-            ),
-            ContactFact::Renamed { contact_id, .. } => (
-                "contact-renamed".to_string(),
-                contact_id.to_bytes().to_vec(),
-            ),
-        };
+        let key = fact.binding_key();
 
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(sub_type),
+            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
             context_id,
-            data,
+            data: key.data,
         })
     }
 }
@@ -265,6 +297,13 @@ impl FactReducer for ContactFactReducer {
 ///
 /// These facts store the full `GuardianBinding` payload as `RelationalFact::Generic`.
 pub const GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID: &str = "guardian_binding_details";
+pub const GUARDIAN_BINDING_DETAILS_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct VersionedGuardianBindingDetailsFact {
+    schema_version: u32,
+    fact: GuardianBindingDetailsFact,
+}
 
 /// Stored guardian binding details for a relational context.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -306,13 +345,22 @@ impl DomainFact for GuardianBindingDetailsFact {
 
     #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(self).expect("GuardianBindingDetailsFact must serialize")
+        bincode::serialize(&VersionedGuardianBindingDetailsFact {
+            schema_version: GUARDIAN_BINDING_DETAILS_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .expect("GuardianBindingDetailsFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
+        if let Ok(versioned) = bincode::deserialize::<VersionedGuardianBindingDetailsFact>(bytes) {
+            if versioned.schema_version == GUARDIAN_BINDING_DETAILS_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         bincode::deserialize(bytes).ok()
     }
 }
@@ -351,6 +399,13 @@ impl FactReducer for GuardianBindingDetailsFactReducer {
 ///
 /// These facts store the full `RecoveryGrant` payload as `RelationalFact::Generic`.
 pub const RECOVERY_GRANT_DETAILS_FACT_TYPE_ID: &str = "recovery_grant_details";
+pub const RECOVERY_GRANT_DETAILS_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct VersionedRecoveryGrantDetailsFact {
+    schema_version: u32,
+    fact: RecoveryGrantDetailsFact,
+}
 
 /// Stored recovery grant details for a relational context.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -389,13 +444,22 @@ impl DomainFact for RecoveryGrantDetailsFact {
 
     #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(self).expect("RecoveryGrantDetailsFact must serialize")
+        bincode::serialize(&VersionedRecoveryGrantDetailsFact {
+            schema_version: RECOVERY_GRANT_DETAILS_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .expect("RecoveryGrantDetailsFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
+        if let Ok(versioned) = bincode::deserialize::<VersionedRecoveryGrantDetailsFact>(bytes) {
+            if versioned.schema_version == RECOVERY_GRANT_DETAILS_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         bincode::deserialize(bytes).ok()
     }
 }

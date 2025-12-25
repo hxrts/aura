@@ -525,7 +525,7 @@ Implementation requires careful attention to cryptographic details, metadata han
 
 ## Implementation References
 
-- **Guard Chain Implementation**: `crates/aura-protocol/src/guards/` (see [Authorization](109_authorization.md))
+- **Guard Chain Implementation**: `crates/aura-guards/src/guards/` (see [Authorization](109_authorization.md))
 - **Authority Privacy**: `crates/aura-effects/src/authority/`
 - **Context Isolation**: `crates/aura-relational/src/privacy/`
 - **Flow Budget System**: `crates/aura-protocol/src/flow_budget/`

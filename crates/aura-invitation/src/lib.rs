@@ -97,6 +97,14 @@ pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("invitation:ceremony", "C"),
 ];
 
+/// Lookup the operation category (A/B/C) for a given operation.
+pub fn operation_category(operation: &str) -> Option<&'static str> {
+    OPERATION_CATEGORIES
+        .iter()
+        .find(|(op, _)| *op == operation)
+        .map(|(_, category)| *category)
+}
+
 // =============================================================================
 // Legacy Modules
 // =============================================================================
@@ -169,8 +177,9 @@ pub use protocol::{
 
 // Re-export consensus-based ceremony types
 pub use invitation_ceremony::{
-    AcceptanceProposal, AcceptanceResponse, CeremonyStatus, InvitationCeremonyEffects,
-    InvitationCeremonyExecutor, InvitationCeremonyId, InvitationCeremonyState,
+    AcceptanceProposal, AcceptanceResponse, CeremonyStatus, InvitationCeremonyCommand,
+    InvitationCeremonyEffects, InvitationCeremonyExecutor, InvitationCeremonyId,
+    InvitationCeremonyState,
 };
 
 // Re-export guard types

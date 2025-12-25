@@ -32,9 +32,10 @@
 //! let fact = RecoveryFact::GuardianSetupInitiated {
 //!     context_id,
 //!     initiator_id,
+//!     trace_id: None,
 //!     guardian_ids: vec![guardian1, guardian2, guardian3],
 //!     threshold: 2,
-//!     initiated_at_ms: 1234567890,
+//!     initiated_at: PhysicalTime { ts_ms: 1234567890, uncertainty: None },
 //! };
 //!
 //! // Convert to generic for storage
@@ -58,6 +59,19 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for recovery facts
 pub const RECOVERY_FACT_TYPE_ID: &str = "recovery";
+pub const RECOVERY_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VersionedRecoveryFact {
+    schema_version: u32,
+    fact: RecoveryFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryFactKey {
+    pub sub_type: &'static str,
+    pub data: Vec<u8>,
+}
 
 /// Recovery domain fact types
 ///
@@ -77,6 +91,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Authority initiating the setup
         initiator_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Target guardians for the setup
         guardian_ids: Vec<AuthorityId>,
         /// Required threshold for recovery
@@ -91,6 +108,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Guardian receiving the invitation
         guardian_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Hash of the invitation details
         invitation_hash: Hash32,
         /// Timestamp when invitation was sent (uses unified time system)
@@ -103,6 +123,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Guardian that accepted
         guardian_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Timestamp when accepted (uses unified time system)
         accepted_at: PhysicalTime,
     },
@@ -113,6 +136,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Guardian that declined
         guardian_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Timestamp when declined (uses unified time system)
         declined_at: PhysicalTime,
     },
@@ -123,6 +149,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Guardians that were bound
         guardian_ids: Vec<AuthorityId>,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Final threshold for recovery
         threshold: u16,
         /// Timestamp when setup completed (uses unified time system)
@@ -135,6 +164,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Reason for failure
         reason: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Timestamp when setup failed (uses unified time system)
         failed_at: PhysicalTime,
     },
@@ -148,6 +180,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Authority proposing the change
         proposer_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Type of change being proposed
         change_type: MembershipChangeType,
         /// Hash of the proposal details
@@ -162,6 +197,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Authority casting the vote
         voter_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Hash of the proposal being voted on
         proposal_hash: Hash32,
         /// Whether the vote is in favor
@@ -176,6 +214,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Hash of the completed proposal
         proposal_hash: Hash32,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// New guardian set after the change
         new_guardian_ids: Vec<AuthorityId>,
         /// New threshold after the change
@@ -190,6 +231,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Hash of the rejected proposal
         proposal_hash: Hash32,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Reason for rejection
         reason: String,
         /// Timestamp when rejected (uses unified time system)
@@ -205,6 +249,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Account requesting recovery
         account_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Hash of the recovery request
         request_hash: Hash32,
         /// Timestamp when recovery was initiated (uses unified time system)
@@ -217,6 +264,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Guardian submitting the share
         guardian_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Hash of the share (not the share itself)
         share_hash: Hash32,
         /// Timestamp when share was submitted (uses unified time system)
@@ -229,6 +279,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Authority filing the dispute
         disputer_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Reason for the dispute
         reason: String,
         /// Timestamp when dispute was filed (uses unified time system)
@@ -241,6 +294,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Account that was recovered
         account_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Hash of the recovery evidence
         evidence_hash: Hash32,
         /// Timestamp when recovery completed (uses unified time system)
@@ -253,6 +309,9 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Account that attempted recovery
         account_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Reason for failure
         reason: String,
         /// Timestamp when recovery failed (uses unified time system)
@@ -332,8 +391,8 @@ impl RecoveryFact {
     }
 
     /// Derive the relational binding key data for this fact.
-    pub fn binding_key(&self) -> Vec<u8> {
-        match self {
+    pub fn binding_key(&self) -> RecoveryFactKey {
+        let data = match self {
             RecoveryFact::GuardianSetupInitiated { initiator_id, .. } => {
                 initiator_id.to_bytes().to_vec()
             }
@@ -389,6 +448,11 @@ impl RecoveryFact {
                 data
             }
             RecoveryFact::RecoveryFailed { account_id, .. } => account_id.to_bytes().to_vec(),
+        };
+
+        RecoveryFactKey {
+            sub_type: self.sub_type(),
+            data,
         }
     }
 
@@ -431,6 +495,7 @@ impl RecoveryFact {
         Self::GuardianSetupInitiated {
             context_id,
             initiator_id,
+            trace_id: None,
             guardian_ids,
             threshold,
             initiated_at: PhysicalTime {
@@ -450,6 +515,7 @@ impl RecoveryFact {
         Self::GuardianInvitationSent {
             context_id,
             guardian_id,
+            trace_id: None,
             invitation_hash,
             sent_at: PhysicalTime {
                 ts_ms: sent_at_ms,
@@ -467,6 +533,7 @@ impl RecoveryFact {
         Self::GuardianAccepted {
             context_id,
             guardian_id,
+            trace_id: None,
             accepted_at: PhysicalTime {
                 ts_ms: accepted_at_ms,
                 uncertainty: None,
@@ -483,6 +550,7 @@ impl RecoveryFact {
         Self::GuardianDeclined {
             context_id,
             guardian_id,
+            trace_id: None,
             declined_at: PhysicalTime {
                 ts_ms: declined_at_ms,
                 uncertainty: None,
@@ -500,6 +568,7 @@ impl RecoveryFact {
         Self::GuardianSetupCompleted {
             context_id,
             guardian_ids,
+            trace_id: None,
             threshold,
             completed_at: PhysicalTime {
                 ts_ms: completed_at_ms,
@@ -517,6 +586,7 @@ impl RecoveryFact {
         Self::GuardianSetupFailed {
             context_id,
             reason,
+            trace_id: None,
             failed_at: PhysicalTime {
                 ts_ms: failed_at_ms,
                 uncertainty: None,
@@ -535,6 +605,7 @@ impl RecoveryFact {
         Self::MembershipChangeProposed {
             context_id,
             proposer_id,
+            trace_id: None,
             change_type,
             proposal_hash,
             proposed_at: PhysicalTime {
@@ -555,6 +626,7 @@ impl RecoveryFact {
         Self::MembershipVoteCast {
             context_id,
             voter_id,
+            trace_id: None,
             proposal_hash,
             approved,
             voted_at: PhysicalTime {
@@ -575,6 +647,7 @@ impl RecoveryFact {
         Self::MembershipChangeCompleted {
             context_id,
             proposal_hash,
+            trace_id: None,
             new_guardian_ids,
             new_threshold,
             completed_at: PhysicalTime {
@@ -594,6 +667,7 @@ impl RecoveryFact {
         Self::MembershipChangeRejected {
             context_id,
             proposal_hash,
+            trace_id: None,
             reason,
             rejected_at: PhysicalTime {
                 ts_ms: rejected_at_ms,
@@ -612,6 +686,7 @@ impl RecoveryFact {
         Self::RecoveryInitiated {
             context_id,
             account_id,
+            trace_id: None,
             request_hash,
             initiated_at: PhysicalTime {
                 ts_ms: initiated_at_ms,
@@ -630,6 +705,7 @@ impl RecoveryFact {
         Self::RecoveryShareSubmitted {
             context_id,
             guardian_id,
+            trace_id: None,
             share_hash,
             submitted_at: PhysicalTime {
                 ts_ms: submitted_at_ms,
@@ -648,6 +724,7 @@ impl RecoveryFact {
         Self::RecoveryDisputeFiled {
             context_id,
             disputer_id,
+            trace_id: None,
             reason,
             filed_at: PhysicalTime {
                 ts_ms: filed_at_ms,
@@ -666,6 +743,7 @@ impl RecoveryFact {
         Self::RecoveryCompleted {
             context_id,
             account_id,
+            trace_id: None,
             evidence_hash,
             completed_at: PhysicalTime {
                 ts_ms: completed_at_ms,
@@ -684,6 +762,7 @@ impl RecoveryFact {
         Self::RecoveryFailed {
             context_id,
             account_id,
+            trace_id: None,
             reason,
             failed_at: PhysicalTime {
                 ts_ms: failed_at_ms,
@@ -703,13 +782,27 @@ impl DomainFact for RecoveryFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
+        bincode::serialize(&VersionedRecoveryFact {
+            schema_version: RECOVERY_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .unwrap_or_default()
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
+        if let Ok(versioned) = bincode::deserialize::<VersionedRecoveryFact>(bytes) {
+            if versioned.schema_version == RECOVERY_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
+        if let Ok(versioned) = serde_json::from_slice::<VersionedRecoveryFact>(bytes) {
+            if versioned.schema_version == RECOVERY_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         serde_json::from_slice(bytes).ok()
     }
 }
@@ -734,18 +827,18 @@ impl FactReducer for RecoveryFactReducer {
             return None;
         }
 
-        let fact: RecoveryFact = serde_json::from_slice(binding_data).ok()?;
+        let fact = RecoveryFact::from_bytes(binding_data)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
         let sub_type = fact.sub_type().to_string();
 
-        let data = fact.binding_key();
+        let key = fact.binding_key();
 
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(sub_type),
+            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
             context_id,
-            data,
+            data: key.data,
         })
     }
 }
@@ -851,6 +944,7 @@ mod tests {
         let fact = RecoveryFact::GuardianSetupInitiated {
             context_id: test_context_id(),
             initiator_id: test_authority_id(1),
+            trace_id: None,
             guardian_ids: vec![
                 test_authority_id(2),
                 test_authority_id(3),
@@ -871,6 +965,7 @@ mod tests {
         let fact = RecoveryFact::RecoveryCompleted {
             context_id: test_context_id(),
             account_id: test_authority_id(1),
+            trace_id: None,
             evidence_hash: test_hash(99),
             completed_at: pt(1234567899),
         };
@@ -899,6 +994,7 @@ mod tests {
         let fact = RecoveryFact::GuardianAccepted {
             context_id: test_context_id(),
             guardian_id: test_authority_id(5),
+            trace_id: None,
             accepted_at: pt(1234567890),
         };
 
@@ -920,6 +1016,7 @@ mod tests {
         let fact = RecoveryFact::GuardianAccepted {
             context_id: test_context_id(),
             guardian_id: test_authority_id(5),
+            trace_id: None,
             accepted_at: pt(1234567890),
         };
 
@@ -933,13 +1030,15 @@ mod tests {
         let fact = RecoveryFact::MembershipChangeProposed {
             context_id: test_context_id(),
             proposer_id: test_authority_id(3),
+            trace_id: None,
             change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
             proposal_hash: test_hash(2),
             proposed_at: pt(0),
         };
 
-        let data = fact.binding_key();
-        assert_eq!(data, test_hash(2).0.to_vec());
+        let key = fact.binding_key();
+        assert_eq!(key.sub_type, "membership-change-proposed");
+        assert_eq!(key.data, test_hash(2).0.to_vec());
     }
 
     #[test]
@@ -949,6 +1048,7 @@ mod tests {
         let fact = RecoveryFact::GuardianAccepted {
             context_id,
             guardian_id: test_authority_id(5),
+            trace_id: None,
             accepted_at: pt(1234567890),
         };
 
@@ -965,6 +1065,7 @@ mod tests {
             RecoveryFact::GuardianSetupInitiated {
                 context_id: ctx,
                 initiator_id: test_authority_id(1),
+                trace_id: None,
                 guardian_ids: vec![],
                 threshold: 2,
                 initiated_at: pt(0),
@@ -972,12 +1073,14 @@ mod tests {
             RecoveryFact::RecoveryInitiated {
                 context_id: ctx,
                 account_id: test_authority_id(2),
+                trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(0),
             },
             RecoveryFact::MembershipChangeProposed {
                 context_id: ctx,
                 proposer_id: test_authority_id(3),
+                trace_id: None,
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(2),
                 proposed_at: pt(0),
@@ -997,6 +1100,7 @@ mod tests {
             RecoveryFact::GuardianSetupInitiated {
                 context_id: ctx,
                 initiator_id: test_authority_id(1),
+                trace_id: None,
                 guardian_ids: vec![],
                 threshold: 2,
                 initiated_at: pt(0),
@@ -1004,11 +1108,13 @@ mod tests {
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
                 guardian_id: test_authority_id(2),
+                trace_id: None,
                 accepted_at: pt(0),
             },
             RecoveryFact::RecoveryCompleted {
                 context_id: ctx,
                 account_id: test_authority_id(3),
+                trace_id: None,
                 evidence_hash: test_hash(1),
                 completed_at: pt(0),
             },
@@ -1026,6 +1132,7 @@ mod tests {
             RecoveryFact::GuardianSetupInitiated {
                 context_id: ctx,
                 initiator_id: test_authority_id(1),
+                trace_id: None,
                 guardian_ids: vec![],
                 threshold: 2,
                 initiated_at: pt(0),
@@ -1034,6 +1141,7 @@ mod tests {
             RecoveryFact::GuardianInvitationSent {
                 context_id: ctx,
                 guardian_id: test_authority_id(1),
+                trace_id: None,
                 invitation_hash: test_hash(1),
                 sent_at: pt(0),
             }
@@ -1041,18 +1149,21 @@ mod tests {
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
                 guardian_id: test_authority_id(1),
+                trace_id: None,
                 accepted_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::GuardianDeclined {
                 context_id: ctx,
                 guardian_id: test_authority_id(1),
+                trace_id: None,
                 declined_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::GuardianSetupCompleted {
                 context_id: ctx,
                 guardian_ids: vec![],
+                trace_id: None,
                 threshold: 2,
                 completed_at: pt(0),
             }
@@ -1060,12 +1171,14 @@ mod tests {
             RecoveryFact::GuardianSetupFailed {
                 context_id: ctx,
                 reason: "test".to_string(),
+                trace_id: None,
                 failed_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::MembershipChangeProposed {
                 context_id: ctx,
                 proposer_id: test_authority_id(1),
+                trace_id: None,
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(1),
                 proposed_at: pt(0),
@@ -1074,6 +1187,7 @@ mod tests {
             RecoveryFact::MembershipVoteCast {
                 context_id: ctx,
                 voter_id: test_authority_id(1),
+                trace_id: None,
                 proposal_hash: test_hash(1),
                 approved: true,
                 voted_at: pt(0),
@@ -1082,6 +1196,7 @@ mod tests {
             RecoveryFact::MembershipChangeCompleted {
                 context_id: ctx,
                 proposal_hash: test_hash(1),
+                trace_id: None,
                 new_guardian_ids: vec![],
                 new_threshold: 2,
                 completed_at: pt(0),
@@ -1090,6 +1205,7 @@ mod tests {
             RecoveryFact::MembershipChangeRejected {
                 context_id: ctx,
                 proposal_hash: test_hash(1),
+                trace_id: None,
                 reason: "test".to_string(),
                 rejected_at: pt(0),
             }
@@ -1097,6 +1213,7 @@ mod tests {
             RecoveryFact::RecoveryInitiated {
                 context_id: ctx,
                 account_id: test_authority_id(1),
+                trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(0),
             }
@@ -1104,6 +1221,7 @@ mod tests {
             RecoveryFact::RecoveryShareSubmitted {
                 context_id: ctx,
                 guardian_id: test_authority_id(1),
+                trace_id: None,
                 share_hash: test_hash(1),
                 submitted_at: pt(0),
             }
@@ -1111,6 +1229,7 @@ mod tests {
             RecoveryFact::RecoveryDisputeFiled {
                 context_id: ctx,
                 disputer_id: test_authority_id(1),
+                trace_id: None,
                 reason: "test".to_string(),
                 filed_at: pt(0),
             }
@@ -1118,6 +1237,7 @@ mod tests {
             RecoveryFact::RecoveryCompleted {
                 context_id: ctx,
                 account_id: test_authority_id(1),
+                trace_id: None,
                 evidence_hash: test_hash(1),
                 completed_at: pt(0),
             }
@@ -1125,6 +1245,7 @@ mod tests {
             RecoveryFact::RecoveryFailed {
                 context_id: ctx,
                 account_id: test_authority_id(1),
+                trace_id: None,
                 reason: "test".to_string(),
                 failed_at: pt(0),
             }

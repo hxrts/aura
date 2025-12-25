@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::effects::*;
-use crate::handlers::{AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
+use aura_protocol::effects::*;
+use aura_protocol::handlers::{AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 use aura_core::hash::hash;
 use aura_mpst::LocalSessionType;
 use serde::Serialize;
@@ -569,7 +569,8 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "current_epoch" => {
-                let result = crate::effects::effect_api::EffectApiEffects::current_epoch(effects)
+                let result =
+                    aura_protocol::effects::effect_api::EffectApiEffects::current_epoch(effects)
                     .await
                     .map_err(|e| AuraHandlerError::ExecutionFailed {
                         source: Box::new(e),

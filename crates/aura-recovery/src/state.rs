@@ -94,6 +94,7 @@ impl RecoveryState {
                 guardian_ids,
                 threshold,
                 initiated_at,
+                ..
             } => {
                 self.setups.insert(
                     *context_id,
@@ -162,6 +163,7 @@ impl RecoveryState {
                 change_type,
                 proposal_hash,
                 proposed_at,
+                ..
             } => {
                 self.proposals.insert(
                     *context_id,
@@ -213,6 +215,7 @@ impl RecoveryState {
                 account_id,
                 request_hash,
                 initiated_at,
+                ..
             } => {
                 self.recoveries.insert(
                     *context_id,
@@ -493,6 +496,7 @@ mod tests {
             RecoveryFact::GuardianSetupInitiated {
                 context_id: ctx,
                 initiator_id: initiator,
+                trace_id: None,
                 guardian_ids: vec![guardian1, guardian2, guardian3],
                 threshold: 2,
                 initiated_at: pt(1000),
@@ -500,6 +504,7 @@ mod tests {
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
                 guardian_id: guardian1,
+                trace_id: None,
                 accepted_at: pt(2000),
             },
         ];
@@ -523,6 +528,7 @@ mod tests {
             RecoveryFact::GuardianSetupInitiated {
                 context_id: ctx,
                 initiator_id: initiator,
+                trace_id: None,
                 guardian_ids: vec![guardian1, guardian2],
                 threshold: 2,
                 initiated_at: pt(1000),
@@ -530,11 +536,13 @@ mod tests {
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
                 guardian_id: guardian1,
+                trace_id: None,
                 accepted_at: pt(2000),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
                 guardian_id: guardian2,
+                trace_id: None,
                 accepted_at: pt(3000),
             },
         ];
@@ -557,6 +565,7 @@ mod tests {
             RecoveryFact::GuardianSetupInitiated {
                 context_id: ctx,
                 initiator_id: initiator,
+                trace_id: None,
                 guardian_ids: vec![guardian1, guardian2],
                 threshold: 2,
                 initiated_at: pt(1000),
@@ -564,6 +573,7 @@ mod tests {
             RecoveryFact::GuardianDeclined {
                 context_id: ctx,
                 guardian_id: guardian1,
+                trace_id: None,
                 declined_at: pt(2000),
             },
         ];
@@ -586,6 +596,7 @@ mod tests {
             RecoveryFact::MembershipChangeProposed {
                 context_id: ctx,
                 proposer_id: proposer,
+                trace_id: None,
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(1),
                 proposed_at: pt(1000),
@@ -593,6 +604,7 @@ mod tests {
             RecoveryFact::MembershipVoteCast {
                 context_id: ctx,
                 voter_id: voter1,
+                trace_id: None,
                 proposal_hash: test_hash(1),
                 approved: true,
                 voted_at: pt(2000),
@@ -600,6 +612,7 @@ mod tests {
             RecoveryFact::MembershipVoteCast {
                 context_id: ctx,
                 voter_id: voter2,
+                trace_id: None,
                 proposal_hash: test_hash(1),
                 approved: false,
                 voted_at: pt(3000),
@@ -624,12 +637,14 @@ mod tests {
             RecoveryFact::RecoveryInitiated {
                 context_id: ctx,
                 account_id: account,
+                trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
             },
             RecoveryFact::RecoveryShareSubmitted {
                 context_id: ctx,
                 guardian_id: guardian1,
+                trace_id: None,
                 share_hash: test_hash(2),
                 submitted_at: pt(2000),
             },
@@ -653,12 +668,14 @@ mod tests {
             RecoveryFact::RecoveryInitiated {
                 context_id: ctx,
                 account_id: account,
+                trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
             },
             RecoveryFact::RecoveryDisputeFiled {
                 context_id: ctx,
                 disputer_id: disputer,
+                trace_id: None,
                 reason: "Unauthorized recovery attempt".to_string(),
                 filed_at: pt(2000),
             },
@@ -683,6 +700,7 @@ mod tests {
             RecoveryFact::GuardianSetupInitiated {
                 context_id: ctx1,
                 initiator_id: initiator,
+                trace_id: None,
                 guardian_ids: vec![guardian],
                 threshold: 1,
                 initiated_at: pt(1000),
@@ -691,6 +709,7 @@ mod tests {
             RecoveryFact::GuardianSetupInitiated {
                 context_id: ctx2,
                 initiator_id: initiator,
+                trace_id: None,
                 guardian_ids: vec![guardian],
                 threshold: 1,
                 initiated_at: pt(2000),
@@ -698,11 +717,13 @@ mod tests {
             RecoveryFact::GuardianAccepted {
                 context_id: ctx2,
                 guardian_id: guardian,
+                trace_id: None,
                 accepted_at: pt(3000),
             },
             RecoveryFact::GuardianSetupCompleted {
                 context_id: ctx2,
                 guardian_ids: vec![],
+                trace_id: None,
                 threshold: 1,
                 completed_at: pt(4000),
             },

@@ -38,6 +38,19 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for social facts
 pub const SOCIAL_FACT_TYPE_ID: &str = "social";
+pub const SOCIAL_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VersionedSocialFact {
+    schema_version: u32,
+    fact: SocialFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocialFactKey {
+    pub sub_type: &'static str,
+    pub data: Vec<u8>,
+}
 
 /// Social domain fact types
 ///
@@ -201,6 +214,68 @@ impl SocialFact {
         self.context_id() == context_id
     }
 
+    /// Derive the relational binding subtype and key data for this fact.
+    pub fn binding_key(&self) -> SocialFactKey {
+        match self {
+            SocialFact::BlockCreated { block_id, .. } => SocialFactKey {
+                sub_type: "block-created",
+                data: block_id.0.to_vec(),
+            },
+            SocialFact::BlockDeleted { block_id, .. } => SocialFactKey {
+                sub_type: "block-deleted",
+                data: block_id.0.to_vec(),
+            },
+            SocialFact::ResidentJoined { authority_id, .. } => SocialFactKey {
+                sub_type: "resident-joined",
+                data: authority_id.to_string().into_bytes(),
+            },
+            SocialFact::ResidentLeft { authority_id, .. } => SocialFactKey {
+                sub_type: "resident-left",
+                data: authority_id.to_string().into_bytes(),
+            },
+            SocialFact::StewardGranted { authority_id, .. } => SocialFactKey {
+                sub_type: "steward-granted",
+                data: authority_id.to_string().into_bytes(),
+            },
+            SocialFact::StewardRevoked { authority_id, .. } => SocialFactKey {
+                sub_type: "steward-revoked",
+                data: authority_id.to_string().into_bytes(),
+            },
+            SocialFact::StorageUpdated { block_id, .. } => SocialFactKey {
+                sub_type: "storage-updated",
+                data: block_id.0.to_vec(),
+            },
+            SocialFact::NeighborhoodCreated { neighborhood_id, .. } => SocialFactKey {
+                sub_type: "neighborhood-created",
+                data: neighborhood_id.0.to_vec(),
+            },
+            SocialFact::BlockJoinedNeighborhood {
+                block_id,
+                neighborhood_id,
+                ..
+            } => {
+                let mut data = block_id.0.to_vec();
+                data.extend_from_slice(&neighborhood_id.0);
+                SocialFactKey {
+                    sub_type: "block-joined-neighborhood",
+                    data,
+                }
+            }
+            SocialFact::BlockLeftNeighborhood {
+                block_id,
+                neighborhood_id,
+                ..
+            } => {
+                let mut data = block_id.0.to_vec();
+                data.extend_from_slice(&neighborhood_id.0);
+                SocialFactKey {
+                    sub_type: "block-left-neighborhood",
+                    data,
+                }
+            }
+        }
+    }
+
     /// Create a BlockCreated fact with millisecond timestamp
     pub fn block_created_ms(
         block_id: BlockId,
@@ -304,13 +379,27 @@ impl DomainFact for SocialFact {
 
     #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("SocialFact must serialize")
+        bincode::serialize(&VersionedSocialFact {
+            schema_version: SOCIAL_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .expect("SocialFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
+        if let Ok(versioned) = bincode::deserialize::<VersionedSocialFact>(bytes) {
+            if versioned.schema_version == SOCIAL_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
+        if let Ok(versioned) = serde_json::from_slice::<VersionedSocialFact>(bytes) {
+            if versioned.schema_version == SOCIAL_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         serde_json::from_slice(bytes).ok()
     }
 }
@@ -335,68 +424,18 @@ impl FactReducer for SocialFactReducer {
             return None;
         }
 
-        let fact: SocialFact = serde_json::from_slice(binding_data).ok()?;
+        let fact = SocialFact::from_bytes(binding_data)?;
 
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
-        let (sub_type, data) = match &fact {
-            SocialFact::BlockCreated { block_id, .. } => {
-                ("block-created".to_string(), block_id.0.to_vec())
-            }
-            SocialFact::BlockDeleted { block_id, .. } => {
-                ("block-deleted".to_string(), block_id.0.to_vec())
-            }
-            SocialFact::ResidentJoined { authority_id, .. } => (
-                "resident-joined".to_string(),
-                authority_id.to_string().into_bytes(),
-            ),
-            SocialFact::ResidentLeft { authority_id, .. } => (
-                "resident-left".to_string(),
-                authority_id.to_string().into_bytes(),
-            ),
-            SocialFact::StewardGranted { authority_id, .. } => (
-                "steward-granted".to_string(),
-                authority_id.to_string().into_bytes(),
-            ),
-            SocialFact::StewardRevoked { authority_id, .. } => (
-                "steward-revoked".to_string(),
-                authority_id.to_string().into_bytes(),
-            ),
-            SocialFact::StorageUpdated { block_id, .. } => {
-                ("storage-updated".to_string(), block_id.0.to_vec())
-            }
-            SocialFact::NeighborhoodCreated {
-                neighborhood_id, ..
-            } => (
-                "neighborhood-created".to_string(),
-                neighborhood_id.0.to_vec(),
-            ),
-            SocialFact::BlockJoinedNeighborhood {
-                block_id,
-                neighborhood_id,
-                ..
-            } => {
-                let mut data = block_id.0.to_vec();
-                data.extend_from_slice(&neighborhood_id.0);
-                ("block-joined-neighborhood".to_string(), data)
-            }
-            SocialFact::BlockLeftNeighborhood {
-                block_id,
-                neighborhood_id,
-                ..
-            } => {
-                let mut data = block_id.0.to_vec();
-                data.extend_from_slice(&neighborhood_id.0);
-                ("block-left-neighborhood".to_string(), data)
-            }
-        };
+        let key = fact.binding_key();
 
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(sub_type),
+            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
             context_id,
-            data,
+            data: key.data,
         })
     }
 }

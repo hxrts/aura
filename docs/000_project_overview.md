@@ -28,7 +28,7 @@ The layers are as follows:
 
 3. Implementation (`aura-effects`, `aura-composition`): Stateless production handlers and handler composition infrastructure.
 
-4. Orchestration (`aura-protocol`): Multi-party coordination, guard chain, and Aura Consensus runtime.
+4. Orchestration (`aura-protocol` + `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`): Multi-party coordination, guard chain, consensus, AMP, and anti-entropy.
 
 5. Feature implementation (`aura-authenticate`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates for authentication, secure messaging, recovery, relational contexts, rendezvous, social topology, and synchronization.
 

@@ -22,8 +22,8 @@
 // - Byzantine threshold: Aura.Assumptions.byzantine_threshold
 //
 // == Rust Correspondence ==
-// - Timeout handling: crates/aura-protocol/src/consensus/coordinator.rs
-// - Fallback logic: crates/aura-protocol/src/consensus/fallback.rs
+// - Timeout handling: crates/aura-consensus/src/consensus/coordinator.rs
+// - Fallback logic: crates/aura-consensus/src/consensus/fallback.rs
 // - Gossip: crates/aura-sync/src/protocols/anti_entropy.rs
 //
 // See: docs/004_distributed_systems_contract.md §4, docs/104_consensus.md

@@ -21,7 +21,8 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 │    (aura-invitation, etc.)                  │
 ├─────────────────────────────────────────────┤
 │ Layer 4: Orchestration                      │
-│         (aura-protocol)                     │
+│ (aura-protocol, aura-guards, aura-consensus,│
+│  aura-amp, aura-anti-entropy, aura-bridge)  │
 ├─────────────────────────────────────────────┤
 │ Layer 3: Implementation                     │
 │    (aura-effects + aura-composition)        │
@@ -240,16 +241,16 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Dependencies**: `aura-core`, `aura-effects`.
 
-## Layer 4: Orchestration — `aura-protocol`
+## Layer 4: Orchestration — `aura-protocol` + subcrates
 
 **Purpose**: Multi-party coordination and distributed protocol orchestration.
 
 **Contains**:
-- Guard chain coordination (`CapGuard → FlowGuard → JournalCoupler`)
-- Multi-party protocol orchestration (consensus, anti-entropy)
+- Guard chain coordination (`CapGuard → FlowGuard → JournalCoupler`) in `aura-guards`
+- Multi-party protocol orchestration (consensus in `aura-consensus`, anti-entropy in `aura-anti-entropy`)
 - Cross-handler coordination logic (`TransportCoordinator`, `StorageCoordinator`, etc.)
 - Distributed state management
-- Protocol-specific bridges and adapters
+- Protocol-specific bridges and adapters (`aura-bridge`)
 - Stateful coordinators for multi-party protocols
 
 **What doesn't go here**:
@@ -262,7 +263,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Key characteristics**: This layer coordinates multiple handlers working together across network boundaries. It implements the "choreography conductor" pattern, ensuring distributed protocols execute correctly with proper authorization, flow control, and state consistency. All handlers here manage multi-party coordination, not single-party operations.
 
-**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, domain crates. Performance-critical protocol operations may require carefully documented exceptions for direct cryptographic library usage.
+**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, domain crates, and Layer 4 subcrates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`). Performance-critical protocol operations may require carefully documented exceptions for direct cryptographic library usage.
 
 ## Layer 5: Feature/Protocol Implementation
 
@@ -283,7 +284,15 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Key characteristics**: Reusable building blocks with no UI or binary entry points.
 
-**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-protocol`, `aura-mpst`.
+**Notes**:
+- Layer 5 crates now include `ARCHITECTURE.md` describing facts, invariants, and operation categories.
+- `OPERATION_CATEGORIES` constants in each Layer 5 crate map operations to A/B/C classes.
+- Runtime-owned caches (e.g., invitation/rendezvous descriptors) live in Layer 6 handlers, not in Layer 5 services.
+- Layer 5 facts use versioned binary encoding (bincode) with JSON fallback for debug and compatibility.
+- FactKey helper types are required for reducers/views to keep binding key derivation consistent.
+- Ceremony facts carry optional `trace_id` values to support cross-protocol traceability.
+
+**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, plus Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`).
 
 ## Layer 6: Runtime Composition — `aura-agent`, `aura-simulator`, and `aura-app`
 
@@ -310,7 +319,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Key characteristics**: This is about "how do I deploy and run this as a production system?" It's the bridge between composed handlers/protocols and actual running applications.
 
-**Dependencies**: All domain crates, `aura-effects`, `aura-composition`, `aura-protocol`.
+**Dependencies**: All domain crates, `aura-effects`, `aura-composition`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`).
 
 ## Layer 7: User Interface — `aura-terminal`
 
@@ -320,7 +329,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Key characteristic**: Contains `main()` entry point that users run directly. Binary is named `aura`.
 
-**Dependencies**: `aura-app`, `aura-agent`, `aura-protocol`, `aura-core`, `aura-recovery`.
+**Dependencies**: `aura-app`, `aura-agent`, `aura-core`, `aura-recovery`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`).
 
 ## Layer 8: Testing and Development Tools
 
@@ -340,7 +349,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Key characteristics**: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.
 
-**Dependencies**: `aura-agent`, `aura-composition`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`.
+**Dependencies**: `aura-agent`, `aura-composition`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`.
 
 ## Workspace Structure
 
@@ -349,10 +358,15 @@ crates/
 ├── aura-agent           Runtime composition and agent lifecycle
 ├── aura-app             Portable headless application core (multi-platform)
 ├── aura-authenticate    Authentication protocols
+├── aura-anti-entropy    Anti-entropy sync and reconciliation
+├── aura-amp             Authenticated messaging protocol (AMP)
+├── aura-bridge          Handler/effect bridge adapters
 ├── aura-chat            Chat facts + local prototype service
 ├── aura-composition     Handler composition and effect system assembly
+├── aura-consensus       Consensus protocol implementation
 ├── aura-core            Foundation types and effect traits
 ├── aura-effects         Effect handler implementations
+├── aura-guards          Guard chain enforcement
 ├── aura-invitation      Invitation choreographies
 ├── aura-journal         Fact-based journal domain
 ├── aura-macros          Choreography DSL compiler
@@ -397,6 +411,11 @@ graph TD
 
     %% Orchestration Layer
     protocol[aura-protocol]
+    guards[aura-guards]
+    consensus[aura-consensus]
+    amp[aura-amp]
+    anti_entropy[aura-anti-entropy]
+    bridge[aura-bridge]
 
     %% Feature Layer
     auth[aura-authenticate]
@@ -589,7 +608,7 @@ Application effects encode Aura-specific abstractions and business logic. These 
 - `EffectApiEffects`: Event sourcing and audit for protocols
 - `SyncEffects`: Anti-entropy synchronization operations
 
-**Implementation Location**: Application effects are implemented in their respective domain crates (`aura-journal`, `aura-wot`, etc.). Protocol coordination effects are implemented in `aura-protocol` as they manage multi-party state.
+**Implementation Location**: Application effects are implemented in their respective domain crates (`aura-journal`, `aura-wot`, etc.). Protocol coordination effects are implemented in Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`) as they manage multi-party state.
 
 **Why Not in aura-effects?**: Moving these to `aura-effects` would create circular dependencies. Domain crates need to implement these effects using their own domain logic, but `aura-effects` cannot depend on domain crates due to the layered architecture.
 
@@ -798,13 +817,13 @@ Use these principles to classify code and determine the correct crate.
 - About "how do I assemble handlers?" not "how do I coordinate protocols?"
 - Enables feature crates to compose handlers without runtime overhead
 
-**Multi-Party Coordination** (Layer 4: `aura-protocol`):
+**Multi-Party Coordination** (Layer 4: `aura-protocol` + subcrates):
 - Stateful, context-specific orchestration
 - Examples: `execute_anti_entropy(...)`, `CrdtCoordinator`, `GuardChain`
 - Manages multiple handlers working together across network boundaries
 - The "choreography conductor" that ensures distributed protocols execute correctly
 
-The distinctions are critical for understanding where code belongs. Single-party operations and handler composition both belong in Layer 3. Multi-party coordination goes in `aura-protocol`.
+The distinctions are critical for understanding where code belongs. Single-party operations and handler composition both belong in Layer 3. Multi-party coordination goes in Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`).
 
 ### Composition vs. Orchestration
 
@@ -1025,7 +1044,7 @@ pub fn hash(data: &[u8]) -> [u8; 32] {
 3. **Pure functions** are deterministic regardless of when/where they're called
 
 **Why broad exemptions are dangerous**:
-- Crate-level exemptions (`aura-agent`, `aura-protocol`) would allow business logic to bypass effects
+- Crate-level exemptions (`aura-agent`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`) would allow business logic to bypass effects
 - This breaks simulation determinism and WASM compatibility
 - Makes testing unreliable by introducing hidden external dependencies
 
@@ -1169,7 +1188,7 @@ Run before every commit to maintain architectural compliance and simulation dete
 - **Test scenario** → `aura-testkit`
 - **Choreography protocol** → Feature crate + `aura-mpst`
 - **Authorization logic** → `aura-wot`
-- **Consensus protocol** → `aura-protocol` (orchestration) + domain crates (state)
+- **Consensus protocol** → `aura-consensus` (orchestration) + domain crates (state)
 - **Effect handler** → `aura-effects` (infrastructure) or domain crate (application logic)
 
 ### "I need to understand..."
@@ -1249,7 +1268,22 @@ Production-grade stateless effect handlers that delegate to OS services for cryp
 Effect handler composition, registry, and builder infrastructure for assembling handlers into cohesive effect systems. Includes reactive infrastructure (`Dynamic<T>`) for composing view updates over effect changes.
 
 ### aura-protocol
-Multi-party coordination and distributed protocol orchestration including guard chain and CRDT coordination.
+Multi-party coordination and distributed protocol orchestration (umbrella crate) re-exporting Layer 4 subcrates and shared orchestration types.
+
+### aura-guards
+Guard chain enforcement (authorization, flow budgets, journal coupling, leakage tracking).
+
+### aura-consensus
+Consensus protocol implementation (fast path + fallback) and relational adapters.
+
+### aura-amp
+Authenticated messaging protocol (AMP), including consensus-backed epoch bumps.
+
+### aura-anti-entropy
+Anti-entropy sync and reconciliation (digest exchange, guarded sync operations).
+
+### aura-bridge
+Handler/effect bridge adapters (typed and unified bridges).
 
 ### aura-authenticate
 Device, threshold, and guardian authentication protocols.
@@ -1273,7 +1307,7 @@ Social Bulletin Board peer discovery with relationship-based routing.
 LAN discovery packet formats/config live in `aura-rendezvous`; the UDP runtime implementation lives in `aura-agent`.
 
 ### aura-sync
-Journal synchronization and anti-entropy protocols.
+Journal synchronization and anti-entropy protocols (built atop `aura-anti-entropy`).
 
 ### aura-agent
 Production runtime assembling handlers and protocols into executable systems. Includes `ReactiveScheduler` (Tokio event loop) for orchestrating fact ingestion, journal updates, and view propagation.

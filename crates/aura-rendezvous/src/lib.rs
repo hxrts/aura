@@ -72,6 +72,14 @@ pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("rendezvous:relay-request", "A"),
 ];
 
+/// Lookup the operation category (A/B/C) for a given operation.
+pub fn operation_category(operation: &str) -> Option<&'static str> {
+    OPERATION_CATEGORIES
+        .iter()
+        .find(|(op, _)| *op == operation)
+        .map(|(_, category)| *category)
+}
+
 // =============================================================================
 // RE-EXPORTS
 // =============================================================================

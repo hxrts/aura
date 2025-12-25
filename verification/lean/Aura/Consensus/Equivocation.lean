@@ -14,10 +14,10 @@ that honest witnesses are never falsely accused.
 - Action: `byzantineEquivocate`
 
 ## Rust Correspondence
-- File: crates/aura-protocol/src/consensus/types.rs
+- File: crates/aura-consensus/src/consensus/types.rs
 - Type: `ConflictFact` - proof of equivocation
 - Function: `detect_conflict` - equivocation detection
-- File: crates/aura-protocol/src/consensus/witness.rs
+- File: crates/aura-consensus/src/consensus/witness.rs
 - Logic: Equivocator exclusion from proposal aggregation
 
 ## Expose

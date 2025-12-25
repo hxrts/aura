@@ -672,7 +672,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Needs rewrite for timestamp-based API - requires manual time advancement"]
     async fn test_connection_eviction() {
         let config = PoolConfig {
             idle_timeout: Duration::from_millis(10),
@@ -689,10 +688,7 @@ mod tests {
         let handle = pool.acquire(peer_id, now).await.unwrap();
         pool.release(peer_id, handle, now).unwrap();
 
-        // Wait for idle timeout
-        // Deterministic eviction; delay handled via logical time input
-
-        // Evict expired connections - needs future timestamp
+        // Advance time past idle timeout (10ms timeout, we advance 100ms)
         let later = now + 100;
         let evicted = pool.evict_expired(later).await;
         assert_eq!(evicted, 1);

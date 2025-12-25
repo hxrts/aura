@@ -20,7 +20,7 @@
 //! - **core**: Base effect handler traits, registry infrastructure, error types
 //! - **tree**: Commitment tree reduction and application handlers
 //! - **memory**: In-memory handlers for testing and simulation
-//! - **bridges**: Integration adapters connecting effect systems
+//! - **bridges**: Integration adapters (moved to aura-bridge)
 //! - **storage**: Storage coordination handlers
 //! - **context**: Context/lifecycle management for handler operations
 //!
@@ -28,7 +28,7 @@
 //! - **core**: Base effect handler traits and registry
 //! - **tree**: Commitment tree operations
 //! - **memory**: In-memory implementations for testing
-//! - **bridges**: Adapters for integration
+//! - **bridges**: Adapters for integration (moved to aura-bridge)
 //! - **storage**: Storage coordination
 //! - **context**: Context management for handler operations
 //!
@@ -220,8 +220,7 @@ pub use context::{
 };
 
 // Bridge adapters
-pub mod bridges;
-pub use bridges::{TypedHandlerBridge, UnifiedAuraHandlerBridge, UnifiedHandlerBridgeFactory};
+// Bridges live in aura-bridge to avoid coupling handler internals to other Layer 4 crates.
 
 // Memory-based handlers
 pub mod memory;
@@ -301,4 +300,3 @@ pub use transport_coordinator::{
     CoordinationResult, RetryingTransportManager, TransportCoordinationConfig,
     TransportCoordinationError, TransportCoordinator,
 };
-

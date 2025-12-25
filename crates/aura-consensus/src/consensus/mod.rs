@@ -14,7 +14,7 @@
 //! - **protocol**: Main consensus protocol coordination and execution
 //! - **relational**: Relational consensus adapter for cross-authority operations
 //!
-//! Note: AMP consensus adapter is consolidated under `crate::amp::consensus`.
+//! Note: AMP consensus adapter is consolidated under `aura-amp`.
 //!
 //! ## Protocol Design (per docs/104_consensus.md)
 //!
@@ -51,12 +51,6 @@ pub use messages::{
 pub use protocol::{run_consensus, ConsensusProtocol};
 pub use types::{CommitFact, ConflictFact, ConsensusConfig, ConsensusId, ConsensusResult};
 // Intentionally avoid re-exporting witness internals to reduce coupling.
-
-// Re-export AMP adapter functions (now consolidated under crate::amp::consensus)
-pub use crate::amp::consensus::{
-    finalize_amp_bump_with_journal, finalize_amp_bump_with_journal_default,
-    run_amp_channel_epoch_bump,
-};
 
 // Re-export relational consensus
 pub use relational::{

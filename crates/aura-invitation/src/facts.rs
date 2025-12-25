@@ -46,6 +46,19 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for invitation facts
 pub const INVITATION_FACT_TYPE_ID: &str = "invitation";
+pub const INVITATION_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VersionedInvitationFact {
+    schema_version: u32,
+    fact: InvitationFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvitationFactKey {
+    pub sub_type: &'static str,
+    pub data: Vec<u8>,
+}
 
 /// Invitation domain fact types
 ///
@@ -109,6 +122,9 @@ pub enum InvitationFact {
         ceremony_id: String,
         /// Authority initiating the ceremony
         sender: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Timestamp in milliseconds
         timestamp_ms: u64,
     },
@@ -117,6 +133,9 @@ pub enum InvitationFact {
     CeremonyAcceptanceReceived {
         /// Ceremony identifier
         ceremony_id: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Timestamp in milliseconds
         timestamp_ms: u64,
     },
@@ -127,6 +146,9 @@ pub enum InvitationFact {
         ceremony_id: String,
         /// Resulting relationship identifier
         relationship_id: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Timestamp in milliseconds
         timestamp_ms: u64,
     },
@@ -137,6 +159,9 @@ pub enum InvitationFact {
         ceremony_id: String,
         /// Reason for abortion
         reason: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
         /// Timestamp in milliseconds
         timestamp_ms: u64,
     },
@@ -195,40 +220,40 @@ impl InvitationFact {
     }
 
     /// Derive the relational binding subtype and key data for this fact.
-    pub fn binding_key(&self) -> (String, Vec<u8>) {
+    pub fn binding_key(&self) -> InvitationFactKey {
         match self {
-            InvitationFact::Sent { invitation_id, .. } => (
-                "invitation-sent".to_string(),
-                invitation_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::Accepted { invitation_id, .. } => (
-                "invitation-accepted".to_string(),
-                invitation_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::Declined { invitation_id, .. } => (
-                "invitation-declined".to_string(),
-                invitation_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::Cancelled { invitation_id, .. } => (
-                "invitation-cancelled".to_string(),
-                invitation_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::CeremonyInitiated { ceremony_id, .. } => (
-                "ceremony-initiated".to_string(),
-                ceremony_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => (
-                "ceremony-acceptance-received".to_string(),
-                ceremony_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::CeremonyCommitted { ceremony_id, .. } => (
-                "ceremony-committed".to_string(),
-                ceremony_id.as_bytes().to_vec(),
-            ),
-            InvitationFact::CeremonyAborted { ceremony_id, .. } => (
-                "ceremony-aborted".to_string(),
-                ceremony_id.as_bytes().to_vec(),
-            ),
+            InvitationFact::Sent { invitation_id, .. } => InvitationFactKey {
+                sub_type: "invitation-sent",
+                data: invitation_id.as_bytes().to_vec(),
+            },
+            InvitationFact::Accepted { invitation_id, .. } => InvitationFactKey {
+                sub_type: "invitation-accepted",
+                data: invitation_id.as_bytes().to_vec(),
+            },
+            InvitationFact::Declined { invitation_id, .. } => InvitationFactKey {
+                sub_type: "invitation-declined",
+                data: invitation_id.as_bytes().to_vec(),
+            },
+            InvitationFact::Cancelled { invitation_id, .. } => InvitationFactKey {
+                sub_type: "invitation-cancelled",
+                data: invitation_id.as_bytes().to_vec(),
+            },
+            InvitationFact::CeremonyInitiated { ceremony_id, .. } => InvitationFactKey {
+                sub_type: "ceremony-initiated",
+                data: ceremony_id.as_bytes().to_vec(),
+            },
+            InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => InvitationFactKey {
+                sub_type: "ceremony-acceptance-received",
+                data: ceremony_id.as_bytes().to_vec(),
+            },
+            InvitationFact::CeremonyCommitted { ceremony_id, .. } => InvitationFactKey {
+                sub_type: "ceremony-committed",
+                data: ceremony_id.as_bytes().to_vec(),
+            },
+            InvitationFact::CeremonyAborted { ceremony_id, .. } => InvitationFactKey {
+                sub_type: "ceremony-aborted",
+                data: ceremony_id.as_bytes().to_vec(),
+            },
         }
     }
 
@@ -323,13 +348,27 @@ impl DomainFact for InvitationFact {
 
     #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("InvitationFact must serialize")
+        bincode::serialize(&VersionedInvitationFact {
+            schema_version: INVITATION_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .expect("InvitationFact must serialize")
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
+        if let Ok(versioned) = bincode::deserialize::<VersionedInvitationFact>(bytes) {
+            if versioned.schema_version == INVITATION_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
+        if let Ok(versioned) = serde_json::from_slice::<VersionedInvitationFact>(bytes) {
+            if versioned.schema_version == INVITATION_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         serde_json::from_slice(bytes).ok()
     }
 }
@@ -354,17 +393,17 @@ impl FactReducer for InvitationFactReducer {
             return None;
         }
 
-        let fact: InvitationFact = serde_json::from_slice(binding_data).ok()?;
+        let fact = InvitationFact::from_bytes(binding_data)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
-        let (sub_type, data) = fact.binding_key();
+        let key = fact.binding_key();
 
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(sub_type),
+            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
             context_id,
-            data,
+            data: key.data,
         })
     }
 }
@@ -476,9 +515,9 @@ mod tests {
             1234,
         );
 
-        let (sub_type, data) = fact.binding_key();
-        assert_eq!(sub_type, "invitation-declined");
-        assert_eq!(data, b"inv-42".to_vec());
+        let key = fact.binding_key();
+        assert_eq!(key.sub_type, "invitation-declined");
+        assert_eq!(key.data, b"inv-42".to_vec());
     }
 
     #[test]

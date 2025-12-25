@@ -634,7 +634,7 @@ fi
 if [ "$RUN_ALL" = true ] || [ "$RUN_GUARDS" = true ]; then
   section "Guard chain — all TransportEffects sends must flow through CapGuard → FlowGuard → JournalCoupler (docs/108_transport_and_information_flow.md, docs/001_system_architecture.md §2.1)"
   transport_sends=$(rg --no-heading "TransportEffects::(send|open_channel)" crates -g "*.rs" || true)
-  guard_allowlist="crates/aura-protocol/src/guards|crates/aura-protocol/src/handlers/sessions|tests/|crates/aura-testkit/"
+  guard_allowlist="crates/aura-guards/src/guards|crates/aura-protocol/src/handlers/sessions|tests/|crates/aura-testkit/"
   bypass_hits=$(echo "$transport_sends" | grep -Ev "$guard_allowlist" || true)
   emit_hits "Potential guard-chain bypass (TransportEffects send/open outside guard modules)" "$bypass_hits"
 fi

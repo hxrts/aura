@@ -22,6 +22,19 @@ fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
 
 /// Type identifier for rendezvous facts
 pub const RENDEZVOUS_FACT_TYPE_ID: &str = "rendezvous";
+pub const RENDEZVOUS_FACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VersionedRendezvousFact {
+    schema_version: u32,
+    fact: RendezvousFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RendezvousFactKey {
+    pub sub_type: &'static str,
+    pub data: Vec<u8>,
+}
 
 /// Rendezvous domain facts stored in context journals
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,21 +59,30 @@ pub enum RendezvousFact {
 
 impl RendezvousFact {
     /// Derive the binding key data used by the reducer.
-    pub fn binding_key(&self) -> Vec<u8> {
+    pub fn binding_key(&self) -> RendezvousFactKey {
         match self {
             RendezvousFact::Descriptor(descriptor) => {
                 let mut key = authority_hash_bytes(&descriptor.authority_id).to_vec();
                 key.extend_from_slice(&descriptor.nonce);
-                key
+                RendezvousFactKey {
+                    sub_type: "rendezvous-descriptor",
+                    data: key,
+                }
             }
-            RendezvousFact::ChannelEstablished { channel_id, .. } => channel_id.to_vec(),
+            RendezvousFact::ChannelEstablished { channel_id, .. } => RendezvousFactKey {
+                sub_type: "rendezvous-channel-established",
+                data: channel_id.to_vec(),
+            },
             RendezvousFact::DescriptorRevoked {
                 authority_id,
                 nonce,
             } => {
                 let mut key = authority_hash_bytes(authority_id).to_vec();
                 key.extend_from_slice(nonce);
-                key
+                RendezvousFactKey {
+                    sub_type: "rendezvous-descriptor-revoked",
+                    data: key,
+                }
             }
         }
     }
@@ -145,13 +167,27 @@ impl DomainFact for RendezvousFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_else(|err| {
+        bincode::serialize(&VersionedRendezvousFact {
+            schema_version: RENDEZVOUS_FACT_SCHEMA_VERSION,
+            fact: self.clone(),
+        })
+        .unwrap_or_else(|err| {
             // Serialization should be infallible for well-formed facts; treat failures as unreachable bugs.
             unreachable!("RendezvousFact serialization should not fail: {err}")
         })
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if let Ok(versioned) = bincode::deserialize::<VersionedRendezvousFact>(bytes) {
+            if versioned.schema_version == RENDEZVOUS_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
+        if let Ok(versioned) = serde_json::from_slice::<VersionedRendezvousFact>(bytes) {
+            if versioned.schema_version == RENDEZVOUS_FACT_SCHEMA_VERSION {
+                return Some(versioned.fact);
+            }
+        }
         serde_json::from_slice(bytes).ok()
     }
 }
@@ -198,17 +234,17 @@ impl FactReducer for RendezvousFactReducer {
             return None;
         }
 
-        let fact: RendezvousFact = serde_json::from_slice(binding_data).ok()?;
+        let fact = RendezvousFact::from_bytes(binding_data)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
 
-        let key_data = fact.binding_key();
+        let key = fact.binding_key();
 
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(RENDEZVOUS_FACT_TYPE_ID.to_string()),
+            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
             context_id,
-            data: key_data,
+            data: key.data,
         })
     }
 }
@@ -365,8 +401,9 @@ mod tests {
             nonce: [9u8; 32],
         };
 
-        let data = fact.binding_key();
-        assert_eq!(data.len(), 64);
+        let key = fact.binding_key();
+        assert_eq!(key.sub_type, "rendezvous-descriptor-revoked");
+        assert_eq!(key.data.len(), 64);
     }
 
     #[test]
