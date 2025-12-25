@@ -183,6 +183,7 @@ pub struct ContactsViewProps {
     pub code_modal_invitation_id: String,
     pub code_modal_code: String,
     pub code_modal_loading: bool,
+    pub code_modal_copied: bool,
     // Guardian setup modal
     pub guardian_setup_modal_visible: bool,
     pub guardian_setup_modal_step: GuardianSetupStep,
@@ -260,12 +261,12 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         ),
     };
 
-    let (code_visible, code_invitation_id, code_code, code_loading) =
+    let (code_visible, code_invitation_id, code_code, code_loading, code_copied) =
         match state.modal_queue.current() {
             Some(QueuedModal::ContactsCode(s)) => {
-                (true, s.invitation_id.clone(), s.code.clone(), s.loading)
+                (true, s.invitation_id.clone(), s.code.clone(), s.loading, s.copied)
             }
-            _ => (false, String::new(), String::new(), false),
+            _ => (false, String::new(), String::new(), false, false),
         };
 
     // Guardian setup modal from queue
@@ -337,6 +338,7 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         code_modal_invitation_id: code_invitation_id,
         code_modal_code: code_code,
         code_modal_loading: code_loading,
+        code_modal_copied: code_copied,
         // Guardian setup modal (from queue)
         guardian_setup_modal_visible: guardian_visible,
         guardian_setup_modal_step: guardian_step,
@@ -407,6 +409,7 @@ pub struct SettingsViewProps {
     pub device_enrollment_modal_is_complete: bool,
     pub device_enrollment_modal_has_failed: bool,
     pub device_enrollment_modal_error_message: String,
+    pub device_enrollment_modal_copied: bool,
     // Confirm remove modal
     pub confirm_remove_modal_visible: bool,
     pub confirm_remove_modal_device_id: String,
@@ -438,6 +441,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         enrollment_is_complete,
         enrollment_has_failed,
         enrollment_error_message,
+        enrollment_copied,
     ) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsDeviceEnrollment(s)) => (
             true,
@@ -453,6 +457,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
             s.ceremony.is_complete,
             s.ceremony.has_failed,
             s.ceremony.error_message.clone().unwrap_or_default(),
+            s.copied,
         ),
         _ => (
             false,
@@ -465,6 +470,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
             false,
             false,
             String::new(),
+            false,
         ),
     };
 
@@ -504,6 +510,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         device_enrollment_modal_is_complete: enrollment_is_complete,
         device_enrollment_modal_has_failed: enrollment_has_failed,
         device_enrollment_modal_error_message: enrollment_error_message,
+        device_enrollment_modal_copied: enrollment_copied,
         // Confirm remove modal (from queue)
         confirm_remove_modal_visible: confirm_remove_visible,
         confirm_remove_modal_device_id: confirm_remove_device_id,

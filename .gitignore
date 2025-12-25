@@ -51,6 +51,7 @@ result-*
 
 # Logs
 *.log
+logs/
 
 # Environment
 .env

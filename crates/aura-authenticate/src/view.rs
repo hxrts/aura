@@ -363,6 +363,10 @@ mod tests {
         AuthorityId::new_from_entropy([2u8; 32])
     }
 
+    fn test_context_id() -> ContextId {
+        ContextId::new_from_entropy([9u8; 32])
+    }
+
     #[test]
     fn test_auth_view_new() {
         let view = AuthView::new();
@@ -378,6 +382,7 @@ mod tests {
 
         // Issue a session
         let fact = AuthFact::SessionIssued {
+            context_id: test_context_id(),
             session_id: "session_123".to_string(),
             authority_id: test_authority(),
             device_id: None,
@@ -395,6 +400,7 @@ mod tests {
 
         // Revoke the session
         let revoke_fact = AuthFact::SessionRevoked {
+            context_id: test_context_id(),
             session_id: "session_123".to_string(),
             revoked_by: test_authority(),
             reason: "User requested".to_string(),
@@ -429,6 +435,7 @@ mod tests {
 
         // First guardian approves
         let approve1 = AuthFact::GuardianApproved {
+            context_id: test_context_id(),
             request_id: "recovery_123".to_string(),
             guardian_id: test_authority(),
             signature: vec![0u8; 64],

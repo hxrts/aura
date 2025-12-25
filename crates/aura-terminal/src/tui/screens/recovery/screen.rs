@@ -340,16 +340,14 @@ pub fn PendingRequestsPanel(props: &PendingRequestsPanelProps) -> impl Into<AnyE
 ///
 /// The `view` field is a required struct that embeds all view state from TuiState.
 /// This makes it a **compile-time error** to forget any view state field.
+///
+/// ## Reactive Data Model
+///
+/// Domain data (guardians, threshold, recovery_status, pending_requests) is NOT
+/// passed as props. Instead, the component subscribes to RECOVERY_SIGNAL directly
+/// via AppCoreContext. This ensures a single source of truth and prevents stale data bugs.
 #[derive(Default, Props)]
 pub struct RecoveryScreenProps {
-    // === Domain data (from reactive signals) ===
-    pub guardians: Vec<Guardian>,
-    pub threshold_required: u32,
-    pub threshold_total: u32,
-    pub recovery_status: RecoveryStatus,
-    /// Pending recovery requests from others (we are their guardian)
-    pub pending_requests: Vec<PendingRequest>,
-
     // === View state from TuiState (REQUIRED - compile-time enforced) ===
     /// All view state extracted from TuiState via `extract_recovery_view_props()`.
     /// This is a single struct field so forgetting any view state is a compile error.
@@ -447,76 +445,65 @@ pub fn RecoveryScreen(
     props: &RecoveryScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
-    // Try to get AppCoreContext for reactive signal subscription
-    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+    // Get AppCoreContext for reactive signal subscription (required for domain data)
+    let app_ctx = hooks.use_context::<AppCoreContext>();
 
-    // Initialize reactive state from props
-    let reactive_guardians = hooks.use_state({
-        let initial = props.guardians.clone();
-        move || initial
-    });
-    let reactive_threshold_required = hooks.use_state(|| props.threshold_required);
-    let reactive_threshold_total = hooks.use_state(|| props.threshold_total);
-    let reactive_recovery_status = hooks.use_state({
-        let initial = props.recovery_status.clone();
-        move || initial
-    });
-    let reactive_pending_requests = hooks.use_state({
-        let initial = props.pending_requests.clone();
-        move || initial
-    });
+    // Initialize reactive state with defaults - will be populated by signal subscriptions
+    let reactive_guardians = hooks.use_state(Vec::new);
+    let reactive_threshold_required = hooks.use_state(|| 0u32);
+    let reactive_threshold_total = hooks.use_state(|| 0u32);
+    let reactive_recovery_status = hooks.use_state(RecoveryStatus::default);
+    let reactive_pending_requests = hooks.use_state(Vec::new);
 
-    // Subscribe to recovery signal updates if AppCoreContext is available
+    // Subscribe to recovery signal updates
     // Uses the unified ReactiveEffects system from aura-core
-    if let Some(ctx) = app_ctx {
-        hooks.use_future({
-            let mut reactive_guardians = reactive_guardians.clone();
-            let mut reactive_threshold_required = reactive_threshold_required.clone();
-            let mut reactive_threshold_total = reactive_threshold_total.clone();
-            let mut reactive_recovery_status = reactive_recovery_status.clone();
-            let mut reactive_pending_requests = reactive_pending_requests.clone();
-            let app_core = ctx.app_core.clone();
-            async move {
-                // Helper closure to convert RecoveryState to TUI types
-                let convert_state = |recovery_state: &aura_app::views::RecoveryState| {
-                    let guardians: Vec<Guardian> = recovery_state
-                        .guardians
-                        .iter()
-                        .map(convert_guardian)
-                        .collect();
+    hooks.use_future({
+        let mut reactive_guardians = reactive_guardians.clone();
+        let mut reactive_threshold_required = reactive_threshold_required.clone();
+        let mut reactive_threshold_total = reactive_threshold_total.clone();
+        let mut reactive_recovery_status = reactive_recovery_status.clone();
+        let mut reactive_pending_requests = reactive_pending_requests.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            // Helper closure to convert RecoveryState to TUI types
+            let convert_state = |recovery_state: &aura_app::views::RecoveryState| {
+                let guardians: Vec<Guardian> = recovery_state
+                    .guardians
+                    .iter()
+                    .map(convert_guardian)
+                    .collect();
 
-                    let status = convert_recovery_status(recovery_state, &recovery_state.guardians);
+                let status = convert_recovery_status(recovery_state, &recovery_state.guardians);
 
-                    let pending: Vec<PendingRequest> = recovery_state
-                        .pending_requests
-                        .iter()
-                        .map(PendingRequest::from)
-                        .collect();
+                let pending: Vec<PendingRequest> = recovery_state
+                    .pending_requests
+                    .iter()
+                    .map(PendingRequest::from)
+                    .collect();
 
-                    (
-                        guardians,
-                        recovery_state.threshold,
-                        recovery_state.guardian_count,
-                        status,
-                        pending,
-                    )
-                };
+                (
+                    guardians,
+                    recovery_state.threshold,
+                    recovery_state.guardian_count,
+                    status,
+                    pending,
+                )
+            };
 
-                subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |recovery_state| {
-                    let (guardians, threshold, total, status, pending) =
-                        convert_state(&recovery_state);
-                    reactive_guardians.set(guardians);
-                    reactive_threshold_required.set(threshold);
-                    reactive_threshold_total.set(total);
-                    reactive_recovery_status.set(status);
-                    reactive_pending_requests.set(pending);
-                })
-                .await;
-            }
-        });
-    }
+            subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |recovery_state| {
+                let (guardians, threshold, total, status, pending) =
+                    convert_state(&recovery_state);
+                reactive_guardians.set(guardians);
+                reactive_threshold_required.set(threshold);
+                reactive_threshold_total.set(total);
+                reactive_recovery_status.set(status);
+                reactive_pending_requests.set(pending);
+            })
+            .await;
+        }
+    });
 
-    // Use reactive state for rendering
+    // Use reactive state for rendering (populated by signal subscription)
     let guardians = reactive_guardians.read().clone();
     let threshold_required = reactive_threshold_required.get();
     let threshold_total = reactive_threshold_total.get();
@@ -578,40 +565,13 @@ pub fn RecoveryScreen(
     }
 }
 
-/// Run the recovery screen with sample data
+/// Run the recovery screen (requires AppCoreContext for domain data)
 pub async fn run_recovery_screen() -> std::io::Result<()> {
-    let guardians = vec![
-        Guardian::new("g1", "Alice")
-            .with_status(GuardianStatus::Active)
-            .with_share(),
-        Guardian::new("g2", "Bob")
-            .with_status(GuardianStatus::Active)
-            .with_share(),
-        Guardian::new("g3", "Carol").with_status(GuardianStatus::Pending),
-    ];
-
-    let recovery_status = RecoveryStatus {
-        state: RecoveryState::Initiated,
-        approvals_received: 1,
-        threshold: 2,
-        approvals: vec![
-            GuardianApproval {
-                guardian_name: "Alice".to_string(),
-                approved: true,
-            },
-            GuardianApproval {
-                guardian_name: "Bob".to_string(),
-                approved: false,
-            },
-        ],
-    };
-
+    // Note: This standalone runner won't have domain data without AppCoreContext.
+    // Domain data is obtained via signal subscriptions when context is available.
     element! {
         RecoveryScreen(
-            guardians: guardians,
-            threshold_required: 2u32,
-            threshold_total: 3u32,
-            recovery_status: recovery_status,
+            view: RecoveryViewProps::default(),
         )
     }
     .fullscreen()

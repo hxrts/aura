@@ -99,6 +99,7 @@ once_cell = { workspace = true }
 biscuit-auth = { workspace = true }
 nix = "0.26"
 dirs = "6"
+arboard = "3"  # Cross-platform clipboard
 
 [dev-dependencies]
 # Testing infrastructure (Layer 7 can use testkit with full effect system)

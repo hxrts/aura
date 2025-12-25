@@ -41,9 +41,7 @@
 //! - **Auditability**: All state changes recorded as journal facts
 
 use aura_core::domain::FactValue;
-use aura_core::effects::{
-    JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects, TimeEffects,
-};
+use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::ThresholdSignature;
 use aura_core::{AuraError, AuraResult, Hash32};
@@ -331,13 +329,13 @@ pub struct RecoveryCeremonyExecutor<E: RecoveryCeremonyEffects> {
 
 /// Combined effects required for recovery ceremonies.
 pub trait RecoveryCeremonyEffects:
-    JournalEffects + PhysicalTimeEffects + TimeEffects + ThresholdSigningEffects + Send + Sync
+    JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
 {
 }
 
 // Blanket implementation
 impl<T> RecoveryCeremonyEffects for T where
-    T: JournalEffects + PhysicalTimeEffects + TimeEffects + ThresholdSigningEffects + Send + Sync
+    T: JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
 {
 }
 
@@ -392,7 +390,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         let request_hash = request.compute_hash();
 
         // Generate nonce from current time
-        let nonce = self.effects.current_timestamp_ms().await;
+        let nonce = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         // Create ceremony ID
         let ceremony_id = RecoveryCeremonyId::new(&current_prestate, &request_hash, nonce);
@@ -427,7 +425,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
     ) -> AuraResult<bool> {
         // Get current prestate and time
         let current_prestate = self.compute_prestate_hash().await?;
-        let now = self.effects.current_timestamp_ms().await;
+        let now = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         // Track if quorum was reached
         let quorum_reached;
@@ -598,7 +596,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         rejection_reason: Option<String>,
     ) -> AuraResult<RecoveryApproval> {
         let prestate_hash = self.compute_prestate_hash().await?;
-        let approved_at_ms = self.effects.current_timestamp_ms().await;
+        let approved_at_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         // Create signature (placeholder)
         let signature = ThresholdSignature::single_signer(
@@ -638,7 +636,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         guardians: &[AuthorityId],
         threshold: usize,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = RecoveryCeremonyFact::CeremonyInitiated {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             account_authority: request.account_authority.to_string(),
@@ -668,7 +666,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         ceremony_id: RecoveryCeremonyId,
         approval: &RecoveryApproval,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = RecoveryCeremonyFact::ApprovalReceived {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             guardian: approval.guardian.to_string(),
@@ -693,7 +691,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
 
     /// Emit quorum reached fact.
     async fn emit_quorum_reached_fact(&self, ceremony_id: RecoveryCeremonyId) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         let (approved_count, approved_guardians) = {
             let ceremony = self
@@ -735,7 +733,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         operation_type: &CeremonyRecoveryOperation,
         approved_guardians: &[AuthorityId],
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         // Create evidence hash from ceremony + guardians
         let mut evidence_input = ceremony_id.0.as_bytes().to_vec();
@@ -772,7 +770,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         ceremony_id: RecoveryCeremonyId,
         reason: &str,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = RecoveryCeremonyFact::CeremonyAborted {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             reason: reason.to_string(),

@@ -130,7 +130,10 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
             // Body - display grouped commands in grid
             View(
                 width: 100pct,
-                padding: Spacing::MODAL_PADDING,
+                padding_top: 1,
+                padding_left: Spacing::MODAL_PADDING,
+                padding_right: Spacing::MODAL_PADDING,
+                padding_bottom: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,

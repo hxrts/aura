@@ -18,7 +18,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use aura_app::signal_defs::SETTINGS_SIGNAL;
+use aura_app::signal_defs::{RECOVERY_SIGNAL, SETTINGS_SIGNAL};
 
 use crate::tui::callbacks::{
     AddDeviceCallback, RemoveDeviceCallback, UpdateDisplayNameCallback, UpdateThresholdCallback,
@@ -47,16 +47,14 @@ pub type MfaCallback = Arc<dyn Fn(MfaPolicy) + Send + Sync>;
 ///
 /// The `view` field is a required struct that embeds all view state from TuiState.
 /// This makes it a **compile-time error** to forget any view state field.
+///
+/// ## Reactive Data Model
+///
+/// Domain data (display_name, devices, guardians, etc.) is NOT passed as props.
+/// Instead, the component subscribes to signals directly via AppCoreContext.
+/// This ensures a single source of truth and prevents stale data bugs.
 #[derive(Default, Props)]
 pub struct SettingsScreenProps {
-    // === Domain data ===
-    pub display_name: String,
-    pub threshold_k: u8,
-    pub threshold_n: u8,
-    pub contact_count: usize,
-    pub devices: Vec<Device>,
-    pub mfa_policy: MfaPolicy,
-
     // === View state from TuiState (REQUIRED - compile-time enforced) ===
     /// All view state extracted from TuiState via `extract_settings_view_props()`.
     /// This is a single struct field so forgetting any view state is a compile error.
@@ -90,58 +88,59 @@ pub fn SettingsScreen(
     props: &SettingsScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
-    // Try to get AppCoreContext for reactive signal subscription
-    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+    // Get AppCoreContext for reactive signal subscription (required for domain data)
+    let app_ctx = hooks.use_context::<AppCoreContext>();
 
-    // Initialize reactive state from props
-    let reactive_display_name = hooks.use_state({
-        let initial = props.display_name.clone();
-        move || initial
+    // Initialize reactive state with defaults - will be populated by signal subscriptions
+    let reactive_display_name = hooks.use_state(String::new);
+    let reactive_devices = hooks.use_state(Vec::new);
+    let reactive_threshold = hooks.use_state(|| (0u8, 0u8));
+    let reactive_guardian_count = hooks.use_state(|| 0usize);
+
+    // Subscribe to settings signal for domain data
+    hooks.use_future({
+        let mut reactive_display_name = reactive_display_name.clone();
+        let mut reactive_devices = reactive_devices.clone();
+        let mut reactive_threshold = reactive_threshold.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
+                reactive_display_name.set(settings_state.display_name);
+                let devices: Vec<Device> = settings_state
+                    .devices
+                    .iter()
+                    .map(|d| Device {
+                        id: d.id.clone(),
+                        name: d.name.clone(),
+                        is_current: d.is_current,
+                        last_seen: d.last_seen,
+                    })
+                    .collect();
+                reactive_devices.set(devices);
+                reactive_threshold
+                    .set((settings_state.threshold_k, settings_state.threshold_n));
+            })
+            .await;
+        }
     });
 
-    let reactive_devices = hooks.use_state({
-        let initial = props.devices.clone();
-        move || initial
+    // Subscribe to recovery signal for guardian count
+    hooks.use_future({
+        let mut reactive_guardian_count = reactive_guardian_count.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |recovery_state| {
+                reactive_guardian_count.set(recovery_state.guardians.len());
+            })
+            .await;
+        }
     });
-
-    let reactive_threshold = hooks.use_state({
-        let initial = (props.threshold_k, props.threshold_n);
-        move || initial
-    });
-
-    // Subscribe to settings signal updates if AppCoreContext is available
-    if let Some(ref ctx) = app_ctx {
-        hooks.use_future({
-            let mut reactive_display_name = reactive_display_name.clone();
-            let mut reactive_devices = reactive_devices.clone();
-            let mut reactive_threshold = reactive_threshold.clone();
-            let app_core = ctx.app_core.clone();
-            async move {
-                subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                    reactive_display_name.set(settings_state.display_name);
-                    let devices: Vec<Device> = settings_state
-                        .devices
-                        .iter()
-                        .map(|d| Device {
-                            id: d.id.clone(),
-                            name: d.name.clone(),
-                            is_current: d.is_current,
-                            last_seen: d.last_seen,
-                        })
-                        .collect();
-                    reactive_devices.set(devices);
-                    reactive_threshold
-                        .set((settings_state.threshold_k, settings_state.threshold_n));
-                })
-                .await;
-            }
-        });
-    }
 
     // Use reactive state for rendering
     let display_name = reactive_display_name.read().clone();
     let devices = reactive_devices.read().clone();
     let (threshold_k, threshold_n) = *reactive_threshold.read();
+    let guardian_count = *reactive_guardian_count.read();
 
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_section = props.view.section;
@@ -175,6 +174,7 @@ pub fn SettingsScreen(
         }
         SettingsSection::Threshold => {
             if threshold_n > 0 {
+                // Threshold scheme is configured
                 vec![
                     (
                         format!(
@@ -194,18 +194,37 @@ pub fn SettingsScreen(
                     (String::new(), Theme::TEXT),
                     ("[Enter] Edit threshold".into(), Theme::SECONDARY),
                 ]
-            } else {
+            } else if guardian_count > 0 {
+                // Guardians exist but threshold not configured yet
                 vec![
-                    ("Guardian configuration unavailable".into(), Theme::WARNING),
+                    (
+                        format!("Guardians Available: {}", guardian_count),
+                        Theme::SECONDARY,
+                    ),
                     (String::new(), Theme::TEXT),
                     (
-                        "You need at least one guardian before".into(),
+                        "Configure how many guardians are needed".into(),
+                        Theme::TEXT_MUTED,
+                    ),
+                    ("to recover your account.".into(), Theme::TEXT_MUTED),
+                    (String::new(), Theme::TEXT),
+                    ("[Enter] Configure threshold".into(), Theme::SECONDARY),
+                ]
+            } else {
+                // No guardians at all
+                vec![
+                    ("No guardians configured".into(), Theme::WARNING),
+                    (String::new(), Theme::TEXT),
+                    (
+                        "Add guardians from your contacts to".into(),
                         Theme::TEXT_MUTED,
                     ),
                     (
-                        "you can configure the recovery threshold.".into(),
+                        "enable account recovery.".into(),
                         Theme::TEXT_MUTED,
                     ),
+                    (String::new(), Theme::TEXT),
+                    ("[Enter] Set up guardians".into(), Theme::SECONDARY),
                 ]
             }
         }
@@ -321,22 +340,13 @@ pub fn SettingsScreen(
     }
 }
 
-/// Run the settings screen with sample data
+/// Run the settings screen (requires AppCoreContext for domain data)
 pub async fn run_settings_screen() -> std::io::Result<()> {
-    let devices = vec![
-        Device::new("d1", "MacBook Pro").current(),
-        Device::new("d2", "iPhone"),
-        Device::new("d3", "iPad"),
-    ];
-
+    // Note: This standalone runner won't have domain data without AppCoreContext.
+    // Domain data is obtained via signal subscriptions when context is available.
     element! {
         SettingsScreen(
-            display_name: "Alice".to_string(),
-            threshold_k: 2u8,
-            threshold_n: 3u8,
-            contact_count: 5usize,
-            devices: devices,
-            mfa_policy: MfaPolicy::SensitiveOnly,
+            view: SettingsViewProps::default(),
         )
     }
     .fullscreen()

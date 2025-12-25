@@ -28,7 +28,8 @@ use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
     RecoveryContext, RecoveryOperationType,
 };
-use aura_core::identifiers::AuthorityId;
+use aura_core::hash::hash;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_verify::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +62,12 @@ impl Default for AuthServiceConfig {
             require_recovery_capability: true,
         }
     }
+}
+
+fn derive_auth_context_id(snapshot: &GuardSnapshot) -> ContextId {
+    snapshot.context_id.unwrap_or_else(|| {
+        ContextId::new_from_entropy(hash(&snapshot.authority_id.to_bytes()))
+    })
 }
 
 // =============================================================================
@@ -111,7 +118,9 @@ impl AuthService {
         let session_id = generate_session_id(snapshot);
         let expires_at_ms = snapshot.now_ms + self.config.challenge_expiration_ms;
 
+        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::ChallengeGenerated {
+            context_id: context_id,
             session_id: session_id.clone(),
             authority_id: snapshot.authority_id,
             device_id: snapshot.device_id,
@@ -119,14 +128,7 @@ impl AuthService {
             expires_at_ms,
             created_at_ms: snapshot.now_ms,
         };
-        let fact_data = match serde_json::to_vec(&fact) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                return GuardOutcome::denied(format!(
-                    "Internal error: failed to serialize auth fact: {err}"
-                ));
-            }
-        };
+        let fact_data = fact.to_bytes();
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -167,20 +169,15 @@ impl AuthService {
             return outcome;
         }
 
+        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::ProofSubmitted {
+            context_id: context_id,
             session_id: session_id.clone(),
             authority_id: snapshot.authority_id,
             proof_hash,
             submitted_at_ms: snapshot.now_ms,
         };
-        let fact_data = match serde_json::to_vec(&fact) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                return GuardOutcome::denied(format!(
-                    "Internal error: failed to serialize auth fact: {err}"
-                ));
-            }
-        };
+        let fact_data = fact.to_bytes();
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -233,7 +230,9 @@ impl AuthService {
         let session_id = generate_session_id(snapshot);
         let expires_at_ms = snapshot.now_ms + (duration_seconds * 1000);
 
+        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::SessionIssued {
+            context_id: context_id,
             session_id: session_id.clone(),
             authority_id: snapshot.authority_id,
             device_id: snapshot.device_id,
@@ -241,14 +240,7 @@ impl AuthService {
             issued_at_ms: snapshot.now_ms,
             expires_at_ms,
         };
-        let fact_data = match serde_json::to_vec(&fact) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                return GuardOutcome::denied(format!(
-                    "Internal error: failed to serialize auth fact: {err}"
-                ));
-            }
-        };
+        let fact_data = fact.to_bytes();
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -315,7 +307,9 @@ impl AuthService {
         let request_id = generate_request_id(snapshot);
         let expires_at_ms = snapshot.now_ms + self.config.guardian_approval_expiration_ms;
 
+        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::GuardianApprovalRequested {
+            context_id: context_id,
             request_id: request_id.clone(),
             account_id,
             requester_id: snapshot.authority_id,
@@ -326,14 +320,7 @@ impl AuthService {
             requested_at_ms: snapshot.now_ms,
             expires_at_ms,
         };
-        let fact_data = match serde_json::to_vec(&fact) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                return GuardOutcome::denied(format!(
-                    "Internal error: failed to serialize auth fact: {err}"
-                ));
-            }
-        };
+        let fact_data = fact.to_bytes();
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -377,8 +364,10 @@ impl AuthService {
             return outcome;
         }
 
+        let context_id = derive_auth_context_id(snapshot);
         let fact = if approved {
             AuthFact::GuardianApproved {
+                context_id: context_id,
                 request_id: request_id.clone(),
                 guardian_id: snapshot.authority_id,
                 signature,
@@ -387,20 +376,14 @@ impl AuthService {
             }
         } else {
             AuthFact::GuardianDenied {
+                context_id: context_id,
                 request_id: request_id.clone(),
                 guardian_id: snapshot.authority_id,
                 reason: justification,
                 denied_at_ms: snapshot.now_ms,
             }
         };
-        let fact_data = match serde_json::to_vec(&fact) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                return GuardOutcome::denied(format!(
-                    "Internal error: failed to serialize auth fact: {err}"
-                ));
-            }
-        };
+        let fact_data = fact.to_bytes();
 
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
@@ -437,20 +420,15 @@ impl AuthService {
             return outcome;
         }
 
+        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::SessionRevoked {
+            context_id: context_id,
             session_id: session_id.clone(),
             revoked_by: snapshot.authority_id,
             reason,
             revoked_at_ms: snapshot.now_ms,
         };
-        let fact_data = match serde_json::to_vec(&fact) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                return GuardOutcome::denied(format!(
-                    "Internal error: failed to serialize auth fact: {err}"
-                ));
-            }
-        };
+        let fact_data = fact.to_bytes();
 
         GuardOutcome::allowed(vec![
             EffectCommand::JournalAppend {

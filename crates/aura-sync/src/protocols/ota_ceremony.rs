@@ -39,9 +39,7 @@
 //! - **Epoch Fencing**: Hard forks enforce coordinated epoch boundaries
 
 use aura_core::domain::FactValue;
-use aura_core::effects::{
-    JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects, TimeEffects,
-};
+use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
 use aura_core::threshold::{SigningContext, ThresholdSignature};
 use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Epoch, Hash32, SemanticVersion};
 use serde::{Deserialize, Serialize};
@@ -388,13 +386,13 @@ pub struct OTACeremonyExecutor<E: OTACeremonyEffects> {
 
 /// Combined effects required for OTA ceremonies.
 pub trait OTACeremonyEffects:
-    JournalEffects + PhysicalTimeEffects + TimeEffects + ThresholdSigningEffects + Send + Sync
+    JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
 {
 }
 
 // Blanket implementation
 impl<T> OTACeremonyEffects for T where
-    T: JournalEffects + PhysicalTimeEffects + TimeEffects + ThresholdSigningEffects + Send + Sync
+    T: JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
 {
 }
 
@@ -447,7 +445,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         let upgrade_hash = proposal.compute_hash();
 
         // Generate nonce from current time
-        let nonce = self.effects.current_timestamp_ms().await;
+        let nonce = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         // Create ceremony ID
         let ceremony_id = OTACeremonyId::new(&prestate_hash, &upgrade_hash, nonce);
@@ -482,7 +480,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     ) -> AuraResult<bool> {
         // Get current prestate and time before borrowing
         let current_prestate = self.compute_prestate_hash().await?;
-        let now = self.effects.current_timestamp_ms().await;
+        let now = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         // Track if we need to emit threshold reached
         let threshold_reached;
@@ -656,7 +654,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     ) -> AuraResult<ReadinessCommitment> {
         // Get current prestate
         let prestate_hash = self.compute_prestate_hash().await?;
-        let committed_at_ms = self.effects.current_timestamp_ms().await;
+        let committed_at_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         // Get the upgrade hash from the ceremony
         let ceremony = self
@@ -772,7 +770,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         ceremony_id: OTACeremonyId,
         proposal: &UpgradeProposal,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = OTACeremonyFact::CeremonyInitiated {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             proposal_id: proposal.proposal_id.to_string(),
@@ -801,7 +799,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         ceremony_id: OTACeremonyId,
         commitment: &ReadinessCommitment,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = OTACeremonyFact::CommitmentReceived {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             device: hex::encode(commitment.device.0.as_bytes()),
@@ -826,7 +824,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
 
     /// Emit threshold reached fact.
     async fn emit_threshold_reached_fact(&self, ceremony_id: OTACeremonyId) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         let (ready_count, ready_devices) = {
             let ceremony = self
@@ -868,7 +866,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         ready_devices: &[DeviceId],
         threshold_signature: &[u8],
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = OTACeremonyFact::CeremonyCommitted {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             activation_epoch,
@@ -896,7 +894,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         ceremony_id: OTACeremonyId,
         reason: &str,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = OTACeremonyFact::CeremonyAborted {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             reason: reason.to_string(),

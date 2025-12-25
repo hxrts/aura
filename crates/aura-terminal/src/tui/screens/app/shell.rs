@@ -22,7 +22,7 @@ use super::modal_overlays::{
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use aura_app::signal_defs::{ERROR_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::signal_defs::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::workflows::{
     cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_guardian_ceremony,
 };
@@ -96,13 +96,13 @@ pub struct IoAppProps {
     // Account setup
     /// Whether to show account setup modal on start
     pub show_account_setup: bool,
-    // Sync status
-    /// Whether sync is in progress
-    pub sync_in_progress: bool,
-    /// Last sync time (ms since epoch)
-    pub last_sync_time: Option<u64>,
-    /// Number of known peers
-    pub peer_count: usize,
+    // Network status
+    /// Unified network status (disconnected, no peers, syncing, synced)
+    pub network_status: NetworkStatus,
+    /// Transport-level peers (active network connections)
+    pub transport_peers: usize,
+    /// Online contacts (people you know who are currently online)
+    pub known_online: usize,
     // Demo mode
     /// Whether running in demo mode
     #[cfg(feature = "development")]
@@ -298,9 +298,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let nav_signals = use_nav_status_signals(
         &mut hooks,
         &app_ctx,
-        props.sync_in_progress,
-        props.peer_count,
-        props.last_sync_time,
+        props.network_status.clone(),
+        props.known_online,
+        props.transport_peers,
     );
 
     // =========================================================================
@@ -1021,24 +1021,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         system.exit();
     }
 
-    // Clone props for use
-    let channels = props.channels.clone();
-    let messages = props.messages.clone();
-    let guardians = props.guardians.clone();
-    let devices = props.devices.clone();
-    // Use reactively updated display_name from UiUpdate channel - State<T> triggers re-renders
-    let display_name = display_name_state.read().clone();
-    let threshold_k = props.threshold_k;
-    let threshold_n = props.threshold_n;
-    let mfa_policy = props.mfa_policy;
-    let recovery_status = props.recovery_status.clone();
-    // Block screen data
-    let block_name = props.block_name.clone();
-    let residents = props.residents.clone();
-    let block_budget = props.block_budget.clone();
-    let channel_name = props.channel_name.clone();
-    // Contacts screen data
-    let contacts = props.contacts.clone();
+    // Note: Domain data (channels, messages, guardians, etc.) is no longer passed to screens.
+    // Each screen subscribes to signals directly via AppCoreContext.
+    // See check-arch.sh --reactive for architectural enforcement.
 
     // Read TUI state for rendering via type-safe handle.
     // This MUST be used for all render-time state access - it reads the version to establish
@@ -1054,13 +1039,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             .collect(),
         _ => Vec::new(),
     };
-    let discovered_peers = props.discovered_peers.clone();
-    // Neighborhood screen data
-    let neighborhood_name = props.neighborhood_name.clone();
-    let blocks = props.blocks.clone();
-    let traversal_depth = props.traversal_depth;
-    // Pending recovery requests
-    let pending_requests = props.pending_requests.clone();
+
     // Callbacks registry and individual callback extraction for screen props
     let callbacks = props.callbacks.clone();
 
@@ -1746,7 +1725,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tokio::spawn(async move {
                                             let app = app_core.raw();
 
-                                            match start_guardian_ceremony(&app, threshold, n, ids.clone())
+                                            match start_guardian_ceremony(app, threshold, n, ids.clone())
                                                 .await
                                             {
                                                 Ok(ceremony_id) => {
@@ -1838,7 +1817,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             let app = app_core.raw();
 
                                             if let Err(e) =
-                                                cancel_key_rotation_ceremony(&app, &ceremony_id).await
+                                                cancel_key_rotation_ceremony(app, &ceremony_id).await
                                             {
                                                 tracing::error!("Failed to cancel guardian ceremony: {}", e);
                                                 if let Some(tx) = update_tx.clone() {
@@ -1868,7 +1847,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             let app = app_core.raw();
 
                                             if let Err(e) =
-                                                cancel_key_rotation_ceremony(&app, &ceremony_id).await
+                                                cancel_key_rotation_ceremony(app, &ceremony_id).await
                                             {
                                                 tracing::error!("Failed to cancel ceremony: {}", e);
                                                 if let Some(tx) = update_tx.clone() {
@@ -1972,10 +1951,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     });
 
     // Nav bar status is updated reactively from signals.
-    let syncing = nav_signals.syncing.get();
-    let last_sync = nav_signals.last_sync_time.get();
+    let network_status = nav_signals.network_status.get();
     let now_ms = nav_signals.now_ms.get();
-    let peers = nav_signals.peer_count.get();
+    let transport_peers = nav_signals.transport_peers.get();
+    let known_online = nav_signals.known_online.get();
 
     // Layout: NavBar (3 rows) + Content (25 rows) + Footer (3 rows) = 31 = TOTAL_HEIGHT
     //
@@ -2005,12 +1984,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     Screen::Block => vec![element! {
                         View(width: 100pct, height: 100pct) {
                             BlockScreen(
-                                block_name: block_name.clone(),
-                                residents: residents.clone(),
-                                messages: messages.clone(),
-                                budget: block_budget.clone(),
-                                channel_name: channel_name.clone(),
-                                contacts: contacts.clone(),
                                 view: block_props.clone(),
                                 on_send: on_block_send.clone(),
                                 on_invite: on_block_invite.clone(),
@@ -2023,8 +1996,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     Screen::Chat => vec![element! {
                         View(width: 100pct, height: 100pct) {
                             ChatScreen(
-                                channels: channels.clone(),
-                                messages: messages.clone(),
                                 view: chat_props.clone(),
                                 on_send: on_send.clone(),
                                 on_retry_message: on_retry_message.clone(),
@@ -2037,8 +2008,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     Screen::Contacts => vec![element! {
                         View(width: 100pct, height: 100pct) {
                             ContactsScreen(
-                                contacts: contacts.clone(),
-                                discovered_peers: discovered_peers.clone(),
                                 view: contacts_props.clone(),
                                 on_update_nickname: on_update_nickname.clone(),
                                 on_start_chat: on_start_chat.clone(),
@@ -2050,9 +2019,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     Screen::Neighborhood => vec![element! {
                         View(width: 100pct, height: 100pct) {
                             NeighborhoodScreen(
-                                neighborhood_name: neighborhood_name.clone(),
-                                blocks: blocks.clone(),
-                                depth: traversal_depth,
                                 view: neighborhood_props.clone(),
                                 on_enter_block: on_enter_block.clone(),
                                 on_go_home: on_go_home.clone(),
@@ -2063,12 +2029,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     Screen::Settings => vec![element! {
                         View(width: 100pct, height: 100pct) {
                             SettingsScreen(
-                                display_name: display_name.clone(),
-                                threshold_k: threshold_k,
-                                threshold_n: threshold_n,
-                                contact_count: contacts.len(),
-                                devices: devices.clone(),
-                                mfa_policy: mfa_policy,
                                 view: settings_props.clone(),
                                 on_update_mfa: on_update_mfa.clone(),
                                 on_update_display_name: on_update_display_name.clone(),
@@ -2081,11 +2041,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     Screen::Recovery => vec![element! {
                         View(width: 100pct, height: 100pct) {
                             RecoveryScreen(
-                                guardians: guardians.clone(),
-                                threshold_required: threshold_k as u32,
-                                threshold_total: threshold_n as u32,
-                                recovery_status: recovery_status.clone(),
-                                pending_requests: pending_requests.clone(),
                                 view: recovery_props.clone(),
                                 on_start_recovery: on_start_recovery.clone(),
                                 on_add_guardian: on_add_guardian.clone(),
@@ -2101,10 +2056,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 hints: screen_hints.clone(),
                 global_hints: global_hints.clone(),
                 disabled: is_insert_mode,
-                syncing: syncing,
-                last_sync_time: last_sync,
+                network_status: network_status.clone(),
                 now_ms: now_ms,
-                peer_count: peers,
+                transport_peers: transport_peers,
+                known_online: known_online,
             )
 
             // === GLOBAL MODALS ===
@@ -2229,9 +2184,9 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
 
     // Status bar values are updated reactively after mount.
     // Avoid blocking before entering fullscreen (important for demo mode).
-    let sync_in_progress = false;
-    let last_sync_time: Option<u64> = None;
-    let peer_count: usize = 0;
+    let network_status = NetworkStatus::Disconnected;
+    let transport_peers: usize = 0;
+    let known_online: usize = 0;
 
     // Create AppCoreContext for components to access AppCore and signals
     // AppCore is always available (demo mode uses agent-less AppCore)
@@ -2277,10 +2232,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         traversal_depth: TraversalDepth::Street,
                         // Account setup
                         show_account_setup: show_account_setup,
-                        // Sync status
-                        sync_in_progress: sync_in_progress,
-                        last_sync_time: last_sync_time,
-                        peer_count: peer_count,
+                        // Network status
+                        network_status: network_status.clone(),
+                        transport_peers: transport_peers,
+                        known_online: known_online,
                         // Demo mode (get from context)
                         demo_mode: ctx_arc.is_demo_mode(),
                         demo_alice_code: ctx_arc.demo_alice_code(),
@@ -2328,10 +2283,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         traversal_depth: TraversalDepth::Street,
                         // Account setup
                         show_account_setup: show_account_setup,
-                        // Sync status
-                        sync_in_progress: sync_in_progress,
-                        last_sync_time: last_sync_time,
-                        peer_count: peer_count,
+                        // Network status
+                        network_status: network_status,
+                        transport_peers: transport_peers,
+                        known_online: known_online,
                         // Reactive update channel
                         update_rx: Some(update_rx_holder),
                         update_tx: Some(update_tx.clone()),

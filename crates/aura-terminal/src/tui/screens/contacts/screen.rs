@@ -64,7 +64,6 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
     } else {
         Theme::LIST_TEXT_NORMAL
     };
-    let indicator = if props.is_selected { "> " } else { "  " };
 
     let status = match c.status {
         ContactStatus::Active => crate::tui::components::Status::Online,
@@ -84,6 +83,18 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
     };
     let guardian_badge = if c.is_guardian { " [guardian]" } else { "" }.to_string();
 
+    // Selection indicator: colored circle when selected, space otherwise
+    let indicator = if props.is_selected {
+        crate::tui::theme::Icons::ONLINE
+    } else {
+        " "
+    };
+    let indicator_color = if props.is_selected {
+        Theme::PRIMARY
+    } else {
+        text_color
+    };
+
     element! {
         View(
             flex_direction: FlexDirection::Row,
@@ -92,7 +103,7 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
             padding_right: 1,
             overflow: Overflow::Hidden,
         ) {
-            Text(content: indicator, color: text_color)
+            Text(content: format!("{} ", indicator), color: indicator_color)
             StatusIndicator(status: status, icon_only: true)
             View(margin_left: Spacing::XS) {
                 Text(content: name, color: text_color, wrap: TextWrap::NoWrap)
@@ -193,13 +204,14 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
 /// This makes it a **compile-time error** to forget any view state field, because
 /// the entire `ContactsViewProps` struct must be passed - you can't accidentally
 /// omit individual fields like `nickname_modal_visible`.
+///
+/// ## Reactive Data Model
+///
+/// Domain data (contacts, discovered_peers) is NOT passed as props.
+/// Instead, the component subscribes to signals directly via AppCoreContext.
+/// This ensures a single source of truth and prevents stale data bugs.
 #[derive(Default, Props)]
 pub struct ContactsScreenProps {
-    // === Domain data (from reactive signals) ===
-    pub contacts: Vec<Contact>,
-    /// Discovered LAN peers
-    pub discovered_peers: Vec<DiscoveredPeerInfo>,
-
     // === View state from TuiState (REQUIRED - compile-time enforced) ===
     /// All view state extracted from TuiState via `extract_contacts_view_props()`.
     /// This is a single struct field so forgetting any view state is a compile error.
@@ -239,80 +251,64 @@ pub fn ContactsScreen(
     props: &ContactsScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
-    // Try to get AppCoreContext for reactive signal subscription
-    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+    // Get AppCoreContext for reactive signal subscription (required for domain data)
+    let app_ctx = hooks.use_context::<AppCoreContext>();
 
-    // Initialize reactive state from props
-    let reactive_contacts = hooks.use_state({
-        let initial = props.contacts.clone();
-        move || initial
-    });
+    // Initialize reactive state with defaults - will be populated by signal subscriptions
+    let reactive_contacts = hooks.use_state(Vec::new);
 
-    // Subscribe to contacts signal updates if AppCoreContext is available
+    // Subscribe to contacts signal updates
     // Uses the unified ReactiveEffects system from aura-core
-
-    if let Some(ref ctx) = app_ctx {
-        hooks.use_future({
-            let mut reactive_contacts = reactive_contacts.clone();
-            let app_core = ctx.app_core.clone();
-            async move {
-                subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
-                    let contacts: Vec<Contact> =
-                        contacts_state.contacts.iter().map(Contact::from).collect();
-                    reactive_contacts.set(contacts);
-                })
-                .await;
-            }
-        });
-    }
-
-    // Use reactive state for rendering
-    let contacts = reactive_contacts.read().clone();
-
-    // LAN discovered peers state (reactive via signal subscription)
-    let lan_peers_state = hooks.use_state({
-        let initial_peers = props.discovered_peers.clone();
-        move || {
-            let mut state = DiscoveredPeersState::new();
-            state.set_peers(initial_peers);
-            state
+    hooks.use_future({
+        let mut reactive_contacts = reactive_contacts.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
+                let contacts: Vec<Contact> =
+                    contacts_state.contacts.iter().map(Contact::from).collect();
+                reactive_contacts.set(contacts);
+            })
+            .await;
         }
     });
 
-    // Subscribe to discovered peers signal updates if AppCoreContext is available
+    // Use reactive state for rendering (populated by signal subscription)
+    let contacts = reactive_contacts.read().clone();
 
-    if let Some(ref ctx) = app_ctx {
-        hooks.use_future({
-            let mut lan_peers_state = lan_peers_state.clone();
-            let app_core = ctx.app_core.clone();
-            async move {
-                subscribe_signal_with_retry(
-                    app_core,
-                    &*DISCOVERED_PEERS_SIGNAL,
-                    move |peers_state| {
-                        let discovered_peers: Vec<DiscoveredPeerInfo> = peers_state
-                            .peers
-                            .iter()
-                            .map(|p| {
-                                DiscoveredPeerInfo::new(&p.authority_id, &p.address)
-                                    .with_method(&p.method)
-                                    .with_status(if p.invited {
-                                        crate::tui::components::PeerInvitationStatus::Pending
-                                    } else {
-                                        crate::tui::components::PeerInvitationStatus::None
-                                    })
-                            })
-                            .collect();
+    // LAN discovered peers state (reactive via signal subscription)
+    let lan_peers_state = hooks.use_state(DiscoveredPeersState::new);
 
-                        let mut state = DiscoveredPeersState::new();
-                        state.set_peers(discovered_peers);
-                        lan_peers_state.set(state);
-                    },
-                )
-                .await;
-            }
-        });
-    }
+    // Subscribe to discovered peers signal updates
+    hooks.use_future({
+        let mut lan_peers_state = lan_peers_state.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(
+                app_core,
+                &*DISCOVERED_PEERS_SIGNAL,
+                move |peers_state| {
+                    let discovered_peers: Vec<DiscoveredPeerInfo> = peers_state
+                        .peers
+                        .iter()
+                        .map(|p| {
+                            DiscoveredPeerInfo::new(&p.authority_id, &p.address)
+                                .with_method(&p.method)
+                                .with_status(if p.invited {
+                                    crate::tui::components::PeerInvitationStatus::Pending
+                                } else {
+                                    crate::tui::components::PeerInvitationStatus::None
+                                })
+                        })
+                        .collect();
+
+                    let mut state = DiscoveredPeersState::new();
+                    state.set_peers(discovered_peers);
+                    lan_peers_state.set(state);
+                },
+            )
+            .await;
+        }
+    });
 
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_selected = props.view.selected_index;
@@ -378,21 +374,14 @@ pub fn ContactsScreen(
     }
 }
 
-/// Run the contacts screen with sample data
+/// Run the contacts screen (requires AppCoreContext for domain data)
 pub async fn run_contacts_screen() -> std::io::Result<()> {
-    let contacts = vec![
-        Contact::new("c1", "Alice")
-            .with_status(ContactStatus::Active)
-            .guardian(),
-        Contact::new("c2", "Bob").with_status(ContactStatus::Active),
-        Contact::new("c3", "Carol")
-            .with_status(ContactStatus::Pending)
-            .with_suggestion("Charles"),
-        Contact::new("c4", "Diana").with_status(ContactStatus::Blocked),
-    ];
-
+    // Note: This standalone runner won't have domain data without AppCoreContext.
+    // Domain data is obtained via signal subscriptions when context is available.
     element! {
-        ContactsScreen(contacts: contacts)
+        ContactsScreen(
+            view: ContactsViewProps::default(),
+        )
     }
     .fullscreen()
     .await

@@ -192,9 +192,55 @@ fmt-check:
 audit:
     cargo audit
 
-# Clean build artifacts
+# Clean build artifacts and generated files
 clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cleaning build artifacts..."
     cargo clean
+
+    echo "Cleaning Nix outputs..."
+    rm -rf result result-*
+
+    echo "Cleaning documentation builds..."
+    rm -rf docs/book/
+    rm -f mermaid.min.js mermaid-init.js custom.css
+
+    echo "Cleaning logs..."
+    rm -rf logs/
+    rm -f *.log
+
+    echo "Cleaning demo/test data..."
+    rm -rf .aura-demo/ .aura-test/
+    rm -rf outcomes/
+    rm -f *.sealed *.dat *.tmp *.temp
+
+    echo "Cleaning verification artifacts..."
+    rm -rf verification/lean/.lake/
+    rm -rf verification/lean/build/
+    rm -rf verification/lean/Generated/
+    rm -rf verification/lean/.lean_build/
+    rm -rf verification/traces/
+    rm -rf _apalache-out/
+
+    echo "✓ Clean complete"
+
+# Clean everything including production data (use with caution!)
+clean-all: clean
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo "WARNING: This will delete production data in .aura/"
+    read -p "Are you sure? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Removing production data..."
+        rm -rf .aura/
+        rm -rf secure_store/
+        echo "✓ All data cleaned"
+    else
+        echo "Aborted."
+    fi
 
 # Watch and rebuild on changes
 watch:
@@ -1455,6 +1501,11 @@ kani-setup:
     echo "✓ Kani setup complete!"
     echo ""
     echo "Run 'just kani' to verify the consensus module."
+
+# Run full Kani verification suite with summary output
+# Logs detailed output to logs/kani/, surfaces only pass/fail
+kani-suite:
+    @./scripts/run-kani-suite.sh
 
 # ============================================================================
 # Lean Verification Tasks

@@ -120,12 +120,14 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
 ///
 /// The `view` field is a required struct that embeds all view state from TuiState.
 /// This makes it a **compile-time error** to forget any view state field.
+///
+/// ## Reactive Data Model
+///
+/// Domain data (channels, messages) is NOT passed as props.
+/// Instead, the component subscribes to CHAT_SIGNAL directly via AppCoreContext.
+/// This ensures a single source of truth and prevents stale data bugs.
 #[derive(Default, Props)]
 pub struct ChatScreenProps {
-    // === Domain data (from reactive signals) ===
-    pub channels: Vec<Channel>,
-    pub messages: Vec<Message>,
-
     // === View state from TuiState (REQUIRED - compile-time enforced) ===
     /// All view state extracted from TuiState via `extract_chat_view_props()`.
     /// This is a single struct field so forgetting any view state is a compile error.
@@ -160,66 +162,56 @@ pub struct ChatScreenProps {
 /// - The selected channel changes
 #[component]
 pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-    // Try to get AppCoreContext for reactive signal subscription
-    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+    // Get AppCoreContext for reactive signal subscription (required for domain data)
+    let app_ctx = hooks.use_context::<AppCoreContext>();
 
-    // Initialize reactive state from props (used when no context or as initial values)
-    // These will be updated by signal subscription when available
-    let reactive_channels = hooks.use_state({
-        let initial = props.channels.clone();
-        move || initial
-    });
-    let reactive_messages = hooks.use_state({
-        let initial = props.messages.clone();
-        move || initial
-    });
+    // Initialize reactive state with defaults - will be populated by signal subscriptions
+    let reactive_channels = hooks.use_state(Vec::new);
+    let reactive_messages = hooks.use_state(Vec::new);
 
-    // Subscribe to chat signal updates if AppCoreContext is available
+    // Subscribe to chat signal updates
     // Uses the unified ReactiveEffects system from aura-core
+    hooks.use_future({
+        let mut reactive_channels = reactive_channels.clone();
+        let mut reactive_messages = reactive_messages.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            // Helper closure to convert ChatState to TUI types
+            let convert_chat_state = |chat_state: &aura_app::views::ChatState| {
+                let channels: Vec<Channel> = chat_state
+                    .channels
+                    .iter()
+                    .map(|c| {
+                        Channel::new(c.id.to_string(), &c.name)
+                            .with_unread(c.unread_count as usize)
+                            .selected(Some(c.id.clone()) == chat_state.selected_channel_id)
+                    })
+                    .collect();
 
-    if let Some(ctx) = app_ctx {
-        hooks.use_future({
-            let mut reactive_channels = reactive_channels.clone();
-            let mut reactive_messages = reactive_messages.clone();
-            let app_core = ctx.app_core.clone();
-            async move {
-                // Helper closure to convert ChatState to TUI types
-                let convert_chat_state = |chat_state: &aura_app::views::ChatState| {
-                    let channels: Vec<Channel> = chat_state
-                        .channels
-                        .iter()
-                        .map(|c| {
-                            Channel::new(c.id.to_string(), &c.name)
-                                .with_unread(c.unread_count as usize)
-                                .selected(Some(c.id.clone()) == chat_state.selected_channel_id)
-                        })
-                        .collect();
+                let messages: Vec<Message> = chat_state
+                    .messages
+                    .iter()
+                    .map(|m| {
+                        let ts_str = format_timestamp(m.timestamp);
+                        Message::new(&m.id, &m.sender_name, &m.content)
+                            .with_timestamp(ts_str)
+                            .own(m.is_own)
+                    })
+                    .collect();
 
-                    let messages: Vec<Message> = chat_state
-                        .messages
-                        .iter()
-                        .map(|m| {
-                            let ts_str = format_timestamp(m.timestamp);
-                            Message::new(&m.id, &m.sender_name, &m.content)
-                                .with_timestamp(ts_str)
-                                .own(m.is_own)
-                        })
-                        .collect();
+                (channels, messages)
+            };
 
-                    (channels, messages)
-                };
+            subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
+                let (channels, messages) = convert_chat_state(&chat_state);
+                reactive_channels.set(channels);
+                reactive_messages.set(messages);
+            })
+            .await;
+        }
+    });
 
-                subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                    let (channels, messages) = convert_chat_state(&chat_state);
-                    reactive_channels.set(channels);
-                    reactive_messages.set(messages);
-                })
-                .await;
-            }
-        });
-    }
-
-    // Use reactive state for rendering (updated by signal or initialized from props)
+    // Use reactive state for rendering (populated by signal subscription)
     let channels = reactive_channels.read().clone();
     let messages = reactive_messages.read().clone();
 
@@ -306,31 +298,13 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     }
 }
 
-/// Run the chat screen (demo mode)
+/// Run the chat screen (requires AppCoreContext for domain data)
 pub async fn run_chat_screen() -> std::io::Result<()> {
-    // Create sample data
-    let channels = vec![
-        Channel::new("1", "general").with_unread(3),
-        Channel::new("2", "random").with_unread(0),
-        Channel::new("3", "dev").with_unread(1),
-    ];
-
-    let messages = vec![
-        Message::new("1", "Alice", "Hello everyone!")
-            .with_timestamp("10:30")
-            .own(false),
-        Message::new("2", "You", "Hi Alice!")
-            .with_timestamp("10:31")
-            .own(true),
-        Message::new("3", "Bob", "What's up?")
-            .with_timestamp("10:32")
-            .own(false),
-    ];
-
+    // Note: This standalone runner won't have domain data without AppCoreContext.
+    // Domain data is obtained via signal subscriptions when context is available.
     element! {
         ChatScreen(
-            channels: channels,
-            messages: messages,
+            view: ChatViewProps::default(),
         )
     }
     .fullscreen()

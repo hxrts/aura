@@ -4,6 +4,7 @@
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent};
 
+use crate::tui::components::copy_to_clipboard;
 use crate::tui::navigation::{navigate_list, NavKey};
 use crate::tui::screens::Screen;
 
@@ -83,10 +84,27 @@ pub fn handle_queued_modal_key(
         QueuedModal::ContactsCreate(modal_state) => {
             handle_create_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
         }
-        QueuedModal::ContactsCode(_) => {
-            // Code display modal is read-only - just Esc to dismiss
-            if key.code == KeyCode::Esc {
-                state.modal_queue.dismiss();
+        QueuedModal::ContactsCode(modal_state) => {
+            // Code display modal: Esc to dismiss, Ctrl+C to copy
+            match key.code {
+                KeyCode::Esc => {
+                    state.modal_queue.dismiss();
+                }
+                KeyCode::Char('c') if key.modifiers.ctrl() => {
+                    // Copy code to clipboard
+                    if !modal_state.code.is_empty() {
+                        if copy_to_clipboard(&modal_state.code).is_ok() {
+                            // Update state to show "copied" feedback
+                            state.modal_queue.update_active(|m| {
+                                if let QueuedModal::ContactsCode(s) = m {
+                                    s.set_copied();
+                                }
+                            });
+                            state.toast_success("Copied to clipboard");
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         QueuedModal::GuardianSetup(modal_state) => {
@@ -997,6 +1015,20 @@ fn handle_device_enrollment_key_queue(
                 }
             }
             state.modal_queue.dismiss();
+        }
+        KeyCode::Char('c') if key.modifiers.ctrl() => {
+            // Copy enrollment code to clipboard
+            if !modal_state.enrollment_code.is_empty() {
+                if copy_to_clipboard(&modal_state.enrollment_code).is_ok() {
+                    // Update state to show "copied" feedback
+                    state.modal_queue.update_active(|m| {
+                        if let QueuedModal::SettingsDeviceEnrollment(s) = m {
+                            s.set_copied();
+                        }
+                    });
+                    state.toast_success("Copied to clipboard");
+                }
+            }
         }
         _ => {}
     }

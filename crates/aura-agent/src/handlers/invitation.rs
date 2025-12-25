@@ -60,6 +60,7 @@ pub struct InvitationHandler {
 
 impl InvitationHandler {
     const IMPORTED_INVITATION_STORAGE_PREFIX: &'static str = "invitation/imported";
+    const CREATED_INVITATION_STORAGE_PREFIX: &'static str = "invitation/created";
 
     /// Create a new invitation handler
     pub fn new(authority: AuthorityContext) -> AgentResult<Self> {
@@ -82,6 +83,43 @@ impl InvitationHandler {
             authority_id.uuid(),
             invitation_id
         )
+    }
+
+    fn created_invitation_key(authority_id: AuthorityId, invitation_id: &str) -> String {
+        format!(
+            "{}/{}/{}",
+            Self::CREATED_INVITATION_STORAGE_PREFIX,
+            authority_id.uuid(),
+            invitation_id
+        )
+    }
+
+    async fn persist_created_invitation(
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        let key = Self::created_invitation_key(authority_id, &invitation.invitation_id);
+        let bytes = serde_json::to_vec(invitation).map_err(|e| {
+            crate::core::AgentError::internal(format!("serialize created invitation: {e}"))
+        })?;
+        effects
+            .store(&key, bytes)
+            .await
+            .map_err(|e| crate::core::AgentError::effects(format!("store invitation: {e}")))?;
+        Ok(())
+    }
+
+    async fn load_created_invitation(
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+        invitation_id: &str,
+    ) -> Option<Invitation> {
+        let key = Self::created_invitation_key(authority_id, invitation_id);
+        let Ok(Some(bytes)) = effects.retrieve(&key).await else {
+            return None;
+        };
+        serde_json::from_slice::<Invitation>(&bytes).ok()
     }
 
     async fn persist_imported_invitation(
@@ -197,7 +235,11 @@ impl InvitationHandler {
             message,
         };
 
-        // Cache the pending invitation
+        // Persist the invitation to storage (so it survives service recreation)
+        Self::persist_created_invitation(effects, self.context.authority.authority_id, &invitation)
+            .await?;
+
+        // Cache the pending invitation (for fast lookup within same service instance)
         {
             let mut cache = self.pending_invitations.write().await;
             cache.insert(invitation_id, invitation.clone());
@@ -635,10 +677,54 @@ impl InvitationHandler {
             .collect()
     }
 
-    /// Get an invitation by ID
+    /// Get an invitation by ID (from in-memory cache only)
     pub async fn get_invitation(&self, invitation_id: &str) -> Option<Invitation> {
         let cache = self.pending_invitations.read().await;
         cache.get(invitation_id).cloned()
+    }
+
+    /// Get an invitation by ID, checking both cache and persistent storage
+    pub async fn get_invitation_with_storage(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &str,
+    ) -> Option<Invitation> {
+        // First check in-memory cache
+        {
+            let cache = self.pending_invitations.read().await;
+            if let Some(inv) = cache.get(invitation_id) {
+                return Some(inv.clone());
+            }
+        }
+
+        // Fall back to persistent storage for created invitations
+        if let Some(inv) =
+            Self::load_created_invitation(effects, self.context.authority.authority_id, invitation_id)
+                .await
+        {
+            return Some(inv);
+        }
+
+        // Check imported invitations and reconstruct if found
+        if let Some(shareable) =
+            Self::load_imported_invitation(effects, self.context.authority.authority_id, invitation_id)
+                .await
+        {
+            // Reconstruct Invitation from ShareableInvitation
+            return Some(Invitation {
+                invitation_id: shareable.invitation_id,
+                context_id: self.context.effect_context.context_id(),
+                sender_id: shareable.sender_id,
+                receiver_id: self.context.authority.authority_id,
+                invitation_type: shareable.invitation_type,
+                status: InvitationStatus::Pending,
+                created_at: 0, // Unknown from shareable
+                expires_at: shareable.expires_at,
+                message: shareable.message,
+            });
+        }
+
+        None
     }
 }
 
@@ -1055,6 +1141,56 @@ mod tests {
             }
             other => panic!("Expected ContactFact::Added, got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn created_invitation_is_retrievable_across_handler_instances() {
+        // This test verifies that created invitations are persisted to storage
+        // and can be retrieved by a different handler instance (fixing the
+        // "failed to export" bug where each agent.invitations() call creates
+        // a new handler with an empty in-memory cache).
+        let own_authority = AuthorityId::new_from_entropy([124u8; 32]);
+        let config = AgentConfig::default();
+        let effects =
+            Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
+
+        let mut authority_context = AuthorityContext::new(own_authority);
+        authority_context.add_context(RelationalContext {
+            context_id: ContextId::new_from_entropy([124u8; 32]),
+            participants: vec![],
+            metadata: Default::default(),
+        });
+
+        // Handler 1: Create an invitation
+        let handler_create = InvitationHandler::new(authority_context.clone()).unwrap();
+        let receiver_id = AuthorityId::new_from_entropy([125u8; 32]);
+        let invitation = handler_create
+            .create_invitation(
+                &effects,
+                receiver_id,
+                InvitationType::Contact {
+                    nickname: Some("Bob".to_string()),
+                },
+                Some("Hello Bob!".to_string()),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Handler 2: Retrieve the invitation (simulates new service instance)
+        let handler_retrieve = InvitationHandler::new(authority_context).unwrap();
+        let retrieved = handler_retrieve
+            .get_invitation_with_storage(&effects, &invitation.invitation_id)
+            .await;
+
+        assert!(
+            retrieved.is_some(),
+            "Created invitation should be retrievable across handler instances"
+        );
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.invitation_id, invitation.invitation_id);
+        assert_eq!(retrieved.receiver_id, receiver_id);
+        assert_eq!(retrieved.sender_id, own_authority);
     }
 
     #[tokio::test]

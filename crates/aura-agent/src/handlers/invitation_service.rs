@@ -227,10 +227,28 @@ impl InvitationService {
     // Sharing Methods (Out-of-Band Transfer)
     // =========================================================================
 
-    /// Export an invitation as a shareable code string
+    /// Export an invitation as a shareable code string (compile-time safe)
+    ///
+    /// This is the preferred method when you already have the `Invitation` object.
+    /// It cannot fail since no lookup is required.
+    ///
+    /// # Arguments
+    /// * `invitation` - The invitation to export
+    ///
+    /// # Returns
+    /// A shareable code string (format: `aura:v1:<base64>`)
+    pub fn export_invitation(invitation: &Invitation) -> String {
+        let shareable = ShareableInvitation::from(invitation);
+        shareable.to_code()
+    }
+
+    /// Export an invitation by ID as a shareable code string
     ///
     /// The code can be shared out-of-band (copy/paste, QR code, etc.)
     /// and imported by the receiver using `import_code`.
+    ///
+    /// **Note**: Prefer `export_invitation(&Invitation)` when you have the
+    /// invitation object, as it provides compile-time safety.
     ///
     /// # Arguments
     /// * `invitation_id` - ID of the invitation to export
@@ -243,14 +261,13 @@ impl InvitationService {
     pub async fn export_code(&self, invitation_id: &str) -> AgentResult<String> {
         let invitation = self
             .handler
-            .get_invitation(invitation_id)
+            .get_invitation_with_storage(&self.effects, invitation_id)
             .await
             .ok_or_else(|| {
                 aura_core::AuraError::not_found(format!("Invitation not found: {}", invitation_id))
             })?;
 
-        let shareable = ShareableInvitation::from(&invitation);
-        Ok(shareable.to_code())
+        Ok(Self::export_invitation(&invitation))
     }
 
     /// Import an invitation from a shareable code string

@@ -1,12 +1,12 @@
 //! # Invitation Code Modal
 //!
 //! Modal for displaying shareable invitation codes.
+//! Uses the shared CodeDisplayModal component.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use crate::tui::layout::dim;
-use crate::tui::theme::{Borders, Spacing, Theme};
+use crate::tui::components::{CodeDisplayModal, CodeDisplayStatus};
 
 /// Callback type for modal close
 pub type CloseCallback = Arc<dyn Fn() + Send + Sync>;
@@ -22,121 +22,25 @@ pub struct InvitationCodeModalProps {
     pub invitation_type: String,
     /// Callback when closing the modal
     pub on_close: Option<CloseCallback>,
+    /// Whether code was copied to clipboard
+    pub copied: bool,
 }
 
 /// Modal for displaying shareable invitation codes
 #[component]
 pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyElement<'static>> {
-    if !props.visible {
-        return element! {
-            View {}
-        };
-    }
-
-    let code = props.code.clone();
-    let invitation_type = props.invitation_type.clone();
-
-    // Format the code for display - break into chunks for readability
-    let formatted_code = if code.len() > 40 {
-        // Break long codes into multiple lines
-        code.chars()
-            .collect::<Vec<_>>()
-            .chunks(40)
-            .map(|c| c.iter().collect::<String>())
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else {
-        code.clone()
-    };
-
     element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
-            border_style: Borders::PRIMARY,
-            border_color: Theme::SUCCESS,
-            overflow: Overflow::Hidden,
-        ) {
-            // Header
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(
-                    content: "✓ Invitation Created",
-                    weight: Weight::Bold,
-                    color: Theme::SUCCESS,
-                )
-                View(margin_top: Spacing::XS) {
-                    Text(
-                        content: format!("Type: {}", invitation_type),
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
-            }
-
-            // Code display - fills available space
-            View(
-                width: 100pct,
-                padding: Spacing::MODAL_PADDING,
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                overflow: Overflow::Hidden,
-            ) {
-                View(margin_bottom: Spacing::XS) {
-                    Text(
-                        content: "Share this code with the recipient:",
-                        color: Theme::TEXT,
-                    )
-                }
-
-                // Code box
-                View(
-                    width: 100pct,
-                    flex_direction: FlexDirection::Column,
-                    border_style: Borders::INPUT,
-                    border_color: Theme::PRIMARY,
-                    padding: Spacing::MODAL_PADDING,
-                ) {
-                    Text(
-                        content: formatted_code,
-                        color: Theme::PRIMARY,
-                        wrap: TextWrap::Wrap,
-                    )
-                }
-
-                View(margin_top: Spacing::SM) {
-                    Text(
-                        content: "The recipient can import this code to accept your invitation.",
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
-            }
-
-            // Footer
-            View(
-                width: 100pct,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                padding: Spacing::PANEL_PADDING,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Close", color: Theme::TEXT_MUTED)
-                }
-            }
-        }
+        CodeDisplayModal(
+            visible: props.visible,
+            title: "Invitation Created".to_string(),
+            subtitle: format!("Type: {}", props.invitation_type),
+            status: CodeDisplayStatus::Success,
+            status_text: String::new(),
+            instruction: "Share this code with the recipient:".to_string(),
+            code: props.code.clone(),
+            help_text: "The recipient can import this code to accept your invitation.".to_string(),
+            copied: props.copied,
+        )
     }
 }
 
@@ -151,6 +55,8 @@ pub struct InvitationCodeState {
     pub invitation_type: String,
     /// The invitation ID (for reference)
     pub invitation_id: String,
+    /// Whether code was copied to clipboard
+    pub copied: bool,
 }
 
 impl InvitationCodeState {
@@ -165,6 +71,7 @@ impl InvitationCodeState {
         self.invitation_id = invitation_id;
         self.invitation_type = invitation_type;
         self.code = code;
+        self.copied = false;
     }
 
     /// Hide the modal
@@ -173,6 +80,12 @@ impl InvitationCodeState {
         self.code.clear();
         self.invitation_type.clear();
         self.invitation_id.clear();
+        self.copied = false;
+    }
+
+    /// Mark code as copied
+    pub fn set_copied(&mut self) {
+        self.copied = true;
     }
 }
 
@@ -195,9 +108,14 @@ mod tests {
         assert_eq!(state.code, "AURA-INV-abc123");
         assert_eq!(state.invitation_type, "Contact");
         assert_eq!(state.invitation_id, "inv-123");
+        assert!(!state.copied);
+
+        state.set_copied();
+        assert!(state.copied);
 
         state.hide();
         assert!(!state.visible);
         assert!(state.code.is_empty());
+        assert!(!state.copied);
     }
 }

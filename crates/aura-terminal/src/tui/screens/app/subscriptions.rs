@@ -10,9 +10,9 @@ use std::time::Duration;
 use iocraft::prelude::*;
 
 use aura_app::signal_defs::{
-    ConnectionStatus, SyncStatus, BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL,
+    ConnectionStatus, NetworkStatus, BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL,
     CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
-    RECOVERY_SIGNAL, SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
+    NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -20,63 +20,61 @@ use crate::tui::types::{Channel, Contact, Invitation, Message, PendingRequest, R
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
 pub struct NavStatusSignals {
-    pub syncing: State<bool>,
-    pub peer_count: State<usize>,
-    pub last_sync_time: State<Option<u64>>,
+    pub network_status: State<NetworkStatus>,
+    /// Online contacts (people you know who are currently online)
+    pub known_online: State<usize>,
+    /// Transport-level peers (active network connections)
+    pub transport_peers: State<usize>,
     pub now_ms: State<Option<u64>>,
 }
 
 pub fn use_nav_status_signals(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
-    initial_syncing: bool,
-    initial_peer_count: usize,
-    initial_last_sync_time: Option<u64>,
+    initial_network_status: NetworkStatus,
+    initial_known_online: usize,
+    initial_transport_peers: usize,
 ) -> NavStatusSignals {
-    let syncing = hooks.use_state(|| initial_syncing);
-    let peer_count = hooks.use_state(|| initial_peer_count);
-    let last_sync_time = hooks.use_state(|| initial_last_sync_time);
+    let network_status = hooks.use_state(|| initial_network_status);
+    let known_online = hooks.use_state(|| initial_known_online);
+    let transport_peers = hooks.use_state(|| initial_transport_peers);
     let now_ms = hooks.use_state(|| None::<u64>);
 
+    // Subscribe to unified network status signal
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let mut syncing = syncing.clone();
-        let last_sync_time = last_sync_time.clone();
-        let app_core_for_time = app_core.clone();
-        let last_sync_time_for_time = last_sync_time.clone();
+        let mut network_status = network_status.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*SYNC_STATUS_SIGNAL, move |status| {
-                syncing.set(matches!(status, SyncStatus::Syncing { .. }));
-
-                if matches!(status, SyncStatus::Synced) {
-                    {
-                        let app_core = app_core_for_time.clone();
-                        let mut last_sync_time = last_sync_time_for_time.clone();
-                        tokio::spawn(async move {
-                            let runtime = app_core.raw().read().await.runtime().cloned();
-                            if let Some(runtime) = runtime {
-                                if let Ok(now_ms) = runtime.current_time_ms().await {
-                                    last_sync_time.set(Some(now_ms));
-                                }
-                            }
-                        });
-                    }
-                }
+            subscribe_signal_with_retry(app_core, &*NETWORK_STATUS_SIGNAL, move |status| {
+                network_status.set(status);
             })
             .await;
         }
     });
 
+    // Subscribe to connection status for online contacts count
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let mut peer_count = peer_count.clone();
+        let mut known_online = known_online.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONNECTION_STATUS_SIGNAL, move |status| {
-                let peers = match status {
+                let count = match status {
                     ConnectionStatus::Online { peer_count } => peer_count,
                     _ => 0,
                 };
-                peer_count.set(peers);
+                known_online.set(count);
+            })
+            .await;
+        }
+    });
+
+    // Subscribe to transport peers signal
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut transport_peers = transport_peers.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
+                transport_peers.set(count);
             })
             .await;
         }
@@ -99,10 +97,11 @@ pub fn use_nav_status_signals(
             }
         }
     });
+
     NavStatusSignals {
-        syncing,
-        peer_count,
-        last_sync_time,
+        network_status,
+        known_online,
+        transport_peers,
         now_ms,
     }
 }

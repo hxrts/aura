@@ -8,13 +8,18 @@
 //! The 6-column grid uses the same column width (13 chars) and padding as the
 //! nav bar, ensuring perfect vertical alignment between nav tabs and footer hints.
 
+use aura_app::signal_defs::NetworkStatus;
+
 use crate::tui::layout::dim;
-use crate::tui::theme::{Spacing, Theme};
+use crate::tui::theme::Theme;
 use crate::tui::types::KeyHint;
 use iocraft::prelude::*;
 
-/// Width of each column (6 columns across 80 chars, matching nav bar)
+/// Width of each hint column (5 columns for hints)
 const COL_WIDTH: u16 = dim::TOTAL_WIDTH / 6; // 13 chars each
+
+/// Width of status column (remaining space after 5 hint columns)
+const STATUS_COL_WIDTH: u16 = dim::TOTAL_WIDTH - (5 * COL_WIDTH); // 15 chars
 
 /// Props for Footer
 #[derive(Default, Props)]
@@ -25,14 +30,14 @@ pub struct FooterProps {
     pub global_hints: Vec<KeyHint>,
     /// Whether the footer is disabled (darkened, indicating hotkeys are inactive)
     pub disabled: bool,
-    /// Whether sync is in progress
-    pub syncing: bool,
-    /// Last sync time (ms since epoch), None if never synced
-    pub last_sync_time: Option<u64>,
+    /// Unified network status (disconnected, no peers, syncing, synced)
+    pub network_status: NetworkStatus,
     /// Current time (ms since epoch) from runtime, for relative formatting
     pub now_ms: Option<u64>,
-    /// Number of known peers
-    pub peer_count: usize,
+    /// Transport-level peers (active network connections)
+    pub transport_peers: usize,
+    /// Online contacts (people you know who are currently online)
+    pub known_online: usize,
 }
 
 /// Format a timestamp as relative time (e.g., "2m ago", "1h ago")
@@ -85,28 +90,41 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
         Theme::TEXT_MUTED
     };
 
-    // Build sync status text
-    let sync_status = if props.syncing {
-        "Syncing...".to_string()
-    } else if let (Some(now_ms), Some(ts)) = (props.now_ms, props.last_sync_time) {
-        format!("Synced {}", format_relative_time(now_ms, ts))
-    } else if props.last_sync_time.is_some() {
-        "Synced".to_string()
+    // Build network status text and color based on unified NetworkStatus
+    let (sync_status, sync_color) = if props.disabled {
+        // Disabled state uses muted colors regardless of network status
+        let status = match &props.network_status {
+            NetworkStatus::Disconnected => "Disconnected".to_string(),
+            NetworkStatus::NoPeers => "No peers".to_string(),
+            NetworkStatus::Syncing => "Syncing...".to_string(),
+            NetworkStatus::Synced { last_sync_ms } => {
+                if let Some(now_ms) = props.now_ms {
+                    format!("Synced {}", format_relative_time(now_ms, *last_sync_ms))
+                } else {
+                    "Synced".to_string()
+                }
+            }
+        };
+        (status, Theme::TEXT_DISABLED)
     } else {
-        "Not synced".to_string()
+        match &props.network_status {
+            NetworkStatus::Disconnected => ("Disconnected".to_string(), Theme::ERROR),
+            NetworkStatus::NoPeers => ("No peers".to_string(), Theme::WARNING),
+            NetworkStatus::Syncing => ("Syncing...".to_string(), Theme::WARNING),
+            NetworkStatus::Synced { last_sync_ms } => {
+                let status = if let Some(now_ms) = props.now_ms {
+                    format!("Synced {}", format_relative_time(now_ms, *last_sync_ms))
+                } else {
+                    "Synced".to_string()
+                };
+                (status, Theme::SUCCESS)
+            }
+        }
     };
 
-    let sync_color = if props.disabled {
-        Theme::TEXT_DISABLED
-    } else if props.syncing {
-        Theme::WARNING
-    } else if props.last_sync_time.is_some() {
-        Theme::SUCCESS
-    } else {
-        Theme::TEXT_MUTED
-    };
-
-    let peer_status = format!("{} peers", props.peer_count);
+    // Format: "123 P, 45 On" - must fit in STATUS_COL_WIDTH (15 chars)
+    // Max realistic: "999 P, 99 On" = 12 chars
+    let peer_status = format!("{} P, {} On", props.transport_peers, props.known_online);
 
     element! {
         View(
@@ -130,7 +148,6 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
                 width: 100pct,
                 height: 1u16,
                 flex_direction: FlexDirection::Row,
-                padding_left: Spacing::SM,
                 overflow: Overflow::Hidden,
             ) {
                 // Columns 1-5: Screen hints in fixed-width columns
@@ -146,9 +163,9 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
                     }
                 }))
 
-                // Column 6: Sync status
+                // Column 6: Sync status (wider to fit "Synced Xm ago")
                 View(
-                    width: COL_WIDTH,
+                    width: STATUS_COL_WIDTH,
                     height: 1u16,
                 ) {
                     Text(content: sync_status.clone(), color: sync_color)
@@ -161,7 +178,6 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
                 width: 100pct,
                 height: 1u16,
                 flex_direction: FlexDirection::Row,
-                padding_left: Spacing::SM,
                 overflow: Overflow::Hidden,
             ) {
                 // Columns 1-5: Global hints in fixed-width columns
@@ -177,9 +193,9 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
                     }
                 }))
 
-                // Column 6: Peer count
+                // Column 6: Peer count (wider to fit "123 Peers | 45 On")
                 View(
-                    width: COL_WIDTH,
+                    width: STATUS_COL_WIDTH,
                     height: 1u16,
                 ) {
                     Text(content: peer_status.clone(), color: text_color)

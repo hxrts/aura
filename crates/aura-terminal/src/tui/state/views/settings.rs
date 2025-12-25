@@ -90,6 +90,8 @@ pub struct DeviceEnrollmentCeremonyModalState {
     pub device_name: String,
     /// Enrollment code to import on the new device
     pub enrollment_code: String,
+    /// Whether code was copied to clipboard
+    pub copied: bool,
 }
 
 impl DeviceEnrollmentCeremonyModalState {
@@ -101,6 +103,7 @@ impl DeviceEnrollmentCeremonyModalState {
             },
             device_name,
             enrollment_code,
+            copied: false,
         }
     }
 
@@ -123,6 +126,11 @@ impl DeviceEnrollmentCeremonyModalState {
             error_message,
             pending_epoch,
         );
+    }
+
+    /// Mark code as copied to clipboard
+    pub fn set_copied(&mut self) {
+        self.copied = true;
     }
 }
 

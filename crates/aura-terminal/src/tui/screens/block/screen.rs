@@ -12,7 +12,7 @@
 
 use iocraft::prelude::*;
 
-use aura_app::signal_defs::BLOCK_SIGNAL;
+use aura_app::signal_defs::{BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL};
 
 use crate::tui::callbacks::{
     BlockInviteCallback, BlockNavCallback, BlockSendCallback, GrantStewardCallback,
@@ -282,17 +282,14 @@ pub fn StorageBudgetPanel(props: &StorageBudgetPanelProps) -> impl Into<AnyEleme
 ///
 /// The `view` field is a required struct that embeds all view state from TuiState.
 /// This makes it a **compile-time error** to forget any view state field.
+///
+/// ## Reactive Data Model
+///
+/// Domain data (block_name, residents, messages, budget, channel_name, contacts) is NOT
+/// passed as props. Instead, the component subscribes to BLOCK_SIGNAL and CONTACTS_SIGNAL
+/// directly via AppCoreContext. This ensures a single source of truth and prevents stale data bugs.
 #[derive(Default, Props)]
 pub struct BlockScreenProps {
-    // === Domain data (from reactive signals) ===
-    pub block_name: String,
-    pub residents: Vec<Resident>,
-    pub messages: Vec<Message>,
-    pub budget: BlockBudget,
-    pub channel_name: String,
-    /// Available contacts for invite modal
-    pub contacts: Vec<Contact>,
-
     // === View state from TuiState (REQUIRED - compile-time enforced) ===
     /// All view state extracted from TuiState via `extract_block_view_props()`.
     /// This is a single struct field so forgetting any view state is a compile error.
@@ -380,84 +377,121 @@ fn short_id(id: &str, len: usize) -> String {
 /// - Block name changes
 #[component]
 pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-    // Try to get AppCoreContext for reactive signal subscription
-    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+    // Get AppCoreContext for reactive signal subscription (required for domain data)
+    let app_ctx = hooks.use_context::<AppCoreContext>();
 
-    // Initialize reactive state from props
-    let reactive_block_name = hooks.use_state({
-        let initial = props.block_name.clone();
-        move || initial
-    });
-    let reactive_residents = hooks.use_state({
-        let initial = props.residents.clone();
-        move || initial
-    });
-    let reactive_budget = hooks.use_state({
-        let initial = props.budget.clone();
-        move || initial
-    });
+    // Initialize reactive state with defaults - will be populated by signal subscriptions
+    let reactive_block_name = hooks.use_state(String::new);
+    let reactive_residents = hooks.use_state(Vec::new);
+    let reactive_budget = hooks.use_state(BlockBudget::default);
     let reactive_pins = hooks.use_state(|| Vec::<PinnedMessageRow>::new());
+    let reactive_messages = hooks.use_state(Vec::new);
+    let reactive_channel_name = hooks.use_state(|| "general".to_string());
+    let reactive_contacts = hooks.use_state(Vec::new);
 
-    // Subscribe to block signal updates if AppCoreContext is available
-    if let Some(ctx) = app_ctx {
-        hooks.use_future({
-            let mut reactive_block_name = reactive_block_name.clone();
-            let mut reactive_residents = reactive_residents.clone();
-            let mut reactive_budget = reactive_budget.clone();
-            let mut reactive_pins = reactive_pins.clone();
-            let contacts = props.contacts.clone();
-            let app_core = ctx.app_core.clone();
-            async move {
-                // Helper closure to convert BlockState to TUI types
-                let convert_block_state = move |block_state: &aura_app::views::BlockState| {
-                    let residents: Vec<Resident> =
-                        block_state.residents.iter().map(convert_resident).collect();
+    // Subscribe to contacts signal for name resolution
+    hooks.use_future({
+        let mut reactive_contacts = reactive_contacts.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
+                let contacts: Vec<Contact> =
+                    contacts_state.contacts.iter().map(Contact::from).collect();
+                reactive_contacts.set(contacts);
+            })
+            .await;
+        }
+    });
 
-                    let budget = convert_budget(&block_state.storage, block_state.resident_count);
+    // Subscribe to block signal updates (for residents, budget, pinned messages)
+    hooks.use_future({
+        let mut reactive_block_name = reactive_block_name.clone();
+        let mut reactive_residents = reactive_residents.clone();
+        let mut reactive_budget = reactive_budget.clone();
+        let mut reactive_pins = reactive_pins.clone();
+        let reactive_contacts = reactive_contacts.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*BLOCK_SIGNAL, move |block_state| {
+                let contacts = reactive_contacts.read().clone();
 
-                    let mut pinned = Vec::new();
-                    for message_id in &block_state.pinned_messages {
-                        if let Some(meta) = block_state.pinned_metadata.get(message_id) {
-                            pinned.push(PinnedMessageRow {
-                                message_id: short_id(&meta.message_id, 10),
-                                pinned_by: format_contact_name(
-                                    &meta.pinned_by.to_string(),
-                                    &contacts,
-                                ),
-                                pinned_at: format_timestamp(meta.pinned_at),
-                            });
-                        } else {
-                            pinned.push(PinnedMessageRow {
-                                message_id: short_id(message_id, 10),
-                                pinned_by: "unknown".to_string(),
-                                pinned_at: "--:--".to_string(),
-                            });
-                        }
+                let residents: Vec<Resident> =
+                    block_state.residents.iter().map(convert_resident).collect();
+
+                let budget = convert_budget(&block_state.storage, block_state.resident_count);
+
+                let mut pinned = Vec::new();
+                for message_id in &block_state.pinned_messages {
+                    if let Some(meta) = block_state.pinned_metadata.get(message_id) {
+                        pinned.push(PinnedMessageRow {
+                            message_id: short_id(&meta.message_id, 10),
+                            pinned_by: format_contact_name(
+                                &meta.pinned_by.to_string(),
+                                &contacts,
+                            ),
+                            pinned_at: format_timestamp(meta.pinned_at),
+                        });
+                    } else {
+                        pinned.push(PinnedMessageRow {
+                            message_id: short_id(message_id, 10),
+                            pinned_by: "unknown".to_string(),
+                            pinned_at: "--:--".to_string(),
+                        });
                     }
+                }
 
-                    (block_state.name.clone(), residents, budget, pinned)
-                };
+                reactive_block_name.set(block_state.name.clone());
+                reactive_residents.set(residents);
+                reactive_budget.set(budget);
+                reactive_pins.set(pinned);
+            })
+            .await;
+        }
+    });
 
-                subscribe_signal_with_retry(app_core, &*BLOCK_SIGNAL, move |block_state| {
-                    let (name, residents, budget, pinned) = convert_block_state(&block_state);
-                    reactive_block_name.set(name);
-                    reactive_residents.set(residents);
-                    reactive_budget.set(budget);
-                    reactive_pins.set(pinned);
-                })
-                .await;
-            }
-        });
-    }
+    // Subscribe to chat signal for block messages
+    // Block messages are part of the unified chat system, filtered by selected channel
+    hooks.use_future({
+        let mut reactive_messages = reactive_messages.clone();
+        let mut reactive_channel_name = reactive_channel_name.clone();
+        let reactive_contacts = reactive_contacts.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
+                let contacts = reactive_contacts.read().clone();
 
-    // Use reactive state for rendering
+                // Get the selected channel name
+                if let Some(channel_id) = &chat_state.selected_channel_id {
+                    if let Some(channel) = chat_state.channels.iter().find(|c| &c.id == channel_id)
+                    {
+                        reactive_channel_name.set(channel.name.clone());
+                    }
+                }
+
+                // Convert chat messages to TUI Message type
+                let messages: Vec<Message> = chat_state
+                    .messages
+                    .iter()
+                    .map(|m| {
+                        let sender_name = format_contact_name(&m.sender_id.to_string(), &contacts);
+                        Message::new(&m.id, &sender_name, &m.content)
+                            .with_timestamp(format_timestamp(m.timestamp))
+                            .own(m.is_own)
+                    })
+                    .collect();
+
+                reactive_messages.set(messages);
+            })
+            .await;
+        }
+    });
+
+    // Use reactive state for rendering (populated by signal subscriptions)
     let residents = reactive_residents.read().clone();
     let budget = reactive_budget.read().clone();
     let pinned = reactive_pins.read().clone();
-
-    // Messages come from props
-    let messages = props.messages.clone();
-    let channel_name = props.channel_name.clone();
+    let messages = reactive_messages.read().clone();
+    let channel_name = reactive_channel_name.read().clone();
 
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_focus = props.view.focus;
@@ -510,40 +544,13 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     }
 }
 
-/// Run the block screen with sample data
+/// Run the block screen (requires AppCoreContext for domain data)
 pub async fn run_block_screen() -> std::io::Result<()> {
-    let residents = vec![
-        Resident::new("r1", "You").is_current_user().steward(),
-        Resident::new("r2", "Alice"),
-        Resident::new("r3", "Bob"),
-    ];
-
-    let messages = vec![
-        Message::new("1", "Alice", "Welcome to the block!")
-            .with_timestamp("10:00")
-            .own(false),
-        Message::new("2", "You", "Thanks for having me!")
-            .with_timestamp("10:05")
-            .own(true),
-        Message::new("3", "Bob", "Hey everyone!")
-            .with_timestamp("10:10")
-            .own(false),
-    ];
-
-    let budget = BlockBudget {
-        total: 10 * 1024 * 1024, // 10 MB
-        used: 3 * 1024 * 1024,   // 3 MB
-        resident_count: 3,
-        max_residents: 8,
-    };
-
+    // Note: This standalone runner won't have domain data without AppCoreContext.
+    // Domain data is obtained via signal subscriptions when context is available.
     element! {
         BlockScreen(
-            block_name: "My Block".to_string(),
-            residents: residents,
-            messages: messages,
-            budget: budget,
-            channel_name: "general".to_string(),
+            view: BlockViewProps::default(),
         )
     }
     .fullscreen()

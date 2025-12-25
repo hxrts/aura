@@ -37,9 +37,8 @@ use super::{HealthCheck, HealthStatus, Service, ServiceMetrics, ServiceState};
 use crate::core::{sync_session_error, MetricsCollector, SessionManager, SyncResult};
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol};
-use aura_core::effects::{PhysicalTimeEffects, TimeEffects, TimeError};
+use aura_core::effects::{PhysicalTimeEffects, TimeError};
 use aura_core::{AuraError, DeviceId};
-use aura_effects::time::PhysicalTimeHandler;
 
 fn time_error_to_aura(err: TimeError) -> AuraError {
     AuraError::internal(format!("time error: {err}"))
@@ -145,7 +144,7 @@ pub struct SyncService {
     started_at: Arc<RwLock<Option<Instant>>>,
 
     /// Time effects for unified time operations
-    time_effects: PhysicalTimeHandler,
+    time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
 }
 
 impl SyncService {
@@ -168,10 +167,10 @@ impl SyncService {
     /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
     pub async fn new(
         config: SyncServiceConfig,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
         now_instant: std::time::Instant,
     ) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        let time_effects = PhysicalTimeHandler;
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
         let now = time_effects
             .physical_time()
@@ -191,40 +190,6 @@ impl SyncService {
             metrics: Arc::new(RwLock::new(metrics)),
             started_at: Arc::new(RwLock::new(None)),
             time_effects,
-        })
-    }
-
-    /// Create a new sync service with PhysicalTimeEffects (preferred for deterministic testing)
-    ///
-    /// # Arguments
-    /// - `config`: Service configuration
-    /// - `time_effects`: Time effects provider
-    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
-    pub async fn new_with_time_effects<T: TimeEffects>(
-        config: SyncServiceConfig,
-        time_effects: &T,
-        now_instant: std::time::Instant,
-    ) -> SyncResult<Self> {
-        let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
-        let now = time_effects
-            .physical_time()
-            .await
-            .map_err(time_error_to_aura)?;
-        let session_manager = SessionManager::new(Default::default(), now);
-        let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
-        let metrics = MetricsCollector::new();
-
-        Ok(Self {
-            config,
-            state: Arc::new(RwLock::new(ServiceState::Stopped)),
-            peer_manager: Arc::new(RwLock::new(peer_manager)),
-            rate_limiter: Arc::new(RwLock::new(rate_limiter)),
-            session_manager: Arc::new(RwLock::new(session_manager)),
-            journal_sync: Arc::new(RwLock::new(journal_sync)),
-            metrics: Arc::new(RwLock::new(metrics)),
-            started_at: Arc::new(RwLock::new(None)),
-            time_effects: PhysicalTimeHandler,
         })
     }
 
@@ -403,7 +368,7 @@ impl SyncService {
     /// # Arguments
     /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
     #[allow(dead_code)]
-    async fn perform_auto_sync_with_time_effects<T: PhysicalTimeEffects + TimeEffects>(
+    async fn perform_auto_sync_with_time_effects<T: PhysicalTimeEffects>(
         peer_manager: &Arc<RwLock<PeerManager>>,
         session_manager: &Arc<RwLock<SessionManager<serde_json::Value>>>,
         journal_sync: &Arc<RwLock<JournalSyncProtocol>>,
@@ -926,8 +891,7 @@ impl Service for SyncService {
             status: health.status,
             message: Some("Sync service operational".to_string()),
             checked_at: {
-                let time_effects = PhysicalTimeHandler;
-                time_effects
+                self.time_effects
                     .physical_time()
                     .await
                     .map_err(|e| aura_core::AuraError::internal(format!("Time error: {}", e)))?
@@ -984,9 +948,13 @@ impl SyncServiceBuilder {
     ///
     /// # Arguments
     /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
-    pub async fn build(self, now_instant: std::time::Instant) -> SyncResult<SyncService> {
+    pub async fn build(
+        self,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+        now_instant: std::time::Instant,
+    ) -> SyncResult<SyncService> {
         let config = self.config.unwrap_or_default();
-        SyncService::new(config, now_instant).await
+        SyncService::new(config, time_effects, now_instant).await
     }
 }
 
@@ -999,10 +967,37 @@ mod tests {
     #![allow(clippy::disallowed_methods)] // Test code uses monotonic clock for coordination
     use super::*;
 
+    #[derive(Clone)]
+    struct TestTimeEffects {
+        now_ms: u64,
+    }
+
+    impl TestTimeEffects {
+        fn new(now_ms: u64) -> Self {
+            Self { now_ms }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for TestTimeEffects {
+        async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
+            Ok(aura_core::time::PhysicalTime {
+                ts_ms: self.now_ms,
+                uncertainty: None,
+            })
+        }
+
+        async fn sleep_ms(&self, _ms: u64) -> Result<(), TimeError> {
+            Ok(())
+        }
+    }
+
+
     #[tokio::test]
     async fn test_sync_service_creation() {
         let config = SyncServiceConfig::default();
-        let service = SyncService::new(config, SyncService::monotonic_now())
+        let time_effects = Arc::new(TestTimeEffects::new(0));
+        let service = SyncService::new(config, time_effects, SyncService::monotonic_now())
             .await
             .unwrap();
 
@@ -1012,10 +1007,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_service_builder() {
+        let time_effects = Arc::new(TestTimeEffects::new(0));
         let service = SyncService::builder()
             .with_auto_sync(true)
             .with_sync_interval(Duration::from_secs(30))
-            .build(SyncService::monotonic_now())
+            .build(time_effects.clone(), SyncService::monotonic_now())
             .await
             .unwrap();
 
@@ -1025,16 +1021,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_service_lifecycle() {
+        let time_effects = Arc::new(TestTimeEffects::new(0));
         let service = SyncService::builder()
-            .build(SyncService::monotonic_now())
+            .build(time_effects.clone(), SyncService::monotonic_now())
             .await
             .unwrap();
 
         assert!(!service.is_running());
-
-        let time_effects = PhysicalTimeHandler;
         service
-            .start_with_time_effects(&time_effects, SyncService::monotonic_now())
+            .start_with_time_effects(time_effects.as_ref(), SyncService::monotonic_now())
             .await
             .unwrap();
         assert!(service.is_running());
@@ -1045,13 +1040,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_service_health_check() {
+        let time_effects = Arc::new(TestTimeEffects::new(0));
         let service = SyncService::builder()
-            .build(SyncService::monotonic_now())
+            .build(time_effects.clone(), SyncService::monotonic_now())
             .await
             .unwrap();
-        let time_effects = PhysicalTimeHandler;
         service
-            .start_with_time_effects(&time_effects, SyncService::monotonic_now())
+            .start_with_time_effects(time_effects.as_ref(), SyncService::monotonic_now())
             .await
             .unwrap();
 

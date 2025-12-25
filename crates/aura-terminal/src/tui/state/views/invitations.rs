@@ -35,7 +35,7 @@ pub struct CreateInvitationModalState {
 
 impl CreateInvitationModalState {
     /// TTL preset values in hours
-    const TTL_PRESETS: [u64; 6] = [1, 24, 72, 168, 720, 0]; // 1h, 1d, 3d, 1w, 30d, never
+    const TTL_PRESETS: [u64; 4] = [1, 24, 168, 720]; // 1h, 1d, 1w, 30d
 
     /// Create new modal state with defaults
     pub fn new() -> Self {
@@ -188,6 +188,8 @@ pub struct InvitationCodeModalState {
     pub loading: bool,
     /// Error message if any
     pub error: Option<String>,
+    /// Whether code was copied to clipboard
+    pub copied: bool,
 }
 
 impl InvitationCodeModalState {
@@ -198,6 +200,7 @@ impl InvitationCodeModalState {
             code: String::new(),
             loading: true,
             error: None,
+            copied: false,
         }
     }
 
@@ -207,6 +210,7 @@ impl InvitationCodeModalState {
             code,
             loading: false,
             error: None,
+            copied: false,
         }
     }
 
@@ -218,6 +222,11 @@ impl InvitationCodeModalState {
     pub fn set_error(&mut self, error: String) {
         self.error = Some(error);
         self.loading = false;
+    }
+
+    /// Mark code as copied to clipboard
+    pub fn set_copied(&mut self) {
+        self.copied = true;
     }
 
     /// Reset state (called when dismissed)

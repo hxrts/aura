@@ -3,12 +3,53 @@
 //! This module contains system-level operations that are portable across all frontends.
 //! These are mostly lightweight health-check and state refresh operations.
 
-use crate::signal_defs::{ConnectionStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL};
+use crate::runtime_bridge::SyncStatus as RuntimeSyncStatus;
+use crate::signal_defs::{
+    ConnectionStatus, NetworkStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
+    NETWORK_STATUS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuraError;
 use std::sync::Arc;
+
+/// Compute the unified network status from transport and sync state.
+///
+/// Precedence:
+/// 1. No runtime → Disconnected
+/// 2. No online contacts → NoPeers (can't sync with no one)
+/// 3. Active sync sessions → Syncing
+/// 4. Has last_sync_ms → Synced
+/// 5. Fallback → Syncing (have peers but no sync yet)
+fn compute_network_status(
+    has_runtime: bool,
+    online_contacts: usize,
+    sync_status: &RuntimeSyncStatus,
+) -> NetworkStatus {
+    if !has_runtime {
+        return NetworkStatus::Disconnected;
+    }
+
+    // No peers = no one to sync with. Use online_contacts as the source of truth
+    // since that's what the footer displays as "N peers".
+    if online_contacts == 0 {
+        return NetworkStatus::NoPeers;
+    }
+
+    // Currently syncing if there are active sync sessions
+    if sync_status.active_sessions > 0 {
+        return NetworkStatus::Syncing;
+    }
+
+    // Synced if we have a last sync timestamp
+    if let Some(last_sync_ms) = sync_status.last_sync_ms {
+        return NetworkStatus::Synced { last_sync_ms };
+    }
+
+    // Have peers but never synced yet - show as syncing (conservative)
+    NetworkStatus::Syncing
+}
 
 /// Ping operation for health check
 ///
@@ -85,9 +126,24 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
             ConnectionStatus::Offline
         };
 
+        // Get sync status and compute unified network status
+        let sync_status = runtime.get_sync_status().await;
+        let network_status = compute_network_status(true, online_contacts, &sync_status);
+
         let core = app_core.read().await;
         let _ = core.emit(&*CONTACTS_SIGNAL, contacts_state).await;
         let _ = core.emit(&*CONNECTION_STATUS_SIGNAL, connection).await;
+        let _ = core.emit(&*NETWORK_STATUS_SIGNAL, network_status).await;
+        let _ = core
+            .emit(&*TRANSPORT_PEERS_SIGNAL, sync_status.connected_peers)
+            .await;
+    } else {
+        // No runtime - emit disconnected status
+        let core = app_core.read().await;
+        let _ = core
+            .emit(&*NETWORK_STATUS_SIGNAL, NetworkStatus::Disconnected)
+            .await;
+        let _ = core.emit(&*TRANSPORT_PEERS_SIGNAL, 0usize).await;
     }
 
     Ok(())

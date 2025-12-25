@@ -258,7 +258,7 @@ impl fmt::Display for AppError {
                 write!(f, "{} - {}", action, hint)
             }
             Self::Internal { source, message } => {
-                write!(f, "Internal error in {}: {}", source, message)
+                write!(f, "{}: {}", source, message)
             }
         }
     }
@@ -309,10 +309,7 @@ mod tests {
     #[test]
     fn test_internal_error() {
         let err = AppError::internal("reducer", "unexpected state transition");
-        assert_eq!(
-            err.to_string(),
-            "Internal error in reducer: unexpected state transition"
-        );
+        assert_eq!(err.to_string(), "reducer: unexpected state transition");
         assert_eq!(err.code(), "INTERNAL");
         assert!(!err.is_recoverable());
         assert_eq!(err.toast_level(), ToastSeverity::Error);

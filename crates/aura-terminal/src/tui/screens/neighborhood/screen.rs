@@ -229,13 +229,14 @@ pub fn TraversalInfo(props: &TraversalInfoProps) -> impl Into<AnyElement<'static
 ///
 /// The `view` field is a required struct that embeds all view state from TuiState.
 /// This makes it a **compile-time error** to forget any view state field.
+///
+/// ## Reactive Data Model
+///
+/// Domain data (neighborhood_name, blocks, depth) is NOT passed as props.
+/// Instead, the component subscribes to NEIGHBORHOOD_SIGNAL directly via AppCoreContext.
+/// This ensures a single source of truth and prevents stale data bugs.
 #[derive(Default, Props)]
 pub struct NeighborhoodScreenProps {
-    // === Domain data (from reactive signals) ===
-    pub neighborhood_name: String,
-    pub blocks: Vec<BlockSummary>,
-    pub depth: TraversalDepth,
-
     // === View state from TuiState (REQUIRED - compile-time enforced) ===
     /// All view state extracted from TuiState via `extract_neighborhood_view_props()`.
     /// This is a single struct field so forgetting any view state is a compile error.
@@ -293,65 +294,57 @@ pub fn NeighborhoodScreen(
     props: &NeighborhoodScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
-    // Try to get AppCoreContext for reactive signal subscription
-    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+    // Get AppCoreContext for reactive signal subscription (required for domain data)
+    let app_ctx = hooks.use_context::<AppCoreContext>();
 
-    // Initialize reactive state from props
-    let reactive_neighborhood_name = hooks.use_state({
-        let initial = props.neighborhood_name.clone();
-        move || initial
-    });
-    let reactive_blocks = hooks.use_state({
-        let initial = props.blocks.clone();
-        move || initial
-    });
-    let reactive_depth = hooks.use_state(|| props.depth);
+    // Initialize reactive state with defaults - will be populated by signal subscriptions
+    let reactive_neighborhood_name = hooks.use_state(String::new);
+    let reactive_blocks = hooks.use_state(Vec::new);
+    let reactive_depth = hooks.use_state(TraversalDepth::default);
 
-    // Subscribe to neighborhood signal updates if AppCoreContext is available
+    // Subscribe to neighborhood signal updates
     // Uses the unified ReactiveEffects system from aura-core
-    if let Some(ctx) = app_ctx {
-        hooks.use_future({
-            let mut reactive_neighborhood_name = reactive_neighborhood_name.clone();
-            let mut reactive_blocks = reactive_blocks.clone();
-            let mut reactive_depth = reactive_depth.clone();
-            let app_core = ctx.app_core.clone();
-            async move {
-                // Helper closure to convert NeighborhoodState to TUI types
-                let convert_neighborhood_state =
-                    |neighborhood_state: &aura_app::views::NeighborhoodState| {
-                        let home_id = &neighborhood_state.home_block_id;
+    hooks.use_future({
+        let mut reactive_neighborhood_name = reactive_neighborhood_name.clone();
+        let mut reactive_blocks = reactive_blocks.clone();
+        let mut reactive_depth = reactive_depth.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            // Helper closure to convert NeighborhoodState to TUI types
+            let convert_neighborhood_state =
+                |neighborhood_state: &aura_app::views::NeighborhoodState| {
+                    let home_id = &neighborhood_state.home_block_id;
 
-                        let blocks: Vec<BlockSummary> = neighborhood_state
-                            .neighbors
-                            .iter()
-                            .map(|n| convert_neighbor_block(n, home_id))
-                            .collect();
+                    let blocks: Vec<BlockSummary> = neighborhood_state
+                        .neighbors
+                        .iter()
+                        .map(|n| convert_neighbor_block(n, home_id))
+                        .collect();
 
-                        let depth = neighborhood_state
-                            .position
-                            .as_ref()
-                            .map(|p| convert_traversal_depth(p.depth))
-                            .unwrap_or(TraversalDepth::Interior);
+                    let depth = neighborhood_state
+                        .position
+                        .as_ref()
+                        .map(|p| convert_traversal_depth(p.depth))
+                        .unwrap_or(TraversalDepth::Interior);
 
-                        (neighborhood_state.home_block_name.clone(), blocks, depth)
-                    };
+                    (neighborhood_state.home_block_name.clone(), blocks, depth)
+                };
 
-                subscribe_signal_with_retry(
-                    app_core,
-                    &*NEIGHBORHOOD_SIGNAL,
-                    move |neighborhood_state| {
-                        let (name, blocks, depth) = convert_neighborhood_state(&neighborhood_state);
-                        reactive_neighborhood_name.set(name);
-                        reactive_blocks.set(blocks);
-                        reactive_depth.set(depth);
-                    },
-                )
-                .await;
-            }
-        });
-    }
+            subscribe_signal_with_retry(
+                app_core,
+                &*NEIGHBORHOOD_SIGNAL,
+                move |neighborhood_state| {
+                    let (name, blocks, depth) = convert_neighborhood_state(&neighborhood_state);
+                    reactive_neighborhood_name.set(name);
+                    reactive_blocks.set(blocks);
+                    reactive_depth.set(depth);
+                },
+            )
+            .await;
+        }
+    });
 
-    // Use reactive state for rendering
+    // Use reactive state for rendering (populated by signal subscription)
     let neighborhood_name = reactive_neighborhood_name.read().clone();
     let blocks = reactive_blocks.read().clone();
     let depth = reactive_depth.get();
@@ -384,33 +377,13 @@ pub fn NeighborhoodScreen(
     }
 }
 
-/// Run the neighborhood screen with sample data
+/// Run the neighborhood screen (requires AppCoreContext for domain data)
 pub async fn run_neighborhood_screen() -> std::io::Result<()> {
-    let blocks = vec![
-        BlockSummary::new("b1")
-            .with_name("My Block")
-            .with_residents(3)
-            .home(),
-        BlockSummary::new("b2")
-            .with_name("Alice's Block")
-            .with_residents(5)
-            .accessible(),
-        BlockSummary::new("b3")
-            .with_name("Bob's Block")
-            .with_residents(2)
-            .accessible(),
-        BlockSummary::new("b4").with_residents(8), // Full, locked
-        BlockSummary::new("b5")
-            .with_name("Community")
-            .with_residents(4)
-            .accessible(),
-    ];
-
+    // Note: This standalone runner won't have domain data without AppCoreContext.
+    // Domain data is obtained via signal subscriptions when context is available.
     element! {
         NeighborhoodScreen(
-            neighborhood_name: "Downtown".to_string(),
-            blocks: blocks,
-            depth: TraversalDepth::Street,
+            view: NeighborhoodViewProps::default(),
         )
     }
     .fullscreen()

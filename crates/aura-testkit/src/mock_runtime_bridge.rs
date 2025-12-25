@@ -430,6 +430,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             connected_peers: 0,
             last_sync_ms: Some(self.now_ms()),
             pending_facts: 0,
+            active_sessions: 0,
         }
     }
 

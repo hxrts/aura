@@ -5,6 +5,7 @@
 //! `aura-agent` provides the implementation.
 
 use crate::core::AuraAgent;
+use crate::handlers::InvitationService;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     BridgeDeviceInfo, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo,
@@ -402,17 +403,24 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let effects = self.agent.runtime().effects();
         let transport_stats = effects.get_transport_stats().await;
 
-        let is_running = if let Some(sync) = self.agent.runtime().sync() {
-            sync.is_running().await
-        } else {
-            false
-        };
+        let (is_running, active_sessions, last_sync_ms) =
+            if let Some(sync) = self.agent.runtime().sync() {
+                let health = sync.health().await;
+                (
+                    sync.is_running().await,
+                    health.as_ref().map(|h| h.active_sessions).unwrap_or(0),
+                    health.and_then(|h| h.last_sync),
+                )
+            } else {
+                (false, 0, None)
+            };
 
         SyncStatus {
             is_running,
             connected_peers: transport_stats.active_channels as usize,
-            last_sync_ms: None, // Would need to track this in SyncServiceManager
-            pending_facts: 0,   // Would need to track this in SyncServiceManager
+            last_sync_ms,
+            pending_facts: 0, // Would need to track this in SyncServiceManager
+            active_sessions,
         }
     }
 
@@ -1028,10 +1036,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::internal_error(format!("Create device invite: {e}")))?;
 
-        let enrollment_code = invitation_service
-            .export_code(&invitation.invitation_id)
-            .await
-            .map_err(|e| IntentError::internal_error(format!("Export device invite: {e}")))?;
+        // Use compile-time safe export since we already have the invitation
+        let enrollment_code = InvitationService::export_invitation(&invitation);
 
         Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {
             ceremony_id,

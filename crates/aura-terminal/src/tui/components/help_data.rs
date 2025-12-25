@@ -75,14 +75,8 @@ pub fn get_help_commands_for_screen(current_screen: Option<&str>) -> Vec<HelpCom
 pub fn get_help_commands() -> Vec<HelpCommand> {
     vec![
         // Global navigation
-        HelpCommand::new(
-            "1-6",
-            "1, 2, 3, 4, 5, 6",
-            "Switch screens (Block, Neighborhood, Chat, Contacts, Recovery, Settings)",
-            "Navigation",
-        ),
+        HelpCommand::new("1-6", "1, 2, 3, 4, 5, 6", "Switch screens", "Navigation"),
         HelpCommand::new("?", "?", "Show/hide help", "Navigation"),
-        HelpCommand::new("q", "q", "Quit application", "Navigation"),
         HelpCommand::new("Esc", "Esc", "Cancel/close modal", "Navigation"),
         HelpCommand::new("j/k", "j, k", "Move down/up in lists", "Navigation"),
         HelpCommand::new("h/l", "h, l", "Switch panels (left/right)", "Navigation"),

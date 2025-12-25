@@ -266,6 +266,7 @@ pub fn render_contacts_code_modal(contacts: &ContactsViewProps) -> Option<AnyEle
                         visible: true,
                         code: contacts.code_modal_code.clone(),
                         invitation_type: "Invitation".to_string(),
+                        copied: contacts.code_modal_copied,
                     )
                 }
             }
@@ -448,6 +449,7 @@ pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<An
                         is_complete: settings.device_enrollment_modal_is_complete,
                         has_failed: settings.device_enrollment_modal_has_failed,
                         error_message: settings.device_enrollment_modal_error_message.clone(),
+                        copied: settings.device_enrollment_modal_copied,
                     )
                 }
             }

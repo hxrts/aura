@@ -62,6 +62,8 @@ pub struct SyncStatus {
     pub last_sync_ms: Option<u64>,
     /// Pending facts waiting to be synced
     pub pending_facts: usize,
+    /// Number of active sync sessions (currently syncing with N peers)
+    pub active_sessions: usize,
 }
 
 /// Status of the runtime's rendezvous service

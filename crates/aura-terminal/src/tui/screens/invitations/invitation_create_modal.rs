@@ -72,7 +72,6 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
 
     // Type selection display
     let type_label = invitation_type.label();
-    let type_icon = invitation_type.icon();
 
     // Field focus colors
     let type_focused = focused_field == CreateInvitationField::Type;
@@ -100,19 +99,19 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     let message_pointer = if message_focused { "▸ " } else { "  " };
     let ttl_pointer = if ttl_focused { "▸ " } else { "  " };
 
-    // Message display (truncated if too long, show cursor when focused)
+    // Message display (truncated to fit input width, show cursor when focused)
     let message_display = if message_focused {
         if message.is_empty() {
             "│".to_string() // Cursor only
-        } else if message.len() > 38 {
-            format!("{}...│", &message[..35])
+        } else if message.len() > 11 {
+            format!("{}...│", &message[..8])
         } else {
             format!("{}│", message)
         }
     } else if message.is_empty() {
         "(optional)".to_string()
-    } else if message.len() > 40 {
-        format!("{}...", &message[..37])
+    } else if message.len() > 12 {
+        format!("{}...", &message[..9])
     } else {
         message.clone()
     };
@@ -127,16 +126,12 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
 
     // TTL display with arrows when focused
     let ttl_display = {
-        let base = if ttl_hours == 0 {
-            "Never".to_string()
-        } else if ttl_hours == 1 {
+        let base = if ttl_hours == 1 {
             "1 hour".to_string()
         } else if ttl_hours < 24 {
             format!("{} hours", ttl_hours)
         } else if ttl_hours == 24 {
             "1 day".to_string()
-        } else if ttl_hours < 168 {
-            format!("{} days", ttl_hours / 24)
         } else if ttl_hours == 168 {
             "1 week".to_string()
         } else {
@@ -149,11 +144,11 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
         }
     };
 
-    // Type display with arrows when focused
+    // Type display with arrows when focused (no icon)
     let type_display = if type_focused {
-        format!("◀ {} {} ▶", type_icon, type_label)
+        format!("◀ {} ▶", type_label)
     } else {
-        format!("{} {}", type_icon, type_label)
+        type_label.to_string()
     };
 
     element! {
@@ -218,6 +213,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                     }
                     View(
                         margin_left: 2,
+                        width: 18,
                         flex_direction: FlexDirection::Row,
                         gap: Spacing::XS,
                         border_style: Borders::INPUT,
@@ -234,11 +230,12 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                     View(flex_direction: FlexDirection::Row) {
                         Text(content: message_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
                         Text(content: "Message", color: if message_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                        Text(content: " - ", color: Theme::TEXT_MUTED)
+                        Text(content: "Personal note included with the invitation", color: Theme::TEXT_MUTED)
                     }
                     View(
-                        margin_top: Spacing::XS,
                         margin_left: 2,
-                        width: 100pct,
+                        width: 18,
                         border_style: Borders::INPUT,
                         border_color: message_border,
                         padding_left: Spacing::PANEL_PADDING,
@@ -253,10 +250,12 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                     View(flex_direction: FlexDirection::Row) {
                         Text(content: ttl_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
                         Text(content: "Expiry", color: if ttl_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                        Text(content: " - ", color: Theme::TEXT_MUTED)
+                        Text(content: "How long the invitation code remains valid", color: Theme::TEXT_MUTED)
                     }
                     View(
-                        margin_top: Spacing::XS,
                         margin_left: 2,
+                        width: 18,
                         border_style: Borders::INPUT,
                         border_color: ttl_border,
                         padding_left: Spacing::PANEL_PADDING,

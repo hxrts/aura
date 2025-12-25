@@ -29,7 +29,7 @@ pub enum IntentError {
     },
 
     /// Internal error during dispatch
-    #[error("Internal error: {reason}")]
+    #[error("{reason}")]
     InternalError {
         /// Reason for internal error
         reason: String,

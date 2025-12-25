@@ -20,6 +20,7 @@ Options (run all when none given):
   --todos          Incomplete code markers
   --registration   Handler composition vs direct instantiation
   --crypto         Crypto library usage boundaries (ed25519_dalek, OsRng, getrandom)
+  --reactive       TUI reactive data model (signals as source of truth, no domain data in props)
   --layer N[,M...] Filter output to specific layer numbers (1-8); repeatable
   --quick          Run fast checks only (skip todos, placeholders)
   -v, --verbose    Show more detail (allowlisted paths, etc.)
@@ -36,6 +37,7 @@ RUN_INVARIANTS=false
 RUN_TODOS=false
 RUN_REG=false
 RUN_CRYPTO=false
+RUN_REACTIVE=false
 RUN_QUICK=false
 VERBOSE=false
 LAYER_FILTERS=()
@@ -50,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --todos) RUN_ALL=false; RUN_TODOS=true ;;
     --registration) RUN_ALL=false; RUN_REG=true ;;
     --crypto) RUN_ALL=false; RUN_CRYPTO=true ;;
+    --reactive) RUN_ALL=false; RUN_REACTIVE=true ;;
     --layer)
       if [[ -z "${2-}" ]]; then
         echo "--layer requires a layer number (1-8)"; exit 1
@@ -77,6 +80,7 @@ if [ "$RUN_QUICK" = true ] && [ "$RUN_ALL" = true ]; then
   RUN_INVARIANTS=true
   RUN_REG=true
   RUN_CRYPTO=true
+  RUN_REACTIVE=true
   RUN_TODOS=false  # Skip todos in quick mode
   RUN_ALL=false
 fi
@@ -747,6 +751,68 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_CRYPTO" = true ]; then
   else
     info "Direct getrandom usage: none outside allowed locations"
   fi
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_REACTIVE" = true ]; then
+  section "Reactive data model — signals are source of truth; no domain data in props; components subscribe to signals (docs/115_cli_tui.md)"
+
+  # Check 1: Props structs with explicit "Domain data" comments
+  # This catches the current pattern where domain data is explicitly marked in props
+  domain_data_in_props=$(rg --no-heading -l "// === Domain data" crates/aura-terminal/src/tui/screens -g "*.rs" || true)
+  if [ -n "$domain_data_in_props" ]; then
+    # Count unique files with domain data in props
+    file_count=$(echo "$domain_data_in_props" | wc -l | tr -d ' ')
+    violation "[L7] Domain data in props: $file_count screen(s) pass domain data as props instead of subscribing to signals"
+    echo -e "    ${YELLOW}Files:${NC}"
+    echo "$domain_data_in_props" | while read -r f; do
+      [ -n "$f" ] && echo "      - $f"
+    done
+    echo -e "    ${YELLOW}Fix:${NC} Remove domain data fields from *ScreenProps; subscribe to signals in component"
+    echo -e "    ${YELLOW}Ref:${NC} docs/115_cli_tui.md §Reactive data model"
+  else
+    info "Domain data in props: none (all screens use signal subscriptions)"
+  fi
+
+  # Check 2: Known domain types in Props structs that should come from signals
+  # These types are domain data that should be subscribed to, not passed as props
+  domain_types="Vec<Contact>|Vec<Channel>|Vec<Message>|Vec<Guardian>|Vec<Device>|Vec<Resident>|Vec<BlockSummary>|Vec<PendingRequest>"
+
+  # Find Props structs containing domain types
+  # Use multiline matching to find struct definitions with these types
+  domain_type_hits=$(rg --no-heading "$domain_types" crates/aura-terminal/src/tui/screens -g "*screen.rs" || true)
+  # Filter to only Props structs (lines near "Props" or containing "pub ")
+  filtered_domain_types=$(echo "$domain_type_hits" | grep -E "pub |ScreenProps" | grep -v "// Subscribe" | grep -v "use_state" || true)
+
+  if [ -n "$filtered_domain_types" ]; then
+    type_count=$(echo "$filtered_domain_types" | wc -l | tr -d ' ')
+    if [ "$type_count" -gt 0 ]; then
+      verbose "Domain types in screen files (may be in Props or local state):"
+      echo "$filtered_domain_types" | head -5 | while read -r line; do
+        verbose "  $line"
+      done
+    fi
+  fi
+
+  # Check 3: Screen components that don't subscribe to any signals
+  # Each screen.rs should have at least one subscribe_signal_with_retry call
+  screens_dir="crates/aura-terminal/src/tui/screens"
+  if [ -d "$screens_dir" ]; then
+    missing_subscriptions=""
+    for screen_file in $(find "$screens_dir" -name "screen.rs" 2>/dev/null); do
+      # Check if the file has a signal subscription
+      if ! grep -q "subscribe_signal_with_retry\|SIGNAL" "$screen_file" 2>/dev/null; then
+        missing_subscriptions="${missing_subscriptions}${screen_file}"$'\n'
+      fi
+    done
+    if [ -n "$missing_subscriptions" ]; then
+      emit_hits "Screen without signal subscription (should subscribe to domain signals)" "$missing_subscriptions"
+    else
+      info "All screens subscribe to signals"
+    fi
+  fi
+
+  verbose "Reactive pattern: Props should only contain view state (focus, selection), callbacks, and configuration"
+  verbose "Domain data (contacts, messages, guardians, etc.) should come from signal subscriptions"
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then

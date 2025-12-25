@@ -48,9 +48,7 @@
 //! relationship invitations (contacts/guardian/channel).
 
 use aura_core::domain::FactValue;
-use aura_core::effects::{
-    JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects, TimeEffects,
-};
+use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::ThresholdSignature;
 use aura_core::{AuraError, AuraResult, Hash32};
@@ -211,13 +209,13 @@ pub struct InvitationCeremonyExecutor<E: InvitationCeremonyEffects> {
 
 /// Combined effects required for invitation ceremonies.
 pub trait InvitationCeremonyEffects:
-    JournalEffects + PhysicalTimeEffects + TimeEffects + ThresholdSigningEffects + Send + Sync
+    JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
 {
 }
 
 // Blanket implementation
 impl<T> InvitationCeremonyEffects for T where
-    T: JournalEffects + PhysicalTimeEffects + TimeEffects + ThresholdSigningEffects + Send + Sync
+    T: JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
 {
 }
 
@@ -262,7 +260,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let invitation_hash = Hash32::from_bytes(&invitation_bytes);
 
         // Generate nonce from current time
-        let nonce = self.effects.current_timestamp_ms().await;
+        let nonce = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         // Create ceremony ID
         let ceremony_id = InvitationCeremonyId::new(&prestate_hash, &invitation_hash, nonce);
@@ -299,7 +297,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     ) -> AuraResult<bool> {
         // Get current prestate before borrowing ceremonies
         let current_prestate = self.compute_prestate_hash().await?;
-        let now = self.effects.current_timestamp_ms().await;
+        let now = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
 
         // Perform validation and updates in a block to limit mutable borrow scope
         {
@@ -514,7 +512,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         ceremony_id: InvitationCeremonyId,
         sender: AuthorityId,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = InvitationFact::CeremonyInitiated {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             sender: sender.to_string(),
@@ -540,7 +538,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         &self,
         ceremony_id: InvitationCeremonyId,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = InvitationFact::CeremonyAcceptanceReceived {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             timestamp_ms,
@@ -565,7 +563,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         ceremony_id: InvitationCeremonyId,
         relationship_id: &str,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = InvitationFact::CeremonyCommitted {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             relationship_id: relationship_id.to_string(),
@@ -591,7 +589,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         ceremony_id: InvitationCeremonyId,
         reason: &str,
     ) -> AuraResult<()> {
-        let timestamp_ms = self.effects.current_timestamp_ms().await;
+        let timestamp_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
         let fact = InvitationFact::CeremonyAborted {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
             reason: reason.to_string(),

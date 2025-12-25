@@ -141,6 +141,14 @@ pub static CONNECTION_STATUS_SIGNAL: LazyLock<Signal<ConnectionStatus>> =
 pub static SYNC_STATUS_SIGNAL: LazyLock<Signal<SyncStatus>> =
     LazyLock::new(|| Signal::new("app:sync_status"));
 
+/// Signal for unified network status (combines transport and sync state)
+pub static NETWORK_STATUS_SIGNAL: LazyLock<Signal<NetworkStatus>> =
+    LazyLock::new(|| Signal::new("app:network_status"));
+
+/// Signal for transport-level peer count (active channels/connections)
+pub static TRANSPORT_PEERS_SIGNAL: LazyLock<Signal<usize>> =
+    LazyLock::new(|| Signal::new("app:transport_peers"));
+
 /// Signal for error notifications
 pub static ERROR_SIGNAL: LazyLock<Signal<Option<AppError>>> =
     LazyLock::new(|| Signal::new("app:error"));
@@ -193,6 +201,29 @@ pub enum SyncStatus {
     Failed {
         /// Error message
         message: String,
+    },
+}
+
+/// Unified network status combining transport and sync state.
+///
+/// This provides a single source of truth for the TUI footer status indicator,
+/// combining transport connectivity and journal sync state into 4 user-facing states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NetworkStatus {
+    /// No transport connections at all
+    #[default]
+    Disconnected,
+
+    /// Connected to transports but no peers found
+    NoPeers,
+
+    /// Connected with peers, journals catching up
+    Syncing,
+
+    /// Caught up with network, receiving real-time updates
+    Synced {
+        /// Last sync timestamp (ms since epoch)
+        last_sync_ms: u64,
     },
 }
 
@@ -298,6 +329,10 @@ pub async fn register_app_signals<R: ReactiveEffects>(handler: &R) -> Result<(),
     handler
         .register(&*SYNC_STATUS_SIGNAL, SyncStatus::default())
         .await?;
+    handler
+        .register(&*NETWORK_STATUS_SIGNAL, NetworkStatus::default())
+        .await?;
+    handler.register(&*TRANSPORT_PEERS_SIGNAL, 0usize).await?;
     handler.register(&*ERROR_SIGNAL, None).await?;
     handler.register(&*UNREAD_COUNT_SIGNAL, 0).await?;
     handler
@@ -380,6 +415,10 @@ pub async fn register_app_signals_with_queries<R: ReactiveEffects>(
     handler
         .register(&*SYNC_STATUS_SIGNAL, SyncStatus::default())
         .await?;
+    handler
+        .register(&*NETWORK_STATUS_SIGNAL, NetworkStatus::default())
+        .await?;
+    handler.register(&*TRANSPORT_PEERS_SIGNAL, 0usize).await?;
     handler.register(&*ERROR_SIGNAL, None).await?;
     handler.register(&*UNREAD_COUNT_SIGNAL, 0).await?;
 
@@ -455,6 +494,7 @@ mod tests {
             NEIGHBORHOOD_SIGNAL.id().to_string(),
             CONNECTION_STATUS_SIGNAL.id().to_string(),
             SYNC_STATUS_SIGNAL.id().to_string(),
+            NETWORK_STATUS_SIGNAL.id().to_string(),
             ERROR_SIGNAL.id().to_string(),
             UNREAD_COUNT_SIGNAL.id().to_string(),
         ];

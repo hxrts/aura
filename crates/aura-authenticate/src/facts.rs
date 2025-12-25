@@ -46,6 +46,8 @@ pub const AUTH_FACT_TYPE_ID: &str = "aura.authenticate.v1";
 pub enum AuthFact {
     /// An authentication challenge was generated
     ChallengeGenerated {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Unique session identifier
         session_id: String,
         /// Authority requesting authentication
@@ -62,6 +64,8 @@ pub enum AuthFact {
 
     /// An identity proof was submitted for verification
     ProofSubmitted {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Session ID from challenge
         session_id: String,
         /// Authority submitting proof
@@ -74,6 +78,8 @@ pub enum AuthFact {
 
     /// Authentication was successfully verified
     AuthVerified {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Session ID that was verified
         session_id: String,
         /// Authority that was authenticated
@@ -88,6 +94,8 @@ pub enum AuthFact {
 
     /// Authentication verification failed
     AuthFailed {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Session ID that failed
         session_id: String,
         /// Authority that failed authentication
@@ -100,6 +108,8 @@ pub enum AuthFact {
 
     /// A session ticket was issued
     SessionIssued {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Session ticket ID
         session_id: String,
         /// Authority the session was issued to
@@ -116,6 +126,8 @@ pub enum AuthFact {
 
     /// A session was explicitly revoked
     SessionRevoked {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Session ticket ID that was revoked
         session_id: String,
         /// Authority that revoked the session
@@ -128,6 +140,8 @@ pub enum AuthFact {
 
     /// Guardian approval was requested for recovery
     GuardianApprovalRequested {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Unique request identifier
         request_id: String,
         /// Account being recovered
@@ -150,6 +164,8 @@ pub enum AuthFact {
 
     /// A guardian approved a recovery request
     GuardianApproved {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Request ID being approved
         request_id: String,
         /// Guardian providing approval
@@ -164,6 +180,8 @@ pub enum AuthFact {
 
     /// A guardian denied a recovery request
     GuardianDenied {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Request ID being denied
         request_id: String,
         /// Guardian providing denial
@@ -176,6 +194,8 @@ pub enum AuthFact {
 
     /// Recovery operation completed successfully
     RecoveryCompleted {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Request ID that completed
         request_id: String,
         /// Account that was recovered
@@ -192,6 +212,8 @@ pub enum AuthFact {
 
     /// Recovery operation failed
     RecoveryFailed {
+        /// Relational context for this auth fact
+        context_id: ContextId,
         /// Request ID that failed
         request_id: String,
         /// Account for which recovery failed
@@ -301,9 +323,47 @@ impl AuthFact {
                 | AuthFact::RecoveryFailed { .. }
         )
     }
+    /// Get the context ID associated with this fact
+    pub fn context_id(&self) -> ContextId {
+        match self {
+            AuthFact::ChallengeGenerated { context_id, .. } => *context_id,
+            AuthFact::ProofSubmitted { context_id, .. } => *context_id,
+            AuthFact::AuthVerified { context_id, .. } => *context_id,
+            AuthFact::AuthFailed { context_id, .. } => *context_id,
+            AuthFact::SessionIssued { context_id, .. } => *context_id,
+            AuthFact::SessionRevoked { context_id, .. } => *context_id,
+            AuthFact::GuardianApprovalRequested { context_id, .. } => *context_id,
+            AuthFact::GuardianApproved { context_id, .. } => *context_id,
+            AuthFact::GuardianDenied { context_id, .. } => *context_id,
+            AuthFact::RecoveryCompleted { context_id, .. } => *context_id,
+            AuthFact::RecoveryFailed { context_id, .. } => *context_id,
+        }
+    }
 }
 
 // =============================================================================
+impl DomainFact for AuthFact {
+    fn type_id(&self) -> &'static str {
+        AUTH_FACT_TYPE_ID
+    }
+
+    fn context_id(&self) -> ContextId {
+        self.context_id()
+    }
+
+    #[allow(clippy::expect_used)]
+    fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("AuthFact must serialize")
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        serde_json::from_slice(bytes).ok()
+    }
+}
+
 // Fact Reducer
 // =============================================================================
 
@@ -393,6 +453,78 @@ impl AuthFactReducer {
     }
 }
 
+impl FactReducer for AuthFactReducer {
+    fn handles_type(&self) -> &'static str {
+        AUTH_FACT_TYPE_ID
+    }
+
+    fn reduce(
+        &self,
+        context_id: ContextId,
+        binding_type: &str,
+        binding_data: &[u8],
+    ) -> Option<RelationalBinding> {
+        if binding_type != AUTH_FACT_TYPE_ID {
+            return None;
+        }
+
+        let fact: AuthFact = serde_json::from_slice(binding_data).ok()?;
+
+        let (sub_type, data) = match &fact {
+            AuthFact::ChallengeGenerated { session_id, .. } => (
+                "auth-challenge-generated".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::ProofSubmitted { session_id, .. } => (
+                "auth-proof-submitted".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::AuthVerified { session_id, .. } => (
+                "auth-verified".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::AuthFailed { session_id, .. } => (
+                "auth-failed".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::SessionIssued { session_id, .. } => (
+                "auth-session-issued".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::SessionRevoked { session_id, .. } => (
+                "auth-session-revoked".to_string(),
+                session_id.as_bytes().to_vec(),
+            ),
+            AuthFact::GuardianApprovalRequested { request_id, .. } => (
+                "auth-guardian-approval-requested".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+            AuthFact::GuardianApproved { request_id, .. } => (
+                "auth-guardian-approved".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+            AuthFact::GuardianDenied { request_id, .. } => (
+                "auth-guardian-denied".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+            AuthFact::RecoveryCompleted { request_id, .. } => (
+                "auth-recovery-completed".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+            AuthFact::RecoveryFailed { request_id, .. } => (
+                "auth-recovery-failed".to_string(),
+                request_id.as_bytes().to_vec(),
+            ),
+        };
+
+        Some(RelationalBinding {
+            binding_type: RelationalBindingType::Generic(sub_type),
+            context_id,
+            data,
+        })
+    }
+}
+
 /// Delta produced by reducing an authentication fact
 #[derive(Debug, Clone)]
 pub enum AuthFactDelta {
@@ -456,9 +588,14 @@ mod tests {
         DeviceId::from_bytes([2u8; 32])
     }
 
+    fn test_context_id() -> ContextId {
+        ContextId::new_from_entropy([9u8; 32])
+    }
+
     #[test]
     fn test_challenge_generated_fact() {
         let fact = AuthFact::ChallengeGenerated {
+            context_id: test_context_id(),
             session_id: "session_123".to_string(),
             authority_id: test_authority(),
             device_id: Some(test_device()),
@@ -480,6 +617,7 @@ mod tests {
     #[test]
     fn test_auth_verified_fact() {
         let fact = AuthFact::AuthVerified {
+            context_id: test_context_id(),
             session_id: "session_123".to_string(),
             authority_id: test_authority(),
             device_id: Some(test_device()),
@@ -494,6 +632,7 @@ mod tests {
     #[test]
     fn test_auth_failed_fact() {
         let fact = AuthFact::AuthFailed {
+            context_id: test_context_id(),
             session_id: "session_123".to_string(),
             authority_id: test_authority(),
             reason: "Invalid signature".to_string(),
@@ -507,6 +646,7 @@ mod tests {
     #[test]
     fn test_guardian_approval_requested_fact() {
         let fact = AuthFact::GuardianApprovalRequested {
+            context_id: test_context_id(),
             request_id: "recovery_123".to_string(),
             account_id: test_authority(),
             requester_id: test_authority(),
@@ -527,6 +667,7 @@ mod tests {
         let reducer = AuthFactReducer::new();
 
         let fact = AuthFact::SessionIssued {
+            context_id: test_context_id(),
             session_id: "session_123".to_string(),
             authority_id: test_authority(),
             device_id: Some(test_device()),

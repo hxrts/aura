@@ -8,6 +8,7 @@
 //! - `screens/recovery/` - GuardianSetupModal, ThresholdModal
 
 mod account_setup_modal_template;
+mod code_display_modal;
 mod command_palette;
 mod contact_select_modal_template;
 #[cfg(feature = "development")]
@@ -37,6 +38,7 @@ mod textarea;
 mod toast;
 
 pub use account_setup_modal_template::{AccountSetupModal, AccountSetupState};
+pub use code_display_modal::{copy_to_clipboard, CodeDisplayModal, CodeDisplayStatus};
 pub use command_palette::{CommandItem, CommandPalette, PaletteCommand};
 pub use contact_select_modal_template::{ContactSelectModal, ContactSelectState};
 #[cfg(feature = "development")]

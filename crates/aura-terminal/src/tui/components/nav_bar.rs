@@ -6,7 +6,7 @@
 
 use crate::tui::layout::dim;
 use crate::tui::screens::Screen;
-use crate::tui::theme::{Spacing, Theme};
+use crate::tui::theme::Theme;
 use iocraft::prelude::*;
 
 /// Width of each nav column (6 columns across 80 chars)
@@ -42,7 +42,6 @@ pub fn NavBar(props: &NavBarProps) -> impl Into<AnyElement<'static>> {
                 width: 100pct,
                 height: 1,
                 flex_direction: FlexDirection::Row,
-                padding_left: Spacing::SM,
             ) {
                 #(Screen::all().iter().map(|&screen| {
                     let is_active = screen == active;

@@ -183,35 +183,18 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 }
             }
 
-            // Footer with hints and button (or spinner when creating)
+            // Footer with centered button (or spinner when creating)
             View(
                 width: 100pct,
                 height: 4,
                 flex_shrink: 0.0,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                padding: Spacing::PANEL_PADDING,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                #(if creating {
-                    // Creating state - show spinner hint on left, spinner button on right
-                    Some(element! {
-                        View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                            Text(content: "Creating account...", color: Theme::TEXT_MUTED)
-                        }
-                    })
-                } else {
-                    // Normal state - show Enter hint
-                    Some(element! {
-                        View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                            Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
-                            Text(content: "to create", color: Theme::TEXT_MUTED)
-                        }
-                    })
-                })
                 View(
                     padding_left: Spacing::SM,
                     padding_right: Spacing::SM,
@@ -221,26 +204,31 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     #(if creating && props.show_spinner {
                         // Show spinner (debounced - only after 300ms)
                         Some(element! {
-                            Text(
-                                content: "Creating...",
-                                color: Theme::SECONDARY,
-                            )
+                            View(flex_direction: FlexDirection::Row) {
+                                Text(
+                                    content: "Creating...",
+                                    color: Theme::SECONDARY,
+                                )
+                            }
                         })
                     } else if creating {
                         // Creating but spinner not yet visible (under 300ms)
                         Some(element! {
-                            Text(
-                                content: "Create Account",
-                                color: Theme::TEXT_MUTED,
-                            )
+                            View(flex_direction: FlexDirection::Row) {
+                                Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
+                                Text(content: " to Create Account", color: Theme::TEXT_MUTED)
+                            }
                         })
                     } else {
-                        // Normal state
+                        // Normal state - "Enter to Create Account" with Enter in yellow
                         Some(element! {
-                            Text(
-                                content: "Create Account",
-                                color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
-                            )
+                            View(flex_direction: FlexDirection::Row) {
+                                Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
+                                Text(
+                                    content: " to Create Account",
+                                    color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                                )
+                            }
                         })
                     })
                 }
