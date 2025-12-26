@@ -157,6 +157,12 @@ pub enum DispatchCommand {
     ImportDeviceEnrollmentOnMobile {
         code: String,
     },
+    /// Open authority picker modal (for switching between authorities)
+    OpenAuthorityPicker,
+    /// Switch to a different authority
+    SwitchAuthority {
+        authority_id: String,
+    },
 
     // Neighborhood screen
     EnterBlock,

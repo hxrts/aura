@@ -125,6 +125,9 @@ pub fn handle_queued_modal_key(
         QueuedModal::SettingsRemoveDevice(modal_state) => {
             handle_settings_remove_device_key_queue(state, commands, key, modal_state);
         }
+        QueuedModal::AuthorityPicker(modal_state) => {
+            handle_authority_picker_key_queue(state, commands, key, modal_state);
+        }
         QueuedModal::ChatMemberSelect(modal_state) => {
             handle_chat_member_select_key_queue(state, commands, key, modal_state);
         }
@@ -776,8 +779,11 @@ fn handle_device_import_key_queue(
     // Demo shortcut: Ctrl+M fills the Mobile device enrollment code.
     let is_ctrl_m =
         key.modifiers.ctrl() && matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'));
+    let is_enter_autofill = key.code == KeyCode::Enter
+        && modal_state.code.is_empty()
+        && !state.settings.demo_mobile_device_id.is_empty();
 
-    if is_ctrl_m {
+    if is_ctrl_m || is_enter_autofill {
         state.toast_queue.dismiss();
         let code = state.settings.last_device_enrollment_code.clone();
         if !code.is_empty() {
@@ -787,11 +793,15 @@ fn handle_device_import_key_queue(
                 }
             });
         } else {
+            state.settings.pending_mobile_enrollment_autofill = true;
+            commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
+                name: "Mobile".to_string(),
+            }));
             state.next_toast_id += 1;
             state.toast_queue.enqueue(QueuedToast::new(
                 state.next_toast_id,
-                "No enrollment code yet. Start Add Device first.",
-                ToastLevel::Warning,
+                "Generating Mobile enrollment code…",
+                ToastLevel::Info,
             ));
         }
         return;
@@ -1325,6 +1335,52 @@ fn handle_settings_remove_device_key_queue(
             commands.push(TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
                 device_id: modal_state.device_id.clone(),
             }));
+            state.modal_queue.dismiss();
+        }
+        _ => {}
+    }
+}
+
+/// Handle authority picker modal keys (queue-based)
+///
+/// Similar to contact select but dispatches SwitchAuthority on selection.
+fn handle_authority_picker_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: ContactSelectModalState,
+) {
+    let item_count = modal_state.contacts.len();
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::AuthorityPicker(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
+                }
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::AuthorityPicker(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
+                }
+            });
+        }
+        KeyCode::Enter => {
+            if item_count > 0 {
+                if let Some((authority_id, _)) =
+                    modal_state.contacts.get(modal_state.selected_index)
+                {
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::SwitchAuthority {
+                        authority_id: authority_id.clone(),
+                    }));
+                }
+            }
             state.modal_queue.dismiss();
         }
         _ => {}

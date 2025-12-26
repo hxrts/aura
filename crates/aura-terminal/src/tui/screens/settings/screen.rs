@@ -28,7 +28,7 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
 use crate::tui::theme::Theme;
-use crate::tui::types::{Device, MfaPolicy, RecoveryStatus, SettingsSection};
+use crate::tui::types::{AuthoritySubSection, Device, MfaPolicy, RecoveryStatus, SettingsSection};
 
 // =============================================================================
 // Callback Types (specialized, kept local)
@@ -291,24 +291,74 @@ pub fn SettingsScreen(
                 ("[Enter] Start recovery request".into(), Theme::SECONDARY),
             ]
         }
-        SettingsSection::Mfa => {
-            vec![
-                ("Multifactor Authority".into(), Theme::SECONDARY),
-                (String::new(), Theme::TEXT),
-                (
-                    "Create a threshold signer set across your devices".into(),
-                    Theme::TEXT_MUTED,
-                ),
-                (
-                    "to approve sensitive operations.".into(),
-                    Theme::TEXT_MUTED,
-                ),
-                (String::new(), Theme::TEXT),
-                (format!("Policy: {}", current_mfa.name()), Theme::TEXT_MUTED),
-                (current_mfa.description().into(), Theme::TEXT_MUTED),
-                (String::new(), Theme::TEXT),
-                ("[Enter] Configure multifactor".into(), Theme::SECONDARY),
-            ]
+        SettingsSection::Authority => {
+            // Get authority state from props
+            let authority_sub = props.view.authority_sub_section;
+            let authorities = &props.view.authorities;
+            let current_auth_idx = props.view.current_authority_index;
+
+            // Get current authority info if available
+            let current_auth = authorities.get(current_auth_idx);
+            let has_multiple = authorities.len() > 1;
+
+            match authority_sub {
+                AuthoritySubSection::Info => {
+                    let mut lines = vec![];
+
+                    // Show current authority info
+                    if let Some(auth) = current_auth {
+                        lines.push((format!("Authority: {}", auth.display_name), Theme::SECONDARY));
+                        lines.push((format!("ID: {}", auth.short_id), Theme::TEXT_MUTED));
+                    } else {
+                        lines.push(("No authority configured".into(), Theme::WARNING));
+                    }
+
+                    lines.push((String::new(), Theme::TEXT));
+                    lines.push((
+                        "Your authority represents your identity".into(),
+                        Theme::TEXT_MUTED,
+                    ));
+                    lines.push((
+                        "and controls access to your data.".into(),
+                        Theme::TEXT_MUTED,
+                    ));
+
+                    // Switch authority hint (if multiple)
+                    if has_multiple {
+                        lines.push((String::new(), Theme::TEXT));
+                        lines.push((
+                            format!("{} authorities available", authorities.len()),
+                            Theme::TEXT_MUTED,
+                        ));
+                        lines.push(("[s] Switch authority".into(), Theme::SECONDARY));
+                    }
+
+                    lines.push((String::new(), Theme::TEXT));
+                    lines.push(("[j/k] Navigate sections".into(), Theme::TEXT_MUTED));
+
+                    lines
+                }
+                AuthoritySubSection::Mfa => {
+                    vec![
+                        ("Multifactor Authentication".into(), Theme::SECONDARY),
+                        (String::new(), Theme::TEXT),
+                        (
+                            "Create a threshold signer set across your devices".into(),
+                            Theme::TEXT_MUTED,
+                        ),
+                        (
+                            "to approve sensitive operations.".into(),
+                            Theme::TEXT_MUTED,
+                        ),
+                        (String::new(), Theme::TEXT),
+                        (format!("Policy: {}", current_mfa.name()), Theme::TEXT),
+                        (current_mfa.description().into(), Theme::TEXT_MUTED),
+                        (String::new(), Theme::TEXT),
+                        ("[Enter] Configure multifactor".into(), Theme::SECONDARY),
+                        ("[j/k] Navigate sections".into(), Theme::TEXT_MUTED),
+                    ]
+                }
+            }
         }
     };
 
@@ -333,7 +383,7 @@ pub fn SettingsScreen(
                         SimpleSelectableItem(label: "Guardian Threshold".to_string(), selected: current_section == SettingsSection::Threshold)
                         SimpleSelectableItem(label: "Request Recovery".to_string(), selected: current_section == SettingsSection::Recovery)
                         SimpleSelectableItem(label: "Devices".to_string(), selected: current_section == SettingsSection::Devices)
-                        SimpleSelectableItem(label: "Multifactor Auth".to_string(), selected: current_section == SettingsSection::Mfa)
+                        SimpleSelectableItem(label: "Authority".to_string(), selected: current_section == SettingsSection::Authority)
                     }
                 }
 

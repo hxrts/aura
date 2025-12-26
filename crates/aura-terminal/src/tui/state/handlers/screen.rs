@@ -300,6 +300,11 @@ pub fn handle_neighborhood_key(
 /// Handle settings screen key events
 pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
     let previous_section = state.settings.section;
+
+    // Handle Authority panel sub-section navigation specially
+    let in_authority_detail =
+        state.settings.section == SettingsSection::Authority && state.settings.focus.is_detail();
+
     match key.code {
         KeyCode::Left | KeyCode::Char('h') => {
             state.settings.focus = state.settings.focus.toggle();
@@ -310,20 +315,28 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
         KeyCode::Up | KeyCode::Char('k') => {
             if state.settings.focus.is_list() {
                 state.settings.section = state.settings.section.prev();
+            } else if in_authority_detail {
+                // Navigate between sub-sections within Authority panel
+                state.settings.authority_sub_section =
+                    state.settings.authority_sub_section.prev();
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
             if state.settings.focus.is_list() {
                 state.settings.section = state.settings.section.next();
+            } else if in_authority_detail {
+                // Navigate between sub-sections within Authority panel
+                state.settings.authority_sub_section =
+                    state.settings.authority_sub_section.next();
             }
         }
         KeyCode::Char(' ') => {
-            if state.settings.section == SettingsSection::Mfa {
+            if state.settings.section == SettingsSection::Authority {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::OpenMfaSetup));
             }
         }
         KeyCode::Char('m') => {
-            if state.settings.section == SettingsSection::Mfa {
+            if state.settings.section == SettingsSection::Authority {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::OpenMfaSetup));
             }
         }
@@ -351,8 +364,22 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 SettingsSection::Recovery => {
                     commands.push(TuiCommand::Dispatch(DispatchCommand::StartRecovery));
                 }
-                SettingsSection::Mfa => {
-                    commands.push(TuiCommand::Dispatch(DispatchCommand::OpenMfaSetup));
+                SettingsSection::Authority => {
+                    // Action depends on sub-section
+                    use crate::tui::types::AuthoritySubSection;
+                    match state.settings.authority_sub_section {
+                        AuthoritySubSection::Info => {
+                            // Open authority picker if multiple authorities
+                            if state.settings.authorities.len() > 1 {
+                                commands.push(TuiCommand::Dispatch(
+                                    DispatchCommand::OpenAuthorityPicker,
+                                ));
+                            }
+                        }
+                        AuthoritySubSection::Mfa => {
+                            commands.push(TuiCommand::Dispatch(DispatchCommand::OpenMfaSetup));
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -378,48 +405,37 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                     .enqueue(QueuedModal::SettingsDeviceImport(
                         ImportInvitationModalState::default(),
                     ));
+                if !state.settings.demo_mobile_device_id.is_empty() {
+                    state.next_toast_id += 1;
+                    state.toast_queue.enqueue(QueuedToast::new(
+                        state.next_toast_id,
+                        "[DEMO] Press Ctrl+m to auto-fill the Mobile device code",
+                        ToastLevel::Info,
+                    ));
+                }
             }
         }
         KeyCode::Char('s') => {
             if state.settings.section == SettingsSection::Recovery {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::StartRecovery));
+            } else if state.settings.section == SettingsSection::Authority {
+                // Switch authority - open picker if multiple authorities available
+                if state.settings.authorities.len() > 1 {
+                    commands
+                        .push(TuiCommand::Dispatch(DispatchCommand::OpenAuthorityPicker));
+                }
             }
         }
         _ => {}
     }
 
-    if key.modifiers.ctrl()
-        && state.settings.section == SettingsSection::Devices
-        && matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'))
-    {
-        if !state.settings.last_device_enrollment_code.is_empty() {
-            state
-                .modal_queue
-                .enqueue(QueuedModal::SettingsDeviceImport(
-                    ImportInvitationModalState::with_code(
-                        &state.settings.last_device_enrollment_code,
-                    ),
-                ));
-        } else {
-            state.next_toast_id += 1;
-            state.toast_queue.enqueue(QueuedToast::new(
-                state.next_toast_id,
-                "Start device enrollment to generate a code first",
-                ToastLevel::Warning,
-            ));
-        }
-    }
+    // Demo shortcuts for device enrollment import are handled in the modal.
 
     if previous_section != state.settings.section
         && state.settings.section == SettingsSection::Devices
         && !state.contacts.demo_alice_code.is_empty()
     {
-        state.next_toast_id += 1;
-        state.toast_queue.enqueue(QueuedToast::new(
-            state.next_toast_id,
-            "[DEMO] Press Ctrl+m in the import modal to auto-fill the Mobile code",
-            ToastLevel::Info,
-        ));
+        // Demo hint now appears when the enrollment code modal opens.
     }
 }
 

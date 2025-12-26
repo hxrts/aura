@@ -131,8 +131,11 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         ),
         // Settings screen
         HelpCommand::new("h/l", "h, l", "Switch panels", "Settings"),
+        HelpCommand::new("j/k", "j, k", "Navigate sections/sub-sections", "Settings"),
         HelpCommand::new("Space", "Space", "Toggle option/edit field", "Settings"),
         HelpCommand::new("Enter", "Enter", "Confirm selection", "Settings"),
+        HelpCommand::new("s", "s", "Switch authority (if multiple)", "Settings"),
+        HelpCommand::new("m", "m", "Configure multifactor auth", "Settings"),
         // Notifications screen
         HelpCommand::new("j/k", "j, k", "Move through notifications", "Notifications"),
         HelpCommand::new("h/l", "h, l", "Switch panels", "Notifications"),

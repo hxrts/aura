@@ -566,7 +566,7 @@ pub enum SettingsSection {
     Threshold,
     Recovery,
     Devices,
-    Mfa,
+    Authority,
 }
 
 impl SettingsSection {
@@ -576,7 +576,7 @@ impl SettingsSection {
             Self::Threshold,
             Self::Recovery,
             Self::Devices,
-            Self::Mfa,
+            Self::Authority,
         ]
     }
 
@@ -586,7 +586,7 @@ impl SettingsSection {
             Self::Threshold => "Guardian Threshold",
             Self::Recovery => "Request Recovery",
             Self::Devices => "Devices",
-            Self::Mfa => "Multifactor Auth",
+            Self::Authority => "Authority",
         }
     }
 
@@ -596,7 +596,7 @@ impl SettingsSection {
             Self::Threshold => "Configure guardians for account recovery",
             Self::Recovery => "Request account recovery from guardians",
             Self::Devices => "Manage devices linked to your account",
-            Self::Mfa => "Set multifactor authentication requirements",
+            Self::Authority => "Manage your authority and multifactor settings",
         }
     }
 
@@ -605,19 +605,85 @@ impl SettingsSection {
             Self::Profile => Self::Threshold,
             Self::Threshold => Self::Recovery,
             Self::Recovery => Self::Devices,
-            Self::Devices => Self::Mfa,
-            Self::Mfa => Self::Profile,
+            Self::Devices => Self::Authority,
+            Self::Authority => Self::Profile,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Profile => Self::Mfa,
+            Self::Profile => Self::Authority,
             Self::Threshold => Self::Profile,
             Self::Recovery => Self::Threshold,
             Self::Devices => Self::Recovery,
-            Self::Mfa => Self::Devices,
+            Self::Authority => Self::Devices,
         }
+    }
+}
+
+/// Sub-section within the Authority panel
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AuthoritySubSection {
+    #[default]
+    Info,
+    Mfa,
+}
+
+impl AuthoritySubSection {
+    pub fn all() -> &'static [Self] {
+        &[Self::Info, Self::Mfa]
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Info => "Authority Info",
+            Self::Mfa => "Multifactor Auth",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Info => Self::Mfa,
+            Self::Mfa => Self::Info,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Info => Self::Mfa,
+            Self::Mfa => Self::Info,
+        }
+    }
+}
+
+/// Authority information for display
+#[derive(Clone, Debug, Default)]
+pub struct AuthorityInfo {
+    pub id: String,
+    pub display_name: String,
+    pub short_id: String,
+    pub is_current: bool,
+}
+
+impl AuthorityInfo {
+    pub fn new(id: impl Into<String>, display_name: impl Into<String>) -> Self {
+        let id_str = id.into();
+        let short_id = if id_str.len() > 8 {
+            id_str[..8].to_string()
+        } else {
+            id_str.clone()
+        };
+        Self {
+            id: id_str,
+            display_name: display_name.into(),
+            short_id,
+            is_current: false,
+        }
+    }
+
+    pub fn current(mut self) -> Self {
+        self.is_current = true;
+        self
     }
 }
 

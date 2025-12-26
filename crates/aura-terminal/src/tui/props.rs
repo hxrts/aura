@@ -395,7 +395,7 @@ pub fn extract_notifications_view_props(state: &TuiState) -> NotificationsViewPr
 // Settings Screen Props Extraction
 // ============================================================================
 
-use crate::tui::types::{MfaPolicy, SettingsSection};
+use crate::tui::types::{AuthorityInfo, AuthoritySubSection, MfaPolicy, SettingsSection};
 
 /// View state extracted from TuiState for SettingsScreen
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -404,6 +404,14 @@ pub struct SettingsViewProps {
     pub section: SettingsSection,
     pub selected_index: usize,
     pub mfa_policy: MfaPolicy,
+    // Authority panel state
+    pub authority_sub_section: AuthoritySubSection,
+    pub authorities: Vec<AuthorityInfo>,
+    pub current_authority_index: usize,
+    // Authority picker modal
+    pub authority_picker_modal_visible: bool,
+    pub authority_picker_modal_contacts: Vec<(String, String)>,
+    pub authority_picker_modal_selected_index: usize,
     // Display name modal (user's own display name)
     pub display_name_modal_visible: bool,
     pub display_name_modal_value: String,
@@ -449,6 +457,17 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         Some(QueuedModal::SettingsDisplayName(s)) => (true, s.value.clone()),
         _ => (false, String::new()),
     };
+
+    // Authority picker modal
+    let (authority_picker_visible, authority_picker_contacts, authority_picker_selected) =
+        match state.modal_queue.current() {
+            Some(QueuedModal::AuthorityPicker(s)) => (
+                true,
+                s.contacts.clone(),
+                s.selected_index,
+            ),
+            _ => (false, vec![], 0),
+        };
 
     let (add_device_visible, add_device_name) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsAddDevice(s)) => (true, s.name.clone()),
@@ -566,6 +585,14 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         section: state.settings.section,
         selected_index: state.settings.selected_index,
         mfa_policy: state.settings.mfa_policy,
+        // Authority panel state
+        authority_sub_section: state.settings.authority_sub_section,
+        authorities: state.settings.authorities.clone(),
+        current_authority_index: state.settings.current_authority_index,
+        // Authority picker modal (from queue)
+        authority_picker_modal_visible: authority_picker_visible,
+        authority_picker_modal_contacts: authority_picker_contacts,
+        authority_picker_modal_selected_index: authority_picker_selected,
         // Display name modal (from queue)
         display_name_modal_visible: display_name_visible,
         display_name_modal_value: display_name_value,

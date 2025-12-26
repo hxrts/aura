@@ -2,7 +2,7 @@
 
 use super::KeyRotationCeremonyUiState;
 use crate::tui::navigation::TwoPanelFocus;
-use crate::tui::types::{MfaPolicy, SettingsSection};
+use crate::tui::types::{AuthorityInfo, AuthoritySubSection, MfaPolicy, SettingsSection};
 
 /// Settings screen state
 #[derive(Clone, Debug, Default)]
@@ -19,6 +19,16 @@ pub struct SettingsViewState {
     pub last_device_enrollment_code: String,
     /// Demo Mobile device id (for MFA shortcuts)
     pub demo_mobile_device_id: String,
+    /// Whether to auto-fill the next device enrollment code into the import modal
+    pub pending_mobile_enrollment_autofill: bool,
+
+    // === Authority panel state ===
+    /// Sub-section within Authority panel (Info or Mfa)
+    pub authority_sub_section: AuthoritySubSection,
+    /// Available authorities for this device
+    pub authorities: Vec<AuthorityInfo>,
+    /// Index of the currently active authority in the authorities list
+    pub current_authority_index: usize,
     // Note: Modal state is now stored in ModalQueue, not here.
     // Use modal_queue.enqueue(QueuedModal::SettingsDisplayName/AddDevice/RemoveDevice(...)) to show modals.
     // For threshold/guardian changes, use OpenGuardianSetup dispatch which shows GuardianSetup modal.

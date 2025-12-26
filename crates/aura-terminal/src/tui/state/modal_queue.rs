@@ -103,6 +103,9 @@ pub enum QueuedModal {
     /// Confirm device removal
     SettingsRemoveDevice(ConfirmRemoveModalState),
 
+    /// Authority picker (switch between authorities on this device)
+    AuthorityPicker(ContactSelectModalState),
+
     // ========================================================================
     // Neighborhood Screen Modals
     // ========================================================================

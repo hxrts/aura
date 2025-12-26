@@ -24,6 +24,7 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use aura_app::signal_defs::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::workflows::settings::refresh_settings_from_runtime;
 use aura_app::workflows::{
     cancel_key_rotation_ceremony, monitor_key_rotation_ceremony,
     start_device_threshold_ceremony, start_guardian_ceremony,
@@ -480,6 +481,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     if let Some(rx_holder) = update_rx_holder {
         hooks.use_future({
             let mut display_name_state = display_name_state.clone();
+            let app_core = app_ctx.app_core.clone();
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let mut tui = tui.clone();
             async move {
@@ -547,15 +549,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             tui.with_mut(|state| {
                                 state.settings.last_device_enrollment_code =
                                     enrollment_code.clone();
-                                state.modal_queue.enqueue(
-                                    crate::tui::state_machine::QueuedModal::SettingsDeviceEnrollment(
-                                        crate::tui::state_machine::DeviceEnrollmentCeremonyModalState::started(
-                                            ceremony_id,
-                                            device_name,
-                                            enrollment_code,
+                                if state.settings.pending_mobile_enrollment_autofill {
+                                    state.settings.pending_mobile_enrollment_autofill = false;
+                                    state.modal_queue.update_active(|modal| {
+                                        if let crate::tui::state_machine::QueuedModal::SettingsDeviceImport(ref mut s) = modal {
+                                            s.code = enrollment_code.clone();
+                                        }
+                                    });
+                                } else {
+                                    state.modal_queue.enqueue(
+                                        crate::tui::state_machine::QueuedModal::SettingsDeviceEnrollment(
+                                            crate::tui::state_machine::DeviceEnrollmentCeremonyModalState::started(
+                                                ceremony_id,
+                                                device_name,
+                                                enrollment_code,
+                                            ),
                                         ),
-                                    ),
-                                );
+                                    );
+                                }
                             });
                         }
                         UiUpdate::KeyRotationCeremonyStatus {
@@ -603,6 +614,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     "Device enrollment complete".to_string(),
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
+                                                let app_core = app_core.raw().clone();
+                                                tokio::spawn(async move {
+                                                    let _ = refresh_settings_from_runtime(&app_core).await;
+                                                });
                                             }
                                         }
                                     } else if let crate::tui::state_machine::QueuedModal::GuardianSetup(ref mut s) = modal {
@@ -683,6 +698,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
                                                 dismiss_ceremony_started_toast = true;
+                                                if matches!(
+                                                    kind,
+                                                    aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment
+                                                        | aura_app::runtime_bridge::CeremonyKind::DeviceRemoval
+                                                        | aura_app::runtime_bridge::CeremonyKind::DeviceRotation
+                                                ) {
+                                                    let app_core = app_core.raw().clone();
+                                                    tokio::spawn(async move {
+                                                        let _ = refresh_settings_from_runtime(&app_core).await;
+                                                    });
+                                                }
                                             }
                                         }
                                     } else if let crate::tui::state_machine::QueuedModal::MfaSetup(ref mut s) = modal {
@@ -2055,6 +2081,46 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::ImportDeviceEnrollmentOnMobile { code } => {
                                         (cb.settings.on_import_device_enrollment_on_mobile)(code);
+                                    }
+                                    DispatchCommand::OpenAuthorityPicker => {
+                                        // Build list of authorities from state
+                                        let authorities = new_state.settings.authorities.clone();
+                                        if authorities.len() <= 1 {
+                                            new_state.toast_info("Only one authority available");
+                                        } else {
+                                            // Convert authorities to contact-like format for picker
+                                            let contacts: Vec<(String, String)> = authorities
+                                                .iter()
+                                                .map(|a| (a.id.clone(), format!("{} ({})", a.display_name, a.short_id)))
+                                                .collect();
+
+                                            let modal_state = crate::tui::state_machine::ContactSelectModalState::single(
+                                                "Select Authority",
+                                                contacts,
+                                            );
+                                            new_state.modal_queue.enqueue(
+                                                crate::tui::state_machine::QueuedModal::AuthorityPicker(modal_state),
+                                            );
+                                        }
+                                    }
+                                    DispatchCommand::SwitchAuthority { authority_id } => {
+                                        // Find the authority index and update state
+                                        if let Some(idx) = new_state.settings.authorities
+                                            .iter()
+                                            .position(|a| a.id == authority_id)
+                                        {
+                                            new_state.settings.current_authority_index = idx;
+                                            if let Some(auth) = new_state.settings.authorities.get(idx) {
+                                                new_state.toast_success(format!(
+                                                    "Switched to authority: {}",
+                                                    auth.display_name
+                                                ));
+                                            }
+                                        } else {
+                                            new_state.toast_error("Authority not found");
+                                        }
+                                        // TODO: Wire to actual authority switch via app core
+                                        // This will need to update the active authority context
                                     }
                                     // Note: Threshold/guardian changes now use OpenGuardianSetup
                                     // which is handled above with the guardian ceremony commands.
