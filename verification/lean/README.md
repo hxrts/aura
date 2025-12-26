@@ -177,9 +177,9 @@ The Lean proofs correspond to a pure, effect-free Rust implementation for direct
 
 | Lean Module | Rust Module | Correspondence |
 |-------------|-------------|----------------|
-| `Consensus.Types` | `aura-protocol/consensus/core/state.rs` | State structures |
-| `Consensus.Agreement` | `aura-protocol/consensus/core/validation.rs` | Invariant checks |
-| `Consensus.Evidence` | `aura-protocol/consensus/core/transitions.rs` | State transitions |
+| `Consensus.Types` | `aura-consensus/src/consensus/core/state.rs` | State structures |
+| `Consensus.Agreement` | `aura-consensus/src/consensus/core/validation.rs` | Invariant checks |
+| `Consensus.Evidence` | `aura-consensus/src/consensus/core/transitions.rs` | State transitions |
 
 ### ITF Trace Conformance
 
@@ -191,11 +191,11 @@ cd verification/quint
 quint run --out-itf=consensus_trace.itf.json protocol_consensus.qnt
 
 # Run conformance tests
-cargo test -p aura-protocol --test consensus_itf_conformance
+cargo test -p aura-consensus --test consensus_itf_conformance
 ```
 
 ITF loader: `crates/aura-consensus/src/consensus/core/itf_loader.rs`
-Conformance tests: `aura-protocol/tests/consensus_itf_conformance.rs`
+Conformance tests: `crates/aura-consensus/tests/consensus_itf_conformance.rs`
 
 ## Differential Testing
 

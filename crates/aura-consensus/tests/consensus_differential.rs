@@ -14,7 +14,7 @@
 
 mod common;
 
-use aura_protocol::consensus::core::{
+use aura_consensus::core::{
     state::{ConsensusPhase, ConsensusState, PathSelection, ShareData, ShareProposal},
     transitions::{apply_share, fail_consensus, trigger_fallback, TransitionResult},
     validation::{check_invariants, is_equivocator, shares_consistent},

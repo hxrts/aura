@@ -7,7 +7,7 @@
 //! **Pure Data Layer**: No protocol logic. Protocol implementations live in:
 //! - aura-recovery (Layer 5): Guardian recovery coordination
 //! - aura-relational (Layer 5): Relational context state machines
-//! - aura-protocol/consensus (Layer 4): Multi-party agreement
+//! - aura-consensus (Layer 4): Multi-party agreement
 //!
 //! **Design Principle**: Relational facts enable facts to reference cross-authority context
 //! (per docs/103_relational_contexts.md), enabling distributed accountability.

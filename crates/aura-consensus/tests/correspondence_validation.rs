@@ -15,7 +15,7 @@
 
 mod common;
 
-use aura_protocol::consensus::core::state::{ShareData, ShareProposal};
+use aura_consensus::core::state::{ShareData, ShareProposal};
 use common::reference::{detect_equivocators_ref, merge_evidence_ref, Evidence, Vote};
 use proptest::prelude::*;
 use std::collections::HashSet;
@@ -198,7 +198,7 @@ proptest! {
         e2.consensus_id = e1.consensus_id.clone();
 
         // Set a commit fact on e1
-        use aura_protocol::consensus::core::state::PureCommitFact;
+        use aura_consensus::core::state::PureCommitFact;
         e1.commit_fact = Some(PureCommitFact {
             cid: e1.consensus_id.clone(),
             result_id: "r1".to_string(),

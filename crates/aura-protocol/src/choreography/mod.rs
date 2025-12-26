@@ -25,7 +25,7 @@
 //! - **handler_bridge**: Choreographic execution trait abstractions
 //!
 //! **Composition Principle**: Domain-specific choreographies (journal sync, consensus)
-//! live in feature crates (aura-sync, aura-protocol/consensus) to avoid circular dependencies.
+//! live in feature crates (aura-anti-entropy, aura-consensus) to avoid circular dependencies.
 
 pub mod crdt_sync;
 pub mod handler_bridge;

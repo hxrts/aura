@@ -402,35 +402,36 @@ mod tests {
         let mut tui = TestTui::new();
 
         // Initial state
-        tui.assert_screen(Screen::Block);
+        tui.assert_screen(Screen::Neighborhood);
         tui.assert_normal_mode();
         tui.assert_no_modal();
 
         // Navigate to Neighborhood
         tui.send_event(events::char('2'));
-        tui.assert_screen(Screen::Neighborhood);
+        tui.assert_screen(Screen::Chat);
 
         // Navigate to Chat
         tui.send_event(events::char('3'));
-        tui.assert_screen(Screen::Chat);
+        tui.assert_screen(Screen::Contacts);
 
         // Navigate to Contacts
         tui.send_event(events::char('4'));
-        tui.assert_screen(Screen::Contacts);
+        tui.assert_screen(Screen::Notifications);
 
         // Use Tab to cycle
         tui.send_event(events::tab());
-        tui.assert_screen(Screen::Recovery);
+        tui.assert_screen(Screen::Settings);
     }
 
     #[test]
     fn test_tui_insert_mode() {
         let mut tui = TestTui::new();
 
-        // Start in Block screen
+        // Start in Neighborhood screen
         tui.assert_normal_mode();
 
-        // Enter insert mode
+        // Enter block detail mode, then insert mode
+        tui.send_event(events::enter());
         tui.send_event(events::char('i'));
         tui.assert_insert_mode();
 
@@ -469,7 +470,7 @@ mod tests {
     #[tokio::test]
     async fn test_runtime_with_test_terminal() {
         let terminal = TestTerminal::new(vec![
-            events::char('3'), // Navigate to Chat
+            events::char('2'), // Navigate to Chat
             events::char('q'), // Quit
         ]);
 

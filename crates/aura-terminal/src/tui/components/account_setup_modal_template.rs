@@ -186,7 +186,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
             // Footer with centered button (or spinner when creating)
             View(
                 width: 100pct,
-                height: 4,
+                height: 5,
                 flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
@@ -196,6 +196,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 border_color: Theme::BORDER,
             ) {
                 View(
+                    margin_top: 1,
                     padding_left: Spacing::SM,
                     padding_right: Spacing::SM,
                     border_style: Borders::PRIMARY,

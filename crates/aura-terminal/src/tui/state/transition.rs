@@ -61,13 +61,14 @@ mod tests {
     use super::*;
     use crate::tui::screens::Screen;
     use crate::tui::state::commands::DispatchCommand;
+    use crate::tui::state::{DetailFocus, NeighborhoodMode};
     use crate::tui::state::ModalType;
     use aura_core::effects::terminal::events;
 
     #[test]
     fn test_initial_state() {
         let state = TuiState::new();
-        assert_eq!(state.screen(), Screen::Block);
+        assert_eq!(state.screen(), Screen::Neighborhood);
         assert!(!state.has_modal());
         assert!(!state.is_insert_mode());
     }
@@ -76,8 +77,8 @@ mod tests {
     fn test_screen_navigation() {
         let state = TuiState::new();
 
-        // Press '3' to go to Chat (see Screen::from_key mapping)
-        let (new_state, _) = transition(&state, events::char('3'));
+        // Press '2' to go to Chat (see Screen::from_key mapping)
+        let (new_state, _) = transition(&state, events::char('2'));
         assert_eq!(new_state.screen(), Screen::Chat);
 
         // Press Tab to go to next screen
@@ -97,21 +98,22 @@ mod tests {
 
     #[test]
     fn test_insert_mode() {
-        let state = TuiState::new();
+        let mut state = TuiState::new();
+        state.neighborhood.mode = crate::tui::state_machine::NeighborhoodMode::Detail;
 
         // Press 'i' to enter insert mode
         let (new_state, _) = transition(&state, events::char('i'));
-        assert!(new_state.block.insert_mode);
+        assert!(new_state.neighborhood.insert_mode);
         assert!(new_state.is_insert_mode());
 
         // Type some text
         let (new_state, _) = transition(&new_state, events::char('h'));
         let (new_state, _) = transition(&new_state, events::char('i'));
-        assert_eq!(new_state.block.input_buffer, "hi");
+        assert_eq!(new_state.neighborhood.input_buffer, "hi");
 
         // Press Escape to exit insert mode
         let (new_state, _) = transition(&new_state, events::escape());
-        assert!(!new_state.block.insert_mode);
+        assert!(!new_state.neighborhood.insert_mode);
         assert!(!new_state.is_insert_mode());
     }
 
@@ -132,12 +134,14 @@ mod tests {
     #[test]
     fn test_send_message_command() {
         let mut state = TuiState::new();
-        state.block.insert_mode = true;
-        state.block.input_buffer = "hello".to_string();
+        state.neighborhood.mode = NeighborhoodMode::Detail;
+        state.neighborhood.detail_focus = DetailFocus::Input;
+        state.neighborhood.insert_mode = true;
+        state.neighborhood.input_buffer = "hello".to_string();
 
         // Press Enter to send
         let (new_state, commands) = transition(&state, events::enter());
-        assert!(new_state.block.input_buffer.is_empty());
+        assert!(new_state.neighborhood.input_buffer.is_empty());
         assert!(commands.iter().any(|c| matches!(
             c,
             TuiCommand::Dispatch(DispatchCommand::SendBlockMessage { content })

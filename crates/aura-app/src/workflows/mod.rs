@@ -105,7 +105,7 @@ pub use budget::{
 };
 pub use ceremonies::{
     cancel_key_rotation_ceremony, get_key_rotation_ceremony_status, monitor_key_rotation_ceremony,
-    start_guardian_ceremony,
+    start_device_threshold_ceremony, start_guardian_ceremony,
 };
 pub use contacts::update_contact_nickname;
 pub use context::{get_current_position, get_neighborhood_state, move_position, set_context};

@@ -549,11 +549,13 @@ impl SyncService {
         let metrics = self.metrics.write();
         for &(peer, synced_ops) in results {
             metrics.increment_sync_attempts(peer);
+            metrics.increment_sync_successes(peer);
+            // Update last_sync even if synced_ops is 0 - a successful sync session
+            // means we're in sync with the peer, even if there was nothing new.
+            metrics.update_last_sync(peer, now_ms);
 
             if synced_ops > 0 {
-                metrics.increment_sync_successes(peer);
                 metrics.add_synced_operations(peer, synced_ops);
-                metrics.update_last_sync(peer, now_ms);
             }
         }
 

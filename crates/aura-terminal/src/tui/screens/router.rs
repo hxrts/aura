@@ -7,17 +7,15 @@ use std::collections::VecDeque;
 /// Screen identifiers for navigation
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Screen {
-    /// Main block/home screen
+    /// Neighborhood navigation (home)
     #[default]
-    Block,
+    Neighborhood,
     /// Chat conversations
     Chat,
     /// Contacts, nicknames, and invitations
     Contacts,
-    /// Neighborhood navigation
-    Neighborhood,
-    /// Recovery and guardians
-    Recovery,
+    /// Notifications and requests
+    Notifications,
     /// Settings and preferences (rightmost in nav bar)
     Settings,
 }
@@ -26,24 +24,22 @@ impl Screen {
     /// Get the numeric key (1-6) for this screen
     pub fn key_number(&self) -> u8 {
         match self {
-            Screen::Block => 1,
-            Screen::Neighborhood => 2,
-            Screen::Chat => 3,
-            Screen::Contacts => 4,
-            Screen::Recovery => 5,
-            Screen::Settings => 6,
+            Screen::Neighborhood => 1,
+            Screen::Chat => 2,
+            Screen::Contacts => 3,
+            Screen::Notifications => 4,
+            Screen::Settings => 5,
         }
     }
 
     /// Get screen from numeric key (1-6)
     pub fn from_key(key: u8) -> Option<Self> {
         match key {
-            1 => Some(Screen::Block),
-            2 => Some(Screen::Neighborhood),
-            3 => Some(Screen::Chat),
-            4 => Some(Screen::Contacts),
-            5 => Some(Screen::Recovery),
-            6 => Some(Screen::Settings),
+            1 => Some(Screen::Neighborhood),
+            2 => Some(Screen::Chat),
+            3 => Some(Screen::Contacts),
+            4 => Some(Screen::Notifications),
+            5 => Some(Screen::Settings),
             _ => None,
         }
     }
@@ -51,11 +47,10 @@ impl Screen {
     /// Get the display name for the screen
     pub fn name(&self) -> &'static str {
         match self {
-            Screen::Block => "Block",
+            Screen::Neighborhood => "Neighborhood",
             Screen::Chat => "Chat",
             Screen::Contacts => "Contacts",
-            Screen::Neighborhood => "Neighborhood",
-            Screen::Recovery => "Recovery",
+            Screen::Notifications => "Notifications",
             Screen::Settings => "Settings",
         }
     }
@@ -63,11 +58,10 @@ impl Screen {
     /// Get the icon/emoji for the screen
     pub fn icon(&self) -> &'static str {
         match self {
-            Screen::Block => "⌂",
+            Screen::Neighborhood => "⊞",
             Screen::Chat => "◊",
             Screen::Contacts => "∑",
-            Screen::Neighborhood => "⊞",
-            Screen::Recovery => "⊗",
+            Screen::Notifications => "✉",
             Screen::Settings => "⚙",
         }
     }
@@ -75,11 +69,10 @@ impl Screen {
     /// Get all screens in order
     pub fn all() -> &'static [Screen] {
         &[
-            Screen::Block,
             Screen::Neighborhood,
             Screen::Chat,
             Screen::Contacts,
-            Screen::Recovery,
+            Screen::Notifications,
             Screen::Settings,
         ]
     }
@@ -87,24 +80,22 @@ impl Screen {
     /// Get next screen in tab order
     pub fn next(&self) -> Screen {
         match self {
-            Screen::Block => Screen::Neighborhood,
             Screen::Neighborhood => Screen::Chat,
             Screen::Chat => Screen::Contacts,
-            Screen::Contacts => Screen::Recovery,
-            Screen::Recovery => Screen::Settings,
-            Screen::Settings => Screen::Block,
+            Screen::Contacts => Screen::Notifications,
+            Screen::Notifications => Screen::Settings,
+            Screen::Settings => Screen::Neighborhood,
         }
     }
 
     /// Get previous screen in tab order
     pub fn prev(&self) -> Screen {
         match self {
-            Screen::Block => Screen::Settings,
-            Screen::Neighborhood => Screen::Block,
+            Screen::Neighborhood => Screen::Settings,
             Screen::Chat => Screen::Neighborhood,
             Screen::Contacts => Screen::Chat,
-            Screen::Recovery => Screen::Contacts,
-            Screen::Settings => Screen::Recovery,
+            Screen::Notifications => Screen::Contacts,
+            Screen::Settings => Screen::Notifications,
         }
     }
 }
@@ -143,7 +134,7 @@ pub struct Router {
 
 impl Default for Router {
     fn default() -> Self {
-        Self::new(Screen::Block)
+        Self::new(Screen::Neighborhood)
     }
 }
 
@@ -262,15 +253,15 @@ mod tests {
 
     #[test]
     fn test_router_navigation() {
-        let mut router = Router::new(Screen::Block);
-        assert_eq!(router.current(), Screen::Block);
+        let mut router = Router::new(Screen::Neighborhood);
+        assert_eq!(router.current(), Screen::Neighborhood);
 
         router.go_to(Screen::Chat);
         assert_eq!(router.current(), Screen::Chat);
         assert!(router.can_back());
 
         router.back();
-        assert_eq!(router.current(), Screen::Block);
+        assert_eq!(router.current(), Screen::Neighborhood);
         assert!(router.can_forward());
 
         router.forward();
@@ -279,10 +270,7 @@ mod tests {
 
     #[test]
     fn test_tab_navigation() {
-        let mut router = Router::new(Screen::Block);
-
-        router.next_tab();
-        assert_eq!(router.current(), Screen::Neighborhood);
+        let mut router = Router::new(Screen::Neighborhood);
 
         router.next_tab();
         assert_eq!(router.current(), Screen::Chat);
@@ -294,15 +282,15 @@ mod tests {
         assert_eq!(router.current(), Screen::Chat);
 
         // Go all the way back (wraps to Settings)
-        let mut r2 = Router::new(Screen::Block);
+        let mut r2 = Router::new(Screen::Neighborhood);
         r2.prev_tab();
         assert_eq!(r2.current(), Screen::Settings);
     }
 
     #[test]
     fn test_screen_keys() {
-        assert_eq!(Screen::Block.key_number(), 1);
-        assert_eq!(Screen::from_key(1), Some(Screen::Block));
+        assert_eq!(Screen::Neighborhood.key_number(), 1);
+        assert_eq!(Screen::from_key(1), Some(Screen::Neighborhood));
         assert_eq!(Screen::from_key(7), None);
     }
 }

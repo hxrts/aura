@@ -3,8 +3,8 @@
 //! This consolidates overlapping error enums (consensus, guards, messaging)
 //! and provides straightforward conversions between them.
 
-use crate::consensus::ConsensusError;
-use crate::guards::GuardError;
+use aura_consensus::ConsensusError;
+use aura_guards::GuardError;
 use aura_core::AuraError;
 use thiserror::Error;
 

@@ -779,12 +779,8 @@ where
             if session.is_timed_out(now) && !session.is_terminal() {
                 to_timeout.push(*session_id);
             } else if session.is_terminal() {
-                // Remove completed sessions after some time
-                if let Some(duration_ms) = session.duration_ms(now) {
-                    if duration_ms > self.config.cleanup_interval.as_millis() as u64 {
-                        to_remove.push(*session_id);
-                    }
-                }
+                // Completed sessions are removed on the next cleanup run
+                to_remove.push(*session_id);
             }
         }
 

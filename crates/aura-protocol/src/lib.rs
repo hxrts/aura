@@ -123,8 +123,7 @@
 // Core modules following unified effect system architecture
 pub use aura_amp as amp;
 pub use aura_anti_entropy as sync;
-pub use aura_consensus as consensus;
-pub use aura_guards as guards;
+// Intentionally avoid re-exporting aura-consensus/aura-guards to keep crate ownership explicit.
 pub mod choreography;
 pub mod effects;
 pub mod error;
@@ -136,8 +135,6 @@ pub mod state;
 pub mod transport;
 pub mod types; // Protocol orchestration types
 
-// Re-export authorization types for convenient access
-pub use aura_guards::{AuthorizationResult, BiscuitAuthorizationBridge};
 pub use error::ProtocolError;
 
 // Re-export session types for convenient access
@@ -186,8 +183,6 @@ pub mod orchestration {
     // Protocol messaging
     pub use crate::messages::{AuraMessage, CryptoMessage, CryptoPayload, WIRE_FORMAT_VERSION};
 
-    // Security and budgets
-    pub use crate::guards::{LeakageBudget, ProtocolGuard};
 }
 
 /// Standard effect composition patterns and bundles

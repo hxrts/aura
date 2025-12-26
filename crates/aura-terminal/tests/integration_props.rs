@@ -17,16 +17,16 @@
 
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::props::{
-    extract_block_view_props, extract_chat_view_props, extract_contacts_view_props,
-    extract_recovery_view_props, extract_settings_view_props,
+    extract_chat_view_props, extract_contacts_view_props, extract_neighborhood_view_props,
+    extract_settings_view_props,
 };
 use aura_terminal::tui::screens::Screen;
-use aura_terminal::tui::screens::{BlockFocus, ChatFocus};
+use aura_terminal::tui::screens::ChatFocus;
 use aura_terminal::tui::state_machine::{
-    transition, ChatFocus as StateChatFocus, ContactSelectModalState, DispatchCommand,
-    NicknameModalState, QueuedModal, TuiCommand, TuiState,
+    transition, ChatFocus as StateChatFocus, ContactSelectModalState, DetailFocus,
+    DispatchCommand, NicknameModalState, QueuedModal, TuiCommand, TuiState,
 };
-use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
+use aura_terminal::tui::types::SettingsSection;
 
 // ============================================================================
 // Test Harness
@@ -89,7 +89,7 @@ impl PropsTestHarness {
     /// Navigate directly to a screen using number keys
     fn go_to_screen(&mut self, screen: Screen) {
         let key = char::from_digit(screen.key_number() as u32, 10)
-            .unwrap_or_else(|| unreachable!("Screen::key_number returns 1..=6"));
+            .unwrap_or_else(|| unreachable!("Screen::key_number returns 1..=5"));
         self.send_char(key);
         assert_eq!(
             self.current_screen(),
@@ -108,74 +108,61 @@ mod block_screen {
     use super::*;
 
     #[test]
-    fn test_insert_mode_reaches_block_props() {
+    fn test_insert_mode_reaches_neighborhood_props() {
         let mut harness = PropsTestHarness::new();
-        harness.go_to_screen(Screen::Block);
+        harness.go_to_screen(Screen::Neighborhood);
 
-        // Initially not in insert mode
-        let props = extract_block_view_props(&harness.state);
-        assert!(!props.insert_mode, "Should start not in insert mode");
-        assert_eq!(props.focus, BlockFocus::Residents);
-
-        // Press 'i' to enter insert mode
+        // Enter detail mode then insert mode
+        harness.send(events::enter());
         harness.send_char('i');
 
         // Verify props reflect the change
-        let props = extract_block_view_props(&harness.state);
+        let props = extract_neighborhood_view_props(&harness.state);
         assert!(
             props.insert_mode,
-            "Insert mode must reach BlockScreen props"
+            "Insert mode must reach NeighborhoodScreen props"
         );
-        assert_eq!(props.focus, BlockFocus::Input, "Focus must change to Input");
+        assert_eq!(
+            props.detail_focus,
+            DetailFocus::Input,
+            "Focus must change to Input"
+        );
     }
 
     #[test]
-    fn test_input_buffer_reaches_block_props() {
+    fn test_input_buffer_reaches_neighborhood_props() {
         let mut harness = PropsTestHarness::new();
-        harness.go_to_screen(Screen::Block);
+        harness.go_to_screen(Screen::Neighborhood);
 
-        // Enter insert mode
+        // Enter detail mode then insert mode
+        harness.send(events::enter());
         harness.send_char('i');
 
         // Type some text
         harness.send_char('h');
         harness.send_char('i');
 
-        let props = extract_block_view_props(&harness.state);
+        let props = extract_neighborhood_view_props(&harness.state);
         assert_eq!(
             props.input_buffer, "hi",
-            "Input buffer must reach BlockScreen props"
+            "Input buffer must reach NeighborhoodScreen props"
         );
     }
 
     #[test]
-    fn test_invite_modal_reaches_block_props() {
+    fn test_resident_selection_reaches_neighborhood_props() {
         let mut harness = PropsTestHarness::new();
-        harness.go_to_screen(Screen::Block);
-
-        // Open invite modal with 'v'
-        harness.send_char('v');
-
-        let props = extract_block_view_props(&harness.state);
-        assert!(
-            props.invite_modal_open,
-            "Invite modal state must reach props"
-        );
-        assert_eq!(props.invite_selection, 0);
-    }
-
-    #[test]
-    fn test_resident_selection_reaches_block_props() {
-        let mut harness = PropsTestHarness::new();
-        harness.go_to_screen(Screen::Block);
+        harness.go_to_screen(Screen::Neighborhood);
 
         // Set up item count for navigation to work
-        harness.state.block.resident_count = 10;
+        harness.state.neighborhood.resident_count = 10;
+        harness.state.neighborhood.detail_focus = DetailFocus::Residents;
+        harness.send(events::enter());
 
         // Navigate down in resident list
         harness.send(events::arrow_down());
 
-        let props = extract_block_view_props(&harness.state);
+        let props = extract_neighborhood_view_props(&harness.state);
         assert_eq!(
             props.selected_resident, 1,
             "Selected resident must reach props"
@@ -313,52 +300,6 @@ mod contacts_screen {
 // NOTE: Invitations screen was merged into Contacts screen. Tests removed.
 
 // ============================================================================
-// Recovery Screen Props Integration Tests
-// ============================================================================
-
-mod recovery_screen {
-    use super::*;
-
-    #[test]
-    fn test_tab_selection_reaches_recovery_props() {
-        let mut harness = PropsTestHarness::new();
-        harness.go_to_screen(Screen::Recovery);
-
-        // Initial tab should be Guardians
-        let props = extract_recovery_view_props(&harness.state);
-        assert_eq!(props.tab, RecoveryTab::Guardians);
-
-        // Switch to Recovery tab with arrow_right (order is Guardians -> Recovery -> Requests)
-        harness.send(events::arrow_right());
-
-        let props = extract_recovery_view_props(&harness.state);
-        assert_eq!(
-            props.tab,
-            RecoveryTab::Recovery,
-            "Tab selection must reach RecoveryScreen props"
-        );
-    }
-
-    #[test]
-    fn test_guardian_selection_reaches_recovery_props() {
-        let mut harness = PropsTestHarness::new();
-        harness.go_to_screen(Screen::Recovery);
-
-        // Set up item count for navigation to work
-        harness.state.recovery.item_count = 10;
-
-        // Navigate down in guardian list
-        harness.send(events::arrow_down());
-
-        let props = extract_recovery_view_props(&harness.state);
-        assert_eq!(
-            props.selected_index, 1,
-            "Selected index must reach RecoveryScreen props"
-        );
-    }
-}
-
-// ============================================================================
 // Settings Screen Props Integration Tests
 // ============================================================================
 
@@ -405,8 +346,9 @@ mod settings_screen {
         let mut harness = PropsTestHarness::new();
         harness.go_to_screen(Screen::Settings);
 
-        // Navigate to Mfa section (Profile -> Threshold -> Devices -> Mfa)
+        // Navigate to Mfa section (Profile -> Threshold -> Recovery -> Devices -> Mfa)
         harness.send(events::arrow_down()); // Threshold
+        harness.send(events::arrow_down()); // Recovery
         harness.send(events::arrow_down()); // Devices
         harness.send(events::arrow_down()); // Mfa
 
@@ -428,19 +370,23 @@ mod cross_screen {
     fn test_insert_mode_works_on_all_screens_with_input() {
         let mut harness = PropsTestHarness::new();
 
-        // Test Block screen insert mode
-        harness.go_to_screen(Screen::Block);
+        // Test Neighborhood screen insert mode
+        harness.go_to_screen(Screen::Neighborhood);
+        harness.send(events::enter());
         harness.send_char('i');
-        let block_props = extract_block_view_props(&harness.state);
+        let neighborhood_props = extract_neighborhood_view_props(&harness.state);
         assert!(
-            block_props.insert_mode,
-            "Block: insert_mode must reach props"
+            neighborhood_props.insert_mode,
+            "Neighborhood: insert_mode must reach props"
         );
 
         // Exit insert mode
         harness.send(events::escape());
-        let block_props = extract_block_view_props(&harness.state);
-        assert!(!block_props.insert_mode, "Block: must exit insert mode");
+        let neighborhood_props = extract_neighborhood_view_props(&harness.state);
+        assert!(
+            !neighborhood_props.insert_mode,
+            "Neighborhood: must exit insert mode"
+        );
 
         // Navigate to Chat and test insert mode
         harness.go_to_screen(Screen::Chat);
@@ -458,24 +404,26 @@ mod cross_screen {
     #[test]
     fn test_screen_state_preserved_across_navigation() {
         let mut harness = PropsTestHarness::new();
-        harness.go_to_screen(Screen::Block);
+        harness.go_to_screen(Screen::Neighborhood);
 
         // Set up item count for navigation to work
-        harness.state.block.resident_count = 10;
+        harness.state.neighborhood.resident_count = 10;
+        harness.state.neighborhood.detail_focus = DetailFocus::Residents;
 
-        // Set some state on Block screen
+        // Set some state on Neighborhood screen
+        harness.send(events::enter());
         harness.send(events::arrow_down());
-        let block_props = extract_block_view_props(&harness.state);
-        assert_eq!(block_props.selected_resident, 1);
+        let neighborhood_props = extract_neighborhood_view_props(&harness.state);
+        assert_eq!(neighborhood_props.selected_resident, 1);
 
         // Navigate away and back
         harness.go_to_screen(Screen::Chat);
-        harness.go_to_screen(Screen::Block);
+        harness.go_to_screen(Screen::Neighborhood);
 
-        // Block state should be preserved
-        let block_props = extract_block_view_props(&harness.state);
+        // Neighborhood state should be preserved
+        let neighborhood_props = extract_neighborhood_view_props(&harness.state);
         assert_eq!(
-            block_props.selected_resident, 1,
+            neighborhood_props.selected_resident, 1,
             "Screen state must be preserved across navigation"
         );
     }

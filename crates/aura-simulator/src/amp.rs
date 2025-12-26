@@ -15,7 +15,7 @@ use aura_core::identifiers::{AuthorityId, ChannelId};
 use aura_journal::fact::{
     ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, RelationalFact,
 };
-use aura_protocol::amp::{get_channel_state, AmpJournalEffects};
+use aura_amp::{get_channel_state, AmpJournalEffects};
 use serde::{Deserialize, Serialize};
 
 /// Channel membership status for tracking participants

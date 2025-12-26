@@ -3,7 +3,7 @@
 //! Keep shell.rs focused on wiring and rendering by extracting the
 //! signal-subscription use_future blocks here.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -16,7 +16,7 @@ use aura_app::signal_defs::{
 };
 
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
-use crate::tui::types::{Channel, Contact, Invitation, Message, PendingRequest, Resident};
+use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest, Resident};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
 pub struct NavStatusSignals {
@@ -189,6 +189,55 @@ pub fn use_contacts_subscription(
     });
 
     shared_contacts
+}
+
+/// Shared devices state (account devices) that can be read by closures without re-rendering.
+#[derive(Clone, Default)]
+pub struct SharedDevices(Arc<RwLock<Vec<Device>>>);
+
+impl SharedDevices {
+    pub fn new() -> Self {
+        Self(Arc::new(RwLock::new(Vec::new())))
+    }
+
+    pub fn read(&self) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<Device>>> {
+        self.0.read()
+    }
+
+    pub fn write(&self) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<Device>>> {
+        self.0.write()
+    }
+}
+
+/// Create a shared devices holder and subscribe it to SETTINGS_SIGNAL.
+pub fn use_devices_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> SharedDevices {
+    let shared_devices_ref = hooks.use_ref(SharedDevices::new);
+    let shared_devices: SharedDevices = shared_devices_ref.read().clone();
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let devices = shared_devices.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
+                let list: Vec<Device> = settings_state
+                    .devices
+                    .iter()
+                    .map(|d| Device {
+                        id: d.id.clone(),
+                        name: d.name.clone(),
+                        is_current: d.is_current,
+                        last_seen: d.last_seen,
+                    })
+                    .collect();
+                if let Ok(mut guard) = devices.write() {
+                    *guard = list;
+                }
+            })
+            .await;
+        }
+    });
+
+    shared_devices
 }
 
 /// Shared residents state (current block) that can be read by closures without re-rendering.
@@ -418,6 +467,55 @@ pub fn use_pending_requests_subscription(
     });
 
     shared_requests
+}
+
+/// Subscribe to notifications-related signals and emit count updates.
+pub fn use_notifications_subscription(
+    hooks: &mut Hooks,
+    app_ctx: &AppCoreContext,
+    update_tx: Option<UiUpdateSender>,
+) {
+    let invite_count = Arc::new(AtomicUsize::new(0));
+    let recovery_count = Arc::new(AtomicUsize::new(0));
+
+    let send_total = |tx: &Option<UiUpdateSender>,
+                      invites: &Arc<AtomicUsize>,
+                      recovery: &Arc<AtomicUsize>| {
+        if let Some(ref tx) = tx {
+            let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
+            let _ = tx.send(UiUpdate::NotificationsCountChanged(total));
+        }
+    };
+
+    // Invitations
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let invite_count = invite_count.clone();
+        let recovery_count = recovery_count.clone();
+        let update_tx = update_tx.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |state| {
+                invite_count.store(state.pending_received_count(), Ordering::Relaxed);
+                send_total(&update_tx, &invite_count, &recovery_count);
+            })
+            .await;
+        }
+    });
+
+    // Recovery requests
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let invite_count = invite_count.clone();
+        let recovery_count = recovery_count.clone();
+        let update_tx = update_tx.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |state| {
+                recovery_count.store(state.pending_requests.len(), Ordering::Relaxed);
+                send_total(&update_tx, &invite_count, &recovery_count);
+            })
+            .await;
+        }
+    });
 }
 
 /// Shared threshold settings.

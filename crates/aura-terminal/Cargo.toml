@@ -45,6 +45,9 @@ development = [
     "dep:aura-testkit",
 ]
 
+# Property-based tests for the TUI state machine
+proptest = []
+
 [dependencies]
 # Headless app core with native (signals) API
 aura-app = { path = "../aura-app", features = ["native"] }

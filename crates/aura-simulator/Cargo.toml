@@ -15,7 +15,8 @@ aura-agent = { path = "../aura-agent", features = ["simulation"] }
 aura-core = { path = "../aura-core", features = ["simulation"] }
 aura-effects = { path = "../aura-effects", features = ["simulation"] }
 aura-journal = { path = "../aura-journal" }
-aura-protocol = { path = "../aura-protocol" }
+aura-amp = { path = "../aura-amp" }
+aura-consensus = { path = "../aura-consensus" }
 aura-testkit = { path = "../aura-testkit" }
 aura-sync = { path = "../aura-sync" }
 # app-console-types = { path = "../app-console-types" }

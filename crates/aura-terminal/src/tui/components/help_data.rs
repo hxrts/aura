@@ -75,17 +75,12 @@ pub fn get_help_commands_for_screen(current_screen: Option<&str>) -> Vec<HelpCom
 pub fn get_help_commands() -> Vec<HelpCommand> {
     vec![
         // Global navigation
-        HelpCommand::new("1-6", "1, 2, 3, 4, 5, 6", "Switch screens", "Navigation"),
+        HelpCommand::new("1-5", "1, 2, 3, 4, 5", "Switch screens", "Navigation"),
         HelpCommand::new("?", "?", "Show/hide help", "Navigation"),
+        HelpCommand::new("q", "q", "Quit", "Navigation"),
         HelpCommand::new("Esc", "Esc", "Cancel/close modal", "Navigation"),
         HelpCommand::new("j/k", "j, k", "Move down/up in lists", "Navigation"),
         HelpCommand::new("h/l", "h, l", "Switch panels (left/right)", "Navigation"),
-        // Block screen
-        HelpCommand::new("i", "i", "Enter insert mode (type message)", "Block"),
-        HelpCommand::new("v", "v", "Send block invitation", "Block"),
-        HelpCommand::new("n", "n", "Navigate to neighborhood", "Block"),
-        HelpCommand::new("g", "g", "Grant steward role", "Block"),
-        HelpCommand::new("R", "Shift+R", "Revoke steward role", "Block"),
         // Chat screen
         HelpCommand::new("i", "i", "Enter insert mode (type message)", "Chat"),
         HelpCommand::new("n", "n", "Create new channel", "Chat"),
@@ -100,21 +95,22 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         ),
         // Contacts screen
         HelpCommand::new("e", "e", "Edit contact nickname", "Contacts"),
-        HelpCommand::new("g", "g", "Toggle guardian status", "Contacts"),
+        HelpCommand::new("g", "g", "Open guardian setup", "Contacts"),
         HelpCommand::new("c", "c", "Start chat with contact", "Contacts"),
         HelpCommand::new("i", "i", "Import invitation code", "Contacts"),
         HelpCommand::new("n", "n", "Create invitation code", "Contacts"),
         // Neighborhood screen
         HelpCommand::new("Enter", "Enter", "Enter selected block", "Neighborhood"),
+        HelpCommand::new("Esc", "Esc", "Return to map view", "Neighborhood"),
+        HelpCommand::new("i", "i", "Enter insert mode (detail)", "Neighborhood"),
+        HelpCommand::new("d", "d", "Cycle traversal depth", "Neighborhood"),
         HelpCommand::new("g", "g", "Go to home block", "Neighborhood"),
-        HelpCommand::new("b", "b", "Back to street view", "Neighborhood"),
         // Settings screen
         HelpCommand::new("h/l", "h, l", "Switch panels", "Settings"),
         HelpCommand::new("Space", "Space", "Toggle option/edit field", "Settings"),
         HelpCommand::new("Enter", "Enter", "Confirm selection", "Settings"),
-        // Recovery screen
-        HelpCommand::new("a", "a", "Add guardian to recovery", "Recovery"),
-        HelpCommand::new("s", "s", "Start recovery process", "Recovery"),
-        HelpCommand::new("h/l", "h, l", "Switch tabs", "Recovery"),
+        // Notifications screen
+        HelpCommand::new("j/k", "j, k", "Move through notifications", "Notifications"),
+        HelpCommand::new("h/l", "h, l", "Switch panels", "Notifications"),
     ]
 }

@@ -92,7 +92,7 @@ pub enum RecoveryFact {
         /// Authority initiating the setup
         initiator_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Target guardians for the setup
         guardian_ids: Vec<AuthorityId>,
@@ -109,7 +109,7 @@ pub enum RecoveryFact {
         /// Guardian receiving the invitation
         guardian_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Hash of the invitation details
         invitation_hash: Hash32,
@@ -124,7 +124,7 @@ pub enum RecoveryFact {
         /// Guardian that accepted
         guardian_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Timestamp when accepted (uses unified time system)
         accepted_at: PhysicalTime,
@@ -137,7 +137,7 @@ pub enum RecoveryFact {
         /// Guardian that declined
         guardian_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Timestamp when declined (uses unified time system)
         declined_at: PhysicalTime,
@@ -150,7 +150,7 @@ pub enum RecoveryFact {
         /// Guardians that were bound
         guardian_ids: Vec<AuthorityId>,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Final threshold for recovery
         threshold: u16,
@@ -165,7 +165,7 @@ pub enum RecoveryFact {
         /// Reason for failure
         reason: String,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Timestamp when setup failed (uses unified time system)
         failed_at: PhysicalTime,
@@ -181,7 +181,7 @@ pub enum RecoveryFact {
         /// Authority proposing the change
         proposer_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Type of change being proposed
         change_type: MembershipChangeType,
@@ -198,7 +198,7 @@ pub enum RecoveryFact {
         /// Authority casting the vote
         voter_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Hash of the proposal being voted on
         proposal_hash: Hash32,
@@ -215,7 +215,7 @@ pub enum RecoveryFact {
         /// Hash of the completed proposal
         proposal_hash: Hash32,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// New guardian set after the change
         new_guardian_ids: Vec<AuthorityId>,
@@ -232,7 +232,7 @@ pub enum RecoveryFact {
         /// Hash of the rejected proposal
         proposal_hash: Hash32,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Reason for rejection
         reason: String,
@@ -250,7 +250,7 @@ pub enum RecoveryFact {
         /// Account requesting recovery
         account_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Hash of the recovery request
         request_hash: Hash32,
@@ -265,7 +265,7 @@ pub enum RecoveryFact {
         /// Guardian submitting the share
         guardian_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Hash of the share (not the share itself)
         share_hash: Hash32,
@@ -280,7 +280,7 @@ pub enum RecoveryFact {
         /// Authority filing the dispute
         disputer_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Reason for the dispute
         reason: String,
@@ -295,7 +295,7 @@ pub enum RecoveryFact {
         /// Account that was recovered
         account_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Hash of the recovery evidence
         evidence_hash: Hash32,
@@ -310,7 +310,7 @@ pub enum RecoveryFact {
         /// Account that attempted recovery
         account_id: AuthorityId,
         /// Optional trace identifier for ceremony correlation
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         trace_id: Option<String>,
         /// Reason for failure
         reason: String,
@@ -831,7 +831,7 @@ impl FactReducer for RecoveryFactReducer {
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
-        let sub_type = fact.sub_type().to_string();
+        let _sub_type = fact.sub_type().to_string();
 
         let key = fact.binding_key();
 
@@ -1055,7 +1055,13 @@ mod tests {
         let bytes = fact.to_bytes();
         let binding1 = reducer.reduce(context_id, RECOVERY_FACT_TYPE_ID, &bytes);
         let binding2 = reducer.reduce(context_id, RECOVERY_FACT_TYPE_ID, &bytes);
-        assert_eq!(binding1, binding2);
+        assert!(binding1.is_some());
+        assert!(binding2.is_some());
+        let binding1 = binding1.unwrap();
+        let binding2 = binding2.unwrap();
+        assert_eq!(binding1.binding_type, binding2.binding_type);
+        assert_eq!(binding1.context_id, binding2.context_id);
+        assert_eq!(binding1.data, binding2.data);
     }
 
     #[test]

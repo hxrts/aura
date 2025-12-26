@@ -948,6 +948,22 @@ impl AppCore {
             .await
     }
 
+    /// Initiate a device threshold (multifactor) ceremony.
+    pub async fn initiate_device_threshold_ceremony(
+        &self,
+        threshold_k: FrostThreshold,
+        total_n: u16,
+        device_ids: &[String],
+    ) -> Result<String, IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("initiate_device_threshold_ceremony requires a runtime")
+        })?;
+
+        runtime
+            .initiate_device_threshold_ceremony(threshold_k, total_n, device_ids)
+            .await
+    }
+
     /// Initiate a device enrollment ("add device") ceremony.
     pub async fn initiate_device_enrollment_ceremony(
         &self,

@@ -4,14 +4,15 @@
 //!
 //! Each screen is organized in its own directory with screen-specific modals colocated:
 //! - `chat/` - ChatScreen, ChannelInfoModal, ChatCreateModal
-//! - `recovery/` - RecoveryScreen, GuardianSetupModal, ThresholdModal
+//! - `notifications/` - NotificationsScreen
+//! - `recovery/` - GuardianSetupModal, ThresholdModal
 
 pub mod app;
-mod block;
 mod chat;
 mod contacts;
 mod invitations;
-mod neighborhood;
+mod neighborhood_v2;
+mod notifications;
 mod recovery;
 mod router;
 mod settings;
@@ -27,16 +28,14 @@ pub use crate::tui::callbacks::{
 };
 
 // Screen-specific callback types (use specialized types not in callbacks module)
-pub use neighborhood::NavigationCallback;
 pub use settings::MfaCallback;
 
 // Screen components and runners
 pub use app::{run_app_with_context, IoApp};
-pub use block::{run_block_screen, BlockFocus, BlockScreen};
 pub use chat::{run_chat_screen, ChatFocus, ChatScreen};
 pub use contacts::{run_contacts_screen, ContactsScreen};
-pub use neighborhood::{run_neighborhood_screen, NeighborhoodScreen};
-pub use recovery::{run_recovery_screen, RecoveryScreen};
+pub use neighborhood_v2::{run_neighborhood_screen_v2, NeighborhoodScreenV2, NeighborhoodScreenV2Props};
+pub use notifications::{run_notifications_screen, NotificationsScreen};
 pub use router::{NavAction, Router, Screen};
 pub use settings::{run_settings_screen, SettingsScreen};
 
@@ -47,5 +46,7 @@ pub use invitations::{
     InvitationCreateModal, InvitationImportModal, InvitationImportState,
     ModalCreateInvitationCallback,
 };
-pub use recovery::{GuardianCandidateProps, GuardianSetupModal, ThresholdModal, ThresholdState};
+pub use recovery::{
+    GuardianCandidateProps, GuardianSetupKind, GuardianSetupModal, ThresholdModal, ThresholdState,
+};
 pub use settings::DeviceEnrollmentModal;

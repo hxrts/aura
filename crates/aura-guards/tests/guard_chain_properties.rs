@@ -1,4 +1,4 @@
-use aura_protocol::guards::types::validate_charge_before_send;
+use aura_guards::types::validate_charge_before_send;
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]

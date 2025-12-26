@@ -30,6 +30,7 @@ use crate::guards::{
 };
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_journal::DomainFact;
 use aura_verify::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +77,7 @@ impl Default for AuthServiceConfig {
 
 #[derive(Debug, Clone)]
 struct AuthPolicy {
+    #[allow(dead_code)] // Reserved for future policy enforcement
     context_id: ContextId,
     max_session_duration_secs: u64,
     require_recovery_capability: bool,
@@ -84,7 +86,7 @@ struct AuthPolicy {
 impl AuthPolicy {
     fn for_snapshot(config: &AuthServiceConfig, snapshot: &GuardSnapshot) -> Self {
         Self {
-            context_id: snapshot.context_id,
+            context_id: derive_auth_context_id(snapshot),
             max_session_duration_secs: config.max_session_duration_secs,
             require_recovery_capability: config.require_recovery_capability,
         }

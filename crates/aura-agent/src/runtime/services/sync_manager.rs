@@ -4,7 +4,7 @@
 //! Provides lifecycle management and configuration for automatic background sync.
 
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
-use aura_core::effects::{PhysicalTimeEffects, TimeEffects};
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::DeviceId;
 use aura_sync::services::{Service, SyncService, SyncServiceConfig};
 use aura_sync::verification::{MerkleVerifier, VerificationResult};
@@ -149,9 +149,9 @@ impl SyncServiceManager {
     ///
     /// # Arguments
     /// - `time_effects`: Time effects for service initialization
-    pub async fn start<T: PhysicalTimeEffects + TimeEffects + Send + Sync>(
+    pub async fn start(
         &self,
-        time_effects: &T,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
     ) -> Result<(), String> {
         let current_state = *self.state.read().await;
         if current_state == SyncManagerState::Running {
@@ -170,13 +170,13 @@ impl SyncServiceManager {
 
         // Create the underlying sync service
         let now_instant = SyncService::monotonic_now();
-        let service = SyncService::new_with_time_effects(sync_config, time_effects, now_instant)
+        let service = SyncService::new(sync_config, time_effects, now_instant)
             .await
             .map_err(|e| format!("Failed to create sync service: {}", e))?;
 
         // Start the service
         service
-            .start_with_time_effects(time_effects, now_instant)
+            .start(now_instant)
             .await
             .map_err(|e| format!("Failed to start sync service: {}", e))?;
 
@@ -442,10 +442,10 @@ mod tests {
     async fn test_sync_manager_lifecycle() {
         let config = SyncManagerConfig::for_testing();
         let manager = SyncServiceManager::new(config);
-        let time_effects = PhysicalTimeHandler::new();
+        let time_effects = Arc::new(PhysicalTimeHandler::new());
 
         // Start
-        manager.start(&time_effects).await.unwrap();
+        manager.start(time_effects).await.unwrap();
         assert!(manager.is_running().await);
 
         // Stop
@@ -488,9 +488,9 @@ mod tests {
     #[tokio::test]
     async fn test_sync_manager_health_when_running() {
         let manager = SyncServiceManager::new(SyncManagerConfig::for_testing());
-        let time_effects = PhysicalTimeHandler::new();
+        let time_effects = Arc::new(PhysicalTimeHandler::new());
 
-        manager.start(&time_effects).await.unwrap();
+        manager.start(time_effects).await.unwrap();
 
         // Health should be available when running
         let health = manager.health().await;

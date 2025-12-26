@@ -110,7 +110,7 @@ pub use aura_verify::{
 };
 
 // Re-export Biscuit authorization types
-pub use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
+pub use aura_guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
 pub use aura_wot::{BiscuitTokenManager, ResourceScope, TokenAuthority};
 
 // Deprecated alias for backward compatibility

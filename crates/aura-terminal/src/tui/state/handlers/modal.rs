@@ -85,13 +85,13 @@ pub fn handle_queued_modal_key(
             handle_create_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
         }
         QueuedModal::ContactsCode(modal_state) => {
-            // Code display modal: Esc to dismiss, Ctrl+C to copy
+            // Code display modal: Esc to dismiss, c to copy
             match key.code {
                 KeyCode::Esc => {
                     state.modal_queue.dismiss();
                 }
-                KeyCode::Char('c') if key.modifiers.ctrl() => {
-                    // Copy code to clipboard
+                KeyCode::Char('c') => {
+                    // Copy code to clipboard (c or Cmd+C)
                     if !modal_state.code.is_empty() {
                         if copy_to_clipboard(&modal_state.code).is_ok() {
                             // Update state to show "copied" feedback
@@ -109,6 +109,9 @@ pub fn handle_queued_modal_key(
         }
         QueuedModal::GuardianSetup(modal_state) => {
             handle_guardian_setup_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::MfaSetup(modal_state) => {
+            handle_mfa_setup_key_queue(state, commands, key, modal_state);
         }
         // Settings screen modals
         QueuedModal::SettingsDisplayName(modal_state) => {
@@ -888,6 +891,111 @@ fn handle_guardian_setup_key_queue(
     }
 }
 
+/// Handle MFA setup modal keys (queue-based)
+fn handle_mfa_setup_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: GuardianSetupModalState,
+) {
+    match modal_state.step {
+        GuardianSetupStep::SelectContacts => match key.code {
+            KeyCode::Esc => {
+                state.modal_queue.dismiss();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::MfaSetup(ref mut s) = modal {
+                        if s.focused_index > 0 {
+                            s.focused_index -= 1;
+                        }
+                    }
+                });
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::MfaSetup(ref mut s) = modal {
+                        if s.focused_index + 1 < s.contacts.len() {
+                            s.focused_index += 1;
+                        }
+                    }
+                });
+            }
+            KeyCode::Char(' ') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::MfaSetup(ref mut s) = modal {
+                        s.toggle_selection();
+                    }
+                });
+            }
+            KeyCode::Enter => {
+                if modal_state.can_proceed_to_threshold() {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::MfaSetup(ref mut s) = modal {
+                            s.step = GuardianSetupStep::ChooseThreshold;
+                        }
+                    });
+                }
+            }
+            _ => {}
+        },
+        GuardianSetupStep::ChooseThreshold => match key.code {
+            KeyCode::Esc => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::MfaSetup(ref mut s) = modal {
+                        s.step = GuardianSetupStep::SelectContacts;
+                    }
+                });
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::MfaSetup(ref mut s) = modal {
+                        s.increment_k();
+                    }
+                });
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::MfaSetup(ref mut s) = modal {
+                        s.decrement_k();
+                    }
+                });
+            }
+            KeyCode::Enter => {
+                if modal_state.can_start_ceremony() {
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::StartMfaCeremony {
+                        device_ids: modal_state.selected_contact_ids(),
+                        threshold_k: modal_state.threshold_k,
+                    }));
+
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::MfaSetup(ref mut s) = modal {
+                            s.begin_ceremony();
+                        }
+                    });
+                }
+            }
+            _ => {}
+        },
+        GuardianSetupStep::CeremonyInProgress => {
+            if key.code == KeyCode::Esc {
+                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id.clone() {
+                    commands.push(TuiCommand::Dispatch(
+                        DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
+                    ));
+                    state.modal_queue.dismiss();
+                } else {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::MfaSetup(ref mut s) = modal {
+                            s.error = Some("Starting multifactor ceremony…".to_string());
+                        }
+                    });
+                }
+            }
+        }
+    }
+}
+
 /// Handle settings display name modal keys (queue-based)
 fn handle_settings_display_name_key_queue(
     state: &mut TuiState,
@@ -1016,8 +1124,8 @@ fn handle_device_enrollment_key_queue(
             }
             state.modal_queue.dismiss();
         }
-        KeyCode::Char('c') if key.modifiers.ctrl() => {
-            // Copy enrollment code to clipboard
+        KeyCode::Char('c') => {
+            // Copy enrollment code to clipboard (c or Cmd+C)
             if !modal_state.enrollment_code.is_empty() {
                 if copy_to_clipboard(&modal_state.enrollment_code).is_ok() {
                     // Update state to show "copied" feedback

@@ -18,10 +18,10 @@
 //! ```
 
 use crate::tui::navigation::TwoPanelFocus;
-use crate::tui::screens::{BlockFocus as ScreenBlockFocus, ChatFocus as ScreenChatFocus};
+use crate::tui::screens::ChatFocus as ScreenChatFocus;
 use crate::tui::state_machine::{
-    BlockFocus, ChatFocus, CreateInvitationField, GuardianCeremonyResponse, GuardianSetupStep,
-    QueuedModal, TuiState,
+    BlockFocus, ChatFocus, CreateInvitationField, DetailFocus, GuardianCeremonyResponse,
+    GuardianSetupStep, NeighborhoodMode, QueuedModal, TuiState,
 };
 use crate::tui::types::TraversalDepth;
 use tracing::warn;
@@ -33,7 +33,7 @@ use tracing::warn;
 /// View state extracted from TuiState for BlockScreen
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BlockViewProps {
-    pub focus: ScreenBlockFocus,
+    pub focus: BlockFocus,
     pub selected_resident: usize,
     pub message_scroll: usize,
     pub insert_mode: bool,
@@ -47,14 +47,8 @@ pub struct BlockViewProps {
 /// This function extracts all view-related state needed by BlockScreen.
 /// Domain data (residents, messages, etc.) is passed separately.
 pub fn extract_block_view_props(state: &TuiState) -> BlockViewProps {
-    let focus = match state.block.focus {
-        BlockFocus::Residents => ScreenBlockFocus::Residents,
-        BlockFocus::Messages => ScreenBlockFocus::Messages,
-        BlockFocus::Input => ScreenBlockFocus::Input,
-    };
-
     BlockViewProps {
-        focus,
+        focus: state.block.focus,
         selected_resident: state.block.selected_resident,
         message_scroll: state.block.message_scroll,
         insert_mode: state.block.insert_mode,
@@ -360,23 +354,21 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
 }
 
 // ============================================================================
-// Recovery Screen Props Extraction
+// Notifications Screen Props Extraction
 // ============================================================================
 
-use crate::tui::types::RecoveryTab;
-
-/// View state extracted from TuiState for RecoveryScreen
+/// View state extracted from TuiState for NotificationsScreen
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct RecoveryViewProps {
-    pub tab: RecoveryTab,
+pub struct NotificationsViewProps {
+    pub focus: crate::tui::navigation::TwoPanelFocus,
     pub selected_index: usize,
 }
 
-/// Extract RecoveryScreen view props from TuiState
-pub fn extract_recovery_view_props(state: &TuiState) -> RecoveryViewProps {
-    RecoveryViewProps {
-        tab: state.recovery.tab,
-        selected_index: state.recovery.selected_index,
+/// Extract NotificationsScreen view props from TuiState
+pub fn extract_notifications_view_props(state: &TuiState) -> NotificationsViewProps {
+    NotificationsViewProps {
+        focus: state.notifications.focus,
+        selected_index: state.notifications.selected_index,
     }
 }
 
@@ -389,6 +381,7 @@ use crate::tui::types::{MfaPolicy, SettingsSection};
 /// View state extracted from TuiState for SettingsScreen
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SettingsViewProps {
+    pub focus: TwoPanelFocus,
     pub section: SettingsSection,
     pub selected_index: usize,
     pub mfa_policy: MfaPolicy,
@@ -415,6 +408,16 @@ pub struct SettingsViewProps {
     pub confirm_remove_modal_device_id: String,
     pub confirm_remove_modal_device_name: String,
     pub confirm_remove_modal_confirm_focused: bool,
+    // MFA setup modal (wizard-based)
+    pub mfa_setup_modal_visible: bool,
+    pub mfa_setup_modal_step: GuardianSetupStep,
+    pub mfa_setup_modal_contacts: Vec<GuardianCandidateViewProps>,
+    pub mfa_setup_modal_selected_indices: Vec<usize>,
+    pub mfa_setup_modal_focused_index: usize,
+    pub mfa_setup_modal_threshold_k: u8,
+    pub mfa_setup_modal_threshold_n: u8,
+    pub mfa_setup_modal_ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
+    pub mfa_setup_modal_error: String,
 }
 
 /// Extract SettingsScreen view props from TuiState
@@ -489,7 +492,50 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         _ => (false, String::new(), String::new(), false),
     };
 
+    let (
+        mfa_visible,
+        mfa_step,
+        mfa_contacts,
+        mfa_selected,
+        mfa_focused,
+        mfa_k,
+        mfa_n,
+        mfa_responses,
+        mfa_error,
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::MfaSetup(s)) => (
+            true,
+            s.step.clone(),
+            s.contacts
+                .iter()
+                .map(|c| GuardianCandidateViewProps {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    is_current_guardian: c.is_current_guardian,
+                })
+                .collect(),
+            s.selected_indices.clone(),
+            s.focused_index,
+            s.threshold_k,
+            s.threshold_n(),
+            s.ceremony_responses.clone(),
+            s.error.clone().unwrap_or_default(),
+        ),
+        _ => (
+            false,
+            GuardianSetupStep::default(),
+            vec![],
+            vec![],
+            0,
+            2,
+            3,
+            vec![],
+            String::new(),
+        ),
+    };
+
     SettingsViewProps {
+        focus: state.settings.focus,
         section: state.settings.section,
         selected_index: state.settings.selected_index,
         mfa_policy: state.settings.mfa_policy,
@@ -516,6 +562,16 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         confirm_remove_modal_device_id: confirm_remove_device_id,
         confirm_remove_modal_device_name: confirm_remove_device_name,
         confirm_remove_modal_confirm_focused: confirm_remove_focused,
+        // MFA setup modal (from queue)
+        mfa_setup_modal_visible: mfa_visible,
+        mfa_setup_modal_step: mfa_step,
+        mfa_setup_modal_contacts: mfa_contacts,
+        mfa_setup_modal_selected_indices: mfa_selected,
+        mfa_setup_modal_focused_index: mfa_focused,
+        mfa_setup_modal_threshold_k: mfa_k,
+        mfa_setup_modal_threshold_n: mfa_n,
+        mfa_setup_modal_ceremony_responses: mfa_responses,
+        mfa_setup_modal_error: mfa_error,
     }
 }
 
@@ -526,19 +582,51 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
 /// View state extracted from TuiState for NeighborhoodScreen
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NeighborhoodViewProps {
+    pub mode: NeighborhoodMode,
+    pub detail_focus: DetailFocus,
     pub selected_index: usize,
     pub grid_row: usize,
     pub grid_col: usize,
     pub enter_depth: TraversalDepth,
+    pub selected_neighborhood: usize,
+    pub neighborhood_count: usize,
+    pub selected_block: usize,
+    pub block_count: usize,
+    pub entered_block_id: Option<String>,
+    pub selected_channel: usize,
+    pub channel_count: usize,
+    pub selected_resident: usize,
+    pub resident_count: usize,
+    pub insert_mode: bool,
+    pub input_buffer: String,
+    pub message_scroll: usize,
+    pub message_count: usize,
+    pub steward_actions_enabled: bool,
 }
 
 /// Extract NeighborhoodScreen view props from TuiState
 pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProps {
     NeighborhoodViewProps {
+        mode: state.neighborhood.mode,
+        detail_focus: state.neighborhood.detail_focus,
         selected_index: state.neighborhood.grid.current(),
         grid_row: state.neighborhood.grid.row(),
         grid_col: state.neighborhood.grid.col(),
         enter_depth: state.neighborhood.enter_depth,
+        selected_neighborhood: state.neighborhood.selected_neighborhood,
+        neighborhood_count: state.neighborhood.neighborhood_count,
+        selected_block: state.neighborhood.selected_block,
+        block_count: state.neighborhood.block_count,
+        entered_block_id: state.neighborhood.entered_block_id.clone(),
+        selected_channel: state.neighborhood.selected_channel,
+        channel_count: state.neighborhood.channel_count,
+        selected_resident: state.neighborhood.selected_resident,
+        resident_count: state.neighborhood.resident_count,
+        insert_mode: state.neighborhood.insert_mode,
+        input_buffer: state.neighborhood.input_buffer.clone(),
+        message_scroll: state.neighborhood.message_scroll,
+        message_count: state.neighborhood.message_count,
+        steward_actions_enabled: state.neighborhood.steward_actions_enabled,
     }
 }
 
@@ -589,7 +677,7 @@ mod tests {
         let props = extract_block_view_props(&state);
 
         assert!(props.insert_mode, "insert_mode must be extracted");
-        assert_eq!(props.focus, ScreenBlockFocus::Input);
+        assert_eq!(props.focus, BlockFocus::Input);
         assert_eq!(props.input_buffer, "hello");
         assert_eq!(props.selected_resident, 3);
         assert!(props.invite_modal_open);
@@ -665,15 +753,15 @@ mod tests {
     }
 
     #[test]
-    fn test_recovery_view_props_extraction() {
+    fn test_notifications_view_props_extraction() {
         let mut state = TuiState::new();
-        state.recovery.tab = RecoveryTab::Requests;
-        state.recovery.selected_index = 2;
+        state.notifications.selected_index = 2;
+        state.notifications.focus = TwoPanelFocus::Detail;
 
-        let props = extract_recovery_view_props(&state);
+        let props = extract_notifications_view_props(&state);
 
-        assert_eq!(props.tab, RecoveryTab::Requests);
         assert_eq!(props.selected_index, 2);
+        assert_eq!(props.focus, TwoPanelFocus::Detail);
     }
 
     #[test]

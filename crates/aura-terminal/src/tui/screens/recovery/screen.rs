@@ -84,13 +84,23 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
         .filter(|g| g.status == GuardianStatus::Active)
         .count();
 
-    let threshold_text = if props.threshold_total == 0 {
-        "Not configured".to_string()
-    } else {
+    let threshold_configured = props.threshold_total > 0;
+    let threshold_text = if threshold_configured {
         format!(
             "{} of {} required ({} active)",
             props.threshold_required, props.threshold_total, active_count
         )
+    } else {
+        "Not configured".to_string()
+    };
+    let threshold_status = if threshold_configured {
+        if active_count as u32 >= props.threshold_required {
+            ("Ready", Theme::SUCCESS)
+        } else {
+            ("Waiting", Theme::WARNING)
+        }
+    } else {
+        ("Not set", Theme::TEXT_MUTED)
     };
 
     element! {
@@ -128,13 +138,32 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                             let status_color = g.status.color();
                             let icon = g.status.icon().to_string();
                             let id = g.id.clone();
-                            let name = g.name.clone();
-                            let share_text = if g.has_share { " [share]" } else { "" }.to_string();
+                            let name = if g.name.trim().is_empty() {
+                                let short = id.chars().take(8).collect::<String>();
+                                format!("{short}…")
+                            } else {
+                                g.name.clone()
+                            };
+                            let share_text = if g.has_share { "Share" } else { "No share" };
                             element! {
-                                View(key: id, flex_direction: FlexDirection::Row, background_color: bg, padding_left: Spacing::XS, gap: Spacing::XS) {
-                                    Text(content: icon, color: status_color)
-                                    Text(content: name, color: text_color)
-                                    Text(content: share_text, color: Theme::SECONDARY)
+                                View(
+                                    key: id,
+                                    flex_direction: FlexDirection::Row,
+                                    background_color: bg,
+                                    padding_left: Spacing::XS,
+                                    padding_right: Spacing::XS,
+                                    gap: Spacing::XS,
+                                    justify_content: JustifyContent::SpaceBetween,
+                                ) {
+                                    View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                                        Text(content: icon, color: status_color)
+                                        Text(content: name, color: text_color)
+                                        Text(content: g.status.label().to_string(), color: Theme::TEXT_MUTED)
+                                    }
+                                    Text(
+                                        content: share_text.to_string(),
+                                        color: if g.has_share { Theme::SUCCESS } else { Theme::TEXT_MUTED },
+                                    )
                                 }
                             }
                         }).collect()
@@ -149,7 +178,33 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                 width: 100pct,
                 padding: Spacing::PANEL_PADDING,
             ) {
-                KeyValue(label: "Threshold".to_string(), value: threshold_text)
+                View(flex_direction: FlexDirection::Column, gap: Spacing::XS) {
+                    View(flex_direction: FlexDirection::Row, justify_content: JustifyContent::SpaceBetween) {
+                        Text(content: "Threshold".to_string(), weight: Weight::Bold, color: Theme::PRIMARY)
+                        Text(content: threshold_status.0.to_string(), color: threshold_status.1)
+                    }
+                    Text(content: threshold_text, color: Theme::TEXT)
+                    #(if threshold_configured {
+                        Some(element! {
+                            Text(
+                                content: format!(
+                                    "Active: {}/{}  •  Required: {}",
+                                    active_count,
+                                    props.threshold_total,
+                                    props.threshold_required
+                                ),
+                                color: Theme::TEXT_MUTED,
+                            )
+                        })
+                    } else {
+                        Some(element! {
+                            Text(
+                                content: "Set up guardians to enable recovery.".to_string(),
+                                color: Theme::TEXT_MUTED,
+                            )
+                        })
+                    })
+                }
             }
         }
     }

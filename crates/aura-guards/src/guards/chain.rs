@@ -433,7 +433,7 @@ impl SendGuardChain {
 ///
 /// # Example
 /// ```rust,ignore
-/// use aura_protocol::guards::send_guard::create_send_guard;
+/// use aura_guards::send_guard::create_send_guard;
 ///
 /// let guard = create_send_guard(
 ///     "message:send".to_string(), // authorization requirement

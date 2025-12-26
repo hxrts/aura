@@ -12,7 +12,7 @@ use crate::amp::{
 };
 use aura_guards::traits::GuardContextProvider;
 use aura_guards::GuardEffects;
-use aura_core::effects::NetworkEffects;
+use aura_core::effects::{CryptoEffects, NetworkEffects};
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Result};
@@ -199,7 +199,7 @@ where
         + NetworkEffects
         + GuardEffects
         + GuardContextProvider
-        + crate::effects::CryptoEffects
+        + CryptoEffects
         + aura_core::PhysicalTimeEffects
         + aura_core::TimeEffects,
 {
@@ -369,7 +369,7 @@ where
 #[instrument(skip(effects, bytes), fields(context = %context))]
 pub async fn amp_recv<E>(effects: &E, context: ContextId, bytes: Vec<u8>) -> Result<AmpMessage>
 where
-    E: AmpJournalEffects + crate::effects::CryptoEffects,
+    E: AmpJournalEffects + CryptoEffects,
 {
     // Timing captured by tracing span, not explicit measurement
     let wire_size = bytes.len();
@@ -519,7 +519,7 @@ pub async fn amp_recv_with_receipt<E>(
     bytes: Vec<u8>,
 ) -> Result<AmpDelivery>
 where
-    E: AmpJournalEffects + crate::effects::CryptoEffects,
+    E: AmpJournalEffects + CryptoEffects,
 {
     let msg = amp_recv(effects, context, bytes).await?;
     Ok(AmpDelivery {

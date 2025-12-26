@@ -15,7 +15,7 @@
 //! - **Shared Storage**: Sync and tree handlers share the same storage backend
 
 pub mod anti_entropy;
-pub mod broadcaster;
+pub mod broadcast;
 pub mod effects;
 pub mod pure;
 pub mod persistent;
@@ -31,7 +31,7 @@ pub use aura_core::effects::WakeCondition;
 
 // Re-export handler types
 pub use anti_entropy::AntiEntropyHandler;
-pub use broadcaster::{BroadcastConfig, BroadcasterHandler};
+pub use broadcast::{BroadcastConfig, BroadcasterHandler};
 pub use persistent::PersistentSyncHandler;
 
 // Re-export storage constants for shared access

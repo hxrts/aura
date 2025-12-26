@@ -101,9 +101,16 @@ pub enum DispatchCommand {
     // Guardian ceremony
     /// Open guardian setup modal (shell will populate contacts)
     OpenGuardianSetup,
+    /// Open MFA setup modal (shell will populate devices)
+    OpenMfaSetup,
     /// Start a guardian ceremony with selected contacts and threshold
     StartGuardianCeremony {
         contact_ids: Vec<String>,
+        threshold_k: u8,
+    },
+    /// Start an MFA ceremony with selected devices and threshold
+    StartMfaCeremony {
+        device_ids: Vec<String>,
         threshold_k: u8,
     },
     /// Cancel an in-progress guardian ceremony

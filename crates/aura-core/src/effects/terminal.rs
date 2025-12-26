@@ -196,6 +196,11 @@ impl Modifiers {
         self.0 & Self::ALT.0 != 0
     }
 
+    /// Check if super/command key is pressed
+    pub fn super_key(self) -> bool {
+        self.0 & Self::SUPER.0 != 0
+    }
+
     /// Combine modifiers
     pub fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)

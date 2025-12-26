@@ -26,7 +26,7 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
-use aura_protocol::guards::types;
+use aura_guards::types;
 use aura_verify::session::SessionScope;
 use serde::{Deserialize, Serialize};
 

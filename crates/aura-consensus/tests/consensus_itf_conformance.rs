@@ -23,12 +23,12 @@
 //!
 //! Then run tests:
 //! ```bash
-//! cargo test -p aura-protocol --test consensus_itf_conformance
+//! cargo test -p aura-consensus --test consensus_itf_conformance
 //! ```
 
 mod common;
 
-use aura_protocol::consensus::core::{
+use aura_consensus::core::{
     state::{ConsensusPhase, ConsensusState},
     validation::check_invariants,
 };
@@ -619,7 +619,7 @@ fn test_itf_state_comparison_with_divergence() {
 /// Demonstrate divergence report format with synthetic data
 #[test]
 fn test_divergence_report_format() {
-    use aura_protocol::consensus::core::state::{PathSelection, ShareData, ShareProposal};
+    use aura_consensus::core::state::{PathSelection, ShareData, ShareProposal};
     use std::collections::BTreeSet;
 
     // Create two states with known differences
@@ -680,7 +680,7 @@ fn test_divergence_report_format() {
 /// Test that invariant violations trigger detailed reporting
 #[test]
 fn test_invariant_violation_with_divergence() {
-    use aura_protocol::consensus::core::state::{PathSelection, ShareData, ShareProposal};
+    use aura_consensus::core::state::{PathSelection, ShareData, ShareProposal};
     use std::collections::BTreeSet;
 
     let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();

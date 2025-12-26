@@ -5,7 +5,7 @@
 //! producing an explicit list of `EffectCommand` values for an async interpreter.
 
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_protocol::guards::types;
+use aura_guards::types;
 
 use crate::facts::ChatFact;
 

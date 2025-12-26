@@ -34,7 +34,6 @@ use crate::tui::components::{
 };
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
-use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::props::ContactsViewProps;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Contact, ContactStatus};
@@ -83,9 +82,9 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
     };
     let guardian_badge = if c.is_guardian { " [guardian]" } else { "" }.to_string();
 
-    // Selection indicator: colored circle when selected, space otherwise
+    // Selection indicator: triangle when selected, space otherwise
     let indicator = if props.is_selected {
-        crate::tui::theme::Icons::ONLINE
+        "➤"
     } else {
         " "
     };
@@ -99,7 +98,6 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
         View(
             flex_direction: FlexDirection::Row,
             background_color: bg,
-            padding_left: 1,
             padding_right: 1,
             overflow: Overflow::Hidden,
         ) {
@@ -312,8 +310,6 @@ pub fn ContactsScreen(
 
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_selected = props.view.selected_index;
-    let current_focus = props.view.focus;
-    let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let selected_contact = contacts.get(current_selected).cloned();
 
     // === Pure view: No use_terminal_events ===
@@ -361,13 +357,13 @@ pub fn ContactsScreen(
                     ContactList(
                         contacts: contacts.clone(),
                         selected_index: current_selected,
-                        focused: !is_detail_focused,
+                        focused: false,
                     )
                 }
                 // Detail (matches settings screen width)
                 ContactDetail(
                     contact: selected_contact,
-                    focused: is_detail_focused,
+                    focused: false,
                 )
             }
         }

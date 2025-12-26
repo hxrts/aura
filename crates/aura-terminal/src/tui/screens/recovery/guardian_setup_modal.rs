@@ -13,11 +13,69 @@ use crate::tui::layout::dim;
 use crate::tui::state_machine::{GuardianCeremonyResponse, GuardianSetupStep};
 use crate::tui::theme::{Borders, Icons, Spacing, Theme};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuardianSetupKind {
+    Guardian,
+    Mfa,
+}
+
+impl Default for GuardianSetupKind {
+    fn default() -> Self {
+        GuardianSetupKind::Guardian
+    }
+}
+
+struct GuardianSetupCopy {
+    title: &'static str,
+    select_prompt: &'static str,
+    empty_title: &'static str,
+    empty_subtitle: &'static str,
+    threshold_prompt: &'static str,
+    decline_message: &'static str,
+    step1: &'static str,
+    step2: &'static str,
+    step3: &'static str,
+    low_hint: &'static str,
+}
+
+impl GuardianSetupKind {
+    fn copy(self) -> GuardianSetupCopy {
+        match self {
+            GuardianSetupKind::Guardian => GuardianSetupCopy {
+                title: "Guardian Setup",
+                select_prompt: "Select guardians (can help recover your account):",
+                empty_title: "No contacts available.",
+                empty_subtitle: "Add contacts first to set up guardians.",
+                threshold_prompt: "How many guardians must approve recovery?",
+                decline_message: "Failed: guardian declined",
+                step1: "1.Select",
+                step2: "2.Threshold",
+                step3: "3.Ceremony",
+                low_hint: "Low: any 1 can recover",
+            },
+            GuardianSetupKind::Mfa => GuardianSetupCopy {
+                title: "Multifactor Setup",
+                select_prompt: "Select devices to authorize multifactor signing:",
+                empty_title: "No devices available.",
+                empty_subtitle: "Add devices first to enable multifactor.",
+                threshold_prompt: "How many devices must sign?",
+                decline_message: "Failed: signer declined",
+                step1: "1.Devices",
+                step2: "2.Threshold",
+                step3: "3.Ceremony",
+                low_hint: "Low: any 1 can sign",
+            },
+        }
+    }
+}
+
 /// Props for GuardianSetupModal
 #[derive(Default, Props)]
 pub struct GuardianSetupModalProps {
     /// Whether the modal is visible
     pub visible: bool,
+    /// What this setup flow is for
+    pub kind: GuardianSetupKind,
     /// Current step in the wizard
     pub step: GuardianSetupStep,
     /// Contact candidates for guardian selection
@@ -52,6 +110,7 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
     }
 
     let step = props.step.clone();
+    let copy = props.kind.copy();
     let error = props.error.clone();
 
     element! {
@@ -75,12 +134,12 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
                 justify_content: JustifyContent::SpaceBetween,
             ) {
                 Text(
-                    content: "Guardian Setup",
+                    content: copy.title,
                     weight: Weight::Bold,
                     color: Theme::PRIMARY,
                 )
                 // Step indicator
-                #(render_step_indicator(&step))
+                #(render_step_indicator(&step, props.kind))
             }
 
             // Error message if any
@@ -125,7 +184,8 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
     }
 }
 
-fn render_step_indicator(step: &GuardianSetupStep) -> AnyElement<'static> {
+fn render_step_indicator(step: &GuardianSetupStep, kind: GuardianSetupKind) -> AnyElement<'static> {
+    let copy = kind.copy();
     let (step1, step2, step3) = match step {
         GuardianSetupStep::SelectContacts => (Theme::PRIMARY, Theme::TEXT_MUTED, Theme::TEXT_MUTED),
         GuardianSetupStep::ChooseThreshold => (Theme::SUCCESS, Theme::PRIMARY, Theme::TEXT_MUTED),
@@ -134,11 +194,11 @@ fn render_step_indicator(step: &GuardianSetupStep) -> AnyElement<'static> {
 
     element! {
         View(flex_direction: FlexDirection::Row, gap: 1) {
-            Text(content: "1.Select", color: step1)
+            Text(content: copy.step1, color: step1)
             Text(content: Icons::ARROW_RIGHT, color: Theme::TEXT_MUTED)
-            Text(content: "2.Threshold", color: step2)
+            Text(content: copy.step2, color: step2)
             Text(content: Icons::ARROW_RIGHT, color: Theme::TEXT_MUTED)
-            Text(content: "3.Ceremony", color: step3)
+            Text(content: copy.step3, color: step3)
         }
     }
     .into_any()
@@ -148,6 +208,7 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
     let contacts = props.contacts.clone();
     let selected = props.selected_indices.clone();
     let focused = props.focused_index;
+    let copy = props.kind.copy();
 
     // Empty state when no contacts
     if contacts.is_empty() {
@@ -160,11 +221,11 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
                 align_items: AlignItems::Center,
             ) {
                 Text(
-                    content: "No contacts available.",
+                    content: copy.empty_title,
                     color: Theme::TEXT_MUTED,
                 )
                 Text(
-                    content: "Add contacts first to set up guardians.",
+                    content: copy.empty_subtitle,
                     color: Theme::TEXT_MUTED,
                 )
                 View(margin_top: Spacing::SM) {
@@ -187,7 +248,7 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
             flex_grow: 1.0,
         ) {
             Text(
-                content: "Select guardians (can help recover your account):",
+                content: copy.select_prompt,
                 color: Theme::TEXT_MUTED,
             )
 
@@ -254,10 +315,11 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
 fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'static> {
     let k = props.threshold_k;
     let n = props.threshold_n;
+    let copy = props.kind.copy();
 
     // Security level hint - compact
     let security_hint = if k == 1 {
-        "Low: any 1 can recover"
+        copy.low_hint
     } else if k == n {
         "Max: all must agree"
     } else {
@@ -273,7 +335,7 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
             align_items: AlignItems::Center,
         ) {
             Text(
-                content: "How many guardians must approve recovery?",
+                content: copy.threshold_prompt,
                 color: Theme::TEXT_MUTED,
             )
 
@@ -317,6 +379,7 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
 
 fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'static> {
     let responses = props.ceremony_responses.clone();
+    let copy = props.kind.copy();
 
     // Count responses
     let total = responses.len();
@@ -373,7 +436,7 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
             // Status message - compact
             #(if declined > 0 {
                 Some(element! {
-                    Text(content: "Failed: guardian declined", color: Theme::ERROR, weight: Weight::Bold)
+                    Text(content: copy.decline_message, color: Theme::ERROR, weight: Weight::Bold)
                 })
             } else if accepted == total && total > 0 {
                 Some(element! {

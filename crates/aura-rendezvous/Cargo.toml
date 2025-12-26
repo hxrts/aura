@@ -12,7 +12,7 @@ description = "Secret-Branded Broadcasting (SBB) and rendezvous protocols for Au
 aura-core = { path = "../aura-core" }
 aura-macros = { path = "../aura-macros" }
 aura-journal = { path = "../aura-journal" }
-aura-protocol = { path = "../aura-protocol" }
+aura-guards = { path = "../aura-guards" }
 aura-social = { path = "../aura-social" }
 
 # Cryptographic dependencies (ChaCha20-Poly1305 via CryptoEffects)

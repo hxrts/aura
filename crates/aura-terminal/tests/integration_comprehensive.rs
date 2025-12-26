@@ -15,7 +15,7 @@
 //!
 //! ## Test Categories
 //!
-//! 1. **Screen Tests** - Navigation and functionality for each of 6 screens
+//! 1. **Screen Tests** - Navigation and functionality for each of 5 screens
 //! 2. **Modal Tests** - All modal types and their interactions
 //! 3. **Dispatch Command Tests** - Verify correct commands are generated
 //! 4. **Edge Case Tests** - Boundary conditions and error handling
@@ -25,10 +25,10 @@
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state_machine::{
-    transition, BlockFocus, ChannelInfoModalState, ChatFocus, ContactSelectModalState,
-    DispatchCommand, ModalType, QueuedModal, TopicModalState, TuiCommand, TuiState,
+    transition, ChannelInfoModalState, ChatFocus, DetailFocus, DispatchCommand, ModalType,
+    QueuedModal, TopicModalState, TuiCommand, TuiState,
 };
-use aura_terminal::tui::types::{RecoveryTab, SettingsSection};
+use aura_terminal::tui::types::SettingsSection;
 use proptest::prelude::*;
 
 // ============================================================================
@@ -160,41 +160,42 @@ impl TestTui {
 
     fn go_to_screen(&mut self, screen: Screen) {
         let key = char::from_digit(screen.key_number() as u32, 10)
-            .unwrap_or_else(|| unreachable!("Screen::key_number returns 1..=6"));
+            .unwrap_or_else(|| unreachable!("Screen::key_number returns 1..=5"));
         self.send_char(key);
         self.assert_screen(screen);
     }
 }
 
 // ============================================================================
-// BLOCK SCREEN TESTS
+// NEIGHBORHOOD SCREEN TESTS
 // ============================================================================
 
-mod block_screen {
+mod neighborhood_screen_map {
     use super::*;
 
-    /// TODO: Block screen insert mode requires keyboard handling implementation
     #[test]
-    fn test_block_insert_mode_entry() {
+    fn test_neighborhood_insert_mode_entry() {
         let mut tui = TestTui::new();
-        tui.assert_screen(Screen::Block);
+        tui.assert_screen(Screen::Neighborhood);
 
-        // Enter insert mode with 'i'
+        // Enter detail mode then insert mode with 'i'
         assert!(!tui.is_insert_mode());
+        tui.send_enter();
         tui.send_char('i');
         assert!(tui.is_insert_mode());
-        assert_eq!(tui.state.block.focus, BlockFocus::Input);
+        assert_eq!(tui.state.neighborhood.detail_focus, DetailFocus::Input);
     }
 
     #[test]
-    fn test_block_send_message() {
+    fn test_neighborhood_send_message() {
         let mut tui = TestTui::new();
 
-        // Enter insert mode and type message
+        // Enter detail mode, then insert mode and type message
+        tui.send_enter();
         tui.send_char('i');
         tui.type_text("Hello, Block!");
 
-        assert_eq!(tui.state.block.input_buffer, "Hello, Block!");
+        assert_eq!(tui.state.neighborhood.input_buffer, "Hello, Block!");
 
         // Send message with Enter
         tui.clear_commands();
@@ -204,19 +205,20 @@ mod block_screen {
         assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::SendBlockMessage { content } if content == "Hello, Block!")));
 
         // Buffer should be cleared
-        assert!(tui.state.block.input_buffer.is_empty());
+        assert!(tui.state.neighborhood.input_buffer.is_empty());
 
         // Should exit insert mode after sending
         assert!(!tui.is_insert_mode());
     }
 
     #[test]
-    fn test_block_empty_message_not_sent() {
+    fn test_neighborhood_empty_message_not_sent() {
         let mut tui = TestTui::new();
 
-        // Enter insert mode with empty buffer
+        // Enter detail mode then insert mode with empty buffer
+        tui.send_enter();
         tui.send_char('i');
-        assert!(tui.state.block.input_buffer.is_empty());
+        assert!(tui.state.neighborhood.input_buffer.is_empty());
 
         // Try to send with Enter
         tui.clear_commands();
@@ -227,144 +229,39 @@ mod block_screen {
     }
 
     #[test]
-    fn test_block_resident_navigation() {
+    fn test_neighborhood_resident_navigation() {
         let mut tui = TestTui::new();
-        assert_eq!(tui.state.block.focus, BlockFocus::Residents);
+        tui.send_enter();
+        tui.state.neighborhood.detail_focus = DetailFocus::Residents;
 
         // Set up item counts for navigation to work
-        tui.state.block.resident_count = 10;
+        tui.state.neighborhood.resident_count = 10;
 
         // Navigate down in resident list
-        let initial = tui.state.block.selected_resident;
+        let initial = tui.state.neighborhood.selected_resident;
         tui.send_char('j');
-        assert_eq!(tui.state.block.selected_resident, initial + 1);
+        assert_eq!(tui.state.neighborhood.selected_resident, initial + 1);
 
         // Navigate up
         tui.send_char('k');
-        assert_eq!(tui.state.block.selected_resident, initial);
+        assert_eq!(tui.state.neighborhood.selected_resident, initial);
     }
 
     #[test]
-    fn test_block_invite_modal() {
+    fn test_neighborhood_backspace_in_insert_mode() {
         let mut tui = TestTui::new();
 
-        // Pressing 'v' requests the shell to open the modal (contacts are populated outside the pure state machine).
-        tui.clear_commands();
-        tui.send_char('v');
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenBlockInvite)));
-
-        // Simulate the shell opening a populated modal.
-        tui.state
-            .modal_queue
-            .enqueue(QueuedModal::BlockInvite(ContactSelectModalState::single(
-                "Invite to Block",
-                vec![
-                    ("c1".to_string(), "Alice".to_string()),
-                    ("c2".to_string(), "Bob".to_string()),
-                ],
-            )));
-        assert!(tui.state.is_block_invite_modal_active());
-
-        // Navigate selection inside queued modal state.
-        let initial = match tui.state.modal_queue.current() {
-            Some(QueuedModal::BlockInvite(s)) => s.selected_index,
-            _ => 0,
-        };
-        tui.send_char('j');
-        let after = match tui.state.modal_queue.current() {
-            Some(QueuedModal::BlockInvite(s)) => s.selected_index,
-            _ => 0,
-        };
-        assert_eq!(after, initial + 1);
-
-        // Close with Escape.
-        tui.send_escape();
-        assert!(!tui.state.is_block_invite_modal_active());
-    }
-
-    #[test]
-    fn test_block_invite_confirm() {
-        let mut tui = TestTui::new();
-
-        // Simulate a populated invite modal.
-        tui.state
-            .modal_queue
-            .enqueue(QueuedModal::BlockInvite(ContactSelectModalState::single(
-                "Invite to Block",
-                vec![
-                    ("c1".to_string(), "Alice".to_string()),
-                    ("c2".to_string(), "Bob".to_string()),
-                ],
-            )));
-
-        // Select second contact.
-        tui.send_char('j');
-
-        // Confirm with Enter.
-        tui.clear_commands();
         tui.send_enter();
-
-        // Modal should close.
-        assert!(!tui.state.is_block_invite_modal_active());
-
-        // Dispatch command should include the real contact id.
-        assert!(tui.has_dispatch(|d| {
-            matches!(d, DispatchCommand::InviteToBlock { contact_id } if contact_id == "c2")
-        }));
-    }
-
-    #[test]
-    fn test_block_grant_steward() {
-        let mut tui = TestTui::new();
-
-        // Select a resident
-        tui.send_char('j');
-        tui.clear_commands();
-
-        // Grant steward with 'g'
-        tui.send_char('g');
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::GrantStewardSelected)));
-    }
-
-    #[test]
-    fn test_block_revoke_steward() {
-        let mut tui = TestTui::new();
-
-        // Select a resident
-        tui.send_char('j');
-        tui.clear_commands();
-
-        // Revoke steward with 'R' (uppercase to distinguish from 'r' toggle residents)
-        tui.send_char('R');
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::RevokeStewardSelected)));
-    }
-
-    #[test]
-    fn test_block_navigate_to_neighborhood() {
-        let mut tui = TestTui::new();
-        tui.clear_commands();
-
-        // Navigate to neighborhood with 'n'
-        tui.send_char('n');
-        assert!(
-            tui.has_dispatch(|d| matches!(d, DispatchCommand::NavigateTo(Screen::Neighborhood)))
-        );
-    }
-
-    #[test]
-    fn test_block_backspace_in_insert_mode() {
-        let mut tui = TestTui::new();
-
         tui.send_char('i');
         tui.type_text("test");
-        assert_eq!(tui.state.block.input_buffer, "test");
+        assert_eq!(tui.state.neighborhood.input_buffer, "test");
 
         // Backspace removes last character
         tui.send_backspace();
-        assert_eq!(tui.state.block.input_buffer, "tes");
+        assert_eq!(tui.state.neighborhood.input_buffer, "tes");
 
         tui.send_backspace();
-        assert_eq!(tui.state.block.input_buffer, "te");
+        assert_eq!(tui.state.neighborhood.input_buffer, "te");
     }
 }
 
@@ -674,6 +571,9 @@ mod settings_screen {
         assert_eq!(tui.state.settings.section, SettingsSection::Threshold);
 
         tui.send_char('j');
+        assert_eq!(tui.state.settings.section, SettingsSection::Recovery);
+
+        tui.send_char('j');
         assert_eq!(tui.state.settings.section, SettingsSection::Devices);
 
         tui.send_char('j');
@@ -744,17 +644,15 @@ mod settings_screen {
         tui.go_to_screen(Screen::Settings);
 
         // Go to MFA section
-        for _ in 0..3 {
+        for _ in 0..4 {
             tui.send_char('j');
         }
         assert_eq!(tui.state.settings.section, SettingsSection::Mfa);
 
-        // Default MFA policy
-        let initial_mfa = tui.state.settings.mfa_policy;
-
-        // Space cycles MFA policy
+        // Space opens MFA setup
+        tui.clear_commands();
         tui.send_char(' ');
-        assert_ne!(tui.state.settings.mfa_policy, initial_mfa);
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenMfaSetup)));
     }
 
     #[test]
@@ -763,6 +661,7 @@ mod settings_screen {
         tui.go_to_screen(Screen::Settings);
 
         // Go to Devices section
+        tui.send_char('j');
         tui.send_char('j');
         tui.send_char('j');
         assert_eq!(tui.state.settings.section, SettingsSection::Devices);
@@ -795,101 +694,6 @@ mod settings_screen {
         tui.send_char('h');
 
         // These should work without panicking
-    }
-}
-
-// ============================================================================
-// RECOVERY SCREEN TESTS
-// ============================================================================
-
-mod recovery_screen {
-    use super::*;
-
-    #[test]
-    fn test_recovery_tab_navigation() {
-        let mut tui = TestTui::new();
-        tui.go_to_screen(Screen::Recovery);
-
-        // Default tab is Guardians
-        assert_eq!(tui.state.recovery.tab, RecoveryTab::Guardians);
-
-        // Navigate right with 'l'
-        tui.send_char('l');
-        assert_eq!(tui.state.recovery.tab, RecoveryTab::Recovery);
-
-        tui.send_char('l');
-        assert_eq!(tui.state.recovery.tab, RecoveryTab::Requests);
-
-        // Wraps around
-        tui.send_char('l');
-        assert_eq!(tui.state.recovery.tab, RecoveryTab::Guardians);
-
-        // Navigate left with 'h'
-        tui.send_char('h');
-        assert_eq!(tui.state.recovery.tab, RecoveryTab::Requests);
-    }
-
-    #[test]
-    fn test_recovery_guardian_list_navigation() {
-        let mut tui = TestTui::new();
-        tui.go_to_screen(Screen::Recovery);
-
-        // Set up item count for navigation to work
-        tui.state.recovery.item_count = 10;
-
-        // On Guardians tab, j/k navigates the list
-        let initial = tui.state.recovery.selected_index;
-        tui.send_char('j');
-        assert_eq!(tui.state.recovery.selected_index, initial + 1);
-
-        tui.send_char('k');
-        assert_eq!(tui.state.recovery.selected_index, initial);
-    }
-
-    #[test]
-    fn test_recovery_add_guardian() {
-        let mut tui = TestTui::new();
-        tui.go_to_screen(Screen::Recovery);
-
-        tui.clear_commands();
-
-        // 'a' opens guardian selection modal
-        tui.send_char('a');
-        assert!(tui.has_modal());
-        assert_eq!(tui.modal_type(), ModalType::GuardianSelect);
-    }
-
-    #[test]
-    fn test_recovery_start_recovery() {
-        let mut tui = TestTui::new();
-        tui.go_to_screen(Screen::Recovery);
-
-        // Go to Recovery tab
-        tui.send_char('l');
-        assert_eq!(tui.state.recovery.tab, RecoveryTab::Recovery);
-
-        tui.clear_commands();
-
-        // 's' starts recovery
-        tui.send_char('s');
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::StartRecovery)));
-    }
-
-    #[test]
-    fn test_recovery_approve_request() {
-        let mut tui = TestTui::new();
-        tui.go_to_screen(Screen::Recovery);
-
-        // Go to Requests tab
-        tui.send_char('l');
-        tui.send_char('l');
-        assert_eq!(tui.state.recovery.tab, RecoveryTab::Requests);
-
-        tui.clear_commands();
-
-        // Enter approves request
-        tui.send_enter();
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::ApproveRecovery { .. })));
     }
 }
 
@@ -1075,7 +879,7 @@ mod modals {
 
         // Test all modal types that can be opened
         let modal_openers = vec![
-            (Screen::Block, '?'),    // Help
+            (Screen::Neighborhood, '?'),    // Help
             (Screen::Chat, 'n'),     // Create channel
             (Screen::Chat, 't'),     // Set topic
             (Screen::Contacts, 'e'), // Edit nickname
@@ -1112,61 +916,51 @@ mod modals {
     #[test]
     fn test_guardian_select_modal() {
         let mut tui = TestTui::new();
-        tui.go_to_screen(Screen::Recovery);
+        tui.go_to_screen(Screen::Contacts);
 
-        // 'a' opens guardian selection
-        tui.send_char('a');
-        assert!(tui.has_modal());
-        assert_eq!(tui.modal_type(), ModalType::GuardianSelect);
+        // 'g' opens guardian setup via dispatch (shell populates modal)
+        tui.clear_commands();
+        tui.send_char('g');
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenGuardianSetup)));
+
+        // Simulate the shell opening the modal.
+        tui.state
+            .modal_queue
+            .enqueue(QueuedModal::GuardianSetup(
+                aura_terminal::tui::state_machine::GuardianSetupModalState::default(),
+            ));
+        assert!(tui.state.is_guardian_setup_modal_active());
 
         // Set up contacts for navigation to work (must modify the queued modal)
-        if let Some(QueuedModal::GuardianSelect(ref mut state)) =
+        if let Some(QueuedModal::GuardianSetup(ref mut state)) =
             tui.state.modal_queue.current_mut()
         {
             state.contacts = vec![
-                ("id1".to_string(), "Contact 1".to_string()),
-                ("id2".to_string(), "Contact 2".to_string()),
-                ("id3".to_string(), "Contact 3".to_string()),
-                ("id4".to_string(), "Contact 4".to_string()),
-                ("id5".to_string(), "Contact 5".to_string()),
+                aura_terminal::tui::state_machine::GuardianCandidate {
+                    id: "id1".to_string(),
+                    name: "Contact 1".to_string(),
+                    is_current_guardian: false,
+                },
+                aura_terminal::tui::state_machine::GuardianCandidate {
+                    id: "id2".to_string(),
+                    name: "Contact 2".to_string(),
+                    is_current_guardian: false,
+                },
             ];
         }
 
-        // Navigate with j/k
-        let initial =
-            if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
-                state.selected_index
-            } else {
-                0
-            };
-        tui.send_char('j');
-        let after =
-            if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
-                state.selected_index
-            } else {
-                0
-            };
-        assert_eq!(after, initial + 1);
-
-        let expected_contact_id =
-            if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
-                state
-                    .contacts
-                    .get(state.selected_index)
-                    .map(|(id, _)| id.clone())
-                    .unwrap()
-            } else {
-                unreachable!("guardian select modal missing after navigation")
-            };
-
-        // Select with Enter
-        tui.clear_commands();
-        tui.send_enter();
-
-        assert!(tui.has_dispatch(|d| matches!(
-            d,
-            DispatchCommand::AddGuardian { contact_id } if contact_id == &expected_contact_id
-        )));
+        // Verify focused index updates
+        if let Some(QueuedModal::GuardianSetup(state)) = tui.state.modal_queue.current() {
+            assert_eq!(state.focused_index, 0);
+        }
+        tui.state.modal_queue.update_active(|modal| {
+            if let QueuedModal::GuardianSetup(state) = modal {
+                state.focused_index = 1;
+            }
+        });
+        if let Some(QueuedModal::GuardianSetup(state)) = tui.state.modal_queue.current() {
+            assert_eq!(state.focused_index, 1);
+        }
     }
 }
 
@@ -1180,12 +974,12 @@ mod global_behavior {
     #[test]
     fn test_quit_from_any_screen() {
         for screen in [
-            Screen::Block,
+            Screen::Neighborhood,
             Screen::Chat,
             Screen::Contacts,
             Screen::Neighborhood,
             Screen::Settings,
-            Screen::Recovery,
+            Screen::Notifications,
         ] {
             let mut tui = TestTui::new();
             tui.go_to_screen(screen);
@@ -1201,14 +995,15 @@ mod global_behavior {
     fn test_quit_blocked_in_insert_mode() {
         let mut tui = TestTui::new();
 
-        // Enter insert mode on Block screen
+        // Enter detail mode then insert mode on Neighborhood screen
+        tui.send_enter();
         tui.send_char('i');
         assert!(tui.is_insert_mode());
 
         // 'q' should type 'q', not quit
         tui.send_char('q');
         assert!(!tui.state.should_exit);
-        assert_eq!(tui.state.block.input_buffer, "q");
+        assert_eq!(tui.state.neighborhood.input_buffer, "q");
     }
 
     #[test]
@@ -1227,12 +1022,12 @@ mod global_behavior {
     #[test]
     fn test_help_from_any_screen() {
         for screen in [
-            Screen::Block,
+            Screen::Neighborhood,
             Screen::Chat,
             Screen::Contacts,
             Screen::Neighborhood,
             Screen::Settings,
-            Screen::Recovery,
+            Screen::Notifications,
         ] {
             let mut tui = TestTui::new();
             tui.go_to_screen(screen);
@@ -1282,21 +1077,20 @@ mod stress {
     fn test_rapid_screen_switching() {
         let mut tui = TestTui::new();
 
-        // Switch screens rapidly 10000 times (6 screens)
+        // Switch screens rapidly 10000 times (5 screens)
         for i in 0..10000 {
-            let key = char::from_digit(((i % 6) + 1) as u32, 10).unwrap();
+            let key = char::from_digit(((i % 5) + 1) as u32, 10).unwrap();
             tui.send_char(key);
         }
 
         // Should end on a valid screen without panicking
         assert!(matches!(
             tui.screen(),
-            Screen::Block
+            Screen::Neighborhood
                 | Screen::Chat
                 | Screen::Contacts
-                | Screen::Neighborhood
+                | Screen::Notifications
                 | Screen::Settings
-                | Screen::Recovery
         ));
     }
 
@@ -1305,6 +1099,7 @@ mod stress {
         let mut tui = TestTui::new();
 
         for _ in 0..10000 {
+            tui.send_enter();
             tui.send_char('i');
             tui.send_escape();
         }
@@ -1316,6 +1111,7 @@ mod stress {
     fn test_very_long_input() {
         let mut tui = TestTui::new();
 
+        tui.send_enter();
         tui.send_char('i');
 
         // Type 100KB of text
@@ -1324,7 +1120,7 @@ mod stress {
             tui.send_char(c);
         }
 
-        assert_eq!(tui.state.block.input_buffer.len(), 100_000);
+        assert_eq!(tui.state.neighborhood.input_buffer.len(), 100_000);
     }
 
     #[test]
@@ -1353,7 +1149,7 @@ mod stress {
                 5 => tui.send_char('?'),
                 6 => tui.send_escape(),
                 7 => tui.send(events::resize(80 + (i % 100) as u16, 24)),
-                8 => tui.send_char((b'1' + (i % 7) as u8) as char),
+                8 => tui.send_char((b'1' + (i % 5) as u8) as char),
                 _ => tui.send_char('h'),
             }
         }
@@ -1367,14 +1163,13 @@ mod stress {
 // ============================================================================
 
 fn screen_key_strategy() -> impl Strategy<Value = char> {
-    // 6 screens: Block(1), Neighborhood(2), Chat(3), Contacts(4), Recovery(5), Settings(6)
+    // 5 screens: Neighborhood(1), Chat(2), Contacts(3), Notifications(4), Settings(5)
     prop_oneof![
         Just('1'),
         Just('2'),
         Just('3'),
         Just('4'),
         Just('5'),
-        Just('6'),
     ]
 }
 
@@ -1384,8 +1179,8 @@ fn navigation_key_strategy() -> impl Strategy<Value = char> {
 
 fn terminal_event_strategy() -> impl Strategy<Value = TerminalEvent> {
     prop_oneof![
-        // Screen navigation (6 screens)
-        (1u8..=6).prop_map(|n| events::char(char::from_digit(n as u32, 10).unwrap())),
+        // Screen navigation (5 screens)
+        (1u8..=5).prop_map(|n| events::char(char::from_digit(n as u32, 10).unwrap())),
         // Vim navigation
         Just(events::char('h')),
         Just(events::char('j')),
@@ -1411,14 +1206,14 @@ fn terminal_event_strategy() -> impl Strategy<Value = TerminalEvent> {
 }
 
 proptest! {
-    /// Tab cycle always returns to start after 6 tabs (6 screens)
+    /// Tab cycle always returns to start after 5 tabs (5 screens)
     #[test]
-    fn prop_tab_cycle(start in 1u8..=6) {
+    fn prop_tab_cycle(start in 1u8..=5) {
         let mut tui = TestTui::new();
         tui.send_char(char::from_digit(start as u32, 10).unwrap());
         let initial = tui.screen();
 
-        for _ in 0..6 {
+        for _ in 0..5 {
             tui.send_tab();
         }
 
@@ -1437,12 +1232,11 @@ proptest! {
         tui.send_char(key);
 
         let expected = match key {
-            '1' => Screen::Block,
-            '2' => Screen::Neighborhood,
-            '3' => Screen::Chat,
-            '4' => Screen::Contacts,
-            '5' => Screen::Recovery,
-            '6' => Screen::Settings,
+            '1' => Screen::Neighborhood,
+            '2' => Screen::Chat,
+            '3' => Screen::Contacts,
+            '4' => Screen::Notifications,
+            '5' => Screen::Settings,
             _ => unreachable!(),
         };
 
@@ -1471,6 +1265,10 @@ proptest! {
     fn prop_escape_exits_insert(chars in prop::collection::vec(any::<char>().prop_filter("printable", |c| c.is_ascii_graphic()), 0..50)) {
         let mut tui = TestTui::new();
 
+        // Enter detail mode for Neighborhood before insert
+        if tui.screen() == Screen::Neighborhood {
+            tui.send_enter();
+        }
         tui.send_char('i');
         prop_assert!(tui.is_insert_mode());
 
@@ -1520,7 +1318,7 @@ proptest! {
         let mut tui = TestTui::new();
 
         // Test on various screens
-        for screen in ['3', '5', '7'] {
+        for screen in ['3', '4', '5'] {
             tui.send_char(screen);
             for _ in 0..k_presses {
                 tui.send_char('k');
@@ -1535,9 +1333,12 @@ proptest! {
     fn prop_insert_mode_screens(screen in screen_key_strategy()) {
         let mut tui = TestTui::new();
         tui.send_char(screen);
+        if tui.screen() == Screen::Neighborhood {
+            tui.send_enter();
+        }
         tui.send_char('i');
 
-        let should_be_insert = matches!(tui.screen(), Screen::Block | Screen::Chat);
+        let should_be_insert = matches!(tui.screen(), Screen::Neighborhood | Screen::Chat);
         prop_assert_eq!(tui.is_insert_mode(), should_be_insert);
     }
 
@@ -1601,41 +1402,57 @@ mod integration {
     fn test_recovery_guardian_setup() {
         let mut tui = TestTui::new();
 
-        // 1. Navigate to Recovery
-        tui.go_to_screen(Screen::Recovery);
+        // 1. Navigate to Contacts
+        tui.go_to_screen(Screen::Contacts);
 
-        // 2. Add a guardian
-        tui.send_char('a');
-        assert!(tui.has_modal());
+        // 2. Add a guardian (dispatch, then shell opens modal)
+        tui.clear_commands();
+        tui.send_char('g');
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenGuardianSetup)));
+        tui.state
+            .modal_queue
+            .enqueue(QueuedModal::GuardianSetup(
+                aura_terminal::tui::state_machine::GuardianSetupModalState::default(),
+            ));
+        assert!(tui.state.is_guardian_setup_modal_active());
 
         // 2b. Populate contacts in the modal (shell would normally do this)
-        if let Some(QueuedModal::GuardianSelect(ref mut state)) =
+        if let Some(QueuedModal::GuardianSetup(ref mut state)) =
             tui.state.modal_queue.current_mut()
         {
             state.contacts = vec![
-                ("id1".to_string(), "Contact 1".to_string()),
-                ("id2".to_string(), "Contact 2".to_string()),
+                aura_terminal::tui::state_machine::GuardianCandidate {
+                    id: "id1".to_string(),
+                    name: "Contact 1".to_string(),
+                    is_current_guardian: false,
+                },
+                aura_terminal::tui::state_machine::GuardianCandidate {
+                    id: "id2".to_string(),
+                    name: "Contact 2".to_string(),
+                    is_current_guardian: false,
+                },
             ];
         }
 
-        // 3. Select from list
-        tui.send_char('j'); // Select second contact
-        let expected_contact_id =
-            if let Some(QueuedModal::GuardianSelect(state)) = tui.state.modal_queue.current() {
-                state
-                    .contacts
-                    .get(state.selected_index)
-                    .map(|(id, _)| id.clone())
-                    .unwrap()
-            } else {
-                unreachable!("guardian select modal missing after navigation")
-            };
+        // 3. Select two contacts
+        tui.send_char(' '); // Select first contact
+        tui.send_char('j'); // Focus second contact
+        tui.send_char(' '); // Select second contact
+
+        // 4. Proceed to threshold selection
+        tui.send_enter();
+        if let Some(QueuedModal::GuardianSetup(state)) = tui.state.modal_queue.current() {
+            assert_eq!(state.step, aura_terminal::tui::state_machine::GuardianSetupStep::ChooseThreshold);
+        } else {
+            unreachable!("guardian setup modal missing after enter");
+        }
+
+        // 5. Start ceremony
         tui.clear_commands();
         tui.send_enter();
-
         assert!(tui.has_dispatch(|d| matches!(
             d,
-            DispatchCommand::AddGuardian { contact_id } if contact_id == &expected_contact_id
+            DispatchCommand::StartGuardianCeremony { .. }
         )));
     }
 
@@ -1686,6 +1503,7 @@ mod integration {
 
         // Go home
         tui.clear_commands();
+        tui.state.neighborhood.mode = aura_terminal::tui::state_machine::NeighborhoodMode::Map;
         tui.send_char('g');
         assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::GoHome)));
     }

@@ -13,10 +13,10 @@
 //! - Tagged variants: `{"tag": "SomeTag", "value": {...}}`
 
 use aura_core::AuraError;
-use aura_protocol::consensus::core::{
+use aura_consensus::core::{
     ConsensusPhase, ConsensusState, ShareData, ShareProposal,
 };
-use aura_protocol::consensus::core::state::PureCommitFact;
+use aura_consensus::core::state::PureCommitFact;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;

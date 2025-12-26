@@ -53,7 +53,7 @@ fn invitation_send_and_accept_end_to_end() {
 
 #[test]
 fn invitation_decline_flow_marks_status() {
-    let sender = test_authority_id(3);
+    let _sender = test_authority_id(3);
     let receiver = test_authority_id(4);
     let ctx = ContextId::new_from_entropy([2u8; 32]);
 

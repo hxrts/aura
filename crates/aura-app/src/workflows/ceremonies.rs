@@ -26,6 +26,21 @@ pub async fn start_guardian_ceremony(
         .map_err(|e| AuraError::agent(format!("Failed to start guardian ceremony: {}", e)))
 }
 
+/// Start a device threshold (multifactor) ceremony.
+pub async fn start_device_threshold_ceremony(
+    app_core: &Arc<RwLock<AppCore>>,
+    threshold_k: FrostThreshold,
+    total_n: u16,
+    device_ids: Vec<String>,
+) -> Result<String, AuraError> {
+    let core = app_core.read().await;
+    core.initiate_device_threshold_ceremony(threshold_k, total_n, &device_ids)
+        .await
+        .map_err(|e| {
+            AuraError::agent(format!("Failed to start device threshold ceremony: {}", e))
+        })
+}
+
 /// Start a device enrollment ("add device") ceremony.
 pub async fn start_device_enrollment_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
@@ -92,13 +107,17 @@ where
         on_update(&status);
 
         if status.has_failed {
-            // Best-effort rollback for guardian rotations (until runtime owns this fully).
-            if let (crate::runtime_bridge::CeremonyKind::GuardianRotation, Some(epoch)) =
-                (status.kind, status.pending_epoch)
-            {
-                let core = app_core.read().await;
-                if let Err(e) = core.rollback_guardian_key_rotation(epoch).await {
-                    let _ = e;
+            // Best-effort rollback for rotations (until runtime owns this fully).
+            if let Some(epoch) = status.pending_epoch {
+                if matches!(
+                    status.kind,
+                    crate::runtime_bridge::CeremonyKind::GuardianRotation
+                        | crate::runtime_bridge::CeremonyKind::DeviceRotation
+                ) {
+                    let core = app_core.read().await;
+                    if let Err(e) = core.rollback_guardian_key_rotation(epoch).await {
+                        let _ = e;
+                    }
                 }
             }
             return Ok(status);

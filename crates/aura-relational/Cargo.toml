@@ -13,7 +13,7 @@ categories = ["cryptography", "data-structures"]
 # Core dependencies
 aura-core = { path = "../aura-core", version = "0.1.0" }
 aura-journal = { path = "../aura-journal", version = "0.1.0" }
-aura-protocol = { path = "../aura-protocol", version = "0.1.0" }  # Re-added for consensus implementation
+aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
 aura-effects = { path = "../aura-effects" }
 
 # Serialization

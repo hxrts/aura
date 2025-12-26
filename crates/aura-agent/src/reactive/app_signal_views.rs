@@ -11,6 +11,7 @@
 use aura_app::errors::AppError;
 use aura_app::signal_defs::{
     BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
+    RECOVERY_SIGNAL,
 };
 use aura_app::views::{
     block::{BanRecord, BlockState, BlocksState, KickRecord, MuteRecord, PinnedMessageMeta},
@@ -19,6 +20,7 @@ use aura_app::views::{
     invitations::{
         Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
     },
+    recovery::{Guardian, GuardianStatus, RecoveryState},
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::AuthorityId;
@@ -40,6 +42,7 @@ use aura_social::moderation::{
     BLOCK_UNBAN_FACT_TYPE_ID, BLOCK_UNMUTE_FACT_TYPE_ID,
 };
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
+use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
     let _ = reactive
@@ -164,6 +167,7 @@ impl ReactiveView for InvitationsSignalView {
                     ceremony_id,
                     sender,
                     timestamp_ms,
+                    ..
                 } => {
                     // Invitation ceremony events don't map to InvitationsState.
                     // They track the consensus-based invitation exchange protocol.
@@ -178,6 +182,7 @@ impl ReactiveView for InvitationsSignalView {
                 InvitationFact::CeremonyAcceptanceReceived {
                     ceremony_id,
                     timestamp_ms,
+                    ..
                 } => {
                     tracing::debug!(
                         ceremony_id,
@@ -189,6 +194,7 @@ impl ReactiveView for InvitationsSignalView {
                     ceremony_id,
                     relationship_id,
                     timestamp_ms,
+                    ..
                 } => {
                     tracing::info!(
                         ceremony_id,
@@ -201,6 +207,7 @@ impl ReactiveView for InvitationsSignalView {
                     ceremony_id,
                     reason,
                     timestamp_ms,
+                    ..
                 } => {
                     tracing::warn!(
                         ceremony_id,
@@ -362,6 +369,137 @@ impl ReactiveView for ContactsSignalView {
 
     fn view_id(&self) -> &str {
         "signals:contacts"
+    }
+}
+
+// =============================================================================
+// Recovery
+// =============================================================================
+
+pub struct RecoverySignalView {
+    reactive: ReactiveHandler,
+    state: Mutex<RecoveryState>,
+}
+
+impl RecoverySignalView {
+    pub fn new(reactive: ReactiveHandler) -> Self {
+        Self {
+            reactive,
+            state: Mutex::new(RecoveryState::default()),
+        }
+    }
+
+    fn ensure_guardian(state: &mut RecoveryState, guardian_id: AuthorityId) {
+        if let Some(guardian) = state.guardians.iter_mut().find(|g| g.id == guardian_id) {
+            guardian.status = GuardianStatus::Active;
+        } else {
+            state.guardians.push(Guardian {
+                id: guardian_id,
+                name: String::new(),
+                status: GuardianStatus::Active,
+                added_at: 0,
+                last_seen: None,
+            });
+        }
+    }
+
+    fn update_guardian_count(state: &mut RecoveryState) {
+        state.guardian_count = state.guardians.len() as u32;
+    }
+}
+
+impl ReactiveView for RecoverySignalView {
+    async fn update(&self, facts: &[Fact]) {
+        let mut state = self.state.lock().await;
+        let mut changed = false;
+
+        for fact in facts {
+            match &fact.content {
+                FactContent::Relational(RelationalFact::GuardianBinding { guardian_id, .. }) => {
+                    Self::ensure_guardian(&mut state, *guardian_id);
+                    Self::update_guardian_count(&mut state);
+                    changed = true;
+                }
+                FactContent::Relational(RelationalFact::Generic {
+                    binding_type,
+                    binding_data,
+                    ..
+                }) if binding_type == RECOVERY_FACT_TYPE_ID => {
+                    let Some(recovery_fact) = RecoveryFact::from_bytes(binding_data) else {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!(
+                                "Failed to decode RecoveryFact bytes (len={})",
+                                binding_data.len()
+                            ),
+                        )
+                        .await;
+                        continue;
+                    };
+
+                    match recovery_fact {
+                        RecoveryFact::GuardianSetupInitiated {
+                            guardian_ids,
+                            threshold,
+                            ..
+                        } => {
+                            for guardian_id in guardian_ids {
+                                Self::ensure_guardian(&mut state, guardian_id);
+                            }
+                            state.threshold = threshold as u32;
+                            Self::update_guardian_count(&mut state);
+                            changed = true;
+                        }
+                        RecoveryFact::GuardianSetupCompleted {
+                            guardian_ids,
+                            threshold,
+                            ..
+                        } => {
+                            // Replace guardian set with the ceremony-completed list.
+                            state
+                                .guardians
+                                .retain(|g| guardian_ids.iter().any(|id| *id == g.id));
+                            for guardian_id in guardian_ids {
+                                Self::ensure_guardian(&mut state, guardian_id);
+                            }
+                            state.threshold = threshold as u32;
+                            Self::update_guardian_count(&mut state);
+                            changed = true;
+                        }
+                        RecoveryFact::MembershipChangeCompleted {
+                            new_guardian_ids,
+                            new_threshold,
+                            ..
+                        } => {
+                            state.threshold = new_threshold as u32;
+                            state.guardian_count = new_guardian_ids.len() as u32;
+                            changed = true;
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !changed {
+            return;
+        }
+
+        let snapshot = state.clone();
+        drop(state);
+
+        if let Err(e) = self.reactive.emit(&*RECOVERY_SIGNAL, snapshot).await {
+            emit_internal_error(
+                &self.reactive,
+                format!("Failed to emit RECOVERY_SIGNAL: {e}"),
+            )
+            .await;
+        }
+    }
+
+    fn view_id(&self) -> &str {
+        "signals:recovery"
     }
 }
 

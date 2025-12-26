@@ -320,6 +320,7 @@ impl AuthViewReducer {
             authority_id,
             reason,
             failed_at_ms,
+            ..
         } = fact
         {
             view.recent_failures.push(FailureRecord {
@@ -353,6 +354,7 @@ impl AuthViewReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::ContextId;
     use aura_verify::session::SessionScope;
 
     fn test_authority() -> AuthorityId {
@@ -418,6 +420,7 @@ mod tests {
 
         // Request guardian approval
         let request_fact = AuthFact::GuardianApprovalRequested {
+            context_id: test_context_id(),
             request_id: "recovery_123".to_string(),
             account_id: test_authority(),
             requester_id: test_authority(),
@@ -454,6 +457,7 @@ mod tests {
 
         // Second guardian approves
         let approve2 = AuthFact::GuardianApproved {
+            context_id: test_context_id(),
             request_id: "recovery_123".to_string(),
             guardian_id: test_authority_2(),
             signature: vec![0u8; 64],
@@ -477,6 +481,7 @@ mod tests {
         let mut view = AuthView::new();
 
         let fail_fact = AuthFact::AuthFailed {
+            context_id: test_context_id(),
             session_id: "session_456".to_string(),
             authority_id: test_authority(),
             reason: "Invalid signature".to_string(),

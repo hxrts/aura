@@ -4,7 +4,7 @@ use aura_core::epochs::Epoch;
 use aura_core::frost::Share;
 use aura_core::AuthorityId;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
-use aura_protocol::consensus::run_amp_channel_epoch_bump;
+use aura_amp::run_amp_channel_epoch_bump;
 use std::collections::HashMap;
 
 #[tokio::test]

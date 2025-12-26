@@ -1,7 +1,7 @@
 //! Consensus adapter for relational contexts
 //!
 //! This module provides a thin adapter that delegates consensus operations
-//! to the aura-protocol implementation while maintaining the aura-relational
+//! to the aura-consensus implementation while maintaining the aura-relational
 //! API surface for backward compatibility.
 
 use aura_core::{
@@ -11,7 +11,7 @@ use aura_core::{
 use aura_core::{relational::ConsensusProof, AuraError, AuthorityId, Prestate, Result};
 use aura_effects::random::RealRandomHandler;
 use aura_effects::time::PhysicalTimeHandler;
-use aura_protocol::consensus::relational::{
+use aura_consensus::relational::{
     run_consensus as run_relational_consensus,
     run_consensus_with_config as run_relational_consensus_with_config,
 };
@@ -20,12 +20,12 @@ use std::collections::HashMap;
 
 /// Consensus configuration for relational contexts
 ///
-/// Re-exported from aura-protocol for API compatibility
-pub use aura_protocol::consensus::types::ConsensusConfig;
+/// Re-exported from aura-consensus for API compatibility
+pub use aura_consensus::types::ConsensusConfig;
 
 /// Run consensus on an operation for relational contexts
 ///
-/// This function delegates to the aura-protocol consensus implementation,
+/// This function delegates to the aura-consensus implementation,
 /// providing a stable API for relational context operations while the
 /// actual consensus logic lives in the orchestration layer.
 pub async fn run_consensus<T: Serialize>(
@@ -52,7 +52,7 @@ pub async fn run_consensus<T: Serialize>(
 /// Run consensus with explicit configuration for relational contexts
 ///
 /// This provides fine-grained control over consensus parameters while
-/// delegating to the aura-protocol implementation.
+/// delegating to the aura-consensus implementation.
 pub async fn run_consensus_with_config<T: Serialize>(
     prestate: &Prestate,
     operation: &T,

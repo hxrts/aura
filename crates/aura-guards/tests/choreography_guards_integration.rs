@@ -306,7 +306,7 @@ async fn test_guard_chain_integration() {
         time::{PhysicalTime, TimeStamp},
         Cap,
     };
-    use aura_protocol::guards::pure::{Guard, GuardChain, GuardRequest};
+    use aura_guards::pure::{Guard, GuardChain, GuardRequest};
     use std::collections::HashMap;
 
     // Create a snapshot with budget

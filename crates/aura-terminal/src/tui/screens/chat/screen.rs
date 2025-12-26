@@ -23,11 +23,11 @@ use crate::tui::callbacks::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
     SetTopicCallback,
 };
-use crate::tui::components::{MessageBubble, MessageInput};
+use crate::tui::components::{ListPanel, MessageInput, MessagePanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
-use crate::tui::theme::{focus_border_color, list_item_colors, Spacing, Theme};
+use crate::tui::theme::{list_item_colors, Spacing, Theme};
 use crate::tui::types::{Channel, Message};
 
 /// Format a timestamp (ms since epoch) as a human-readable time string
@@ -76,40 +76,45 @@ pub struct ChannelListProps {
 #[component]
 pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
     let selected_idx = props.selected_index;
+    let items: Vec<AnyElement<'static>> = props
+        .channels
+        .iter()
+        .enumerate()
+        .map(|(idx, ch)| {
+            let is_selected = idx == selected_idx;
+            let (bg, fg) = list_item_colors(is_selected);
+            let id = ch.id.clone();
+            let name = ch.name.clone();
+            let badge = if ch.unread_count > 0 {
+                format!(" ({})", ch.unread_count)
+            } else {
+                String::new()
+            };
+            // Selection indicator: colored triangle when selected, space otherwise
+            let (indicator, indicator_color) = if is_selected {
+                ("➤ ", Theme::PRIMARY)
+            } else {
+                ("  ", fg)
+            };
+            element! {
+                View(key: id, flex_direction: FlexDirection::Row, background_color: bg, padding_right: Spacing::XS) {
+                    Text(content: indicator, color: indicator_color)
+                    Text(content: format!("# {}{}", name, badge), color: fg)
+                }
+            }
+            .into_any()
+        })
+        .collect();
 
     element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            border_style: BorderStyle::Round,
-            border_color: focus_border_color(props.focused),
-            padding: Spacing::PANEL_PADDING,
-            width: 30pct,
-        ) {
-            Text(content: "Channels", weight: Weight::Bold, color: Theme::PRIMARY)
-            View(
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                overflow: Overflow::Scroll,
-                margin_top: Spacing::XS,
-            ) {
-            #(props.channels.iter().enumerate().map(|(idx, ch)| {
-                let is_selected = idx == selected_idx;
-                let (bg, fg) = list_item_colors(is_selected);
-                let id = ch.id.clone();
-                let name = ch.name.clone();
-                let badge = if ch.unread_count > 0 {
-                    format!(" ({})", ch.unread_count)
-                } else {
-                    String::new()
-                };
-                let indicator = if is_selected { "→ " } else { "  " };
-                element! {
-                    View(key: id, background_color: bg, padding_left: Spacing::XS, padding_right: Spacing::XS) {
-                        Text(content: format!("{}# {}{}", indicator, name, badge), color: fg)
-                    }
-                }
-            }))
-            }
+        View(width: dim::TWO_PANEL_LEFT_WIDTH) {
+            ListPanel(
+                title: "Channels".to_string(),
+                count: props.channels.len(),
+                focused: props.focused,
+                items: items,
+                empty_message: "No channels yet".to_string(),
+            )
         }
     }
 }
@@ -216,19 +221,9 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let messages = reactive_messages.read().clone();
 
     // === Pure view: Use props.view from TuiState instead of local state ===
-    let current_focus = props.view.focus;
     let current_channel_idx = props.view.selected_channel;
     let display_input_text = props.view.input_buffer.clone();
-    let input_focused = props.view.insert_mode || current_focus == ChatFocus::Input;
-    let channels_focused = current_focus == ChatFocus::Channels;
-    let messages_focused = current_focus == ChatFocus::Messages;
-
-    // Message list border color based on focus
-    let msg_border = if messages_focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
+    let input_focused = props.view.insert_mode;
 
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.
@@ -247,41 +242,14 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 flex_direction: FlexDirection::Row,
                 height: 22,
                 overflow: Overflow::Hidden,
-                gap: Spacing::XS,
+                gap: dim::TWO_PANEL_GAP,
             ) {
                 ChannelList(
                     channels: channels,
                     selected_index: current_channel_idx,
-                    focused: channels_focused,
+                    focused: false,
                 )
-                // Message list with focus indication
-                View(
-                    flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
-                    height: 22,
-                    border_style: BorderStyle::Round,
-                    border_color: msg_border,
-                    padding: Spacing::PANEL_PADDING,
-                    overflow: Overflow::Scroll,
-                ) {
-                    #(messages.iter().map(|msg| {
-                        let id = msg.id.clone();
-                        let sender = msg.sender.clone();
-                        let content = msg.content.clone();
-                        let ts = msg.timestamp.clone();
-                        let status = msg.delivery_status;
-                        element! {
-                            MessageBubble(
-                                key: id,
-                                sender: sender,
-                                content: content,
-                                timestamp: ts,
-                                is_own: msg.is_own,
-                                delivery_status: status,
-                            )
-                        }
-                    }))
-                }
+                MessagePanel(messages: messages, title: None, empty_message: None)
             }
 
             // Message input (3 rows) - full width

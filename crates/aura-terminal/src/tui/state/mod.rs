@@ -82,8 +82,8 @@ pub struct TuiState {
     /// Contacts screen state
     pub contacts: ContactsViewState,
 
-    /// Recovery screen state
-    pub recovery: RecoveryViewState,
+    /// Notifications screen state
+    pub notifications: NotificationsViewState,
 
     /// Settings screen state
     pub settings: SettingsViewState,
@@ -254,8 +254,8 @@ impl TuiState {
     /// Check if in insert mode (for text input)
     pub fn is_insert_mode(&self) -> bool {
         match self.screen() {
-            Screen::Block => self.block.insert_mode,
             Screen::Chat => self.chat.insert_mode,
+            Screen::Neighborhood => self.neighborhood.insert_mode,
             _ => false,
         }
     }

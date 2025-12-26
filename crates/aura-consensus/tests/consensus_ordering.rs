@@ -1,8 +1,8 @@
-use aura_protocol::consensus::core::state::{PathSelection, ShareData, ShareProposal};
-use aura_protocol::consensus::core::transitions::{apply_share, start_consensus, TransitionResult};
+use aura_consensus::core::state::{PathSelection, ShareData, ShareProposal};
+use aura_consensus::core::transitions::{apply_share, start_consensus, TransitionResult};
 use std::collections::BTreeSet;
 
-fn base_state() -> aura_protocol::consensus::core::state::ConsensusState {
+fn base_state() -> aura_consensus::core::state::ConsensusState {
     let witnesses: BTreeSet<String> = ["A", "B", "C"].iter().map(|s| s.to_string()).collect();
     match start_consensus(
         "cid-1".to_string(),
@@ -31,9 +31,9 @@ fn proposal(witness: &str) -> ShareProposal {
 }
 
 fn apply_sequence(
-    mut state: aura_protocol::consensus::core::state::ConsensusState,
+    mut state: aura_consensus::core::state::ConsensusState,
     proposals: &[ShareProposal],
-) -> aura_protocol::consensus::core::state::ConsensusState {
+) -> aura_consensus::core::state::ConsensusState {
     for proposal in proposals {
         if let TransitionResult::Ok(next) = apply_share(&state, proposal.clone()) {
             state = next;

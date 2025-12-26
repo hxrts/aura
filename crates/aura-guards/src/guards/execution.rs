@@ -49,7 +49,7 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
     let evaluator = BiscuitGuardEvaluator::new(auth_bridge);
     let mut failed_requirements = Vec::new();
     let mut total_flow_consumed = 0;
-    let mut max_delegation_depth = None;
+    let mut max_delegation_depth: Option<u32> = None;
     let mut context = GuardVerificationContext::new(
         guard.operation_id.clone(),
         ResourceScope::Authority {

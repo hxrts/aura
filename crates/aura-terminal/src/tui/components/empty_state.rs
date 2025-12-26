@@ -22,11 +22,8 @@ pub struct EmptyStateProps {
 /// A polished empty state display
 #[component]
 pub fn EmptyState(props: &EmptyStateProps) -> impl Into<AnyElement<'static>> {
-    let icon = if props.icon.is_empty() {
-        Icons::OFFLINE.to_string()
-    } else {
-        props.icon.clone()
-    };
+    let icon = props.icon.clone();
+    let has_icon = !icon.is_empty();
     let title = props.title.clone();
     let description = props.description.clone();
     let action_hint = props.action_hint.clone();
@@ -41,10 +38,22 @@ pub fn EmptyState(props: &EmptyStateProps) -> impl Into<AnyElement<'static>> {
             flex_direction: FlexDirection::Column,
             padding: Spacing::LG,
         ) {
-            // Icon
-            Text(content: icon, color: Theme::TEXT_MUTED)
-            // Spacer
-            View(height: Spacing::XS)
+            // Icon (only if explicitly provided)
+            #(if has_icon {
+                Some(element! {
+                    View {
+                        Text(content: icon, color: Theme::TEXT_MUTED)
+                    }
+                })
+            } else {
+                None
+            })
+            // Spacer (only if icon shown)
+            #(if has_icon {
+                Some(element! { View(height: Spacing::XS) })
+            } else {
+                None
+            })
             // Title
             Text(content: title, weight: Weight::Bold, color: Theme::TEXT_MUTED)
             // Description

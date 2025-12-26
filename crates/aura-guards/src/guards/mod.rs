@@ -50,7 +50,7 @@
 //! # Example: Using Guard Chain with Effect Interpreter
 //!
 //! ```rust,ignore
-//! use aura_protocol::guards::{create_send_guard, SendGuardChain};
+//! use aura_guards::{create_send_guard, SendGuardChain};
 //!
 //! let guard = create_send_guard(
 //!     "message:send".to_string(),

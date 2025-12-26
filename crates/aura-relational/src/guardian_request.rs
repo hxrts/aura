@@ -135,7 +135,7 @@ impl FactReducer for GuardianRequestFactReducer {
             return None;
         }
 
-        let fact: GuardianRequestFact = bincode::deserialize(binding_data).ok()?;
+        let fact = GuardianRequestFact::from_bytes(binding_data)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
@@ -198,6 +198,12 @@ mod tests {
 
         let binding1 = reducer.reduce(context_id, GUARDIAN_REQUEST_FACT_TYPE_ID, &bytes);
         let binding2 = reducer.reduce(context_id, GUARDIAN_REQUEST_FACT_TYPE_ID, &bytes);
-        assert_eq!(binding1, binding2);
+        assert!(binding1.is_some());
+        assert!(binding2.is_some());
+        let binding1 = binding1.unwrap();
+        let binding2 = binding2.unwrap();
+        assert_eq!(binding1.binding_type, binding2.binding_type);
+        assert_eq!(binding1.context_id, binding2.context_id);
+        assert_eq!(binding1.data, binding2.data);
     }
 }

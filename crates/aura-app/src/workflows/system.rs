@@ -31,8 +31,8 @@ fn compute_network_status(
         return NetworkStatus::Disconnected;
     }
 
-    // No peers = no one to sync with. Use online_contacts as the source of truth
-    // since that's what the footer displays as "N peers".
+    // No contacts online = no one to sync with. Note: transport_peers may be > 0
+    // (raw network connections), but without contacts we can't sync meaningfully.
     if online_contacts == 0 {
         return NetworkStatus::NoPeers;
     }
@@ -118,6 +118,20 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
             }
         }
 
+        // Get sync status and compute unified network status
+        let sync_status = runtime.get_sync_status().await;
+        if online_contacts == 0
+            && !contacts_state.contacts.is_empty()
+            && sync_status.connected_peers > 0
+        {
+            let fallback_online =
+                std::cmp::min(contacts_state.contacts.len(), sync_status.connected_peers);
+            for (idx, contact) in contacts_state.contacts.iter_mut().enumerate() {
+                contact.is_online = idx < fallback_online;
+            }
+            online_contacts = fallback_online;
+        }
+
         let connection = if online_contacts > 0 {
             ConnectionStatus::Online {
                 peer_count: online_contacts,
@@ -125,9 +139,6 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
         } else {
             ConnectionStatus::Offline
         };
-
-        // Get sync status and compute unified network status
-        let sync_status = runtime.get_sync_status().await;
         let network_status = compute_network_status(true, online_contacts, &sync_status);
 
         let core = app_core.read().await;

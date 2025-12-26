@@ -15,12 +15,19 @@ fn serialize_fact<T: Serialize>(value: &T, label: &'static str) -> Vec<u8> {
 /// Fact representing a block-wide mute or channel-specific mute.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockMuteFact {
+    /// Context where the mute applies
     pub context_id: ContextId,
+    /// Optional channel restriction (None = block-wide)
     pub channel_id: Option<ChannelId>,
+    /// Authority being muted
     pub muted_authority: AuthorityId,
+    /// Authority who performed the mute
     pub actor_authority: AuthorityId,
+    /// Optional duration in seconds (None = permanent)
     pub duration_secs: Option<u64>,
+    /// When the mute was applied
     pub muted_at: PhysicalTime,
+    /// When the mute expires (None = permanent)
     pub expires_at: Option<PhysicalTime>,
 }
 
@@ -84,10 +91,15 @@ impl DomainFact for BlockMuteFact {
 /// Fact representing the removal of a block mute.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockUnmuteFact {
+    /// Context where the unmute applies
     pub context_id: ContextId,
+    /// Optional channel restriction (None = block-wide)
     pub channel_id: Option<ChannelId>,
+    /// Authority being unmuted
     pub unmuted_authority: AuthorityId,
+    /// Authority who performed the unmute
     pub actor_authority: AuthorityId,
+    /// When the unmute was applied
     pub unmuted_at: PhysicalTime,
 }
 
@@ -139,12 +151,19 @@ impl DomainFact for BlockUnmuteFact {
 /// Fact representing a block-wide ban or channel-specific ban.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockBanFact {
+    /// Context where the ban applies
     pub context_id: ContextId,
+    /// Optional channel restriction (None = block-wide)
     pub channel_id: Option<ChannelId>,
+    /// Authority being banned
     pub banned_authority: AuthorityId,
+    /// Authority who performed the ban
     pub actor_authority: AuthorityId,
+    /// Reason for the ban
     pub reason: String,
+    /// When the ban was applied
     pub banned_at: PhysicalTime,
+    /// When the ban expires (None = permanent)
     pub expires_at: Option<PhysicalTime>,
 }
 
@@ -208,10 +227,15 @@ impl DomainFact for BlockBanFact {
 /// Fact representing the removal of a block ban.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockUnbanFact {
+    /// Context where the unban applies
     pub context_id: ContextId,
+    /// Optional channel restriction (None = block-wide)
     pub channel_id: Option<ChannelId>,
+    /// Authority being unbanned
     pub unbanned_authority: AuthorityId,
+    /// Authority who performed the unban
     pub actor_authority: AuthorityId,
+    /// When the unban was applied
     pub unbanned_at: PhysicalTime,
 }
 
@@ -263,11 +287,17 @@ impl DomainFact for BlockUnbanFact {
 /// Fact representing a kick from a channel (audit log entry).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockKickFact {
+    /// Context where the kick occurred
     pub context_id: ContextId,
+    /// Channel from which the user was kicked
     pub channel_id: ChannelId,
+    /// Authority being kicked
     pub kicked_authority: AuthorityId,
+    /// Authority who performed the kick
     pub actor_authority: AuthorityId,
+    /// Reason for the kick
     pub reason: String,
+    /// When the kick occurred
     pub kicked_at: PhysicalTime,
 }
 
@@ -321,10 +351,15 @@ impl DomainFact for BlockKickFact {
 /// Fact representing a pinned message in a block/channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockPinFact {
+    /// Context where the pin applies
     pub context_id: ContextId,
+    /// Channel containing the pinned message
     pub channel_id: ChannelId,
+    /// ID of the pinned message
     pub message_id: String,
+    /// Authority who pinned the message
     pub actor_authority: AuthorityId,
+    /// When the message was pinned
     pub pinned_at: PhysicalTime,
 }
 
@@ -371,10 +406,15 @@ impl DomainFact for BlockPinFact {
 /// Fact representing an unpinned message in a block/channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockUnpinFact {
+    /// Context where the unpin applies
     pub context_id: ContextId,
+    /// Channel containing the unpinned message
     pub channel_id: ChannelId,
+    /// ID of the unpinned message
     pub message_id: String,
+    /// Authority who unpinned the message
     pub actor_authority: AuthorityId,
+    /// When the message was unpinned
     pub unpinned_at: PhysicalTime,
 }
 

@@ -766,23 +766,104 @@ impl Query for RecoveryQuery {
 
     fn to_datalog(&self) -> DatalogProgram {
         // Query recovery_config for threshold and guardian_count,
-        // plus join with guardians for the full list
-        DatalogProgram::new(vec![DatalogRule {
-            head: DatalogFact::new(
-                "result",
-                vec![
-                    DatalogValue::var("threshold"),
-                    DatalogValue::var("guardian_count"),
+        // plus join with guardian contacts (is_guardian = true).
+        DatalogProgram::new(vec![
+            DatalogRule {
+                head: DatalogFact::new(
+                    "result",
+                    vec![
+                        DatalogValue::var("threshold"),
+                        DatalogValue::var("guardian_count"),
+                        DatalogValue::var("contact_id"),
+                        DatalogValue::var("contact_nickname"),
+                        DatalogValue::var("contact_suggested"),
+                        DatalogValue::var("contact_last_interaction"),
+                    ],
+                ),
+                body: vec![
+                    DatalogFact::new(
+                        "recovery_config",
+                        vec![
+                            DatalogValue::var("threshold"),
+                            DatalogValue::var("guardian_count"),
+                        ],
+                    ),
+                    DatalogFact::new(
+                        "contact",
+                        vec![
+                            DatalogValue::var("contact_id"),
+                            DatalogValue::var("contact_nickname"),
+                            DatalogValue::var("contact_suggested"),
+                            DatalogValue::var("is_guardian"),
+                            DatalogValue::var("is_resident"),
+                            DatalogValue::var("contact_last_interaction"),
+                            DatalogValue::var("is_online"),
+                        ],
+                    ),
+                    DatalogFact::new(
+                        "eq",
+                        vec![
+                            DatalogValue::var("is_guardian"),
+                            DatalogValue::Boolean(true),
+                        ],
+                    ),
                 ],
-            ),
-            body: vec![DatalogFact::new(
-                "recovery_config",
-                vec![
-                    DatalogValue::var("threshold"),
-                    DatalogValue::var("guardian_count"),
+            },
+            DatalogRule {
+                head: DatalogFact::new(
+                    "result",
+                    vec![
+                        DatalogValue::Integer(0),
+                        DatalogValue::Integer(0),
+                        DatalogValue::var("contact_id"),
+                        DatalogValue::var("contact_nickname"),
+                        DatalogValue::var("contact_suggested"),
+                        DatalogValue::var("contact_last_interaction"),
+                    ],
+                ),
+                body: vec![
+                    DatalogFact::new(
+                        "contact",
+                        vec![
+                            DatalogValue::var("contact_id"),
+                            DatalogValue::var("contact_nickname"),
+                            DatalogValue::var("contact_suggested"),
+                            DatalogValue::var("is_guardian"),
+                            DatalogValue::var("is_resident"),
+                            DatalogValue::var("contact_last_interaction"),
+                            DatalogValue::var("is_online"),
+                        ],
+                    ),
+                    DatalogFact::new(
+                        "eq",
+                        vec![
+                            DatalogValue::var("is_guardian"),
+                            DatalogValue::Boolean(true),
+                        ],
+                    ),
                 ],
-            )],
-        }])
+            },
+            DatalogRule {
+                head: DatalogFact::new(
+                    "result",
+                    vec![
+                        DatalogValue::var("threshold"),
+                        DatalogValue::var("guardian_count"),
+                        DatalogValue::String(String::new()),
+                        DatalogValue::String(String::new()),
+                        DatalogValue::String(String::new()),
+                        DatalogValue::Integer(0),
+                    ],
+                ),
+                body: vec![DatalogFact::new(
+                    "recovery_config",
+                    vec![
+                        DatalogValue::var("threshold"),
+                        DatalogValue::var("guardian_count"),
+                    ],
+                )],
+            },
+        ])
     }
 
     fn required_capabilities(&self) -> Vec<QueryCapability> {
@@ -792,27 +873,76 @@ impl Query for RecoveryQuery {
     fn dependencies(&self) -> Vec<FactPredicate> {
         vec![
             FactPredicate::new("recovery_config"),
-            FactPredicate::new("guardian"),
+            FactPredicate::new("contact"),
             FactPredicate::new("recovery_process"),
         ]
     }
 
     fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
         use crate::views::recovery::RecoveryState;
+        use crate::views::recovery::{Guardian, GuardianStatus};
+        use std::collections::HashMap;
 
-        // RecoveryQuery returns configuration only; guardians and active recovery
-        // state are populated via separate queries (GuardiansQuery, etc.)
-        if let Some(row) = bindings.rows.first() {
-            Ok(RecoveryState {
-                guardians: Vec::new(),
-                threshold: get_int(row, "threshold") as u32,
-                guardian_count: get_int(row, "guardian_count") as u32,
-                active_recovery: None,
-                pending_requests: Vec::new(),
-            })
-        } else {
-            Ok(RecoveryState::default())
+        if bindings.rows.is_empty() {
+            return Ok(RecoveryState::default());
         }
+
+        let mut guardians_by_id: HashMap<AuthorityId, Guardian> = HashMap::new();
+        let mut threshold = 0u32;
+        let mut guardian_count = 0u32;
+
+        for row in bindings.rows.iter() {
+            if threshold == 0 {
+                threshold = get_int(row, "threshold") as u32;
+            }
+            if guardian_count == 0 {
+                guardian_count = get_int(row, "guardian_count") as u32;
+            }
+
+            let guardian_id = get_authority_id(row, "contact_id");
+            let nickname = get_string(row, "contact_nickname");
+            let suggested = get_string(row, "contact_suggested");
+            let guardian_name = if !nickname.is_empty() {
+                nickname
+            } else if !suggested.is_empty() {
+                suggested
+            } else {
+                guardian_id.to_string()
+            };
+
+            if guardian_id == AuthorityId::default() && guardian_name.is_empty() {
+                continue;
+            }
+            let status = GuardianStatus::Active;
+
+            guardians_by_id.entry(guardian_id).or_insert(Guardian {
+                id: guardian_id,
+                name: guardian_name,
+                status,
+                added_at: get_int(row, "contact_last_interaction") as u64,
+                last_seen: {
+                    let ts = get_int(row, "contact_last_interaction");
+                    if ts > 0 {
+                        Some(ts as u64)
+                    } else {
+                        None
+                    }
+                },
+            });
+        }
+
+        let guardians: Vec<Guardian> = guardians_by_id.into_values().collect();
+        if guardian_count == 0 && !guardians.is_empty() {
+            guardian_count = guardians.len() as u32;
+        }
+
+        Ok(RecoveryState {
+            guardians,
+            threshold,
+            guardian_count,
+            active_recovery: None,
+            pending_requests: Vec::new(),
+        })
     }
 }
 

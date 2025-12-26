@@ -125,7 +125,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
 
                         let name = contact.nickname.clone();
                         let id = contact.id.clone();
-                        let pointer = if is_selected { "▸ " } else { "  " };
+                        let pointer = if is_selected { "➤ " } else { "  " };
                         let checkbox = if multi_select {
                             if is_checked { "[x] " } else { "[ ] " }
                         } else {

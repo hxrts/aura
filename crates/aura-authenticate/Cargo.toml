@@ -14,6 +14,7 @@ aura-journal = { path = "../aura-journal" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
 aura-protocol = { path = "../aura-protocol" }
+aura-guards = { path = "../aura-guards" }
 aura-relational = { path = "../aura-relational" }
 aura-verify = { path = "../aura-verify" }
 aura-wot = { path = "../aura-wot" }

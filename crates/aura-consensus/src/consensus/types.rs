@@ -104,12 +104,10 @@ impl CommitFact {
     }
 
     /// Verify the commit fact is valid
-    pub fn verify(&self) -> Result<(), crate::ProtocolError> {
+    pub fn verify(&self) -> Result<()> {
         // Check threshold was met
         if self.participants.len() < self.threshold as usize {
-            return Err(crate::ProtocolError::Other(
-                "Insufficient participants for threshold".to_string(),
-            ));
+            return Err(AuraError::invalid("Insufficient participants for threshold"));
         }
 
         // Check participants are unique
@@ -117,29 +115,26 @@ impl CommitFact {
         unique_check.sort();
         unique_check.dedup();
         if unique_check.len() != self.participants.len() {
-            return Err(crate::ProtocolError::Other(
-                "Duplicate participants".to_string(),
-            ));
+            return Err(AuraError::invalid("Duplicate participants"));
         }
 
         // Verify threshold signature against provided group public key
-        let group_pkg = self.group_public_key.clone().ok_or_else(|| {
-            crate::ProtocolError::Other("Missing group public key for verification".to_string())
-        })?;
+        let group_pkg = self
+            .group_public_key
+            .clone()
+            .ok_or_else(|| AuraError::invalid("Missing group public key for verification"))?;
 
         let frost_pkg: frost_ed25519::keys::PublicKeyPackage =
-            group_pkg.try_into().map_err(|e: String| {
-                crate::ProtocolError::Other(format!("Invalid group public key package: {}", e))
-            })?;
+            group_pkg
+                .try_into()
+                .map_err(|e: String| AuraError::invalid(format!("Invalid group public key package: {}", e)))?;
 
         frost_verify_aggregate(
             frost_pkg.verifying_key(),
             &self.operation_bytes,
             &self.threshold_signature.signature,
         )
-        .map_err(|e| {
-            crate::ProtocolError::Other(format!("Threshold signature verification failed: {}", e))
-        })?;
+        .map_err(|e| AuraError::crypto(format!("Threshold signature verification failed: {}", e)))?;
 
         Ok(())
     }

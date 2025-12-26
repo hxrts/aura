@@ -425,7 +425,13 @@ mod tests {
         let bytes = fact.to_bytes();
         let binding1 = reducer.reduce(context_id, RENDEZVOUS_FACT_TYPE_ID, &bytes);
         let binding2 = reducer.reduce(context_id, RENDEZVOUS_FACT_TYPE_ID, &bytes);
-        assert_eq!(binding1, binding2);
+        assert!(binding1.is_some());
+        assert!(binding2.is_some());
+        let binding1 = binding1.unwrap();
+        let binding2 = binding2.unwrap();
+        assert_eq!(binding1.binding_type, binding2.binding_type);
+        assert_eq!(binding1.context_id, binding2.context_id);
+        assert_eq!(binding1.data, binding2.data);
     }
 
     #[test]

@@ -56,7 +56,7 @@ fn test_time_now() -> PhysicalTime {
         uncertainty: None,
     }
 }
-use aura_protocol::guards::BiscuitGuardEvaluator;
+use aura_guards::BiscuitGuardEvaluator;
 
 // =============================================================================
 // Configuration

@@ -95,7 +95,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
         // Disabled state uses muted colors regardless of network status
         let status = match &props.network_status {
             NetworkStatus::Disconnected => "Disconnected".to_string(),
-            NetworkStatus::NoPeers => "No peers".to_string(),
+            NetworkStatus::NoPeers => "No contacts".to_string(),
             NetworkStatus::Syncing => "Syncing...".to_string(),
             NetworkStatus::Synced { last_sync_ms } => {
                 if let Some(now_ms) = props.now_ms {
@@ -109,7 +109,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
     } else {
         match &props.network_status {
             NetworkStatus::Disconnected => ("Disconnected".to_string(), Theme::ERROR),
-            NetworkStatus::NoPeers => ("No peers".to_string(), Theme::WARNING),
+            NetworkStatus::NoPeers => ("No contacts".to_string(), Theme::WARNING),
             NetworkStatus::Syncing => ("Syncing...".to_string(), Theme::WARNING),
             NetworkStatus::Synced { last_sync_ms } => {
                 let status = if let Some(now_ms) = props.now_ms {

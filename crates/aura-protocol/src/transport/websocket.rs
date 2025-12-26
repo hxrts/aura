@@ -1,8 +1,7 @@
 //! WebSocket Choreographic Protocols
 //!
 //! Layer 4: Multi-party WebSocket coordination using choreographic protocols.
-//! YES choreography - complex handshake and session management with multiple phases.
-//! Target: <250 lines, focused on choreographic coordination.
+//! Includes complex handshake and session management with multiple phases.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
 use aura_core::effects::PhysicalTimeEffects;
@@ -217,9 +216,7 @@ impl WebSocketHandshakeCoordinator {
                 .physical_time()
                 .await
                 .map(|p| p.ts_ms)
-                .map_err(|e| {
-                    ChoreographicError::ExecutionFailed(format!("time error: {e}"))
-                })
+                .map_err(|e| ChoreographicError::ExecutionFailed(format!("time error: {e}")))
         })?;
         Ok(SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
     }
@@ -356,9 +353,7 @@ impl WebSocketSessionCoordinator {
                 .physical_time()
                 .await
                 .map(|p| p.ts_ms)
-                .map_err(|e| {
-                    ChoreographicError::ExecutionFailed(format!("time error: {e}"))
-                })
+                .map_err(|e| ChoreographicError::ExecutionFailed(format!("time error: {e}")))
         })?;
         Ok(SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
     }
@@ -384,7 +379,7 @@ impl WebSocketSessionCoordinator {
 
     /// Record session activity
     pub fn record_activity(&mut self, session_id: &str) -> ChoreographicResult<()> {
-        let now = self.now();
+        let now = self.now()?;
         let session = self.active_sessions.get_mut(session_id).ok_or_else(|| {
             ChoreographicError::ExecutionFailed(format!("Session not found: {}", session_id))
         })?;

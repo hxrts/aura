@@ -2,7 +2,7 @@
 //!
 //! Displays contextual hints for demo mode, including contact invite codes for Alice and Carol.
 //! These codes add Alice/Carol as contacts. Guardian requests are sent in-band from the
-//! Recovery page after someone is a contact.
+//! Settings > Recovery Requests section after someone is a contact.
 
 use iocraft::prelude::*;
 

@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for social facts
 pub const SOCIAL_FACT_TYPE_ID: &str = "social";
+/// Schema version for social fact serialization
 pub const SOCIAL_FACT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,9 +47,12 @@ struct VersionedSocialFact {
     fact: SocialFact,
 }
 
+/// Key for indexing social facts in the journal
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SocialFactKey {
+    /// Sub-type discriminator for the fact
     pub sub_type: &'static str,
+    /// Serialized key data for lookup
     pub data: Vec<u8>,
 }
 
@@ -570,6 +574,12 @@ mod tests {
         let bytes = fact.to_bytes();
         let binding1 = reducer.reduce(context_id, SOCIAL_FACT_TYPE_ID, &bytes);
         let binding2 = reducer.reduce(context_id, SOCIAL_FACT_TYPE_ID, &bytes);
-        assert_eq!(binding1, binding2);
+        assert!(binding1.is_some());
+        assert!(binding2.is_some());
+        let binding1 = binding1.unwrap();
+        let binding2 = binding2.unwrap();
+        assert_eq!(binding1.binding_type, binding2.binding_type);
+        assert_eq!(binding1.context_id, binding2.context_id);
+        assert_eq!(binding1.data, binding2.data);
     }
 }

@@ -18,7 +18,7 @@
 //! #[test]
 //! fn test_navigation() {
 //!     let mut tui = TestTui::new();
-//!     tui.assert_screen(Screen::Block);
+//!     tui.assert_screen(Screen::Neighborhood);
 //!
 //!     tui.send_char('2');
 //!     tui.assert_screen(Screen::Neighborhood);

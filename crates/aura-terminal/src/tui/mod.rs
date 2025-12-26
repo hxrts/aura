@@ -6,7 +6,7 @@
 //!
 //! ## Module Organization
 //!
-//! - **screens**: Full-screen views (Block, Chat, Recovery, etc.)
+//! - **screens**: Full-screen views (Block, Chat, Notifications, etc.)
 //! - **components**: Reusable UI widgets (Modal, Toast, CommandPalette)
 //! - **context**: IoContext for effect dispatch and reactive data
 //! - **theme**: Centralized color and style constants

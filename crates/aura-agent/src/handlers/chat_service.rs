@@ -24,7 +24,7 @@ use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_journal::fact::{CommittedChannelEpochBump, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{get_channel_state, AmpChannelCoordinator, AmpJournalEffects};
-use aura_protocol::guards::GuardContextProvider;
+use aura_guards::GuardContextProvider;
 use uuid::Uuid;
 
 /// Chat service for the agent layer.

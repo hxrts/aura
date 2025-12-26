@@ -37,7 +37,7 @@ use aura_protocol::effects::{
     ChoreographyError, ChoreographyEvent, ChoreographyMetrics, EffectApiEffects, EffectApiError,
     EffectApiEventStream, LeakageEffects, SyncEffects, SyncError,
 };
-use aura_protocol::guards::GuardContextProvider;
+use aura_guards::GuardContextProvider;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use aura_wot::{BiscuitAuthorizationBridge, FlowBudgetHandler};
 use biscuit_auth::{Biscuit, KeyPair, PublicKey};

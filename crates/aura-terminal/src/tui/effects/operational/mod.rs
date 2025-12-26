@@ -17,6 +17,7 @@
 //! - **Network**: AddPeer, RemovePeer, ListPeers, DiscoverPeers, ListLanPeers
 //! - **Settings**: UpdateMfaPolicy, UpdateNickname, SetChannelMode
 //! - **Invitation Codes**: ExportInvitation, ImportInvitation
+//! - **Recovery**: StartRecovery, SubmitGuardianApproval, CompleteRecovery, CancelRecovery
 //!
 //! ## Module Organization
 //!
@@ -28,6 +29,7 @@
 //! - `context`: Context commands (SetContext, MovePosition)
 //! - `settings`: Settings commands
 //! - `invitations`: Invitation export/import commands
+//! - `recovery`: Recovery commands (StartRecovery, SubmitGuardianApproval, etc.)
 //! - `messaging`: Direct messaging commands
 //! - `steward`: Steward role management commands
 
@@ -38,6 +40,7 @@ mod messaging;
 mod moderation;
 mod network;
 mod query;
+mod recovery;
 mod settings;
 mod steward;
 mod sync;
@@ -123,6 +126,11 @@ impl OperationalHandler {
 
         // Invitation commands
         if let Some(result) = invitations::handle_invitations(command, &self.app_core).await {
+            return Some(result);
+        }
+
+        // Recovery commands
+        if let Some(result) = recovery::handle_recovery(command, &self.app_core).await {
             return Some(result);
         }
 

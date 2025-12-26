@@ -4,7 +4,7 @@
 //! This provides the interface that choreographic protocols need without
 //! depending on concrete runtime implementations.
 
-use crate::guards::LeakageBudget;
+use aura_guards::LeakageBudget;
 use aura_core::identifiers::ContextId;
 use aura_core::identifiers::DeviceId;
 use biscuit_auth::Biscuit;

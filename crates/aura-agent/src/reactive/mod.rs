@@ -39,7 +39,7 @@ pub mod scheduler;
 
 // Re-export main types for convenience
 pub use app_signal_views::{
-    BlockSignalView, ChatSignalView, ContactsSignalView, InvitationsSignalView,
+    BlockSignalView, ChatSignalView, ContactsSignalView, InvitationsSignalView, RecoverySignalView,
 };
 pub use frp::Dynamic;
 pub use pipeline::ReactivePipeline;

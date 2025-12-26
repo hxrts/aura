@@ -25,7 +25,9 @@
 //! - `RecoveryFailed`: Recovery operation failed
 
 use aura_core::identifiers::AuthorityId;
-use aura_core::DeviceId;
+use aura_core::{ContextId, DeviceId};
+use aura_journal::{DomainFact, FactReducer};
+use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
 use aura_verify::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
@@ -769,8 +771,9 @@ mod tests {
         };
 
         let other_context = ContextId::new_from_entropy([10u8; 32]);
-        let binding = reducer.reduce(other_context, AUTH_FACT_TYPE_ID, &fact.to_bytes());
-        assert!(binding.is_none());
+        assert_ne!(fact.context_id(), other_context);
+        let delta = reducer.reduce(&fact);
+        assert!(matches!(delta, AuthFactDelta::ActiveSession { .. }));
     }
 
     #[test]
@@ -779,6 +782,8 @@ mod tests {
             context_id: test_context_id(),
             request_id: "req-123".to_string(),
             guardian_id: test_authority(),
+            signature: vec![0u8; 64],
+            justification: "Approved".to_string(),
             approved_at_ms: 1234,
         };
 
@@ -803,9 +808,41 @@ mod tests {
             expires_at_ms: 2000,
         };
 
-        let bytes = fact.to_bytes();
-        let binding1 = reducer.reduce(context_id, AUTH_FACT_TYPE_ID, &bytes);
-        let binding2 = reducer.reduce(context_id, AUTH_FACT_TYPE_ID, &bytes);
-        assert_eq!(binding1, binding2);
+        let delta1 = reducer.reduce(&fact);
+        let delta2 = reducer.reduce(&fact);
+        match (delta1, delta2) {
+            (
+                AuthFactDelta::ActiveSession {
+                    session_id: session_id_1,
+                    authority_id: authority_id_1,
+                    scope: scope_1,
+                    expires_at_ms: expires_at_1,
+                },
+                AuthFactDelta::ActiveSession {
+                    session_id: session_id_2,
+                    authority_id: authority_id_2,
+                    scope: scope_2,
+                    expires_at_ms: expires_at_2,
+                },
+            ) => {
+                assert_eq!(session_id_1, session_id_2);
+                assert_eq!(authority_id_1, authority_id_2);
+                assert_eq!(expires_at_1, expires_at_2);
+                match (scope_1, scope_2) {
+                    (
+                        SessionScope::Protocol {
+                            protocol_type: protocol_type_1,
+                        },
+                        SessionScope::Protocol {
+                            protocol_type: protocol_type_2,
+                        },
+                    ) => {
+                        assert_eq!(protocol_type_1, protocol_type_2);
+                    }
+                    _ => panic!("Expected Protocol SessionScope variants"),
+                }
+            }
+            _ => panic!("Expected ActiveSession deltas"),
+        }
     }
 }

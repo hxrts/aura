@@ -20,7 +20,7 @@ This module generates test vectors for **mathematical primitives only**:
 are tested via Quint ITF traces.
 
 ## Rust Correspondence
-- File: crates/aura-protocol/tests/correspondence_validation.rs
+- File: crates/aura-consensus/tests/correspondence_validation.rs
 - File: crates/aura-testkit/src/differential.rs
 
 ## Usage

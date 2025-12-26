@@ -293,7 +293,7 @@ impl SessionOperations {
         if effects.is_testing() {
             return Ok(());
         }
-        let guard = aura_protocol::guards::chain::create_send_guard(
+        let guard = aura_guards::chain::create_send_guard(
             operation.to_string(),
             self.guard_context(),
             self.authority_context.authority_id,

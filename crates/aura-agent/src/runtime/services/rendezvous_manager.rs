@@ -502,8 +502,8 @@ impl RendezvousManager {
 
         let (announcer_handle, listener_handle) = lan_service.start(move |peer: DiscoveredPeer| {
             let discovered_peers = discovered_peers.clone();
-            let service = service.clone();
             let peer_clone = peer.clone();
+            let cache = descriptor_cache.clone();
 
             // Spawn a task to handle the discovery
             tokio::spawn(async move {
@@ -514,7 +514,7 @@ impl RendezvousManager {
                 }
 
                 // Also cache the descriptor locally for rendezvous resolution.
-                descriptor_cache
+                cache
                     .write()
                     .await
                     .insert(

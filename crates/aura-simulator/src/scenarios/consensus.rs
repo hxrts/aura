@@ -33,10 +33,10 @@
 //! - **Message Reordering**: Deliver messages out of order
 //! - **Byzantine Witness**: Inject equivocating or invalid votes
 
-use aura_protocol::consensus::core::state::{
+use aura_consensus::core::state::{
     ConsensusPhase, ConsensusState, PathSelection, PureCommitFact, ShareData, ShareProposal,
 };
-use aura_protocol::consensus::core::transitions::{apply_share, trigger_fallback};
+use aura_consensus::core::transitions::{apply_share, trigger_fallback};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// Network partition configuration

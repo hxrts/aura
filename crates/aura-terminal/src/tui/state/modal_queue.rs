@@ -82,6 +82,8 @@ pub enum QueuedModal {
 
     /// Guardian setup wizard (multi-select + threshold + ceremony)
     GuardianSetup(GuardianSetupModalState),
+    /// MFA setup wizard (devices + threshold + ceremony)
+    MfaSetup(GuardianSetupModalState),
 
     // ========================================================================
     // Settings Screen Modals

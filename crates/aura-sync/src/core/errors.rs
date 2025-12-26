@@ -151,7 +151,7 @@ pub fn sync_biscuit_authorization_error(message: impl Into<String>, peer: Device
 pub fn sync_biscuit_guard_error(
     guard_capability: impl Into<String>,
     peer: DeviceId,
-    error: aura_protocol::guards::GuardError,
+    error: aura_guards::GuardError,
 ) -> AuraError {
     AuraError::permission_denied(format!(
         "Sync Biscuit guard error with peer {}, capability '{}': {}",

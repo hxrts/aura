@@ -9,8 +9,9 @@ use crate::facts::{RendezvousDescriptor, RendezvousFact, TransportHint};
 use crate::protocol::{guards, HandshakeComplete, HandshakeInit, NoiseHandshake};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
-use aura_protocol::guards::types;
+use aura_guards::types;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
 #[derive(Debug)]
 enum RendezvousGuardError {
@@ -152,6 +153,13 @@ pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 // Rendezvous Service
 // =============================================================================
 
+/// Cache key for descriptor storage
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct DescriptorCacheKey {
+    context_id: ContextId,
+    authority_id: AuthorityId,
+}
+
 /// Rendezvous service coordinating peer discovery and channel establishment
 pub struct RendezvousService {
     /// Local authority
@@ -162,6 +170,8 @@ pub struct RendezvousService {
     transport_selector: TransportSelector,
     /// Descriptor builder
     descriptor_builder: DescriptorBuilder,
+    /// Cached descriptors indexed by (context, authority)
+    descriptor_cache: HashMap<DescriptorCacheKey, RendezvousDescriptor>,
 }
 
 impl RendezvousService {
@@ -179,6 +189,7 @@ impl RendezvousService {
             config,
             transport_selector,
             descriptor_builder,
+            descriptor_cache: HashMap::new(),
         }
     }
 
@@ -190,6 +201,116 @@ impl RendezvousService {
     /// Get the service configuration
     pub fn config(&self) -> &RendezvousConfig {
         &self.config
+    }
+
+    // =========================================================================
+    // Descriptor Cache Access
+    // =========================================================================
+
+    /// Cache a descriptor received from the journal or network.
+    ///
+    /// This stores the descriptor for later lookup by `get_cached_descriptor`.
+    /// Expired descriptors are automatically replaced when a newer one is cached.
+    pub fn cache_descriptor(&mut self, descriptor: RendezvousDescriptor) {
+        let key = DescriptorCacheKey {
+            context_id: descriptor.context_id,
+            authority_id: descriptor.authority_id,
+        };
+        self.descriptor_cache.insert(key, descriptor);
+    }
+
+    /// Get a cached descriptor for a specific peer in a context.
+    ///
+    /// Returns `None` if no descriptor is cached or if the cached descriptor
+    /// has expired (based on `now_ms`).
+    pub fn get_cached_descriptor(
+        &self,
+        context_id: ContextId,
+        authority_id: AuthorityId,
+        now_ms: u64,
+    ) -> Option<&RendezvousDescriptor> {
+        let key = DescriptorCacheKey {
+            context_id,
+            authority_id,
+        };
+        self.descriptor_cache.get(&key).filter(|d| d.is_valid(now_ms))
+    }
+
+    /// Iterate over all cached descriptors in a context.
+    ///
+    /// Returns descriptors regardless of validity; caller should check `is_valid()`.
+    pub fn iter_descriptors_in_context(
+        &self,
+        context_id: ContextId,
+    ) -> impl Iterator<Item = &RendezvousDescriptor> {
+        self.descriptor_cache
+            .iter()
+            .filter(move |(k, _)| k.context_id == context_id)
+            .map(|(_, v)| v)
+    }
+
+    /// Get authorities whose descriptors need refresh in a context.
+    ///
+    /// Returns authorities with descriptors that are still valid but within
+    /// their refresh window (10% of expiry).
+    pub fn peers_needing_refresh(&self, context_id: ContextId, now_ms: u64) -> Vec<AuthorityId> {
+        self.descriptor_cache
+            .iter()
+            .filter(|(k, d)| {
+                k.context_id == context_id
+                    && k.authority_id != self.authority_id
+                    && d.is_valid(now_ms)
+                    && d.needs_refresh(now_ms)
+            })
+            .map(|(k, _)| k.authority_id)
+            .collect()
+    }
+
+    /// Check if our own descriptor needs refresh in a context.
+    ///
+    /// # Arguments
+    /// * `context_id` - The context to check
+    /// * `now_ms` - Current time in milliseconds
+    /// * `refresh_window_ms` - Time before expiry to trigger refresh
+    ///
+    /// Returns `true` if we have no cached descriptor, it's expired, or it's
+    /// within the refresh window.
+    pub fn needs_own_refresh(
+        &self,
+        context_id: ContextId,
+        now_ms: u64,
+        refresh_window_ms: u64,
+    ) -> bool {
+        let key = DescriptorCacheKey {
+            context_id,
+            authority_id: self.authority_id,
+        };
+
+        match self.descriptor_cache.get(&key) {
+            None => true, // No descriptor cached, need to publish
+            Some(descriptor) => {
+                if !descriptor.is_valid(now_ms) {
+                    return true; // Descriptor expired
+                }
+                // Check if within custom refresh window
+                let time_until_expiry = descriptor.valid_until.saturating_sub(now_ms);
+                time_until_expiry <= refresh_window_ms
+            }
+        }
+    }
+
+    /// Remove expired descriptors from the cache.
+    ///
+    /// Call periodically to prevent unbounded cache growth.
+    pub fn evict_expired_descriptors(&mut self, now_ms: u64) {
+        self.descriptor_cache
+            .retain(|_, d| d.is_valid(now_ms));
+    }
+
+    /// Clear all cached descriptors for a context.
+    pub fn clear_context_cache(&mut self, context_id: ContextId) {
+        self.descriptor_cache
+            .retain(|k, _| k.context_id != context_id);
     }
 
     // =========================================================================

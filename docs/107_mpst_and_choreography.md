@@ -140,10 +140,10 @@ This diagram shows the combined guard sequence. Annotation-derived effects execu
 
 ### Combined Execution
 
-Use `execute_guarded_choreography()` from `aura_protocol::guards` to execute both annotation-derived commands and runtime guards atomically:
+Use `execute_guarded_choreography()` from `aura_guards` to execute both annotation-derived commands and runtime guards atomically:
 
 ```rust
-use aura_protocol::guards::{execute_guarded_choreography, GuardChain};
+use aura_guards::{execute_guarded_choreography, GuardChain};
 
 let result = execute_guarded_choreography(
     &effect_system,

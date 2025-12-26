@@ -19,8 +19,8 @@
 //! 2. **Simplicity over efficiency**: Prefer clarity to optimization
 //! 3. **Property annotations**: Document which theorem each function relates to
 
-use aura_protocol::consensus::core::{ConsensusPhase, ConsensusState, ShareProposal};
-use aura_protocol::consensus::core::state::PureCommitFact;
+use aura_consensus::core::{ConsensusPhase, ConsensusState, ShareProposal};
+use aura_consensus::core::state::PureCommitFact;
 use std::collections::BTreeSet;
 
 /// Reference evidence structure for CRDT merge
@@ -461,7 +461,7 @@ pub fn state_to_evidence(state: &ConsensusState) -> Evidence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_protocol::consensus::core::state::ShareData;
+    use aura_consensus::core::state::ShareData;
 
     #[test]
     fn test_merge_lists_dedup() {

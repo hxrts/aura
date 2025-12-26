@@ -11,7 +11,7 @@ mod guardian;
 mod help;
 mod invitations;
 mod neighborhood;
-mod recovery;
+mod notifications;
 mod settings;
 
 pub use account_setup::*;
@@ -23,7 +23,7 @@ pub use guardian::*;
 pub use help::*;
 pub use invitations::*;
 pub use neighborhood::*;
-pub use recovery::*;
+pub use notifications::*;
 pub use settings::*;
 
 // Note: PanelFocus has been unified with TwoPanelFocus from navigation.rs.

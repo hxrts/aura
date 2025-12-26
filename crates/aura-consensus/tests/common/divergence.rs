@@ -28,8 +28,8 @@
 //! ╚══════════════════════════════════════════════════════════════════════╝
 //! ```
 
-use aura_protocol::consensus::core::{ConsensusState, ShareProposal};
-use aura_protocol::consensus::core::state::PureCommitFact;
+use aura_consensus::core::{ConsensusState, ShareProposal};
+use aura_consensus::core::state::PureCommitFact;
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -552,7 +552,7 @@ impl<'a> fmt::Display for DivergenceReport<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_protocol::consensus::core::state::{ConsensusPhase, PathSelection, ShareData};
+    use aura_consensus::core::state::{ConsensusPhase, PathSelection, ShareData};
 
     fn make_test_state() -> ConsensusState {
         let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();

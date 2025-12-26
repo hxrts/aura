@@ -24,7 +24,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use aura_protocol::guards::EffectPolicyGuard;
+//! use aura_guards::EffectPolicyGuard;
 //! use aura_wot::{OperationType, EffectPolicyRegistry, EffectDecision};
 //!
 //! let registry = EffectPolicyRegistry::default();

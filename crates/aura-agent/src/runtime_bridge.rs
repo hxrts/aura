@@ -412,7 +412,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     health.and_then(|h| h.last_sync),
                 )
             } else {
-                (false, 0, None)
+                let now_ms = self
+                    .agent
+                    .runtime()
+                    .effects()
+                    .physical_time()
+                    .await
+                    .map(|time| time.ts_ms)
+                    .ok();
+                (false, 0, now_ms.filter(|_| transport_stats.active_channels > 0))
             };
 
         SyncStatus {
@@ -815,6 +823,193 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ceremony_id = %ceremony_id,
             "All guardian invitations sent successfully"
         );
+
+        Ok(ceremony_id)
+    }
+
+    async fn initiate_device_threshold_ceremony(
+        &self,
+        threshold_k: FrostThreshold,
+        total_n: u16,
+        device_ids: &[String],
+    ) -> Result<String, IntentError> {
+        use aura_core::effects::{RandomEffects, ThresholdSigningEffects};
+        use aura_core::hash::hash;
+        use aura_core::threshold::ParticipantIdentity;
+
+        let authority_id = self.agent.authority_id();
+        let effects = self.agent.runtime().effects();
+        let current_device_id = self.agent.context().device_id();
+
+        let mut parsed_devices: Vec<aura_core::DeviceId> = Vec::with_capacity(device_ids.len());
+        for id_str in device_ids {
+            let device_id: aura_core::DeviceId = id_str.parse().map_err(|_| {
+                IntentError::validation_failed(format!(
+                    "Failed to parse device id: {}",
+                    id_str
+                ))
+            })?;
+            if parsed_devices.contains(&device_id) {
+                return Err(IntentError::validation_failed(format!(
+                    "Duplicate device id provided: {}",
+                    id_str
+                )));
+            }
+            parsed_devices.push(device_id);
+        }
+
+        if parsed_devices.len() != total_n as usize {
+            return Err(IntentError::validation_failed(format!(
+                "Device count ({}) must match total_n ({})",
+                parsed_devices.len(),
+                total_n
+            )));
+        }
+
+        if !parsed_devices.contains(&current_device_id) {
+            return Err(IntentError::validation_failed(
+                "Current device must participate in MFA ceremony".to_string(),
+            ));
+        }
+
+        let threshold_value = threshold_k.value();
+        if threshold_value < 2 || threshold_value > total_n {
+            return Err(IntentError::validation_failed(format!(
+                "Invalid threshold {} for {} devices",
+                threshold_value, total_n
+            )));
+        }
+
+        let participants: Vec<ParticipantIdentity> = parsed_devices
+            .iter()
+            .copied()
+            .map(ParticipantIdentity::device)
+            .collect();
+
+        let (pending_epoch, key_packages, _public_key) = effects
+            .rotate_keys(&authority_id, threshold_value, total_n, &participants)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to prepare device rotation: {e}"))
+            })?;
+
+        let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
+            std::collections::HashMap::new();
+        for (device_id, key_package) in parsed_devices
+            .iter()
+            .copied()
+            .zip(key_packages.iter())
+        {
+            key_package_by_device.insert(device_id, key_package.clone());
+        }
+
+        let tree_state = effects
+            .get_current_state()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read tree state: {e}")))?;
+
+        let prestate_input = serde_json::to_vec(&(
+            tree_state.epoch,
+            tree_state.root_commitment,
+            parsed_devices.clone(),
+            threshold_value,
+            total_n,
+        ))
+        .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
+        let prestate_hash = aura_core::Hash32(hash(&prestate_input));
+
+        let op_input = serde_json::to_vec(&(pending_epoch, threshold_value, total_n, &parsed_devices))
+            .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
+        let op_hash = aura_core::Hash32(hash(&op_input));
+
+        let nonce_bytes = effects.random_bytes(8).await;
+        let nonce = u64::from_le_bytes(nonce_bytes[..8].try_into().unwrap_or_default());
+        let mut ceremony_seed = Vec::with_capacity(32 + 32 + 8);
+        ceremony_seed.extend_from_slice(prestate_hash.as_bytes());
+        ceremony_seed.extend_from_slice(op_hash.as_bytes());
+        ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
+        let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
+        let ceremony_id = format!("ceremony:{}", hex::encode(ceremony_hash.as_bytes()));
+
+        let tracker = self.agent.ceremony_tracker().await;
+        tracker
+            .register(
+                ceremony_id.clone(),
+                aura_app::runtime_bridge::CeremonyKind::DeviceRotation,
+                threshold_value,
+                total_n,
+                participants,
+                pending_epoch,
+                None,
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
+            })?;
+
+        // Mark the initiator as accepted (their key package is already local).
+        let _ = tracker
+            .mark_accepted(
+                &ceremony_id,
+                ParticipantIdentity::device(current_device_id),
+            )
+            .await;
+
+        // Send key packages to other devices.
+        let context_entropy = {
+            let mut h = aura_core::hash::hasher();
+            h.update(b"DEVICE_THRESHOLD_CONTEXT");
+            h.update(&authority_id.to_bytes());
+            h.update(ceremony_id.as_bytes());
+            h.finalize()
+        };
+        let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+
+        for device_id in parsed_devices.iter().copied() {
+            if device_id == current_device_id {
+                continue;
+            }
+
+            let Some(key_package) = key_package_by_device.get(&device_id).cloned() else {
+                return Err(IntentError::internal_error(format!(
+                    "Missing key package for device {}",
+                    device_id
+                )));
+            };
+
+            let mut metadata = std::collections::HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                "application/aura-device-threshold-key-package".to_string(),
+            );
+            metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+            metadata.insert("pending-epoch".to_string(), pending_epoch.to_string());
+            metadata.insert(
+                "initiator-device-id".to_string(),
+                current_device_id.to_string(),
+            );
+            metadata.insert("participant-device-id".to_string(), device_id.to_string());
+            metadata.insert(
+                "aura-destination-device-id".to_string(),
+                device_id.to_string(),
+            );
+
+            let envelope = aura_core::effects::TransportEnvelope {
+                destination: authority_id,
+                source: authority_id,
+                context: ceremony_context,
+                payload: key_package,
+                metadata,
+                receipt: None,
+            };
+
+            effects.send_envelope(envelope).await.map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to send device threshold key package to {}: {e}",
+                    device_id
+                ))
+            })?;
+        }
 
         Ok(ceremony_id)
     }

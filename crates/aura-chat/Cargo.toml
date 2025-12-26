@@ -24,7 +24,7 @@ aura-journal = { path = "../aura-journal" }
 aura-composition = { path = "../aura-composition" }
 
 # Guard-chain shared helpers
-aura-protocol = { path = "../aura-protocol" }
+aura-guards = { path = "../aura-guards" }
 
 # Session types and choreography
 

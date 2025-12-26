@@ -286,6 +286,12 @@ fn convert_modifiers(modifiers: KeyModifiers) -> aura_core::effects::terminal::M
     if modifiers.contains(KeyModifiers::ALT) {
         result = result | Modifiers::ALT;
     }
+    if modifiers.contains(KeyModifiers::SUPER) {
+        result = result | Modifiers::SUPER;
+    }
+    if modifiers.contains(KeyModifiers::META) {
+        result = result | Modifiers::META;
+    }
     result
 }
 

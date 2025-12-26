@@ -9,7 +9,7 @@ use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_protocol::effects::EffectApiEffects;
-use aura_protocol::guards::chain::create_send_guard;
+use aura_guards::chain::create_send_guard;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

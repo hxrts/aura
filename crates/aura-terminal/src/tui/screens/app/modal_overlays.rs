@@ -13,7 +13,8 @@ use crate::tui::components::{
 use crate::tui::props::{BlockViewProps, ChatViewProps, ContactsViewProps, SettingsViewProps};
 use crate::tui::screens::{
     ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal, GuardianCandidateProps,
-    GuardianSetupModal, InvitationCodeModal, InvitationCreateModal, InvitationImportModal,
+    GuardianSetupKind, GuardianSetupModal, InvitationCodeModal, InvitationCreateModal,
+    InvitationImportModal,
 };
 use crate::tui::types::{Contact, InvitationType};
 
@@ -294,6 +295,7 @@ pub fn render_guardian_setup_modal(contacts: &ContactsViewProps) -> Option<AnyEl
                 ModalFrame {
                     GuardianSetupModal(
                         visible: true,
+                        kind: GuardianSetupKind::Guardian,
                         step: contacts.guardian_setup_modal_step.clone(),
                         contacts: guardian_contacts,
                         selected_indices: contacts.guardian_setup_modal_selected_indices.clone(),
@@ -302,6 +304,42 @@ pub fn render_guardian_setup_modal(contacts: &ContactsViewProps) -> Option<AnyEl
                         threshold_n: contacts.guardian_setup_modal_threshold_n,
                         ceremony_responses: contacts.guardian_setup_modal_ceremony_responses.clone(),
                         error: contacts.guardian_setup_modal_error.clone(),
+                    )
+                }
+            }
+            .into_any(),
+        )
+    } else {
+        None
+    }
+}
+
+pub fn render_mfa_setup_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
+    if settings.mfa_setup_modal_visible {
+        let device_candidates: Vec<GuardianCandidateProps> = settings
+            .mfa_setup_modal_contacts
+            .iter()
+            .map(|c| GuardianCandidateProps {
+                id: c.id.clone(),
+                name: c.name.clone(),
+                is_current_guardian: c.is_current_guardian,
+            })
+            .collect();
+
+        Some(
+            element! {
+                ModalFrame {
+                    GuardianSetupModal(
+                        visible: true,
+                        kind: GuardianSetupKind::Mfa,
+                        step: settings.mfa_setup_modal_step.clone(),
+                        contacts: device_candidates,
+                        selected_indices: settings.mfa_setup_modal_selected_indices.clone(),
+                        focused_index: settings.mfa_setup_modal_focused_index,
+                        threshold_k: settings.mfa_setup_modal_threshold_k,
+                        threshold_n: settings.mfa_setup_modal_threshold_n,
+                        ceremony_responses: settings.mfa_setup_modal_ceremony_responses.clone(),
+                        error: settings.mfa_setup_modal_error.clone(),
                     )
                 }
             }

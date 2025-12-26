@@ -69,6 +69,7 @@ impl Default for InvitationConfig {
 
 #[derive(Debug, Clone)]
 struct InvitationPolicy {
+    #[allow(dead_code)] // Reserved for future policy enforcement
     context_id: ContextId,
     max_message_length: usize,
     require_guardian_capability: bool,

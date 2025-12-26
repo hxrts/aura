@@ -564,19 +564,27 @@ pub enum SettingsSection {
     #[default]
     Profile,
     Threshold,
+    Recovery,
     Devices,
     Mfa,
 }
 
 impl SettingsSection {
     pub fn all() -> &'static [Self] {
-        &[Self::Profile, Self::Threshold, Self::Devices, Self::Mfa]
+        &[
+            Self::Profile,
+            Self::Threshold,
+            Self::Recovery,
+            Self::Devices,
+            Self::Mfa,
+        ]
     }
 
     pub fn title(self) -> &'static str {
         match self {
             Self::Profile => "Profile",
             Self::Threshold => "Guardian Threshold",
+            Self::Recovery => "Recovery Requests",
             Self::Devices => "Devices",
             Self::Mfa => "Multifactor Auth",
         }
@@ -586,6 +594,7 @@ impl SettingsSection {
         match self {
             Self::Profile => "Your display name and account information",
             Self::Threshold => "Configure guardians for account recovery",
+            Self::Recovery => "Approve recovery requests and start recovery",
             Self::Devices => "Manage devices linked to your account",
             Self::Mfa => "Set multifactor authentication requirements",
         }
@@ -594,7 +603,8 @@ impl SettingsSection {
     pub fn next(self) -> Self {
         match self {
             Self::Profile => Self::Threshold,
-            Self::Threshold => Self::Devices,
+            Self::Threshold => Self::Recovery,
+            Self::Recovery => Self::Devices,
             Self::Devices => Self::Mfa,
             Self::Mfa => Self::Profile,
         }
@@ -604,7 +614,8 @@ impl SettingsSection {
         match self {
             Self::Profile => Self::Mfa,
             Self::Threshold => Self::Profile,
-            Self::Devices => Self::Threshold,
+            Self::Recovery => Self::Threshold,
+            Self::Devices => Self::Recovery,
             Self::Mfa => Self::Devices,
         }
     }

@@ -7,7 +7,7 @@
 //! - Code display with automatic line wrapping
 //! - Status indicator (success, pending, error)
 //! - Optional progress tracking
-//! - Ctrl+C to copy code to clipboard
+//! - Press 'c' to copy code to clipboard
 
 use iocraft::prelude::*;
 
@@ -271,9 +271,9 @@ pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'
                 border_edges: Edges::Top,
                 border_color: Theme::BORDER,
             ) {
-                // Ctrl+C to copy
+                // c to copy
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Ctrl+C", weight: Weight::Bold, color: Theme::SECONDARY)
+                    Text(content: "c", weight: Weight::Bold, color: Theme::SECONDARY)
                     Text(content: "Copy", color: Theme::TEXT_MUTED)
                 }
                 // Esc to close

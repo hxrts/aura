@@ -13,7 +13,7 @@ use aura_core::effects::terminal::{KeyCode, KeyEvent};
 
 use crate::tui::screens::Screen;
 
-use super::commands::TuiCommand;
+use super::commands::{DispatchCommand, TuiCommand};
 use super::modal_queue::QueuedModal;
 use super::TuiState;
 
@@ -21,8 +21,8 @@ use super::TuiState;
 pub use input::{handle_insert_mode_key, handle_mouse_event, handle_paste_event};
 pub use modal::handle_queued_modal_key;
 pub use screen::{
-    handle_block_key, handle_chat_key, handle_contacts_key, handle_neighborhood_key,
-    handle_recovery_key, handle_settings_key,
+    handle_chat_key, handle_contacts_key, handle_neighborhood_key, handle_notifications_key,
+    handle_settings_key,
 };
 
 /// Handle a key event
@@ -52,12 +52,11 @@ pub fn handle_key_event(state: &mut TuiState, commands: &mut Vec<TuiCommand>, ke
 
     // Screen-specific keys (exhaustive match on all Screen variants)
     match state.screen() {
-        Screen::Block => handle_block_key(state, commands, key),
         Screen::Chat => handle_chat_key(state, commands, key),
         Screen::Contacts => handle_contacts_key(state, commands, key),
         Screen::Neighborhood => handle_neighborhood_key(state, commands, key),
+        Screen::Notifications => handle_notifications_key(state, commands, key),
         Screen::Settings => handle_settings_key(state, commands, key),
-        Screen::Recovery => handle_recovery_key(state, commands, key),
     }
 }
 
@@ -75,6 +74,12 @@ pub fn handle_global_key(
     commands: &mut Vec<TuiCommand>,
     key: &KeyEvent,
 ) -> bool {
+    // Contacts: guardian setup shortcut should be available regardless of list focus.
+    if key.code == KeyCode::Char('g') && matches!(state.screen(), Screen::Contacts) {
+        commands.push(TuiCommand::Dispatch(DispatchCommand::OpenGuardianSetup));
+        return true;
+    }
+
     // Quit
     if key.code == KeyCode::Char('q') && !key.modifiers.shift() {
         state.should_exit = true;

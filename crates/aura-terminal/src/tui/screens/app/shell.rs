@@ -15,8 +15,8 @@ use super::modal_overlays::{
     render_channel_info_modal, render_chat_create_modal, render_confirm_modal,
     render_contact_modal, render_contacts_code_modal, render_contacts_create_modal,
     render_contacts_import_modal, render_device_enrollment_modal, render_display_name_modal,
-    render_guardian_modal, render_guardian_setup_modal, render_help_modal, render_nickname_modal,
-    render_remove_device_modal, render_topic_modal, GlobalModalProps,
+    render_guardian_modal, render_guardian_setup_modal, render_help_modal, render_mfa_setup_modal,
+    render_nickname_modal, render_remove_device_modal, render_topic_modal, GlobalModalProps,
 };
 
 use iocraft::prelude::*;
@@ -24,7 +24,8 @@ use std::sync::Arc;
 
 use aura_app::signal_defs::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::workflows::{
-    cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_guardian_ceremony,
+    cancel_key_rotation_ceremony, monitor_key_rotation_ceremony,
+    start_device_threshold_ceremony, start_guardian_ceremony,
 };
 use aura_app::AppError;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -38,24 +39,25 @@ use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
 use crate::tui::screens::app::subscriptions::{
-    use_channels_subscription, use_contacts_subscription, use_messages_subscription,
-    use_nav_status_signals, use_neighborhood_blocks_subscription,
-    use_pending_requests_subscription, use_residents_subscription, use_threshold_subscription,
+    use_channels_subscription, use_contacts_subscription, use_devices_subscription,
+    use_messages_subscription, use_nav_status_signals, use_neighborhood_blocks_subscription,
+    use_notifications_subscription, use_pending_requests_subscription,
+    use_residents_subscription, use_threshold_subscription,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
-    BlockScreen, ChatScreen, ContactsScreen, NeighborhoodScreen, RecoveryScreen, SettingsScreen,
+    ChatScreen, ContactsScreen, NeighborhoodScreenV2, NotificationsScreen, SettingsScreen,
 };
 use crate::tui::types::{
     BlockBudget, BlockSummary, Channel, Contact, Device, Guardian, Invitation, KeyHint, Message,
-    MfaPolicy, PendingRequest, RecoveryStatus, Resident, TraversalDepth,
+    MfaPolicy, Resident, TraversalDepth,
 };
 
 // State machine integration
 use crate::tui::iocraft_adapter::convert_iocraft_event;
 use crate::tui::props::{
     extract_block_view_props, extract_chat_view_props, extract_contacts_view_props,
-    extract_neighborhood_view_props, extract_recovery_view_props, extract_settings_view_props,
+    extract_neighborhood_view_props, extract_notifications_view_props, extract_settings_view_props,
 };
 use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{ui_update_channel, UiUpdate, UiUpdateReceiver, UiUpdateSender};
@@ -77,7 +79,6 @@ pub struct IoAppProps {
     pub threshold_k: u8,
     pub threshold_n: u8,
     pub mfa_policy: MfaPolicy,
-    pub recovery_status: RecoveryStatus,
     // Block screen data
     pub block_name: String,
     pub residents: Vec<Resident>,
@@ -91,8 +92,6 @@ pub struct IoAppProps {
     pub neighborhood_name: String,
     pub blocks: Vec<BlockSummary>,
     pub traversal_depth: TraversalDepth,
-    /// Pending recovery requests from others that we can approve
-    pub pending_requests: Vec<PendingRequest>,
     // Account setup
     /// Whether to show account setup modal on start
     pub show_account_setup: bool,
@@ -233,7 +232,7 @@ impl std::ops::Deref for TuiRenderState {
 #[allow(clippy::field_reassign_with_default)] // Large struct with many conditional fields
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-    let screen = hooks.use_state(|| Screen::Block);
+    let screen = hooks.use_state(|| Screen::Neighborhood);
     let should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
 
@@ -321,6 +320,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let shared_messages = use_messages_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
+    // Devices subscription: SharedDevices for dispatch handlers to read
+    // =========================================================================
+    let shared_devices = use_devices_subscription(&mut hooks, &app_ctx);
+
+    // =========================================================================
     // Residents subscription: SharedResidents for dispatch handlers to read
     // =========================================================================
     let shared_residents = use_residents_subscription(&mut hooks, &app_ctx);
@@ -339,6 +343,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Pending requests subscription: SharedPendingRequests for dispatch handlers to read
     // =========================================================================
     let shared_pending_requests = use_pending_requests_subscription(&mut hooks, &app_ctx);
+
+    // =========================================================================
+    // Notifications subscription: keep notification count in sync for navigation
+    // =========================================================================
+    use_notifications_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Threshold subscription: SharedThreshold for dispatch handlers to read
@@ -440,9 +449,29 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         }
     });
 
-    // NOTE: Toast polling loop removed - toasts now flow through UiUpdate channel
-    // All toast operations (ShowToast, DismissToast, ClearAllToasts) send UiUpdate variants
-    // which are processed by the UI Update Processor below
+    // =========================================================================
+    // Toast Auto-Dismiss Timer
+    //
+    // Runs every 100ms to tick the toast queue, enabling auto-dismiss for
+    // non-error toasts (5 second timeout). Error toasts never auto-dismiss.
+    // Only triggers re-render when a toast is actually dismissed.
+    // =========================================================================
+    hooks.use_future({
+        let mut tui = tui.clone();
+        async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+            loop {
+                interval.tick().await;
+                // Only tick if there's an active toast to avoid unnecessary re-renders
+                let has_active_toast = tui.state.read().toast_queue.is_active();
+                if has_active_toast {
+                    tui.with_mut(|state| {
+                        state.toast_queue.tick();
+                    });
+                }
+            }
+        }
+    });
 
     // =========================================================================
     // UI Update Processor - Central handler for all async callback results
@@ -646,7 +675,76 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         aura_app::runtime_bridge::CeremonyKind::DeviceRemoval => {
                                                             "Device removal complete".to_string()
                                                         }
+                                                        aura_app::runtime_bridge::CeremonyKind::DeviceRotation => {
+                                                            format!(
+                                                                "Device threshold ceremony complete ({}-of-{})",
+                                                                threshold, total_count
+                                                            )
+                                                        }
                                                     },
+                                                    crate::tui::state_machine::ToastLevel::Success,
+                                                ));
+                                                dismiss_ceremony_started_toast = true;
+                                            }
+                                        }
+                                    } else if let crate::tui::state_machine::QueuedModal::MfaSetup(ref mut s) = modal {
+                                        if matches!(
+                                            s.step,
+                                            crate::tui::state_machine::GuardianSetupStep::CeremonyInProgress
+                                        ) {
+                                            if s.ceremony.ceremony_id.is_none() {
+                                                s.ceremony.set_ceremony_id(ceremony_id.clone());
+                                            }
+
+                                            s.ceremony.update_from_status(
+                                                accepted_count,
+                                                total_count,
+                                                threshold,
+                                                is_complete,
+                                                has_failed,
+                                                error_message.clone(),
+                                                pending_epoch,
+                                            );
+
+                                            use aura_core::threshold::ParticipantIdentity;
+                                            let accepted_devices: Vec<String> = accepted_participants
+                                                .iter()
+                                                .filter_map(|p| match p {
+                                                    ParticipantIdentity::Device(id) => Some(id.to_string()),
+                                                    _ => None,
+                                                })
+                                                .collect();
+
+                                            for (id, _name, response) in &mut s.ceremony_responses {
+                                                if accepted_devices.iter().any(|d| d == id) {
+                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Accepted;
+                                                } else if matches!(
+                                                    response,
+                                                    crate::tui::state_machine::GuardianCeremonyResponse::Accepted
+                                                ) {
+                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Pending;
+                                                }
+                                            }
+
+                                            if has_failed {
+                                                let msg = error_message
+                                                    .clone()
+                                                    .unwrap_or_else(|| "Multifactor ceremony failed".to_string());
+                                                s.error = Some(msg.clone());
+
+                                                s.step = crate::tui::state_machine::GuardianSetupStep::ChooseThreshold;
+                                                s.ceremony.clear();
+                                                s.ceremony_responses.clear();
+
+                                                toast = Some((msg, crate::tui::state_machine::ToastLevel::Error));
+                                                dismiss_ceremony_started_toast = true;
+                                            } else if is_complete {
+                                                dismiss_modal = true;
+                                                toast = Some((
+                                                    format!(
+                                                        "Multifactor ceremony complete! {}-of-{} committed",
+                                                        threshold, total_count
+                                                    ),
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
                                                 dismiss_ceremony_started_toast = true;
@@ -907,6 +1005,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 state.contacts.contact_count = count;
                             });
                         }
+                        UiUpdate::NotificationsCountChanged(count) => {
+                            tui.with_mut(|state| {
+                                state.notifications.item_count = count;
+                                if count == 0 {
+                                    state.notifications.selected_index = 0;
+                                } else if state.notifications.selected_index >= count {
+                                    state.notifications.selected_index = count.saturating_sub(1);
+                                }
+                            });
+                        }
                         UiUpdate::NicknameUpdated {
                             contact_id: _,
                             nickname: _,
@@ -1045,18 +1153,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Extract individual callbacks from registry for screen component props
     // (Screen components still use individual callback props for now)
-    let on_block_send = callbacks.as_ref().map(|cb| cb.block.on_send.clone());
-    let on_block_invite = callbacks.as_ref().map(|cb| cb.block.on_invite.clone());
-    let on_block_navigate_neighborhood = callbacks
-        .as_ref()
-        .map(|cb| cb.block.on_navigate_neighborhood.clone());
-    let on_grant_steward = callbacks
-        .as_ref()
-        .map(|cb| cb.block.on_grant_steward.clone());
-    let on_revoke_steward = callbacks
-        .as_ref()
-        .map(|cb| cb.block.on_revoke_steward.clone());
-
     let on_send = callbacks.as_ref().map(|cb| cb.chat.on_send.clone());
     let on_retry_message = callbacks
         .as_ref()
@@ -1082,16 +1178,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         .as_ref()
         .map(|cb| cb.invitations.on_import.clone());
 
-    let on_enter_block = callbacks
-        .as_ref()
-        .map(|cb| cb.neighborhood.on_enter_block.clone());
-    let on_go_home = callbacks
-        .as_ref()
-        .map(|cb| cb.neighborhood.on_go_home.clone());
-    let on_back_to_street = callbacks
-        .as_ref()
-        .map(|cb| cb.neighborhood.on_back_to_street.clone());
-
     let on_update_mfa = callbacks
         .as_ref()
         .map(|cb| cb.settings.on_update_mfa.clone());
@@ -1108,16 +1194,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         .as_ref()
         .map(|cb| cb.settings.on_remove_device.clone());
 
-    let on_start_recovery = callbacks
-        .as_ref()
-        .map(|cb| cb.recovery.on_start_recovery.clone());
-    let on_add_guardian = callbacks
-        .as_ref()
-        .map(|cb| cb.recovery.on_add_guardian.clone());
-    let on_submit_approval = callbacks
-        .as_ref()
-        .map(|cb| cb.recovery.on_submit_approval.clone());
-
     let current_screen = screen.get();
 
     // Check if in insert mode (MessageInput has its own hint bar, so hide main hints)
@@ -1129,7 +1205,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let chat_props = extract_chat_view_props(&tui_snapshot);
     let contacts_props = extract_contacts_view_props(&tui_snapshot);
     let settings_props = extract_settings_view_props(&tui_snapshot);
-    let recovery_props = extract_recovery_view_props(&tui_snapshot);
+    let notifications_props = extract_notifications_view_props(&tui_snapshot);
     let neighborhood_props = extract_neighborhood_view_props(&tui_snapshot);
 
     // =========================================================================
@@ -1217,13 +1293,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Build screen-specific hints based on current screen (top row)
     let screen_hints: Vec<KeyHint> = match current_screen {
-        Screen::Block => vec![
-            KeyHint::new("i", "Insert"),
-            KeyHint::new("v", "Invite"),
-            KeyHint::new("n", "Neighbor"),
-            KeyHint::new("g", "Grant"),
-            KeyHint::new("r", "Revoke"),
-        ],
         Screen::Chat => vec![
             KeyHint::new("i", "Insert"),
             KeyHint::new("n", "New"),
@@ -1239,18 +1308,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("n", "Invite"),
         ],
         Screen::Neighborhood => vec![
-            KeyHint::new("g", "Home"),
-            KeyHint::new("b", "Back"),
             KeyHint::new("Enter", "Enter"),
+            KeyHint::new("Esc", "Map"),
+            KeyHint::new("i", "Insert"),
+            KeyHint::new("d", "Depth"),
+            KeyHint::new("g", "Home"),
+        ],
+        Screen::Notifications => vec![
+            KeyHint::new("j/k", "Move"),
+            KeyHint::new("h/l", "Focus"),
         ],
         Screen::Settings => vec![
             KeyHint::new("Enter", "Select"),
             KeyHint::new("Space", "Toggle"),
-        ],
-        Screen::Recovery => vec![
-            KeyHint::new("a", "Add"),
-            KeyHint::new("s", "Start"),
-            KeyHint::new("h/l", "Tab"),
         ],
     };
 
@@ -1277,6 +1347,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_residents_for_dispatch = shared_residents.clone();
         // Used to look up failed messages by ID to get channel and content for retry
         let shared_messages_for_dispatch = shared_messages.clone();
+        // Used to map device selection for MFA wizard
+        let shared_devices_for_dispatch = shared_devices.clone();
         move |event| {
             // Convert iocraft event to aura-core event and run through state machine
             if let Some(core_event) = convert_iocraft_event(event.clone()) {
@@ -1615,17 +1687,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.invitations.on_revoke)(invitation_id);
                                     }
 
-                                    // === Recovery Screen Commands ===
+                                    // === Recovery Commands ===
                                     DispatchCommand::StartRecovery => {
                                         (cb.recovery.on_start_recovery)();
                                     }
                                     DispatchCommand::ApproveRecovery => {
-                                        let idx = new_state.recovery.selected_index;
                                         if let Ok(guard) = shared_pending_requests_for_dispatch.read() {
-                                            if let Some(req) = guard.get(idx) {
+                                            if let Some(req) = guard.first() {
                                                 (cb.recovery.on_submit_approval)(req.id.clone());
                                             } else {
-                                                new_state.toast_error("No request selected");
+                                                new_state.toast_error("No pending recovery requests");
                                             }
                                         } else {
                                             new_state.toast_error("Failed to read requests");
@@ -1690,6 +1761,44 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                         // Enqueue the modal to new_state (not tui_state, which gets overwritten)
                                         new_state.modal_queue.enqueue(crate::tui::state_machine::QueuedModal::GuardianSetup(modal_state));
+                                    }
+
+                                    DispatchCommand::OpenMfaSetup => {
+                                        let current_devices = shared_devices_for_dispatch
+                                            .read()
+                                            .map(|guard| guard.clone())
+                                            .unwrap_or_default();
+
+                                        let candidates: Vec<crate::tui::state_machine::GuardianCandidate> = current_devices
+                                            .iter()
+                                            .map(|d| {
+                                                let name = if d.name.is_empty() {
+                                                    let short = d.id.chars().take(8).collect::<String>();
+                                                    format!("Device {}", short)
+                                                } else {
+                                                    d.name.clone()
+                                                };
+                                                crate::tui::state_machine::GuardianCandidate {
+                                                    id: d.id.clone(),
+                                                    name,
+                                                    is_current_guardian: d.is_current,
+                                                }
+                                            })
+                                            .collect();
+
+                                        let selected: Vec<usize> = (0..candidates.len()).collect();
+                                        let n = selected.len() as u8;
+                                        let threshold_k = if n >= 2 { (n / 2) + 1 } else { 2 };
+
+                                        let mut modal_state =
+                                            crate::tui::state_machine::GuardianSetupModalState::default();
+                                        modal_state.contacts = candidates;
+                                        modal_state.selected_indices = selected;
+                                        modal_state.threshold_k = threshold_k;
+
+                                        new_state.modal_queue.enqueue(
+                                            crate::tui::state_machine::QueuedModal::MfaSetup(modal_state),
+                                        );
                                     }
 
                                     // === Guardian Ceremony Commands ===
@@ -1800,6 +1909,124 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     if let Some(tx) = update_tx {
                                                         let _ = tx.send(UiUpdate::operation_failed(
                                                             "Guardian ceremony",
+                                                            e.to_string(),
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    }
+
+                                    DispatchCommand::StartMfaCeremony { device_ids, threshold_k } => {
+                                        tracing::info!(
+                                            "Starting multifactor ceremony with {} devices, threshold {}",
+                                            device_ids.len(),
+                                            threshold_k
+                                        );
+
+                                        let ids = device_ids.clone();
+                                        let n = device_ids.len() as u16;
+                                        let k_raw = threshold_k as u16;
+
+                                        let threshold = match FrostThreshold::new(k_raw) {
+                                            Ok(t) => t,
+                                            Err(e) => {
+                                                tracing::error!("Invalid threshold for multifactor ceremony: {}", e);
+                                                if let Some(tx) = update_tx_for_ceremony.clone() {
+                                                    let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                                        "mfa-ceremony-failed",
+                                                        format!("Invalid threshold: {}", e),
+                                                    )));
+                                                }
+                                                continue;
+                                            }
+                                        };
+
+                                        let app_core = app_core_for_ceremony.clone();
+                                        let update_tx = update_tx_for_ceremony.clone();
+
+                                        tokio::spawn(async move {
+                                            let app = app_core.raw();
+
+                                            match start_device_threshold_ceremony(
+                                                app,
+                                                threshold,
+                                                n,
+                                                ids.clone(),
+                                            )
+                                            .await
+                                            {
+                                                Ok(ceremony_id) => {
+                                                    let k = threshold.value();
+                                                    tracing::info!(
+                                                        "Multifactor ceremony initiated: {} ({}-of-{})",
+                                                        ceremony_id,
+                                                        k,
+                                                        n
+                                                    );
+
+                                                    if let Some(tx) = update_tx.clone() {
+                                                        let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                                                            "mfa-ceremony-started",
+                                                            format!(
+                                                                "Multifactor ceremony started ({}-of-{})",
+                                                                k, n
+                                                            ),
+                                                        )));
+                                                    }
+
+                                                    if let Some(tx) = update_tx.clone() {
+                                                        let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
+                                                            ceremony_id: ceremony_id.clone(),
+                                                            kind: aura_app::runtime_bridge::CeremonyKind::DeviceRotation,
+                                                            accepted_count: 0,
+                                                            total_count: n,
+                                                            threshold: k,
+                                                            is_complete: false,
+                                                            has_failed: false,
+                                                            accepted_participants: Vec::new(),
+                                                            error_message: None,
+                                                            pending_epoch: None,
+                                                        });
+                                                    }
+
+                                                    let app_core_monitor = app.clone();
+                                                    let update_tx_monitor = update_tx.clone();
+                                                    tokio::spawn(async move {
+                                                        let _ = monitor_key_rotation_ceremony(
+                                                            &app_core_monitor,
+                                                            ceremony_id.clone(),
+                                                            tokio::time::Duration::from_millis(500),
+                                                            |status| {
+                                                                if let Some(tx) = update_tx_monitor.clone() {
+                                                                    let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
+                                                                        ceremony_id: status.ceremony_id.clone(),
+                                                                        kind: status.kind,
+                                                                        accepted_count: status.accepted_count,
+                                                                        total_count: status.total_count,
+                                                                        threshold: status.threshold,
+                                                                        is_complete: status.is_complete,
+                                                                        has_failed: status.has_failed,
+                                                                        accepted_participants: status.accepted_participants.clone(),
+                                                                        error_message: status.error_message.clone(),
+                                                                        pending_epoch: status.pending_epoch,
+                                                                    });
+                                                                }
+                                                            },
+                                                            tokio::time::sleep,
+                                                        )
+                                                        .await;
+                                                    });
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!(
+                                                        "Failed to initiate multifactor ceremony: {}",
+                                                        e
+                                                    );
+
+                                                    if let Some(tx) = update_tx {
+                                                        let _ = tx.send(UiUpdate::operation_failed(
+                                                            "Multifactor ceremony",
                                                             e.to_string(),
                                                         ));
                                                     }
@@ -1981,18 +2208,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 overflow: Overflow::Hidden,
             ) {
                 #(match current_screen {
-                    Screen::Block => vec![element! {
-                        View(width: 100pct, height: 100pct) {
-                            BlockScreen(
-                                view: block_props.clone(),
-                                on_send: on_block_send.clone(),
-                                on_invite: on_block_invite.clone(),
-                                on_go_neighborhood: on_block_navigate_neighborhood.clone(),
-                                on_grant_steward: on_grant_steward.clone(),
-                                on_revoke_steward: on_revoke_steward.clone(),
-                            )
-                        }
-                    }],
                     Screen::Chat => vec![element! {
                         View(width: 100pct, height: 100pct) {
                             ChatScreen(
@@ -2018,11 +2233,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }],
                     Screen::Neighborhood => vec![element! {
                         View(width: 100pct, height: 100pct) {
-                            NeighborhoodScreen(
+                            NeighborhoodScreenV2(
                                 view: neighborhood_props.clone(),
-                                on_enter_block: on_enter_block.clone(),
-                                on_go_home: on_go_home.clone(),
-                                on_back_to_street: on_back_to_street.clone(),
                             )
                         }
                     }],
@@ -2038,13 +2250,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             )
                         }
                     }],
-                    Screen::Recovery => vec![element! {
+                    Screen::Notifications => vec![element! {
                         View(width: 100pct, height: 100pct) {
-                            RecoveryScreen(
-                                view: recovery_props.clone(),
-                                on_start_recovery: on_start_recovery.clone(),
-                                on_add_guardian: on_add_guardian.clone(),
-                                on_submit_approval: on_submit_approval.clone(),
+                            NotificationsScreen(
+                                view: notifications_props.clone(),
                             )
                         }
                     }],
@@ -2090,6 +2299,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             #(render_add_device_modal(&settings_props))
             #(render_device_enrollment_modal(&settings_props))
             #(render_remove_device_modal(&settings_props))
+            #(render_mfa_setup_modal(&settings_props))
 
             // === BLOCK SCREEN MODALS ===
             // Rendered via modal_overlays module for maintainability
@@ -2144,12 +2354,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // ========================================================================
     // Screens subscribe to their respective signals and update reactively:
     // - ChatScreen subscribes to CHAT_SIGNAL
-    // - RecoveryScreen subscribes to RECOVERY_SIGNAL
-    // - InvitationsScreen subscribes to INVITATIONS_SIGNAL
+    // - NotificationsScreen subscribes to INVITATIONS_SIGNAL + RECOVERY_SIGNAL
     // - ContactsScreen subscribes to CONTACTS_SIGNAL + DISCOVERED_PEERS_SIGNAL
-    // - BlockScreen subscribes to BLOCK_SIGNAL
-    // - NeighborhoodScreen subscribes to NEIGHBORHOOD_SIGNAL
-    // - SettingsScreen subscribes to SETTINGS_SIGNAL
+    // - NeighborhoodScreenV2 subscribes to NEIGHBORHOOD_SIGNAL + BLOCK_SIGNAL + CHAT_SIGNAL + CONTACTS_SIGNAL
+    // - SettingsScreen subscribes to SETTINGS_SIGNAL (+ RECOVERY_SIGNAL for recovery data)
     //
     // Props passed below are ONLY used as empty/default initial values.
     // Screens ignore these and use signal data immediately on mount.
@@ -2157,7 +2365,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let channels = Vec::new();
     let messages = Vec::new();
     let guardians = Vec::new();
-    let recovery_status = RecoveryStatus::default();
     let invitations = Vec::new();
     let contacts = Vec::new();
     let residents = Vec::new();
@@ -2207,11 +2414,9 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Chat screen data
                         channels: channels,
                         messages: messages,
-                        // Recovery screen data
+                        // Invitations data
                         invitations: invitations,
                         guardians: guardians,
-                        pending_requests: Vec::new(), // Populated reactively in RecoveryScreen
-                        recovery_status: recovery_status,
                         // Settings screen data
                         devices: devices,
                         display_name: display_name,
@@ -2258,11 +2463,9 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Chat screen data
                         channels: channels,
                         messages: messages,
-                        // Recovery screen data
+                        // Invitations data
                         invitations: invitations,
                         guardians: guardians,
-                        pending_requests: Vec::new(), // Populated reactively in RecoveryScreen
-                        recovery_status: recovery_status,
                         // Settings screen data
                         devices: devices,
                         display_name: display_name,

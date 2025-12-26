@@ -24,13 +24,13 @@
 //! ## Running Tests
 //!
 //! ```bash
-//! cargo test -p aura-protocol --test consensus_differential_tests
-//! PROPTEST_CASES=1000 cargo test -p aura-protocol --test consensus_differential_tests
+//! cargo test -p aura-consensus --test consensus_differential_tests
+//! PROPTEST_CASES=1000 cargo test -p aura-consensus --test consensus_differential_tests
 //! ```
 
 mod common;
 
-use aura_protocol::consensus::core::{
+use aura_consensus::core::{
     state::{ShareData, ShareProposal},
     validation::{is_equivocator, shares_consistent},
 };
@@ -591,7 +591,7 @@ fn test_equivocator_different_result_is_equivocator() {
 
 #[test]
 fn test_merge_preserves_commit_fact() {
-    use aura_protocol::consensus::core::state::PureCommitFact;
+    use aura_consensus::core::state::PureCommitFact;
 
     let e1 = Evidence {
         consensus_id: "cns1".to_string(),

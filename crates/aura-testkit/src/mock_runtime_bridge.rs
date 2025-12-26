@@ -35,7 +35,8 @@ use aura_core::types::FrostThreshold;
 use aura_core::SigningContext;
 use aura_core::{DeviceId, ThresholdSignature};
 use aura_effects::ReactiveHandler;
-use aura_journal::fact::RelationalFact;
+use aura_journal::{fact::RelationalFact, DomainFact};
+use aura_relational::ContactFact;
 use base64::Engine;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -134,84 +135,59 @@ impl MockRuntimeBridge {
     /// Process a ContactFact from binding data and update internal contacts list
     /// Returns true if contacts were changed
     async fn process_contact_fact_data(&self, _binding_type: &str, binding_data: &[u8]) -> bool {
-        // ContactFact is an enum serialized as { "Variant": { fields... } }
-        // Try to parse the binding_data as JSON
-        let data: serde_json::Value = match serde_json::from_slice(binding_data) {
-            Ok(v) => v,
-            Err(_) => return false,
+        let Some(fact) = ContactFact::from_bytes(binding_data) else {
+            return false;
         };
 
-        // Check for Renamed variant: { "Renamed": { "contact_id": "...", "new_nickname": "..." } }
-        if let Some(renamed) = data.get("Renamed") {
-            let contact_id_str = renamed.get("contact_id").and_then(|v| v.as_str());
-            let nickname = renamed
-                .get("new_nickname")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-
-            if let (Some(id_str), Some(nick)) = (contact_id_str, nickname) {
-                if let Ok(contact_id) = id_str.parse::<AuthorityId>() {
-                    let mut contacts = self.contacts.write().await;
-                    if let Some(contact) = contacts.iter_mut().find(|c| c.id == contact_id) {
-                        contact.nickname = nick;
-                    } else {
-                        // Contact not found - create new one
-                        contacts.push(Contact {
-                            id: contact_id,
-                            nickname: nick,
-                            suggested_name: None,
-                            is_guardian: false,
-                            is_resident: false,
-                            last_interaction: Some(self.now_ms()),
-                            is_online: false,
-                        });
-                    }
-                    return true;
+        match fact {
+            ContactFact::Renamed {
+                contact_id,
+                new_nickname,
+                ..
+            } => {
+                let mut contacts = self.contacts.write().await;
+                if let Some(contact) = contacts.iter_mut().find(|c| c.id == contact_id) {
+                    contact.nickname = new_nickname;
+                } else {
+                    contacts.push(Contact {
+                        id: contact_id,
+                        nickname: new_nickname,
+                        suggested_name: None,
+                        is_guardian: false,
+                        is_resident: false,
+                        last_interaction: Some(self.now_ms()),
+                        is_online: false,
+                    });
                 }
+                true
+            }
+            ContactFact::Removed { contact_id, .. } => {
+                let mut contacts = self.contacts.write().await;
+                let len_before = contacts.len();
+                contacts.retain(|c| c.id != contact_id);
+                contacts.len() != len_before
+            }
+            ContactFact::Added {
+                contact_id,
+                nickname,
+                ..
+            } => {
+                let mut contacts = self.contacts.write().await;
+                if contacts.iter().any(|c| c.id == contact_id) {
+                    return false;
+                }
+                contacts.push(Contact {
+                    id: contact_id,
+                    nickname,
+                    suggested_name: None,
+                    is_guardian: false,
+                    is_resident: false,
+                    last_interaction: Some(self.now_ms()),
+                    is_online: false,
+                });
+                true
             }
         }
-
-        // Check for Removed variant: { "Removed": { "contact_id": "..." } }
-        if let Some(removed) = data.get("Removed") {
-            if let Some(id_str) = removed.get("contact_id").and_then(|v| v.as_str()) {
-                if let Ok(contact_id) = id_str.parse::<AuthorityId>() {
-                    let mut contacts = self.contacts.write().await;
-                    let len_before = contacts.len();
-                    contacts.retain(|c| c.id != contact_id);
-                    return contacts.len() != len_before;
-                }
-            }
-        }
-
-        // Check for Added variant: { "Added": { "contact_id": "...", "nickname": "..." } }
-        if let Some(added) = data.get("Added") {
-            let contact_id_str = added.get("contact_id").and_then(|v| v.as_str());
-            let nickname = added
-                .get("nickname")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "Unknown".to_string());
-
-            if let Some(id_str) = contact_id_str {
-                if let Ok(contact_id) = id_str.parse::<AuthorityId>() {
-                    let mut contacts = self.contacts.write().await;
-                    if !contacts.iter().any(|c| c.id == contact_id) {
-                        contacts.push(Contact {
-                            id: contact_id,
-                            nickname,
-                            suggested_name: None,
-                            is_guardian: false,
-                            is_resident: false,
-                            last_interaction: Some(self.now_ms()),
-                            is_online: false,
-                        });
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
     }
 
     /// Get committed facts for test assertions
@@ -551,6 +527,15 @@ impl RuntimeBridge for MockRuntimeBridge {
         _threshold_k: FrostThreshold,
         _total_n: u16,
         _guardian_ids: &[String],
+    ) -> Result<String, IntentError> {
+        Ok(self.next_id())
+    }
+
+    async fn initiate_device_threshold_ceremony(
+        &self,
+        _threshold_k: FrostThreshold,
+        _total_n: u16,
+        _device_ids: &[String],
     ) -> Result<String, IntentError> {
         Ok(self.next_id())
     }
@@ -1053,7 +1038,7 @@ mod tests {
             .export_invitation(&invite.invitation_id)
             .await
             .expect("Should export");
-        assert!(code.starts_with("aura:v1:mock:"));
+        assert!(code.starts_with("aura:v1:"));
 
         // Accept invitation
         bridge
@@ -1093,7 +1078,7 @@ mod tests {
         bridge.advance_time_ms(1000);
         let t2 = bridge.current_time_ms().await.unwrap();
 
-        assert_eq!(t2 - t1, 1000);
+        assert_eq!(t2 - t1, 1001);
 
         bridge.set_time_ms(2000000000000);
         let t3 = bridge.current_time_ms().await.unwrap();

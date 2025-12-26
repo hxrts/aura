@@ -5,7 +5,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::{Icons, Theme};
+use crate::tui::theme::Theme;
 
 /// Props for SimpleSelectableItem (text-only variant)
 #[derive(Default, Props)]
@@ -55,13 +55,12 @@ pub fn SimpleSelectableItem(props: &SimpleSelectableItemProps) -> impl Into<AnyE
         View(
             flex_direction: FlexDirection::Row,
             background_color: bg,
-            padding_left: 1,
             padding_right: 1,
         ) {
-            // Selection indicator: colored circle when selected, space otherwise
+            // Selection indicator: small triangle when selected, space otherwise
             #(if props.selected {
                 Some(element! {
-                    Text(content: format!("{} ", Icons::ONLINE), color: Theme::PRIMARY)
+                    Text(content: "➤ ", color: Theme::PRIMARY)
                 })
             } else {
                 Some(element! {

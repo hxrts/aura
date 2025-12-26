@@ -19,7 +19,7 @@ use aura_core::{
     time::{PhysicalTime, TimeStamp},
     AuraResult,
 };
-use aura_protocol::guards::pure::{Guard, GuardChain, GuardRequest};
+use aura_guards::pure::{Guard, GuardChain, GuardRequest};
 // Note: Examples can use tokio::main for simplicity (arch-check accepts this for examples/)
 use std::collections::HashMap;
 

@@ -14,6 +14,7 @@ use aura_agent::{SyncManagerConfig, SyncServiceManager};
 use aura_core::identifiers::DeviceId;
 use aura_effects::time::PhysicalTimeHandler;
 use aura_sync::services::HealthStatus;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 
@@ -90,9 +91,9 @@ async fn handle_daemon_mode(
     let manager = SyncServiceManager::new(config);
 
     // Start the sync service
-    let time_handler = PhysicalTimeHandler::new();
+    let time_handler = Arc::new(PhysicalTimeHandler::new());
     manager
-        .start(&time_handler)
+        .start(time_handler.clone())
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {}", e)))?;
 
@@ -188,9 +189,9 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Terminal
     let manager = SyncServiceManager::new(config);
 
     // Start the sync service
-    let time_handler = PhysicalTimeHandler::new();
+    let time_handler = Arc::new(PhysicalTimeHandler::new());
     manager
-        .start(&time_handler)
+        .start(time_handler.clone())
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {}", e)))?;
 

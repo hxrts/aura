@@ -164,7 +164,7 @@ fn test_guardian_setup_receives_reactive_contacts() {
     let mut harness = DispatchTestHarness::new();
 
     // Navigate to Contacts screen
-    harness.send_char('4');
+    harness.send_char('3');
     assert_eq!(harness.state.screen(), Screen::Contacts);
 
     // Simulate adding contacts via reactive signals
@@ -206,7 +206,7 @@ fn test_guardian_setup_receives_reactive_contacts() {
 fn test_guardian_setup_empty_when_no_contacts() {
     let mut harness = DispatchTestHarness::new();
 
-    harness.send_char('4'); // Contacts screen
+    harness.send_char('3'); // Contacts screen
 
     // Don't add any contacts - shared_contacts remains empty
 
@@ -232,7 +232,7 @@ fn test_contacts_added_after_render_are_visible() {
     let mut harness = DispatchTestHarness::new();
 
     // Navigate to Contacts screen (simulates initial render)
-    harness.send_char('4');
+    harness.send_char('3');
 
     // At this point, in the old buggy code:
     // - props.contacts was empty
@@ -269,7 +269,7 @@ fn test_g_key_produces_open_guardian_setup_command() {
     let mut state = TuiState::new();
 
     // Navigate to Contacts
-    let (new_state, _) = transition(&state, events::char('4'));
+    let (new_state, _) = transition(&state, events::char('3'));
     state = new_state;
 
     assert_eq!(state.screen(), Screen::Contacts);
@@ -343,7 +343,7 @@ fn test_dispatch_uses_current_contacts_not_captured() {
     let mut harness = DispatchTestHarness::new();
 
     // Render the harness (in the old code, this would capture empty contacts)
-    harness.send_char('4');
+    harness.send_char('3');
 
     // Old bug: contacts_for_dispatch was captured here as empty
 
@@ -396,7 +396,7 @@ proptest! {
     ) {
         let mut harness = DispatchTestHarness::new();
 
-        harness.send_char('4'); // Contacts screen
+        harness.send_char('3'); // Contacts screen
         harness.add_contacts(contacts.clone());
         harness.send_char('g'); // Open guardian setup
 

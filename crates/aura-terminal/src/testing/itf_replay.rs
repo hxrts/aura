@@ -60,7 +60,7 @@ pub struct ITFStateMeta {
 pub struct TuiITFState {
     pub current_screen: Screen,
     pub current_modal: ModalType,
-    pub block_insert_mode: bool,
+    pub neighborhood_insert_mode: bool,
     pub chat_insert_mode: bool,
     pub should_exit: bool,
     pub terminal_width: u16,
@@ -187,7 +187,7 @@ impl ITFTraceReplayer {
         let current_modal =
             Self::parse_modal(vars.get("currentModal").ok_or("Missing currentModal")?)?;
 
-        let block_insert_mode = vars
+        let neighborhood_insert_mode = vars
             .get("blockInsertMode")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
@@ -216,7 +216,7 @@ impl ITFTraceReplayer {
         Ok(TuiITFState {
             current_screen,
             current_modal,
-            block_insert_mode,
+            neighborhood_insert_mode,
             chat_insert_mode,
             should_exit,
             terminal_width,
@@ -233,13 +233,14 @@ impl ITFTraceReplayer {
             .ok_or("Screen missing tag")?;
 
         match tag {
-            "Block" => Ok(Screen::Block),
+            "Block" => Ok(Screen::Neighborhood),
             "Chat" => Ok(Screen::Chat),
             "Contacts" => Ok(Screen::Contacts),
             "Invitations" => Ok(Screen::Contacts),
             "Neighborhood" => Ok(Screen::Neighborhood),
+            "Notifications" => Ok(Screen::Notifications),
             "Settings" => Ok(Screen::Settings),
-            "Recovery" => Ok(Screen::Recovery),
+            "Recovery" => Ok(Screen::Notifications),
             // "Invitations" was removed - functionality moved to Contacts screen
             _ => Err(format!("Unknown screen: {}", tag)),
         }
@@ -317,9 +318,9 @@ impl ITFTraceReplayer {
 
     /// Validate state invariants (mirrors Quint spec)
     fn validate_state_invariants(state: &TuiITFState) -> bool {
-        // Insert mode only valid on Block or Chat screens
-        let insert_mode_valid = (!state.block_insert_mode && !state.chat_insert_mode)
-            || (state.current_screen == Screen::Block && state.block_insert_mode)
+        // Insert mode only valid on Neighborhood or Chat screens
+        let insert_mode_valid = (!state.neighborhood_insert_mode && !state.chat_insert_mode)
+            || (state.current_screen == Screen::Neighborhood && state.neighborhood_insert_mode)
             || (state.current_screen == Screen::Chat && state.chat_insert_mode);
 
         // Terminal size is reasonable
@@ -335,7 +336,7 @@ impl ITFTraceReplayer {
         TuiITFState {
             current_screen: state.screen(),
             current_modal: state.current_modal_type(),
-            block_insert_mode: state.block.insert_mode,
+            neighborhood_insert_mode: state.neighborhood.insert_mode,
             chat_insert_mode: state.chat.insert_mode,
             should_exit: state.should_exit,
             terminal_width: state.terminal_size.0,
@@ -369,7 +370,7 @@ impl ITFTraceReplayer {
         candidates.push(events::char('?'));
         candidates.push(events::char('i'));
 
-        for c in ['1', '2', '3', '4', '5', '6'] {
+        for c in ['1', '2', '3', '4', '5'] {
             candidates.push(events::char(c));
         }
 
@@ -439,8 +440,8 @@ impl ITFTraceReplayer {
         TuiState {
             router: Router::new(itf.current_screen),
             modal_queue,
-            block: crate::tui::state_machine::BlockViewState {
-                insert_mode: itf.block_insert_mode,
+            neighborhood: crate::tui::state_machine::NeighborhoodViewState {
+                insert_mode: itf.neighborhood_insert_mode,
                 ..Default::default()
             },
             chat: crate::tui::state_machine::ChatViewState {
@@ -469,7 +470,7 @@ mod tests {
         let value = serde_json::json!({"tag": "Block", "value": {"#tup": []}});
         assert_eq!(
             ITFTraceReplayer::parse_screen(&value).unwrap(),
-            Screen::Block
+            Screen::Neighborhood
         );
 
         let value = serde_json::json!({"tag": "Chat", "value": {"#tup": []}});
@@ -507,9 +508,9 @@ mod tests {
     fn test_validate_invariants() {
         // Valid state
         let state = TuiITFState {
-            current_screen: Screen::Block,
+            current_screen: Screen::Neighborhood,
             current_modal: ModalType::None,
-            block_insert_mode: true,
+            neighborhood_insert_mode: true,
             chat_insert_mode: false,
             should_exit: false,
             terminal_width: 80,
@@ -522,7 +523,7 @@ mod tests {
         let state = TuiITFState {
             current_screen: Screen::Contacts,
             current_modal: ModalType::None,
-            block_insert_mode: true, // Invalid: not on Block screen
+            neighborhood_insert_mode: true, // Invalid: not on Neighborhood screen
             chat_insert_mode: false,
             should_exit: false,
             terminal_width: 80,

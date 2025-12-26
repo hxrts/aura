@@ -28,7 +28,7 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
 use crate::tui::theme::Theme;
-use crate::tui::types::{Device, MfaPolicy, SettingsSection};
+use crate::tui::types::{Device, MfaPolicy, PendingRequest, RecoveryStatus, SettingsSection};
 
 // =============================================================================
 // Callback Types (specialized, kept local)
@@ -96,6 +96,8 @@ pub fn SettingsScreen(
     let reactive_devices = hooks.use_state(Vec::new);
     let reactive_threshold = hooks.use_state(|| (0u8, 0u8));
     let reactive_guardian_count = hooks.use_state(|| 0usize);
+    let reactive_recovery_status = hooks.use_state(RecoveryStatus::default);
+    let reactive_pending_requests = hooks.use_state(Vec::new);
 
     // Subscribe to settings signal for domain data
     hooks.use_future({
@@ -127,10 +129,20 @@ pub fn SettingsScreen(
     // Subscribe to recovery signal for guardian count
     hooks.use_future({
         let mut reactive_guardian_count = reactive_guardian_count.clone();
+        let mut reactive_recovery_status = reactive_recovery_status.clone();
+        let mut reactive_pending_requests = reactive_pending_requests.clone();
         let app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |recovery_state| {
                 reactive_guardian_count.set(recovery_state.guardians.len());
+                reactive_recovery_status.set(RecoveryStatus::from(&recovery_state));
+
+                let pending: Vec<PendingRequest> = recovery_state
+                    .pending_requests
+                    .iter()
+                    .map(PendingRequest::from)
+                    .collect();
+                reactive_pending_requests.set(pending);
             })
             .await;
         }
@@ -141,10 +153,11 @@ pub fn SettingsScreen(
     let devices = reactive_devices.read().clone();
     let (threshold_k, threshold_n) = *reactive_threshold.read();
     let guardian_count = *reactive_guardian_count.read();
+    let recovery_status = reactive_recovery_status.read().clone();
+    let pending_requests = reactive_pending_requests.read().clone();
 
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_section = props.view.section;
-    let is_list_focused = true; // Default to list focused (no panel_focus in SettingsViewProps)
     let current_device_index = props.view.selected_index;
     let current_mfa = props.view.mfa_policy;
 
@@ -258,39 +271,82 @@ pub fn SettingsScreen(
                 lines
             }
         }
+        SettingsSection::Recovery => {
+            let mut lines = Vec::new();
+            lines.push((
+                format!("Recovery Status: {}", recovery_status.state.label()),
+                Theme::SECONDARY,
+            ));
+            lines.push((String::new(), Theme::TEXT));
+            lines.push((
+                format!("Pending Requests: {}", pending_requests.len()),
+                Theme::TEXT,
+            ));
+
+            if pending_requests.is_empty() {
+                lines.push((
+                    "No pending recovery requests.".into(),
+                    Theme::TEXT_MUTED,
+                ));
+            } else {
+                for req in pending_requests.iter().take(3) {
+                    let account = if req.account_name.is_empty() {
+                        "Unknown account".to_string()
+                    } else {
+                        let name = req.account_name.clone();
+                        if name.len() > 16 {
+                            format!("{}…", &name[..8])
+                        } else {
+                            name
+                        }
+                    };
+                    lines.push((
+                        format!(
+                            "- {account} ({}/{})",
+                            req.approvals_received, req.approvals_required
+                        ),
+                        Theme::TEXT,
+                    ));
+                }
+                if pending_requests.len() > 3 {
+                    lines.push((
+                        format!("...and {} more", pending_requests.len() - 3),
+                        Theme::TEXT_MUTED,
+                    ));
+                }
+            }
+
+            lines.push((String::new(), Theme::TEXT));
+            lines.push((
+                "[s] Start recovery".into(),
+                Theme::SECONDARY,
+            ));
+            lines.push((
+                "[a] Approve next request".into(),
+                Theme::TEXT_MUTED,
+            ));
+
+            lines
+        }
         SettingsSection::Mfa => {
             vec![
+                ("Multifactor Authority".into(), Theme::SECONDARY),
+                (String::new(), Theme::TEXT),
                 (
-                    format!("Current Policy: {}", current_mfa.name()),
-                    Theme::SECONDARY,
+                    "Create a threshold signer set across your devices".into(),
+                    Theme::TEXT_MUTED,
+                ),
+                (
+                    "to approve sensitive operations.".into(),
+                    Theme::TEXT_MUTED,
                 ),
                 (String::new(), Theme::TEXT),
+                (format!("Policy: {}", current_mfa.name()), Theme::TEXT_MUTED),
                 (current_mfa.description().into(), Theme::TEXT_MUTED),
                 (String::new(), Theme::TEXT),
-                (
-                    "Multifactor authentication adds an extra".into(),
-                    Theme::TEXT_MUTED,
-                ),
-                (
-                    "layer of security to your account.".into(),
-                    Theme::TEXT_MUTED,
-                ),
-                (String::new(), Theme::TEXT),
-                ("[Space] Cycle policy".into(), Theme::TEXT),
+                ("[Enter] Configure multifactor".into(), Theme::SECONDARY),
             ]
         }
-    };
-
-    // Border colors
-    let list_border = if is_list_focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
-    let detail_border = if !is_list_focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
     };
 
     // Layout: Full 25 rows for content (no input bar on this screen)
@@ -302,14 +358,17 @@ pub fn SettingsScreen(
                 View(
                     flex_direction: FlexDirection::Column,
                     border_style: BorderStyle::Round,
-                    border_color: list_border,
-                    padding: 1,
+                    border_color: Theme::BORDER,
+                    padding_left: 1,
+                    padding_right: 1,
+                    padding_bottom: 1,
                     width: dim::TWO_PANEL_LEFT_WIDTH,
                 ) {
                     Text(content: "Settings", weight: Weight::Bold, color: Theme::PRIMARY)
                     View(flex_direction: FlexDirection::Column, margin_top: 1) {
                         SimpleSelectableItem(label: "Profile".to_string(), selected: current_section == SettingsSection::Profile)
                         SimpleSelectableItem(label: "Guardian Threshold".to_string(), selected: current_section == SettingsSection::Threshold)
+                        SimpleSelectableItem(label: "Recovery Requests".to_string(), selected: current_section == SettingsSection::Recovery)
                         SimpleSelectableItem(label: "Devices".to_string(), selected: current_section == SettingsSection::Devices)
                         SimpleSelectableItem(label: "Multifactor Auth".to_string(), selected: current_section == SettingsSection::Mfa)
                     }
@@ -319,8 +378,10 @@ pub fn SettingsScreen(
                 View(
                     flex_direction: FlexDirection::Column,
                     border_style: BorderStyle::Round,
-                    border_color: detail_border,
-                    padding: 1,
+                    border_color: Theme::BORDER,
+                    padding_left: 1,
+                    padding_right: 1,
+                    padding_bottom: 1,
                     width: dim::TWO_PANEL_RIGHT_WIDTH,
                     overflow: Overflow::Hidden,
                 ) {

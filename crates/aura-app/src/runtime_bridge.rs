@@ -91,6 +91,8 @@ pub struct RuntimeStatus {
 pub enum CeremonyKind {
     /// Guardian threshold key rotation ceremony for an account authority.
     GuardianRotation,
+    /// Device threshold key rotation ceremony (multifactor authority).
+    DeviceRotation,
     /// Device enrollment ceremony (account authority membership change + rotation).
     DeviceEnrollment,
     /// Device removal ceremony (account authority membership change + rotation).
@@ -565,6 +567,25 @@ pub trait RuntimeBridge: Send + Sync {
         threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
+    ) -> Result<String, IntentError>;
+
+    /// Initiate a device threshold (multifactor) ceremony.
+    ///
+    /// Rotates the threshold signing keys for the selected device set and
+    /// distributes key packages to the participating devices.
+    ///
+    /// # Arguments
+    /// * `threshold_k` - Minimum signers required (k), must be >= 2 for FROST
+    /// * `total_n` - Total number of devices (n)
+    /// * `device_ids` - IDs of devices participating in the threshold set
+    ///
+    /// # Returns
+    /// A ceremony ID for tracking progress
+    async fn initiate_device_threshold_ceremony(
+        &self,
+        threshold_k: FrostThreshold,
+        total_n: u16,
+        device_ids: &[String],
     ) -> Result<String, IntentError>;
 
     /// Initiate a device enrollment ("add device") ceremony.
@@ -1044,6 +1065,17 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<String, IntentError> {
         Err(IntentError::no_agent(
             "Guardian ceremony not available in offline mode",
+        ))
+    }
+
+    async fn initiate_device_threshold_ceremony(
+        &self,
+        _threshold_k: FrostThreshold,
+        _total_n: u16,
+        _device_ids: &[String],
+    ) -> Result<String, IntentError> {
+        Err(IntentError::no_agent(
+            "Device threshold ceremony not available in offline mode",
         ))
     }
 

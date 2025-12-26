@@ -1268,16 +1268,16 @@ Production-grade stateless effect handlers that delegate to OS services for cryp
 Effect handler composition, registry, and builder infrastructure for assembling handlers into cohesive effect systems. Includes reactive infrastructure (`Dynamic<T>`) for composing view updates over effect changes.
 
 ### aura-protocol
-Multi-party coordination and distributed protocol orchestration (umbrella crate) re-exporting Layer 4 subcrates and shared orchestration types.
+Multi-party coordination and distributed protocol orchestration (umbrella crate) with shared orchestration types. Consensus and guard-chain crates are consumed directly (`aura-consensus`, `aura-guards`).
 
 ### aura-guards
-Guard chain enforcement (authorization, flow budgets, journal coupling, leakage tracking).
+Guard chain enforcement (authorization, flow budgets, journal coupling, leakage tracking). Tests live in `crates/aura-guards/tests/` with examples in `crates/aura-guards/examples/`.
 
 ### aura-consensus
-Consensus protocol implementation (fast path + fallback) and relational adapters.
+Consensus protocol implementation (fast path + fallback) and relational adapters. Tests live in `crates/aura-consensus/tests/`.
 
 ### aura-amp
-Authenticated messaging protocol (AMP), including consensus-backed epoch bumps.
+Authenticated messaging protocol (AMP), including consensus-backed epoch bumps. Tests live in `crates/aura-amp/tests/`.
 
 ### aura-anti-entropy
 Anti-entropy sync and reconciliation (digest exchange, guarded sync operations).

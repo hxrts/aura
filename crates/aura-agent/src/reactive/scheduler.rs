@@ -1278,7 +1278,7 @@ mod tests {
     fn test_recovery_reduction() {
         use aura_core::identifiers::AuthorityId;
         use aura_journal::DomainFact;
-        use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
+        use aura_recovery::RecoveryFact;
 
         let reduction = RecoveryReduction;
 
@@ -1311,30 +1311,9 @@ mod tests {
         );
 
         let facts = vec![
-            make_test_fact(
-                1,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: RECOVERY_FACT_TYPE_ID.to_string(),
-                    binding_data: setup_initiated.to_bytes(),
-                }),
-            ),
-            make_test_fact(
-                2,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: RECOVERY_FACT_TYPE_ID.to_string(),
-                    binding_data: guardian_accepted.to_bytes(),
-                }),
-            ),
-            make_test_fact(
-                3,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: RECOVERY_FACT_TYPE_ID.to_string(),
-                    binding_data: setup_completed.to_bytes(),
-                }),
-            ),
+            make_test_fact(1, FactContent::Relational(setup_initiated.to_generic())),
+            make_test_fact(2, FactContent::Relational(guardian_accepted.to_generic())),
+            make_test_fact(3, FactContent::Relational(setup_completed.to_generic())),
         ];
 
         let deltas = reduction.reduce(&facts, None);

@@ -445,7 +445,7 @@ pub fn convert_send_guard_to_request(
 /// # Example
 ///
 /// ```rust,ignore
-/// use aura_protocol::guards::executor::{execute_effect_commands, BorrowedEffectInterpreter};
+/// use aura_guards::executor::{execute_effect_commands, BorrowedEffectInterpreter};
 /// use aura_core::effects::guard::EffectCommand;
 ///
 /// // Commands from choreography! macro

@@ -67,29 +67,21 @@ impl<'a> RendezvousAdapter<'a> {
         context_id: ContextId,
         now_ms: u64,
     ) -> HashMap<AuthorityId, DiscoveredPeer> {
-        let peers = HashMap::new();
-
-        // Current limitation: This returns an empty map because RendezvousService
-        // caches descriptors by (context, authority) pairs but doesn't yet expose
-        // iteration over all descriptors in a context.
-        //
-        // Full implementation requires RendezvousService to expose either:
-        // - iter_descriptors(context_id) -> impl Iterator<Item = &RendezvousDescriptor>
-        // - Or a separate index of authorities per context
-        //
-        // For now, use get_peer_info() to check specific peers.
-
-        // Exclude self from peer list
         let local_authority = self.service.authority_id();
 
-        // If we have a specific peer we want to check, we can do so:
-        // let descriptor = self.service.get_cached_descriptor(context_id, peer);
-
-        // For demonstration, return empty - full implementation pending
-        // RendezvousService iterator support
-        let _ = (context_id, now_ms, local_authority);
-
-        peers
+        self.service
+            .iter_descriptors_in_context(context_id)
+            .filter(|d| d.is_valid(now_ms) && d.authority_id != local_authority)
+            .map(|d| {
+                let peer = DiscoveredPeer {
+                    authority_id: d.authority_id,
+                    transport_hints: d.transport_hints.clone(),
+                    valid_until: d.valid_until,
+                    context_id: d.context_id,
+                };
+                (d.authority_id, peer)
+            })
+            .collect()
     }
 
     /// Check if a specific peer is reachable in a context
@@ -101,26 +93,21 @@ impl<'a> RendezvousAdapter<'a> {
         peer: AuthorityId,
         now_ms: u64,
     ) -> Option<DiscoveredPeer> {
-        let descriptor = self.service.get_cached_descriptor(context_id, peer)?;
-
-        // Check validity
-        if !descriptor.is_valid(now_ms) {
-            return None;
-        }
-
-        Some(DiscoveredPeer {
-            authority_id: peer,
-            transport_hints: descriptor.transport_hints.clone(),
-            valid_until: descriptor.valid_until,
-            context_id,
-        })
+        self.service
+            .get_cached_descriptor(context_id, peer, now_ms)
+            .map(|d| DiscoveredPeer {
+                authority_id: d.authority_id,
+                transport_hints: d.transport_hints.clone(),
+                valid_until: d.valid_until,
+                context_id: d.context_id,
+            })
     }
 
     /// Get peers that need descriptor refresh
     ///
     /// Returns authorities whose descriptors will expire within the refresh window.
     pub fn peers_needing_refresh(&self, context_id: ContextId, now_ms: u64) -> Vec<AuthorityId> {
-        self.service.descriptors_needing_refresh(context_id, now_ms)
+        self.service.peers_needing_refresh(context_id, now_ms)
     }
 
     /// Check if our own descriptor needs refresh
@@ -131,7 +118,7 @@ impl<'a> RendezvousAdapter<'a> {
         refresh_window_ms: u64,
     ) -> bool {
         self.service
-            .needs_refresh(context_id, now_ms, refresh_window_ms)
+            .needs_own_refresh(context_id, now_ms, refresh_window_ms)
     }
 }
 
@@ -216,6 +203,7 @@ pub type RendezvousEventCallback = Box<dyn Fn(RendezvousEvent) + Send + Sync>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_rendezvous::facts::RendezvousDescriptor;
     use aura_rendezvous::service::RendezvousConfig;
 
     fn test_authority(seed: u8) -> AuthorityId {
@@ -224,6 +212,26 @@ mod tests {
 
     fn test_context(seed: u8) -> ContextId {
         ContextId::new_from_entropy([seed; 32])
+    }
+
+    fn test_descriptor(
+        authority: AuthorityId,
+        context: ContextId,
+        valid_from: u64,
+        valid_until: u64,
+    ) -> RendezvousDescriptor {
+        RendezvousDescriptor {
+            authority_id: authority,
+            context_id: context,
+            transport_hints: vec![TransportHint::TcpDirect {
+                addr: "127.0.0.1:8080".to_string(),
+            }],
+            handshake_psk_commitment: [0u8; 32],
+            valid_from,
+            valid_until,
+            nonce: [0u8; 32],
+            display_name: None,
+        }
     }
 
     #[test]
@@ -285,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_peer_info() {
+    fn test_get_peer_info_with_cached_descriptor() {
         let alice = test_authority(1);
         let bob = test_authority(2);
         let context = test_context(100);
@@ -294,28 +302,17 @@ mod tests {
         let mut service = RendezvousService::new(alice, config);
 
         // Cache Bob's descriptor
-        let descriptor = aura_rendezvous::facts::RendezvousDescriptor {
-            authority_id: bob,
-            context_id: context,
-            transport_hints: vec![TransportHint::QuicDirect {
-                addr: "10.0.0.2:8443".to_string(),
-            }],
-            handshake_psk_commitment: [0u8; 32],
-            valid_from: 0,
-            valid_until: 10_000,
-            nonce: [0u8; 32],
-            display_name: None,
-        };
-        service.cache_descriptor(descriptor);
+        let bob_descriptor = test_descriptor(bob, context, 0, 10_000);
+        service.cache_descriptor(bob_descriptor);
 
         let adapter = RendezvousAdapter::new(&service);
 
-        // Should find Bob
+        // Should find Bob's cached descriptor
         let peer_info = adapter.get_peer_info(context, bob, 5000);
         assert!(peer_info.is_some());
-        let info = peer_info.unwrap();
-        assert_eq!(info.authority_id, bob);
-        assert!(info.has_direct_transport());
+        let peer = peer_info.unwrap();
+        assert_eq!(peer.authority_id, bob);
+        assert_eq!(peer.valid_until, 10_000);
 
         // Should not find unknown peer
         let unknown = test_authority(99);
@@ -323,5 +320,92 @@ mod tests {
 
         // Should not find expired descriptor
         assert!(adapter.get_peer_info(context, bob, 15_000).is_none());
+    }
+
+    #[test]
+    fn test_discover_context_peers() {
+        let alice = test_authority(1);
+        let bob = test_authority(2);
+        let carol = test_authority(3);
+        let context = test_context(100);
+        let other_context = test_context(200);
+
+        let config = RendezvousConfig::default();
+        let mut service = RendezvousService::new(alice, config);
+
+        // Cache descriptors for Bob and Carol in the same context
+        service.cache_descriptor(test_descriptor(bob, context, 0, 10_000));
+        service.cache_descriptor(test_descriptor(carol, context, 0, 10_000));
+        // Cache a descriptor in a different context
+        service.cache_descriptor(test_descriptor(test_authority(4), other_context, 0, 10_000));
+        // Cache Alice's own descriptor (should be excluded)
+        service.cache_descriptor(test_descriptor(alice, context, 0, 10_000));
+
+        let adapter = RendezvousAdapter::new(&service);
+
+        // Discover peers in the context
+        let peers = adapter.discover_context_peers(context, 5000);
+
+        // Should find Bob and Carol, but not Alice (self) or the other context peer
+        assert_eq!(peers.len(), 2);
+        assert!(peers.contains_key(&bob));
+        assert!(peers.contains_key(&carol));
+        assert!(!peers.contains_key(&alice)); // Self excluded
+
+        // Expired descriptors should be filtered
+        let peers_after_expiry = adapter.discover_context_peers(context, 15_000);
+        assert!(peers_after_expiry.is_empty());
+    }
+
+    #[test]
+    fn test_peers_needing_refresh() {
+        let alice = test_authority(1);
+        let bob = test_authority(2);
+        let context = test_context(100);
+
+        let config = RendezvousConfig::default();
+        let mut service = RendezvousService::new(alice, config);
+
+        // Bob's descriptor valid from 0 to 10_000, refresh window starts at 9000 (10% before expiry)
+        service.cache_descriptor(test_descriptor(bob, context, 0, 10_000));
+
+        let adapter = RendezvousAdapter::new(&service);
+
+        // At 5000, Bob doesn't need refresh yet
+        let needing_refresh = adapter.peers_needing_refresh(context, 5000);
+        assert!(needing_refresh.is_empty());
+
+        // At 9500 (within 10% of expiry), Bob needs refresh
+        let needing_refresh = adapter.peers_needing_refresh(context, 9500);
+        assert_eq!(needing_refresh.len(), 1);
+        assert_eq!(needing_refresh[0], bob);
+    }
+
+    #[test]
+    fn test_needs_own_refresh() {
+        let alice = test_authority(1);
+        let context = test_context(100);
+
+        let config = RendezvousConfig::default();
+        let mut service = RendezvousService::new(alice, config);
+
+        let adapter = RendezvousAdapter::new(&service);
+
+        // No cached descriptor - needs refresh
+        assert!(adapter.needs_own_refresh(context, 5000, 1000));
+
+        // Cache Alice's own descriptor
+        service.cache_descriptor(test_descriptor(alice, context, 0, 10_000));
+
+        let adapter = RendezvousAdapter::new(&service);
+
+        // At 5000 with 1000ms window - doesn't need refresh (expiry is 10_000)
+        assert!(!adapter.needs_own_refresh(context, 5000, 1000));
+
+        // At 9500 with 1000ms window - needs refresh (within window)
+        assert!(adapter.needs_own_refresh(context, 9500, 1000));
+
+        // After expiry - needs refresh
+        assert!(adapter.needs_own_refresh(context, 15_000, 1000));
     }
 }
