@@ -1050,6 +1050,7 @@ impl SimulatedBridge {
                 name,
                 topic,
                 members,
+                ..
             } => {
                 if let Some(amp) = &self.amp {
                     let context = ids::context_id("demo:chat-context");

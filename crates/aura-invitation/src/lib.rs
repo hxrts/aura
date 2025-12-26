@@ -15,7 +15,7 @@
 //!
 //! This crate depends on:
 //! - **Layer 1** (aura-core): Core types, effects, errors
-//! - **Layer 2** (aura-journal, aura-wot, aura-verify): Domain semantics
+//! - **Layer 2** (aura-journal, aura-authorization, aura-signature): Domain semantics
 //! - **Layer 3** (aura-effects): Effect handler implementations
 //! - **Layer 4** (aura-protocol): Orchestration and guard chain
 //! - **Layer 4** (aura-mpst): Session type coordination
@@ -34,7 +34,7 @@
 //! - Handler composition or registry (belong in aura-composition)
 //! - Low-level multi-party coordination (belong in aura-protocol)
 //! - Runtime assembly or effect system management
-//! - Domain type definitions (belong in aura-journal/aura-wot/aura-verify)
+//! - Domain type definitions (belong in aura-journal/aura-authorization/aura-signature)
 //!
 //! ## Design Principles
 //!
@@ -200,16 +200,16 @@ pub use aura_core::{
 };
 
 // Re-export WoT types (using Biscuit tokens instead of legacy capabilities)
-pub use aura_wot::{BiscuitError, BiscuitTokenManager, TokenAuthority};
+pub use aura_authorization::{BiscuitError, BiscuitTokenManager, TokenAuthority};
 pub use biscuit_auth::Biscuit as BiscuitToken;
 
 // Deprecated alias for backward compatibility
 #[deprecated(since = "0.2.0", note = "Use TokenAuthority instead")]
 #[allow(deprecated)]
-pub use aura_wot::AccountAuthority;
+pub use aura_authorization::AccountAuthority;
 
 // Re-export auth types
-pub use aura_authenticate::{
+pub use aura_authentication::{
     AuthenticationError, AuthenticationResult, IdentityProof, VerifiedIdentity,
 };
 

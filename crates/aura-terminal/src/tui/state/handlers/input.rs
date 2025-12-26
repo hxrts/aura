@@ -131,6 +131,14 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
                 modal_state.value.push_str(&text);
                 return;
             }
+            QueuedModal::NeighborhoodBlockCreate(modal_state) => {
+                if modal_state.active_field == 0 {
+                    modal_state.name.push_str(&text);
+                } else {
+                    modal_state.description.push_str(&text);
+                }
+                return;
+            }
 
             // These modals don't have direct text input
             QueuedModal::AccountSetup(_)
@@ -144,9 +152,9 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             | QueuedModal::GuardianSetup(_)
             | QueuedModal::MfaSetup(_)
             | QueuedModal::SettingsAddDevice(_)
+            | QueuedModal::SettingsDeviceImport(_)
             | QueuedModal::SettingsDeviceEnrollment(_)
             | QueuedModal::SettingsRemoveDevice(_)
-            | QueuedModal::BlockInvite(_)
             | QueuedModal::ChatMemberSelect(_) => {}
         }
     }

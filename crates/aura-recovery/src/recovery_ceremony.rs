@@ -77,7 +77,7 @@ impl RecoveryCeremonyId {
 
 /// Recovery operation types supported by the ceremony.
 ///
-/// Note: This is distinct from `aura_authenticate::RecoveryOperationType`
+/// Note: This is distinct from `aura_authentication::RecoveryOperationType`
 /// which is used for general recovery context management. This enum is
 /// specifically for ceremony-based recovery operations with guardian approval.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

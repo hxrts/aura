@@ -12,7 +12,7 @@ use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::{
     ChatMemberSelectModalState, ConfirmAction, ContactSelectModalState, QueuedModal,
 };
-use super::super::toast::ToastLevel;
+use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
     AccountSetupModalState, AddDeviceModalState, ConfirmRemoveModalState, CreateChannelModalState,
     CreateInvitationField, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
@@ -56,10 +56,6 @@ pub fn handle_queued_modal_key(
         }
         QueuedModal::ContactSelect(modal_state) => {
             handle_contact_select_key_queue(state, commands, key, modal_state);
-        }
-        // Block screen modals
-        QueuedModal::BlockInvite(modal_state) => {
-            handle_block_invite_key_queue(state, commands, key, modal_state);
         }
         // Chat screen modals
         QueuedModal::ChatCreate(modal_state) => {
@@ -120,6 +116,9 @@ pub fn handle_queued_modal_key(
         QueuedModal::SettingsAddDevice(modal_state) => {
             handle_settings_add_device_key_queue(state, commands, key, modal_state);
         }
+        QueuedModal::SettingsDeviceImport(modal_state) => {
+            handle_device_import_key_queue(state, commands, key, modal_state);
+        }
         QueuedModal::SettingsDeviceEnrollment(modal_state) => {
             handle_device_enrollment_key_queue(state, commands, key, modal_state);
         }
@@ -128,6 +127,57 @@ pub fn handle_queued_modal_key(
         }
         QueuedModal::ChatMemberSelect(modal_state) => {
             handle_chat_member_select_key_queue(state, commands, key, modal_state);
+        }
+        // Neighborhood screen modals
+        QueuedModal::NeighborhoodBlockCreate(modal_state) => {
+            if modal_state.creating {
+                return;
+            }
+
+            match key.code {
+                KeyCode::Esc => {
+                    state.modal_queue.dismiss();
+                }
+                KeyCode::Tab => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::NeighborhoodBlockCreate(ref mut s) = modal {
+                            s.next_field();
+                        }
+                    });
+                }
+                KeyCode::Enter => {
+                    if modal_state.can_submit() {
+                        let name = modal_state.name.clone();
+                        let description = modal_state.get_description().map(|s| s.to_string());
+
+                        state.modal_queue.update_active(|modal| {
+                            if let QueuedModal::NeighborhoodBlockCreate(ref mut s) = modal {
+                                s.start_creating();
+                            }
+                        });
+
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::CreateBlock {
+                            name,
+                            description,
+                        }));
+                    }
+                }
+                KeyCode::Char(c) => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::NeighborhoodBlockCreate(ref mut s) = modal {
+                            s.push_char(c);
+                        }
+                    });
+                }
+                KeyCode::Backspace => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::NeighborhoodBlockCreate(ref mut s) = modal {
+                            s.pop_char();
+                        }
+                    });
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -342,48 +392,6 @@ fn handle_contact_select_key_queue(
     }
 }
 
-/// Handle block invite modal keys (queue-based)
-///
-/// This modal is fully driven by the queued modal state. The contacts list is snapshotted
-/// when the modal is opened.
-fn handle_block_invite_key_queue(
-    state: &mut TuiState,
-    commands: &mut Vec<TuiCommand>,
-    key: KeyEvent,
-    modal_state: ContactSelectModalState,
-) {
-    match key.code {
-        KeyCode::Esc => {
-            state.modal_queue.dismiss();
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::BlockInvite(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
-                }
-            });
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::BlockInvite(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
-                }
-            });
-        }
-        KeyCode::Enter => {
-            if let Some(contact_id) = modal_state.focused_contact_id() {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::InviteToBlock {
-                    contact_id: contact_id.to_string(),
-                }));
-                state.modal_queue.dismiss();
-            }
-        }
-        _ => {}
-    }
-}
-
 /// Handle chat create channel modal keys (queue-based)
 fn handle_chat_create_key_queue(
     state: &mut TuiState,
@@ -391,60 +399,174 @@ fn handle_chat_create_key_queue(
     key: KeyEvent,
     modal_state: CreateChannelModalState,
 ) {
-    match key.code {
-        KeyCode::Esc => {
-            state.modal_queue.dismiss();
-        }
-        KeyCode::Char('m') | KeyCode::Char('M') => {
-            commands.push(TuiCommand::Dispatch(DispatchCommand::OpenChatMemberSelect));
-        }
-        KeyCode::Tab => {
-            // Toggle between name and topic fields
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::ChatCreate(ref mut s) = modal {
-                    s.active_field = (s.active_field + 1) % 2;
-                }
-            });
-        }
-        KeyCode::Enter => {
-            if modal_state.can_submit() {
-                let topic = if modal_state.topic.trim().is_empty() {
-                    None
-                } else {
-                    Some(modal_state.topic.clone())
-                };
+    use crate::tui::state::CreateChannelStep;
+    use aura_core::effects::terminal::KeyCode::*;
 
-                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
-                    name: modal_state.name.clone(),
-                    topic,
-                    members: modal_state.member_ids.clone(),
-                }));
+    match modal_state.step {
+        CreateChannelStep::Details => match key.code {
+            Esc => {
+                state.modal_queue.dismiss();
+            }
+            Tab => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        s.active_field = (s.active_field + 1) % 2;
+                    }
+                });
+            }
+            Enter => {
+                if modal_state.can_submit() {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::ChatCreate(ref mut s) = modal {
+                            s.step = CreateChannelStep::Members;
+                            s.error = None;
+                        }
+                    });
+                }
+            }
+            Char(c) => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        if s.active_field == 0 {
+                            s.name.push(c);
+                        } else {
+                            s.topic.push(c);
+                        }
+                    }
+                });
+            }
+            Backspace => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        if s.active_field == 0 {
+                            s.name.pop();
+                        } else {
+                            s.topic.pop();
+                        }
+                    }
+                });
+            }
+            _ => {}
+        },
+        CreateChannelStep::Members => match key.code {
+            Esc => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        s.step = CreateChannelStep::Details;
+                    }
+                });
+            }
+            Up | Char('k') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        if s.focused_index > 0 {
+                            s.focused_index -= 1;
+                        }
+                    }
+                });
+            }
+            Down | Char('j') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        if s.focused_index + 1 < s.contacts.len() {
+                            s.focused_index += 1;
+                        }
+                    }
+                });
+            }
+            Char(' ') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        s.toggle_selection();
+                    }
+                });
+            }
+            Enter => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        s.ensure_threshold();
+                        s.step = CreateChannelStep::Threshold;
+                    }
+                });
+            }
+            _ => {}
+        },
+        CreateChannelStep::Threshold => match key.code {
+            Esc => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        s.step = CreateChannelStep::Members;
+                    }
+                });
+            }
+            Up | Char('k') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        let total = s.total_participants().max(1);
+                        s.threshold_custom = true;
+                        s.threshold_k = (s.threshold_k + 1).min(total);
+                    }
+                });
+            }
+            Down | Char('j') => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        s.threshold_custom = true;
+                        s.threshold_k = s.threshold_k.saturating_sub(1).max(1);
+                    }
+                });
+            }
+            Enter => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        s.step = CreateChannelStep::Review;
+                    }
+                });
+            }
+            _ => {}
+        },
+        CreateChannelStep::Review => match key.code {
+            Esc => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ChatCreate(ref mut s) = modal {
+                        s.step = CreateChannelStep::Threshold;
+                    }
+                });
+            }
+            Enter => {
+                if modal_state.can_submit() {
+                    let topic = if modal_state.topic.trim().is_empty() {
+                        None
+                    } else {
+                        Some(modal_state.topic.clone())
+                    };
+                    let members = modal_state.selected_member_ids();
+
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
+                        name: modal_state.name.clone(),
+                        topic,
+                        members,
+                        threshold_k: modal_state.threshold_k,
+                    }));
+
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::ChatCreate(ref mut s) = modal {
+                            s.step = CreateChannelStep::Waiting;
+                            s.status = Some(
+                                "Channel created. Invites sent. Waiting for acceptances…"
+                                    .to_string(),
+                            );
+                        }
+                    });
+                }
+            }
+            _ => {}
+        },
+        CreateChannelStep::Waiting => {
+            if key.code == Esc {
                 state.modal_queue.dismiss();
             }
         }
-        KeyCode::Char(c) => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::ChatCreate(ref mut s) = modal {
-                    if s.active_field == 0 {
-                        s.name.push(c);
-                    } else {
-                        s.topic.push(c);
-                    }
-                }
-            });
-        }
-        KeyCode::Backspace => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::ChatCreate(ref mut s) = modal {
-                    if s.active_field == 0 {
-                        s.name.pop();
-                    } else {
-                        s.topic.pop();
-                    }
-                }
-            });
-        }
-        _ => {}
     }
 }
 
@@ -638,6 +760,69 @@ fn handle_import_invitation_key_queue(
                     s.code.pop();
                 }
                 _ => {}
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Handle device enrollment import modal keys (queue-based)
+fn handle_device_import_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: ImportInvitationModalState,
+) {
+    // Demo shortcut: Ctrl+M fills the Mobile device enrollment code.
+    let is_ctrl_m =
+        key.modifiers.ctrl() && matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'));
+
+    if is_ctrl_m {
+        state.toast_queue.dismiss();
+        let code = state.settings.last_device_enrollment_code.clone();
+        if !code.is_empty() {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsDeviceImport(ref mut s) = modal {
+                    s.code = code.clone();
+                }
+            });
+        } else {
+            state.next_toast_id += 1;
+            state.toast_queue.enqueue(QueuedToast::new(
+                state.next_toast_id,
+                "No enrollment code yet. Start Add Device first.",
+                ToastLevel::Warning,
+            ));
+        }
+        return;
+    }
+
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Enter => {
+            if modal_state.can_submit() {
+                commands.push(TuiCommand::Dispatch(
+                    DispatchCommand::ImportDeviceEnrollmentOnMobile {
+                        code: modal_state.code.clone(),
+                    },
+                ));
+                state.modal_queue.dismiss();
+            }
+        }
+        KeyCode::Char(c) => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsDeviceImport(ref mut s) = modal {
+                    s.code.push(c);
+                }
+            });
+        }
+        KeyCode::Backspace => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsDeviceImport(ref mut s) = modal {
+                    s.code.pop();
+                }
             });
         }
         _ => {}

@@ -67,7 +67,7 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 1. **Foundation** (`aura-core`): Effect traits (crypto, network, storage, unified time system, journal, console, random, transport), domain types (`AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`), cryptographic utilities (FROST, merkle trees), semilattice traits, unified errors (`AuraError`), and reliability utilities. Other crates depend on `aura-core`, but it depends on none of them.
 
 2. **Specification** (Domain Crates + `aura-mpst` + `aura-macros`):
-   - Domain crates (`aura-journal`, `aura-wot`, `aura-verify`, `aura-store`, `aura-transport`): CRDT domains, capability systems, transport semantics. `aura-journal` now exposes fact-based journals and reduction pipelines (`docs/102_journal.md`, `docs/111_maintenance.md`).
+   - Domain crates (`aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`): CRDT domains, capability systems, transport semantics. `aura-journal` now exposes fact-based journals and reduction pipelines (`docs/102_journal.md`, `docs/111_maintenance.md`).
    - `aura-mpst`: Session type runtime with guard extensions and leakage tracking (`LeakageTracker`).
    - `aura-macros`: Choreography DSL parser/annotation extractor (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) that emits rumpsteak projections.
 
@@ -76,7 +76,7 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 
 4. **Orchestration** (`aura-protocol` + `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`): Multi-party coordination and guard infrastructure: handler adapters, CrdtCoordinator, GuardChain (CapGuard → FlowGuard → JournalCoupler), Consensus runtime, AMP orchestration, anti-entropy/snapshot helpers.
 
-5. **Feature/Protocol** (`aura-authenticate`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates (auth, secure messaging, guardian recovery, rendezvous, social topology, storage, etc.) built atop the orchestration layer. `aura-frost` is deprecated; FROST primitives live in `aura-core::crypto::tree_signing`.
+5. **Feature/Protocol** (`aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates (auth, secure messaging, guardian recovery, rendezvous, social topology, storage, etc.) built atop the orchestration layer. `aura-frost` is deprecated; FROST primitives live in `aura-core::crypto::tree_signing`.
 
 6. **Runtime Composition** (`aura-agent`, `aura-simulator`, `aura-app`): Runtime assembly of effect systems (agent), deterministic simulation (simulator), and portable application core (app). `aura-agent` now owns the effect registry/builder infrastructure; `aura-protocol` no longer exports the legacy registry. `aura-app` provides the platform-agnostic business logic consumed by all frontends.
 
@@ -118,8 +118,8 @@ Reference `docs/003_information_flow_contract.md` for the unified flow-budget/me
 
 ## Authorization Systems
 
-1. **Traditional Capability Semantics** (`aura-wot`): Meet-semilattice capability evaluation for local checks.
-2. **Biscuit Tokens** (`aura-wot/src/biscuit/`, `aura-guards/src/authorization.rs`): Cryptographically verifiable, attenuated tokens.
+1. **Traditional Capability Semantics** (`aura-authorization`): Meet-semilattice capability evaluation for local checks.
+2. **Biscuit Tokens** (`aura-authorization/src/biscuit/`, `aura-guards/src/authorization.rs`): Cryptographically verifiable, attenuated tokens.
 3. **Guard Integration**: `aura-guards::{CapGuard, FlowGuard, JournalCoupler, LeakageTracker}` enforce Biscuit/policy requirements, flow budgets, journal commits, and leakage budgets per message.
 
 ## Unified Time System
@@ -165,7 +165,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **Domain-specific logic** → Domain crate (`aura-journal`, etc.)
 - **Domain service handler (stateless)** → Domain crate `*Handler` (e.g., `aura-chat::ChatHandler`)
 - **RwLock wrapper service** → `aura-agent/src/handlers/*_service.rs`
-- **Complete end-to-end protocol** → Feature crate (e.g., `aura-authenticate`; `aura-frost` deprecated)
+- **Complete end-to-end protocol** → Feature crate (e.g., `aura-authentication`; `aura-frost` deprecated)
 - **Effect trait definition** → `aura-core`
 - **Mock/test handlers** → `aura-testkit`
 
@@ -209,7 +209,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **CLI command** → `aura-terminal`
 - **Test scenario** → `aura-testkit`
 - **Choreography protocol** → Feature crate + `aura-mpst`
-- **Authorization logic** → `aura-wot`
+- **Authorization logic** → `aura-authorization`
 - **Social topology/relay selection** → `aura-social`
 - **Quint specification** → `verification/quint/` + `docs/807_verification_guide.md`
 - **Generative test** → `aura-simulator/src/quint/` + `docs/809_generative_testing_guide.md`
@@ -236,7 +236,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **How the mathematical model works** → `docs/002_theoretical_model.md`
 - **How identifiers and boundaries work** → `docs/105_identifiers_and_boundaries.md`
 - **How authorization and capabilities work** → `docs/109_authorization.md`
-- **How Biscuit tokens work** → `docs/109_authorization.md` + `aura-wot/src/biscuit/`
+- **How Biscuit tokens work** → `docs/109_authorization.md` + `aura-authorization/src/biscuit/`
 - **How to get started as a new developer** → `docs/801_hello_world_guide.md`
 - **How core systems work together** → `docs/802_core_systems_guide.md`
 - **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`

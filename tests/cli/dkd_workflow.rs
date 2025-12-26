@@ -13,7 +13,7 @@
 //! **Architecture Compliance:**
 //! - Uses AuthorityId for all participants
 //! - Integrates with aura-agent runtime
-//! - Uses current aura-authenticate DKD APIs
+//! - Uses current aura-authentication DKD APIs
 //! - Tests real CLI commands and workflows
 
 use aura_core::{

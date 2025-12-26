@@ -1,6 +1,6 @@
 //! Authorization Effects Implementation - Web-of-Trust Domain Logic
 //!
-//! This module implements AuthorizationEffects using aura-wot's domain-specific
+//! This module implements AuthorizationEffects using aura-authorization's domain-specific
 //! Biscuit token logic and capability semilattice evaluation. This follows the
 //! Layer 2 pattern where application effects are implemented in domain crates
 //! using business logic combined with infrastructure effect composition.
@@ -18,7 +18,7 @@ use uuid::Uuid;
 ///
 /// This handler implements AuthorizationEffects by combining:
 /// - CryptoEffects for cryptographic operations
-/// - aura-wot domain logic for Biscuit token validation and policy evaluation
+/// - aura-authorization domain logic for Biscuit token validation and policy evaluation
 /// - Capability semilattice operations for permission checking
 ///
 /// This is the correct pattern for application effects: domain crates implement
@@ -145,7 +145,7 @@ impl<C: CryptoEffects> AuthorizationEffects for WotAuthorizationHandler<C> {
         operation: &str,
         resource: &str,
     ) -> Result<bool, AuthorizationError> {
-        // 1. Domain validation using aura-wot business logic
+        // 1. Domain validation using aura-authorization business logic
         self.validate_capability_semantics(capabilities)?;
 
         // Reject obviously invalid root keys before crypto operations
@@ -186,7 +186,7 @@ impl<C: CryptoEffects> AuthorizationEffects for WotAuthorizationHandler<C> {
         self.validate_capability_semantics(source_capabilities)?;
         self.validate_capability_semantics(requested_capabilities)?;
 
-        // 2. Apply delegation using aura-wot domain logic
+        // 2. Apply delegation using aura-authorization domain logic
         // This implements the principle of least privilege using meet-semilattice operations
         // The delegated capabilities are the intersection of source and requested (source ⊓ requested)
         let delegated_cap = source_capabilities.meet(requested_capabilities);

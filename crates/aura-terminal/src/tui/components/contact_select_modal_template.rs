@@ -6,8 +6,9 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use super::modal::ModalContent;
+use super::{modal_footer, modal_header, status_message, ModalFooterProps, ModalHeaderProps, ModalStatus};
 use crate::tui::theme::{Borders, Spacing, Theme};
-use crate::tui::types::Contact;
+use crate::tui::types::{Contact, KeyHint};
 
 /// Callback type for selecting a contact (contact_id: String)
 pub type ContactSelectCallback = Arc<dyn Fn(String) + Send + Sync>;
@@ -62,6 +63,27 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
         Theme::PRIMARY
     };
 
+    // Header props
+    let header_props = ModalHeaderProps::new(title.clone());
+
+    // Footer props - conditionally include "Space" hint for multi-select
+    let mut footer_hints = vec![
+        KeyHint::new("Esc", "Cancel"),
+        KeyHint::new("↑↓", "Navigate"),
+    ];
+    if multi_select {
+        footer_hints.push(KeyHint::new("Space", "Toggle"));
+    }
+    footer_hints.push(KeyHint::new("Enter", if multi_select { "Done" } else { "Select" }));
+    let footer_props = ModalFooterProps::new(footer_hints);
+
+    // Error status
+    let error_status = if !error.is_empty() {
+        ModalStatus::Error(error.clone())
+    } else {
+        ModalStatus::Idle
+    };
+
     element! {
         ModalContent(
             flex_direction: FlexDirection::Column,
@@ -69,21 +91,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
             border_color: Some(border_color),
         ) {
             // Header
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(
-                    content: title,
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-            }
+            #(Some(modal_header(&header_props).into()))
 
             // Body - contact list
             View(
@@ -148,52 +156,12 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
 
                 })
 
-                // Error message (if any)
-                #(if !error.is_empty() {
-                    Some(element! {
-                        View(margin_top: Spacing::XS) {
-                            Text(content: error.clone(), color: Theme::ERROR)
-                        }
-                    })
-                } else {
-                    None
-                })
+                // Error message
+                #(Some(status_message(&error_status).into()))
             }
 
-            // Footer with key hints
-            View(
-                width: 100pct,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                padding: Spacing::PANEL_PADDING,
-                gap: Spacing::LG,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "↑↓", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Navigate", color: Theme::TEXT_MUTED)
-                }
-                #(if multi_select {
-                    Some(element! {
-                        View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                            Text(content: "Space", weight: Weight::Bold, color: Theme::SECONDARY)
-                            Text(content: "Toggle", color: Theme::TEXT_MUTED)
-                        }
-                    })
-                } else {
-                    None
-                })
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: if multi_select { "Done" } else { "Select" }.to_string(), color: Theme::TEXT_MUTED)
-                }
-            }
+            // Footer
+            #(Some(modal_footer(&footer_props).into()))
         }
     }
     .into_any()

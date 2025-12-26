@@ -2,9 +2,9 @@
 //!
 //! This module provides the storage authorization evaluator that was moved from aura-store
 //! to eliminate improper domain coupling. Storage access control is fundamentally an
-//! authorization concern and belongs in the authorization domain (aura-wot).
+//! authorization concern and belongs in the authorization domain (aura-authorization).
 
-// Authorization logic moved from aura-store to proper domain (aura-wot)
+// Authorization logic moved from aura-store to proper domain (aura-authorization)
 use aura_core::scope::ResourceScope;
 use aura_core::{AuthorityId, FlowBudget};
 use biscuit_auth::{
@@ -507,7 +507,7 @@ use tokio::sync::RwLock;
 /// # Example
 ///
 /// ```rust,ignore
-/// use aura_wot::{AuthorizedStorageHandler, BiscuitStorageEvaluator};
+/// use aura_authorization::{AuthorizedStorageHandler, BiscuitStorageEvaluator};
 /// use aura_effects::FilesystemStorageHandler;
 ///
 /// let inner = FilesystemStorageHandler::new(path);

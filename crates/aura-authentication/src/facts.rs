@@ -28,7 +28,7 @@ use aura_core::identifiers::AuthorityId;
 use aura_core::{ContextId, DeviceId};
 use aura_journal::{DomainFact, FactReducer};
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
-use aura_verify::session::SessionScope;
+use aura_signature::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
 use crate::guards::RecoveryOperationType;
@@ -620,7 +620,7 @@ pub enum AuthFactDelta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_verify::session::SessionScope;
+    use aura_signature::session::SessionScope;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])

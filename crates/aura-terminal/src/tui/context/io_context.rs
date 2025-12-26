@@ -28,6 +28,8 @@ use aura_app::signal_defs::{
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
 use aura_app::AppCore;
+#[cfg(feature = "development")]
+use aura_agent::AuraAgent;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::error::TerminalError;
@@ -89,6 +91,8 @@ pub struct IoContextBuilder {
     demo_hints: Option<crate::demo::DemoHints>,
     #[cfg(feature = "development")]
     demo_bridge: Option<Arc<crate::demo::SimulatedBridge>>,
+    #[cfg(feature = "development")]
+    demo_mobile_agent: Option<Arc<AuraAgent>>,
 }
 
 impl IoContextBuilder {
@@ -138,6 +142,13 @@ impl IoContextBuilder {
     #[cfg(feature = "development")]
     pub fn with_demo_bridge(mut self, bridge: Arc<crate::demo::SimulatedBridge>) -> Self {
         self.demo_bridge = Some(bridge);
+        self
+    }
+
+    /// Set the demo Mobile agent for device enrollment flows.
+    #[cfg(feature = "development")]
+    pub fn with_demo_mobile_agent(mut self, agent: Arc<AuraAgent>) -> Self {
+        self.demo_mobile_agent = Some(agent);
         self
     }
 
@@ -192,6 +203,8 @@ impl IoContextBuilder {
             demo_hints: self.demo_hints,
             #[cfg(feature = "development")]
             demo_bridge: self.demo_bridge,
+            #[cfg(feature = "development")]
+            demo_mobile_agent: self.demo_mobile_agent,
             invited_lan_peers,
             current_context,
             channel_modes,
@@ -220,6 +233,8 @@ pub struct IoContext {
     demo_hints: Option<crate::demo::DemoHints>,
     #[cfg(feature = "development")]
     demo_bridge: Option<Arc<crate::demo::SimulatedBridge>>,
+    #[cfg(feature = "development")]
+    demo_mobile_agent: Option<Arc<AuraAgent>>,
     invited_lan_peers: Arc<RwLock<HashSet<String>>>,
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
@@ -460,6 +475,27 @@ impl IoContext {
     #[cfg(feature = "development")]
     pub fn demo_bridge(&self) -> Option<&Arc<crate::demo::SimulatedBridge>> {
         self.demo_bridge.as_ref()
+    }
+
+    /// Import an invitation code on the demo Mobile device and accept it.
+    #[cfg(feature = "development")]
+    pub async fn import_invitation_on_mobile(&self, code: &str) -> Result<(), String> {
+        let agent = self
+            .demo_mobile_agent
+            .as_ref()
+            .ok_or_else(|| "Demo Mobile agent unavailable".to_string())?;
+        let invitations = agent
+            .invitations()
+            .map_err(|e| format!("Invitation service unavailable: {e}"))?;
+        let invitation = invitations
+            .import_and_cache(code)
+            .await
+            .map_err(|e| format!("Failed to import invitation: {e}"))?;
+        invitations
+            .accept(&invitation.invitation_id)
+            .await
+            .map_err(|e| format!("Failed to accept invitation: {e}"))?;
+        Ok(())
     }
 
     // =========================================================================

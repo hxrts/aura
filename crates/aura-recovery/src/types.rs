@@ -164,7 +164,7 @@ pub struct RecoveryRequest {
     /// Account authority being operated on
     pub account_id: AuthorityId,
     /// Recovery context and justification
-    pub context: aura_authenticate::RecoveryContext,
+    pub context: aura_authentication::RecoveryContext,
     /// Required threshold of guardian approvals
     pub threshold: usize,
     /// Available guardians for the operation

@@ -23,8 +23,8 @@ use aura_terminal::tui::props::{
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::screens::ChatFocus;
 use aura_terminal::tui::state_machine::{
-    transition, ChatFocus as StateChatFocus, ContactSelectModalState, DetailFocus,
-    DispatchCommand, NicknameModalState, QueuedModal, TuiCommand, TuiState,
+    transition, ChatFocus as StateChatFocus, DetailFocus, DispatchCommand, NicknameModalState,
+    QueuedModal, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::SettingsSection;
 
@@ -57,12 +57,6 @@ impl PropsTestHarness {
         // Simulate a small subset of shell-driven UI effects so these tests can
         // validate the full state→props pipeline.
         for cmd in &commands {
-            if let TuiCommand::Dispatch(DispatchCommand::OpenBlockInvite) = cmd {
-                new_state.show_modal(QueuedModal::BlockInvite(ContactSelectModalState::single(
-                    "Invite to block",
-                    vec![("contact-1".to_string(), "Alice".to_string())],
-                )));
-            }
             if let TuiCommand::Dispatch(DispatchCommand::OpenContactNicknameModal) = cmd {
                 new_state.show_modal(QueuedModal::ContactsNickname(
                     NicknameModalState::for_contact("contact-1", ""),
@@ -101,10 +95,10 @@ impl PropsTestHarness {
 }
 
 // ============================================================================
-// Block Screen Props Integration Tests
+// Neighborhood Screen Props Integration Tests
 // ============================================================================
 
-mod block_screen {
+mod neighborhood_screen {
     use super::*;
 
     #[test]

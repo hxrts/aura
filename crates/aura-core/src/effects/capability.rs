@@ -7,7 +7,7 @@
 //! # Effect Classification
 //!
 //! - **Category**: Application Effect
-//! - **Implementation**: `aura-wot` (Layer 2)
+//! - **Implementation**: `aura-authorization` (Layer 2)
 //! - **Usage**: Capability token management (Biscuit, JWT, custom formats)
 //!
 //! This is an application effect implemented in domain crates by composing

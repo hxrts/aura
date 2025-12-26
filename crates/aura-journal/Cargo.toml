@@ -14,8 +14,8 @@ workspace = true
 
 # Internal crates  
 aura-core = { path = "../aura-core" }
-# aura-wot dependency removed - authorization via effects system only
-# aura-macros, aura-mpst, aura-verify dependencies removed - Layer 2 horizontal coupling violations
+# aura-authorization dependency removed - authorization via effects system only
+# aura-macros, aura-mpst, aura-signature dependencies removed - Layer 2 horizontal coupling violations
 
 # Choreography dependencies removed - unused
 # Note: Cannot import aura-protocol due to circular dependency (aura-protocol imports journal)

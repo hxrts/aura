@@ -53,7 +53,7 @@ Aura implements cryptographically secure authorization using Biscuit tokens. Thi
 Biscuit tokens provide cryptographically verifiable, attenuated delegation chains. The following code shows a typical implementation workflow:
 
 ```rust
-use aura_wot::{AccountAuthority, BiscuitTokenManager, ResourceScope, AuthorityOp};
+use aura_authorization::{AccountAuthority, BiscuitTokenManager, ResourceScope, AuthorityOp};
 use aura_protocol::authorization::BiscuitAuthorizationBridge;
 use biscuit_auth::{Biscuit, Authorizer, macros::*};
 use aura_core::{AuthorityId, DeviceId};
@@ -210,12 +210,12 @@ Core Cap Type: `aura-core/src/domain/journal.rs` contains the `Cap` type, which 
 
 Biscuit Authorization Bridge: `crates/aura-guards/src/authorization.rs` contains `BiscuitAuthorizationBridge`.
 
-Biscuit Token Management: `aura-wot/src/biscuit_token.rs` contains `AccountAuthority`, `BiscuitTokenManager`, and attenuation logic.
+Biscuit Token Management: `aura-authorization/src/biscuit_token.rs` contains `AccountAuthority`, `BiscuitTokenManager`, and attenuation logic.
 
-Biscuit Authorization: `aura-wot/src/biscuit_authorization.rs` contains `BiscuitAuthorizationBridge` and `AuthorizationResult`.
+Biscuit Authorization: `aura-authorization/src/biscuit_authorization.rs` contains `BiscuitAuthorizationBridge` and `AuthorizationResult`.
 
-Authority-Based Resources: `aura-wot/src/resource_scope.rs` contains `ResourceScope`, `AuthorityOp`, and `ContextOp`.
+Authority-Based Resources: `aura-authorization/src/resource_scope.rs` contains `ResourceScope`, `AuthorityOp`, and `ContextOp`.
 
 Guard Chain: `crates/aura-guards/src/guards/capability_guard.rs` contains `CapabilityGuard` for Biscuit integration.
 
-Storage Authorization: `aura-wot/src/storage_authorization.rs` contains storage-specific Biscuit authorization (moved from aura-store).
+Storage Authorization: `aura-authorization/src/storage_authorization.rs` contains storage-specific Biscuit authorization (moved from aura-store).

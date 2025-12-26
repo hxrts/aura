@@ -15,7 +15,7 @@ workspace = true
 # Foundation layer only
 aura-core = { path = "../aura-core" }
 
-# Authorization logic moved to aura-wot (proper domain separation)
+# Authorization logic moved to aura-authorization (proper domain separation)
 
 # Serialization
 serde = { workspace = true }

@@ -28,7 +28,7 @@ impl Layer {
             "aura-core" => Some(Layer::Foundation),
 
             // Layer 2: Specification
-            "aura-journal" | "aura-wot" | "aura-verify" | "aura-store" | "aura-transport"
+            "aura-journal" | "aura-authorization" | "aura-signature" | "aura-store" | "aura-transport"
             | "aura-mpst" | "aura-macros" => Some(Layer::Specification),
 
             // Layer 3: Implementation
@@ -38,7 +38,7 @@ impl Layer {
             "aura-protocol" => Some(Layer::Orchestration),
 
             // Layer 5: Feature/Protocol
-            "aura-authenticate" | "aura-invitation" | "aura-recovery" | "aura-rendezvous"
+            "aura-authentication" | "aura-invitation" | "aura-recovery" | "aura-rendezvous"
             | "aura-storage" | "aura-sync" => Some(Layer::Feature),
 
             // Layer 6: Runtime Composition

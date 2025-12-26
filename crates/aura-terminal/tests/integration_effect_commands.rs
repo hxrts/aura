@@ -625,6 +625,7 @@ async fn test_create_channel_propagates_to_chat_signal() {
             name: "Test Channel".to_string(),
             topic: Some("A test channel for verification".to_string()),
             members: vec![alice_id.to_string()],
+            threshold_k: 1,
         })
         .await;
 

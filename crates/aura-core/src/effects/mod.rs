@@ -15,7 +15,7 @@
 //!
 //! ## Application Effects (Layer 2-4: Domain crates)
 //! Aura-specific business logic:
-//! - **Journal** (`aura-journal`), **Authorization**, **Capability** (`aura-wot`)
+//! - **Journal** (`aura-journal`), **Authorization**, **Capability** (`aura-authorization`)
 //! - **Agent** (`aura-agent`), **Authority** (`aura-protocol`/`aura-relational`)
 //! - **Guard** (`aura-protocol::guards`), **Ledger** (`aura-journal`/`aura-protocol`)
 //!

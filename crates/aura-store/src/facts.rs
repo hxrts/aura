@@ -4,7 +4,7 @@
 //! with Aura's journal system. All storage operations are recorded as
 //! immutable facts for audit trails and state derivation.
 //!
-//! **Architecture**: Layer 2 domain facts following the pattern from aura-wot.
+//! **Architecture**: Layer 2 domain facts following the pattern from aura-authorization.
 //! These facts capture storage events and enable deterministic state reduction.
 //!
 //! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.

@@ -5,7 +5,7 @@
 //!
 //! **Important**: These types describe capability *requirements*, not authorization
 //! logic. Actual authorization is handled by Biscuit tokens via the effect system.
-//! See `aura-wot` for the authorization implementation.
+//! See `aura-authorization` for the authorization implementation.
 //!
 //! ## Usage Pattern
 //!
@@ -19,7 +19,7 @@
 //! );
 //!
 //! // Actual authorization check uses Biscuit tokens
-//! // via aura-wot::check_biscuit_access()
+//! // via aura-authorization::check_biscuit_access()
 //! ```
 //!
 //! ## Future Direction
@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 /// Actual authorization is performed via Biscuit tokens. Use this to
 /// annotate content with its access requirements.
 ///
-/// See `aura_wot::check_biscuit_access()` for authorization checks.
+/// See `aura_authorization::check_biscuit_access()` for authorization checks.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct StorageCapability {
     /// Storage resource identifier

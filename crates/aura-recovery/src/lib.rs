@@ -15,10 +15,10 @@
 //!
 //! This crate depends on:
 //! - **Layer 1** (aura-core): Core types, effects, errors
-//! - **Layer 2** (aura-journal, aura-verify, aura-wot, aura-macros, aura-mpst): Domain semantics and choreography
+//! - **Layer 2** (aura-journal, aura-signature, aura-authorization, aura-macros, aura-mpst): Domain semantics and choreography
 //! - **Layer 3** (aura-effects, aura-composition): Effect handler implementations
 //! - **Layer 4** (aura-protocol): Orchestration and guard chain
-//! - **Layer 5** (aura-authenticate): Authentication coordination
+//! - **Layer 5** (aura-authentication): Authentication coordination
 //! - **Layer 5** (aura-relational): Relational context management for recovery
 //!
 //! ## What Belongs Here
@@ -125,7 +125,7 @@ pub type RecoveryResult<T> = AuraResult<T>;
 pub use types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse};
 
 // Re-export auth types (from new guard-based architecture)
-pub use aura_authenticate::{RecoveryContext, RecoveryOperationType};
+pub use aura_authentication::{RecoveryContext, RecoveryOperationType};
 
 // Re-export choreography coordinators
 pub use guardian_membership::GuardianMembershipCoordinator;

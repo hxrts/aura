@@ -9,9 +9,14 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::components::{
+    contact_multi_select, modal_footer, threshold_selector, ContactMultiSelectItem,
+    ContactMultiSelectProps, ModalFooterProps, ThresholdSelectorProps,
+};
 use crate::tui::layout::dim;
 use crate::tui::state_machine::{GuardianCeremonyResponse, GuardianSetupStep};
 use crate::tui::theme::{Borders, Icons, Spacing, Theme};
+use crate::tui::types::KeyHint;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GuardianSetupKind {
@@ -168,18 +173,7 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
             }
 
             // Footer with key hints
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                gap: Spacing::LG,
-            ) {
-                #(render_key_hints(&step))
-            }
+            #(Some(modal_footer(&get_footer_hints(&step)).into()))
         }
     }
 }
@@ -239,142 +233,40 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
         .into_any();
     }
 
-    element! {
-        View(
-            padding_left: Spacing::SM,
-            padding_right: Spacing::SM,
-            padding_top: Spacing::XS,
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
-        ) {
-            Text(
-                content: copy.select_prompt,
-                color: Theme::TEXT_MUTED,
-            )
+    let items = contacts
+        .iter()
+        .map(|contact| ContactMultiSelectItem {
+            name: contact.name.clone(),
+            badge: contact
+                .is_current_guardian
+                .then_some(" (current)".to_string()),
+        })
+        .collect::<Vec<_>>();
 
-            // Contact list with checkboxes - compact
-            View(
-                margin_top: Spacing::XS,
-                flex_direction: FlexDirection::Column,
-                border_style: BorderStyle::Round,
-                border_color: Theme::BORDER,
-                max_height: 10,
-                overflow: Overflow::Hidden,
-            ) {
-                #(contacts.iter().enumerate().map(|(i, contact)| {
-                    let is_selected = selected.contains(&i);
-                    let is_focused = i == focused;
-                    let pointer = if is_focused { "▸" } else { " " };
-                    let checkbox = if is_selected { "[x]" } else { "[ ]" };
-                    let guardian_badge = if contact.is_current_guardian { " (current)" } else { "" };
+    let selector = ContactMultiSelectProps {
+        prompt: copy.select_prompt.to_string(),
+        items,
+        selected: selected.clone(),
+        focused,
+        min_selected: Some(2),
+        footer_hint: Some("↑↓/jk Navigate  Space Select  Enter Confirm  Esc Cancel".to_string()),
+    };
 
-                    let bg = if is_focused { Theme::BG_SELECTED } else { Color::Reset };
-                    let fg = if is_focused { Theme::TEXT } else { Theme::TEXT_MUTED };
-                    let pointer_color = if is_focused { Theme::PRIMARY } else { Color::Reset };
-
-                    element! {
-                        View(
-                            flex_direction: FlexDirection::Row,
-                            gap: 1,
-                            padding_left: Spacing::XS,
-                            background_color: bg,
-                        ) {
-                            Text(content: pointer.to_string(), color: pointer_color)
-                            Text(content: checkbox.to_string(), color: if is_selected { Theme::SUCCESS } else { fg })
-                            Text(content: contact.name.clone(), color: fg)
-                            #(if contact.is_current_guardian {
-                                Some(element! {
-                                    Text(content: guardian_badge.to_string(), color: Theme::WARNING)
-                                })
-                            } else {
-                                None
-                            })
-                        }
-                    }
-                }))
-            }
-
-            // Selection count - inline
-            Text(
-                content: format!("{} selected (min 2)", selected.len()),
-                color: if selected.len() >= 2 { Theme::SUCCESS } else { Theme::WARNING },
-            )
-
-            // Key hints footer
-            View(margin_top: Spacing::XS) {
-                Text(
-                    content: "↑↓/jk Navigate  Space Select  Enter Confirm  Esc Cancel",
-                    color: Theme::TEXT_MUTED,
-                )
-            }
-        }
-    }
-    .into_any()
+    contact_multi_select(&selector).into()
 }
 
 fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'static> {
-    let k = props.threshold_k;
-    let n = props.threshold_n;
     let copy = props.kind.copy();
-
-    // Security level hint - compact
-    let security_hint = if k == 1 {
-        copy.low_hint
-    } else if k == n {
-        "Max: all must agree"
-    } else {
-        "Balanced"
+    let selector = ThresholdSelectorProps {
+        prompt: copy.threshold_prompt.to_string(),
+        subtext: None,
+        k: props.threshold_k,
+        n: props.threshold_n,
+        low_hint: Some(copy.low_hint.to_string()),
+        show_hint: true,
     };
 
-    element! {
-        View(
-            padding: Spacing::SM,
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-        ) {
-            Text(
-                content: copy.threshold_prompt,
-                color: Theme::TEXT_MUTED,
-            )
-
-            // Threshold selector - vertical layout for up/down controls
-            View(
-                margin_top: Spacing::SM,
-                margin_bottom: Spacing::SM,
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-            ) {
-                Text(
-                    content: Icons::ARROW_UP,
-                    color: if k < n { Theme::PRIMARY } else { Theme::TEXT_MUTED },
-                    weight: Weight::Bold,
-                )
-                View(
-                    border_style: BorderStyle::Round,
-                    border_color: Theme::PRIMARY,
-                    padding_left: 2,
-                    padding_right: 2,
-                ) {
-                    Text(
-                        content: format!("{} of {}", k, n),
-                        color: Theme::PRIMARY,
-                        weight: Weight::Bold,
-                    )
-                }
-                Text(
-                    content: Icons::ARROW_DOWN,
-                    color: if k > 1 { Theme::PRIMARY } else { Theme::TEXT_MUTED },
-                    weight: Weight::Bold,
-                )
-            }
-
-            // Security hint - inline
-            Text(content: security_hint.to_string(), color: Theme::SECONDARY)
-        }
-    }
-    .into_any()
+    threshold_selector(&selector).into()
 }
 
 fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'static> {
@@ -403,7 +295,10 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
             View(flex_direction: FlexDirection::Row, gap: 2) {
                 Text(content: "Waiting...", color: Theme::TEXT, weight: Weight::Bold)
                 Text(
-                    content: format!("{}✓ {}⏳ {}✗", accepted, pending, declined),
+                    content: format!(
+                        "Accepted: {}  Pending: {}  Declined: {}",
+                        accepted, pending, declined
+                    ),
                     color: Theme::TEXT_MUTED,
                 )
             }
@@ -450,52 +345,20 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
     .into_any()
 }
 
-fn render_key_hints(step: &GuardianSetupStep) -> AnyElement<'static> {
-    match step {
-        GuardianSetupStep::SelectContacts => element! {
-            View(flex_direction: FlexDirection::Row, gap: Spacing::LG) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "↑/↓", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Navigate", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Space", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Toggle", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Next", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                }
-            }
-        }
-        .into_any(),
-        GuardianSetupStep::ChooseThreshold => element! {
-            View(flex_direction: FlexDirection::Row, gap: Spacing::LG) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "↑/↓", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Adjust", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Confirm", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Back", color: Theme::TEXT_MUTED)
-                }
-            }
-        }
-        .into_any(),
-        GuardianSetupStep::CeremonyInProgress => element! {
-            View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                Text(content: "Cancel", color: Theme::TEXT_MUTED)
-            }
-        }
-        .into_any(),
-    }
+fn get_footer_hints(step: &GuardianSetupStep) -> ModalFooterProps {
+    let hints = match step {
+        GuardianSetupStep::SelectContacts => vec![
+            KeyHint::new("↑/↓", "Navigate"),
+            KeyHint::new("Space", "Toggle"),
+            KeyHint::new("Enter", "Next"),
+            KeyHint::new("Esc", "Cancel"),
+        ],
+        GuardianSetupStep::ChooseThreshold => vec![
+            KeyHint::new("↑/↓", "Adjust"),
+            KeyHint::new("Enter", "Confirm"),
+            KeyHint::new("Esc", "Back"),
+        ],
+        GuardianSetupStep::CeremonyInProgress => vec![KeyHint::new("Esc", "Cancel")],
+    };
+    ModalFooterProps::new(hints)
 }

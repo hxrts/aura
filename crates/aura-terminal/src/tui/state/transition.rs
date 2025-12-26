@@ -241,6 +241,44 @@ mod tests {
         assert_eq!(state.account_setup_state().unwrap().display_name, "Alic");
     }
 
+    #[test]
+    fn test_mfa_modal_escape_preserves_settings_focus() {
+        use crate::tui::navigation::TwoPanelFocus;
+        use crate::tui::state::views::GuardianSetupModalState;
+        use crate::tui::state::modal_queue::QueuedModal;
+        use crate::tui::types::SettingsSection;
+
+        // Start on Settings screen, Mfa section, focus on List
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Settings);
+        state.settings.section = SettingsSection::Mfa;
+        assert_eq!(state.settings.focus, TwoPanelFocus::List);
+
+        // Enqueue MFA setup modal (simulates shell's OpenMfaSetup dispatch)
+        let modal_state = GuardianSetupModalState::default();
+        state.modal_queue.enqueue(QueuedModal::MfaSetup(modal_state));
+        assert!(state.has_queued_modal());
+
+        // Press Escape to dismiss the modal
+        let (state, _) = transition(&state, events::escape());
+        assert!(!state.has_queued_modal(), "Modal should be dismissed");
+
+        // Focus should still be List
+        assert_eq!(
+            state.settings.focus,
+            TwoPanelFocus::List,
+            "Settings focus should remain List after dismissing MFA modal"
+        );
+
+        // Press Up arrow - should navigate sections
+        let (state, _) = transition(&state, events::arrow_up());
+        assert_eq!(
+            state.settings.section,
+            SettingsSection::Devices,
+            "Up arrow should navigate to previous section (Mfa -> Devices)"
+        );
+    }
+
     // Note: test_threshold_modal_arrow_keys was removed because threshold adjustments
     // now use the GuardianSetup flow (OpenGuardianSetup dispatch) instead of the
     // standalone threshold modal

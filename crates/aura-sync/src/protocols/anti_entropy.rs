@@ -54,7 +54,7 @@ use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::scope::ResourceScope;
 use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, Journal};
 use aura_guards::{BiscuitGuardEvaluator, GuardError};
-use aura_wot::BiscuitTokenManager;
+use aura_authorization::BiscuitTokenManager;
 
 // =============================================================================
 // Types

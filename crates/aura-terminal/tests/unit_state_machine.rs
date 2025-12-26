@@ -919,8 +919,7 @@ proptest! {
         prop_assert_eq!(modal_type != ModalType::None, is_global_modal);
 
         if let Some(QueuedModal::ContactSelect(state))
-        | Some(QueuedModal::GuardianSelect(state))
-        | Some(QueuedModal::BlockInvite(state)) = modal
+        | Some(QueuedModal::GuardianSelect(state)) = modal
         {
             if state.contacts.is_empty() {
                 prop_assert_eq!(state.selected_index, 0);
@@ -1059,7 +1058,7 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
     assert!(tui.has_dispatch(|d| {
         matches!(
             d,
-            DispatchCommand::CreateChannel { name, topic, members }
+            DispatchCommand::CreateChannel { name, topic, members, .. }
                 if name == "group"
                     && topic.as_deref() == Some("topic")
                     && members.len() == 2

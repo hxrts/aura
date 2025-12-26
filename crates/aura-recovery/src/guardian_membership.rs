@@ -563,9 +563,9 @@ mod tests {
             base: crate::types::RecoveryRequest {
                 initiator_id: test_authority_id(0),
                 account_id: test_authority_id(10),
-                context: aura_authenticate::RecoveryContext {
+                context: aura_authentication::RecoveryContext {
                     operation_type:
-                        aura_authenticate::RecoveryOperationType::GuardianSetModification,
+                        aura_authentication::RecoveryOperationType::GuardianSetModification,
                     justification: "Test membership change".to_string(),
                     is_emergency: false,
                     timestamp: 0,

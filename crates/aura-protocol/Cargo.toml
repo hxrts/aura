@@ -26,7 +26,7 @@ aura-amp = { path = "../aura-amp" }
 aura-anti-entropy = { path = "../aura-anti-entropy" }
 # Note: do NOT depend on aura-relational to avoid cycles (Layer 4 -> Layer 5).
 # Guardian coordinator will be in Layer 4; relational helpers stay in aura-relational.
-aura-wot = { path = "../aura-wot" }
+aura-authorization = { path = "../aura-authorization" }
 aura-transport = { path = "../aura-transport" }
 aura-mpst = { path = "../aura-mpst" }
 aura-macros = { path = "../aura-macros" }

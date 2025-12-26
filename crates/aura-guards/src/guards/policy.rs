@@ -25,7 +25,7 @@
 //!
 //! ```rust,ignore
 //! use aura_guards::EffectPolicyGuard;
-//! use aura_wot::{OperationType, EffectPolicyRegistry, EffectDecision};
+//! use aura_authorization::{OperationType, EffectPolicyRegistry, EffectDecision};
 //!
 //! let registry = EffectPolicyRegistry::default();
 //! let guard = EffectPolicyGuard::new(registry);
@@ -39,7 +39,7 @@
 //! ```
 
 use aura_core::{AuraError, AuraResult, ContextId};
-use aura_wot::{EffectDecision, EffectPolicy, EffectPolicyRegistry, OperationType};
+use aura_authorization::{EffectDecision, EffectPolicy, EffectPolicyRegistry, OperationType};
 
 /// Guard that evaluates effect policies and determines execution timing
 #[derive(Debug, Clone)]
@@ -259,7 +259,7 @@ impl From<EffectPolicyError> for AuraError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_wot::EffectTiming;
+    use aura_authorization::EffectTiming;
 
     #[test]
     fn test_guard_defaults() {
@@ -310,7 +310,7 @@ mod tests {
 
         assert_eq!(result.operation, OperationType::DeleteChannel);
         assert!(result.is_deferred());
-        assert_eq!(result.policy.security_level, aura_wot::SecurityLevel::High);
+        assert_eq!(result.policy.security_level, aura_authorization::SecurityLevel::High);
     }
 
     #[test]
@@ -335,6 +335,6 @@ mod tests {
 
         let policy = guard.get_policy(&OperationType::TransferChannelOwnership, None);
         assert_eq!(policy.operation, OperationType::TransferChannelOwnership);
-        assert_eq!(policy.security_level, aura_wot::SecurityLevel::High);
+        assert_eq!(policy.security_level, aura_authorization::SecurityLevel::High);
     }
 }

@@ -27,8 +27,9 @@ use aura_core::types::FrostThreshold;
 use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_effects::ReactiveHandler;
-use aura_journal::fact::RelationalFact;
+use aura_journal::fact::{CommittedChannelEpochBump, RelationalFact};
 use aura_journal::DomainFact;
+use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::TreeEffects;
 use aura_social::moderation::facts::{BlockPinFact, BlockUnpinFact};
 use aura_social::moderation::{
@@ -177,6 +178,42 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn amp_leave_channel(&self, params: ChannelLeaveParams) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
         effects.leave_channel(params).await.map_err(map_amp_error)
+    }
+
+    async fn bump_channel_epoch(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+        reason: String,
+    ) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        let state = aura_protocol::amp::get_channel_state(&effects, context, channel)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("AMP state lookup failed: {e}")))?;
+
+        let committed = CommittedChannelEpochBump {
+            context,
+            channel,
+            parent_epoch: state.chan_epoch,
+            new_epoch: state.chan_epoch + 1,
+            chosen_bump_id: Default::default(),
+            consensus_id: Default::default(),
+        };
+
+        effects
+            .insert_relational_fact(RelationalFact::AmpCommittedChannelEpochBump(committed))
+            .await
+            .map_err(|e| IntentError::internal_error(format!("AMP epoch bump failed: {e}")))?;
+
+        tracing::info!(
+            context = %context,
+            channel = %channel,
+            new_epoch = state.chan_epoch + 1,
+            reason = %reason,
+            "Channel epoch bumped"
+        );
+
+        Ok(())
     }
 
     async fn amp_send_message(
@@ -1043,11 +1080,24 @@ impl RuntimeBridge for AgentRuntimeBridge {
             device_ids.push(current_device_id);
         }
 
-        // Generate a new device id to enroll.
+        // Generate a new device id to enroll (demo override supported via env).
         let entropy = effects.random_bytes(32).await;
         let mut entropy_bytes = [0u8; 32];
         entropy_bytes.copy_from_slice(&entropy[..32]);
-        let new_device_id = aura_core::DeviceId::new_from_entropy(entropy_bytes);
+        let new_device_id = match std::env::var("AURA_DEMO_DEVICE_ID") {
+            Ok(override_id) => match override_id.parse::<aura_core::DeviceId>() {
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::warn!(
+                        override_id = %override_id,
+                        error = %e,
+                        "Invalid AURA_DEMO_DEVICE_ID override; falling back to random device id"
+                    );
+                    aura_core::DeviceId::new_from_entropy(entropy_bytes)
+                }
+            },
+            Err(_) => aura_core::DeviceId::new_from_entropy(entropy_bytes),
+        };
 
         // Prepare new key material for the updated participant set.
         //

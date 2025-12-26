@@ -28,7 +28,7 @@ aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
 aura-social = { path = "../aura-social" }
 aura-transport = { path = "../aura-transport" }
-aura-wot = { path = "../aura-wot" }
+aura-authorization = { path = "../aura-authorization" }
 
 # App core for RuntimeBridge trait and types
 aura-app = { path = "../aura-app" }

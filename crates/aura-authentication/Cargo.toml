@@ -1,5 +1,5 @@
 [package]
-name = "aura-authenticate"
+name = "aura-authentication"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,8 +16,8 @@ aura-mpst = { path = "../aura-mpst" }
 aura-protocol = { path = "../aura-protocol" }
 aura-guards = { path = "../aura-guards" }
 aura-relational = { path = "../aura-relational" }
-aura-verify = { path = "../aura-verify" }
-aura-wot = { path = "../aura-wot" }
+aura-signature = { path = "../aura-signature" }
+aura-authorization = { path = "../aura-authorization" }
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 

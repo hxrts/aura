@@ -27,8 +27,8 @@
 //! # Example
 //!
 //! ```rust
-//! use aura_wot::proposals::{ProposalFact, ProposalState, PROPOSAL_FACT_TYPE_ID};
-//! use aura_wot::effect_policy::{OperationType, ApprovalThreshold};
+//! use aura_authorization::proposals::{ProposalFact, ProposalState, PROPOSAL_FACT_TYPE_ID};
+//! use aura_authorization::effect_policy::{OperationType, ApprovalThreshold};
 //! use aura_core::identifiers::{ContextId, AuthorityId};
 //!
 //! // Create a proposal for removing a channel member

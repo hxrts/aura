@@ -1,8 +1,8 @@
-//! Test modules for aura-wot capability system
+//! Test modules for aura-authorization capability system
 
 use aura_core::identifiers::AuthorityId;
 use aura_core::scope::{AuthorityOp, ResourceScope};
-use aura_wot::biscuit_authorization::BiscuitAuthorizationBridge;
+use aura_authorization::biscuit_authorization::BiscuitAuthorizationBridge;
 use biscuit_auth::macros::*;
 
 #[test]

@@ -28,7 +28,7 @@
 //! ## Usage
 //!
 //! ```rust
-//! use aura_wot::{ResourceScope, AuthorityOp};
+//! use aura_authorization::{ResourceScope, AuthorityOp};
 //! use aura_core::{AuthorityId};
 //!
 //! // Authority-based resource authorization

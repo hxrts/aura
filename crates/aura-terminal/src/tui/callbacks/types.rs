@@ -24,8 +24,8 @@ pub type ThreeStringCallback = Arc<dyn Fn(String, String, String) + Send + Sync>
 pub type StringOptStringCallback = Arc<dyn Fn(String, Option<String>) + Send + Sync>;
 
 /// Callback that takes a string, optional string, and a list of strings.
-pub type StringOptStringVecCallback =
-    Arc<dyn Fn(String, Option<String>, Vec<String>) + Send + Sync>;
+pub type StringOptStringVecU8Callback =
+    Arc<dyn Fn(String, Option<String>, Vec<String>, u8) + Send + Sync>;
 
 /// Callback that takes two u8 values.
 pub type ThresholdCallback = Arc<dyn Fn(u8, u8) + Send + Sync>;
@@ -47,7 +47,7 @@ pub type CreateInvitationCallbackType =
 // --- Chat Screen ---
 pub type SendCallback = TwoStringCallback;
 pub type ChannelSelectCallback = IdCallback;
-pub type CreateChannelCallback = StringOptStringVecCallback;
+pub type CreateChannelCallback = StringOptStringVecU8Callback;
 pub type RetryMessageCallback = ThreeStringCallback;
 pub type SetTopicCallback = TwoStringCallback;
 
@@ -64,6 +64,7 @@ pub type UpdateDisplayNameCallback = IdCallback;
 pub type AddDeviceCallback = IdCallback;
 pub type RemoveDeviceCallback = IdCallback;
 pub type UpdateThresholdCallback = ThresholdCallback;
+pub type ImportDeviceEnrollmentCallback = IdCallback;
 
 // --- Invitations Screen ---
 pub type InvitationCallback = IdCallback;
@@ -71,12 +72,8 @@ pub type CreateInvitationCallback = CreateInvitationCallbackType;
 pub type ExportInvitationCallback = IdCallback;
 pub type ImportInvitationCallback = IdCallback;
 
-// --- Block Screen ---
+// --- Block Messaging ---
 pub type BlockSendCallback = IdCallback;
-pub type BlockInviteCallback = IdCallback;
-pub type BlockNavCallback = NoArgCallback;
-pub type GrantStewardCallback = IdCallback;
-pub type RevokeStewardCallback = IdCallback;
 
 // --- Neighborhood Screen ---
 pub type GoHomeCallback = NoArgCallback;

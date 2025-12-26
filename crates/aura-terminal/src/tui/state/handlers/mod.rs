@@ -33,6 +33,12 @@ pub use screen::{
 /// 3. Global key handlers
 /// 4. Screen-specific handlers
 pub fn handle_key_event(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
+    // Escape precedence: toasts first, then modals, then everything else.
+    if key.code == KeyCode::Esc && state.toast_queue.is_active() {
+        state.toast_queue.dismiss();
+        return;
+    }
+
     // Queued modal gets priority (all modals are now queue-based)
     if state.has_queued_modal() {
         handle_modal_key(state, commands, key);
@@ -91,18 +97,6 @@ pub fn handle_global_key(
     if key.code == KeyCode::Char('c') && key.modifiers.ctrl() {
         state.should_exit = true;
         commands.push(TuiCommand::Exit);
-        return true;
-    }
-
-    // Escape - dismiss ONE toast at a time (when no modal is open)
-    // Note: Modal escape handling is in handle_modal_key, so this only fires
-    // when there's no modal open
-    if key.code == KeyCode::Esc {
-        if state.toast_queue.is_active() {
-            // Dismiss the current toast (queue automatically shows next one)
-            state.toast_queue.dismiss();
-        }
-        // If no toasts, Esc does nothing here (modals handled in handle_modal_key)
         return true;
     }
 

@@ -82,9 +82,23 @@ fn BlockMap(props: &BlockMapProps) -> impl Into<AnyElement<'static>> {
                 overflow: Overflow::Scroll,
             ) {
                 #(if blocks.is_empty() {
-                    vec![element! {
-                        View { Text(content: "No blocks available", color: Theme::TEXT_MUTED) }
-                    }]
+                    vec![
+                        element! {
+                            View(flex_direction: FlexDirection::Column, gap: 1) {
+                                Text(content: "No blocks yet", color: Theme::TEXT_MUTED)
+                                View(height: 1)
+                                Text(content: "To get started:", color: Theme::TEXT)
+                                View(flex_direction: FlexDirection::Column, padding_left: 1) {
+                                    Text(content: "• Create a new block", color: Theme::TEXT_MUTED)
+                                    Text(content: "• Accept an invitation to join", color: Theme::TEXT_MUTED)
+                                    Text(content: "  an existing block", color: Theme::TEXT_MUTED)
+                                }
+                                View(height: 1)
+                                Text(content: "[n] Create block", color: Theme::SECONDARY)
+                                Text(content: "[i] Import invitation", color: Theme::SECONDARY)
+                            }
+                        }
+                    ]
                 } else {
                     blocks.iter().enumerate().map(|(idx, block)| {
                         let is_selected = idx == selected;
@@ -134,17 +148,22 @@ fn BlockHeader(props: &BlockHeaderProps) -> impl Into<AnyElement<'static>> {
         "Residents: {} • {} • {}",
         props.resident_count, props.storage_text, props.steward_label
     );
+    let name_line = format!("Name: {}", props.block_name);
 
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
             padding_left: 1,
             padding_right: 1,
         ) {
-            Text(content: props.block_name.clone(), weight: Weight::Bold, color: Theme::TEXT)
-            Text(content: status_line, color: Theme::TEXT_MUTED)
+            View(flex_direction: FlexDirection::Column, gap: 0) {
+                Text(content: "Block", weight: Weight::Bold, color: Theme::PRIMARY)
+                Text(content: name_line, color: Theme::TEXT_MUTED)
+                Text(content: status_line, color: Theme::TEXT_MUTED)
+            }
         }
     }
 }
@@ -163,6 +182,7 @@ fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
             padding_left: 1,
@@ -205,6 +225,7 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
             padding_left: 1,
@@ -324,7 +345,6 @@ pub fn NeighborhoodScreenV2(
     props: &NeighborhoodScreenV2Props,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
-    const NEIGHBORHOOD_LEFT_WIDTH: u16 = dim::TWO_PANEL_LEFT_WIDTH - 6;
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
     let reactive_neighborhood_name = hooks.use_state(String::new);
@@ -346,11 +366,21 @@ pub fn NeighborhoodScreenV2(
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
                 let home_id = &n.home_block_id;
-                let blocks: Vec<BlockSummary> = n
-                    .neighbors
-                    .iter()
-                    .map(|b| convert_neighbor_block(b, home_id))
-                    .collect();
+                let mut blocks: Vec<BlockSummary> = Vec::with_capacity(n.neighbors.len() + 1);
+                blocks.push(BlockSummary {
+                    id: n.home_block_id.to_string(),
+                    name: Some(n.home_block_name.clone()),
+                    resident_count: 0,
+                    max_residents: 8,
+                    is_home: true,
+                    can_enter: true,
+                });
+                blocks.extend(
+                    n.neighbors
+                        .iter()
+                        .filter(|b| b.id != n.home_block_id)
+                        .map(|b| convert_neighbor_block(b, home_id)),
+                );
                 let depth = n
                     .position
                     .as_ref()
@@ -490,53 +520,57 @@ pub fn NeighborhoodScreenV2(
     };
 
     let input_placeholder = if read_only {
-        "Enter block to chat (Frontage/Interior required)".to_string()
+        "Enter block to chat (Frontage/Interior)".to_string()
     } else {
         "Type a message...".to_string()
     };
 
     element! {
         View(
-            flex_direction: FlexDirection::Row,
+            flex_direction: FlexDirection::Column,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
             overflow: Overflow::Hidden,
-            gap: dim::TWO_PANEL_GAP,
         ) {
-            View(width: NEIGHBORHOOD_LEFT_WIDTH, height: dim::MIDDLE_HEIGHT) {
-                #(if is_detail {
-                    vec![element! {
-                        View(flex_direction: FlexDirection::Column, gap: 1) {
-                            BlockHeader(
-                                block_name: current_block_name,
-                                resident_count: residents.len(),
-                                storage_text: storage_text,
-                                steward_label: steward_label,
-                            )
-                            ChannelList(channels: channels, selected_index: props.view.selected_channel)
-                            ResidentList(
-                                residents: residents,
-                                selected_index: props.view.selected_resident,
-                                steward_actions_enabled: props.view.steward_actions_enabled,
-                            )
-                        }
-                    }]
-                } else {
-                    vec![element! {
-                        View {
-                            BlockMap(blocks: blocks, selected_index: props.view.selected_block, enter_depth: props.view.enter_depth)
-                        }
-                    }]
-                })
-            }
-            View(flex_grow: 1.0, height: dim::MIDDLE_HEIGHT, flex_direction: FlexDirection::Column) {
-                // Message panel fills remaining space (borders provide separation)
+            View(
+                flex_direction: FlexDirection::Row,
+                height: 22,
+                overflow: Overflow::Hidden,
+                gap: dim::TWO_PANEL_GAP,
+            ) {
+                View(width: dim::TWO_PANEL_LEFT_WIDTH, height: 22) {
+                    #(if is_detail {
+                        vec![element! {
+                            View(flex_direction: FlexDirection::Column, gap: 0) {
+                                BlockHeader(
+                                    block_name: current_block_name,
+                                    resident_count: residents.len(),
+                                    storage_text: storage_text,
+                                    steward_label: steward_label,
+                                )
+                                ChannelList(channels: channels, selected_index: props.view.selected_channel)
+                                ResidentList(
+                                    residents: residents,
+                                    selected_index: props.view.selected_resident,
+                                    steward_actions_enabled: props.view.steward_actions_enabled,
+                                )
+                            }
+                        }]
+                    } else {
+                        vec![element! {
+                            View {
+                                BlockMap(blocks: blocks, selected_index: props.view.selected_block, enter_depth: props.view.enter_depth)
+                            }
+                        }]
+                    })
+                }
                 MessagePanel(
                     messages: messages,
                     title: Some(context_bar),
                     empty_message: Some("No messages yet".to_string()),
                 )
-                // Input at bottom (no gap - border separation is sufficient)
+            }
+            View(height: 3, width: dim::TOTAL_WIDTH) {
                 MessageInput(
                     value: props.view.input_buffer.clone(),
                     placeholder: input_placeholder,

@@ -6,9 +6,11 @@
 use iocraft::prelude::*;
 
 use crate::tui::theme::{Borders, Spacing, Theme};
+use crate::tui::types::KeyHint;
 
 use super::help_data::{get_help_commands_for_screen, HelpCommand};
 use super::modal::ModalContent;
+use super::{modal_footer, modal_header, ModalFooterProps, ModalHeaderProps};
 
 /// Props for HelpModal
 #[derive(Default, Props)]
@@ -58,6 +60,13 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
     } else {
         "Keyboard Shortcuts".to_string()
     };
+
+    // Header and footer props
+    let header_props = ModalHeaderProps::new(header_text.clone());
+    let footer_props = ModalFooterProps::new(vec![
+        KeyHint::new("Esc", "Close"),
+        KeyHint::new("?", "Toggle"),
+    ]);
 
     // Build grouped command elements with 2-column grid layout
     let category_elements: Vec<AnyElement<'static>> = groups
@@ -111,21 +120,7 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
             border_color: Some(Theme::PRIMARY),
         ) {
             // Header
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(
-                    content: header_text,
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-            }
+            #(Some(modal_header(&header_props).into()))
 
             // Body - display grouped commands in grid
             View(
@@ -143,25 +138,7 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
             }
 
             // Footer
-            View(
-                width: 100pct,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                padding: Spacing::PANEL_PADDING,
-                gap: Spacing::LG,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Close", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "?", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Toggle", color: Theme::TEXT_MUTED)
-                }
-            }
+            #(Some(modal_footer(&footer_props).into()))
         }
     }
     .into_any()

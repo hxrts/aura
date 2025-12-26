@@ -220,7 +220,7 @@ impl ChatCallbacks {
 
     fn make_create_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateChannelCallback {
         Arc::new(
-            move |name: String, topic: Option<String>, members: Vec<String>| {
+            move |name: String, topic: Option<String>, members: Vec<String>, threshold_k: u8| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 let channel_name = name.clone();
@@ -228,6 +228,7 @@ impl ChatCallbacks {
                     name,
                     topic,
                     members,
+                    threshold_k,
                 };
                 tokio::spawn(async move {
                     match ctx.dispatch(cmd).await {
@@ -678,6 +679,7 @@ pub struct SettingsCallbacks {
     pub on_update_threshold: UpdateThresholdCallback,
     pub on_add_device: AddDeviceCallback,
     pub on_remove_device: RemoveDeviceCallback,
+    pub on_import_device_enrollment_on_mobile: ImportDeviceEnrollmentCallback,
 }
 
 impl SettingsCallbacks {
@@ -687,7 +689,8 @@ impl SettingsCallbacks {
             on_update_display_name: Self::make_update_display_name(ctx.clone(), tx.clone()),
             on_update_threshold: Self::make_update_threshold(ctx.clone(), tx.clone()),
             on_add_device: Self::make_add_device(ctx.clone(), tx.clone()),
-            on_remove_device: Self::make_remove_device(ctx, tx),
+            on_remove_device: Self::make_remove_device(ctx.clone(), tx.clone()),
+            on_import_device_enrollment_on_mobile: Self::make_import_device_enrollment(ctx, tx),
         }
     }
 
@@ -890,30 +893,59 @@ impl SettingsCallbacks {
             });
         })
     }
+
+    #[cfg(feature = "development")]
+    fn make_import_device_enrollment(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> ImportDeviceEnrollmentCallback {
+        Arc::new(move |code: String| {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                match ctx.import_invitation_on_mobile(&code).await {
+                    Ok(()) => {
+                        let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::success(
+                            "devices",
+                            "Mobile device accepted enrollment",
+                        )));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                            "devices",
+                            e,
+                        )));
+                    }
+                }
+            });
+        })
+    }
+
+    #[cfg(not(feature = "development"))]
+    fn make_import_device_enrollment(
+        _ctx: Arc<IoContext>,
+        _tx: UiUpdateSender,
+    ) -> ImportDeviceEnrollmentCallback {
+        Arc::new(move |_code: String| {
+            // No-op in production builds
+        })
+    }
 }
 
 // =============================================================================
-// Block Callbacks
+// Block Messaging Callbacks
 // =============================================================================
 
-/// All callbacks for the block screen
+/// All callbacks for block messaging
 #[derive(Clone)]
 pub struct BlockCallbacks {
     pub on_send: BlockSendCallback,
-    pub on_invite: BlockInviteCallback,
-    pub on_navigate_neighborhood: BlockNavCallback,
-    pub on_grant_steward: GrantStewardCallback,
-    pub on_revoke_steward: RevokeStewardCallback,
 }
 
 impl BlockCallbacks {
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_send: Self::make_send(ctx.clone(), tx.clone()),
-            on_invite: Self::make_invite(ctx.clone(), tx.clone()),
-            on_navigate_neighborhood: Self::make_navigate_neighborhood(ctx.clone(), tx.clone()),
-            on_grant_steward: Self::make_grant_steward(ctx.clone(), tx.clone()),
-            on_revoke_steward: Self::make_revoke_steward(ctx, tx),
         }
     }
     fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> BlockSendCallback {
@@ -1060,96 +1092,6 @@ impl BlockCallbacks {
         })
     }
 
-    fn make_invite(ctx: Arc<IoContext>, tx: UiUpdateSender) -> BlockInviteCallback {
-        Arc::new(move |contact_id: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let contact_id_clone = contact_id.clone();
-            let cmd = EffectCommand::SendBlockInvitation {
-                contact_id: contact_id.clone(),
-            };
-            tokio::spawn(async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let _ = tx.send(UiUpdate::BlockInviteSent {
-                            contact_id: contact_id_clone,
-                        });
-                    }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                    }
-                }
-            });
-        })
-    }
-
-    fn make_navigate_neighborhood(ctx: Arc<IoContext>, tx: UiUpdateSender) -> BlockNavCallback {
-        Arc::new(move || {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let cmd = EffectCommand::MovePosition {
-                neighborhood_id: "current".to_string(),
-                block_id: "current".to_string(),
-                depth: "Street".to_string(),
-            };
-            tokio::spawn(async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let _ = tx.send(UiUpdate::NavigatedToNeighborhood);
-                    }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                    }
-                }
-            });
-        })
-    }
-
-    fn make_grant_steward(ctx: Arc<IoContext>, tx: UiUpdateSender) -> GrantStewardCallback {
-        Arc::new(move |resident_id: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let resident_id_clone = resident_id.clone();
-            let cmd = EffectCommand::GrantSteward {
-                target: resident_id.clone(),
-            };
-            tokio::spawn(async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let _ = tx.send(UiUpdate::StewardGranted {
-                            contact_id: resident_id_clone,
-                        });
-                    }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                    }
-                }
-            });
-        })
-    }
-
-    fn make_revoke_steward(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RevokeStewardCallback {
-        Arc::new(move |resident_id: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let resident_id_clone = resident_id.clone();
-            let cmd = EffectCommand::RevokeSteward {
-                target: resident_id.clone(),
-            };
-            tokio::spawn(async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let _ = tx.send(UiUpdate::StewardRevoked {
-                            contact_id: resident_id_clone,
-                        });
-                    }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                    }
-                }
-            });
-        })
-    }
 }
 
 // =============================================================================

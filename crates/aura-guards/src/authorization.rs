@@ -1,5 +1,5 @@
 use aura_core::identifiers::AuthorityId;
-use aura_wot::{BiscuitError, ResourceScope};
+use aura_authorization::{BiscuitError, ResourceScope};
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 
 pub struct BiscuitAuthorizationBridge {

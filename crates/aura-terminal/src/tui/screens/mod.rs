@@ -19,12 +19,12 @@ mod settings;
 
 // Re-export callback types from centralized callbacks module
 pub use crate::tui::callbacks::{
-    AddDeviceCallback, ApprovalCallback, BlockInviteCallback, BlockNavCallback, BlockSendCallback,
-    ChannelSelectCallback, CreateAccountCallback, CreateChannelCallback, CreateInvitationCallback,
-    ExportInvitationCallback, GoHomeCallback, GrantStewardCallback, GuardianSelectCallback,
-    ImportInvitationCallback, InvitationCallback, RecoveryCallback, RemoveDeviceCallback,
-    RetryMessageCallback, RevokeStewardCallback, SendCallback, SetTopicCallback, StartChatCallback,
-    UpdateDisplayNameCallback, UpdateNicknameCallback, UpdateThresholdCallback,
+    AddDeviceCallback, ApprovalCallback, BlockSendCallback, ChannelSelectCallback,
+    CreateAccountCallback, CreateChannelCallback, CreateInvitationCallback,
+    ExportInvitationCallback, GoHomeCallback, GuardianSelectCallback, ImportInvitationCallback,
+    InvitationCallback, RecoveryCallback, RemoveDeviceCallback, RetryMessageCallback, SendCallback,
+    SetTopicCallback, StartChatCallback, UpdateDisplayNameCallback, UpdateNicknameCallback,
+    UpdateThresholdCallback,
 };
 
 // Screen-specific callback types (use specialized types not in callbacks module)
@@ -34,7 +34,10 @@ pub use settings::MfaCallback;
 pub use app::{run_app_with_context, IoApp};
 pub use chat::{run_chat_screen, ChatFocus, ChatScreen};
 pub use contacts::{run_contacts_screen, ContactsScreen};
-pub use neighborhood_v2::{run_neighborhood_screen_v2, NeighborhoodScreenV2, NeighborhoodScreenV2Props};
+pub use neighborhood_v2::{
+    run_neighborhood_screen_v2, NeighborhoodScreenV2, NeighborhoodScreenV2Props,
+};
+pub use neighborhood_v2::block_create_modal::BlockCreateModal;
 pub use notifications::{run_notifications_screen, NotificationsScreen};
 pub use router::{NavAction, Router, Screen};
 pub use settings::{run_settings_screen, SettingsScreen};

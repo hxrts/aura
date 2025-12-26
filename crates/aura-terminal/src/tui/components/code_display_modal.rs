@@ -11,8 +11,10 @@
 
 use iocraft::prelude::*;
 
+use super::{modal_footer, status_message, ModalFooterProps, ModalStatus};
 use crate::tui::layout::dim;
 use crate::tui::theme::{Borders, Icons, Spacing, Theme};
+use crate::tui::types::KeyHint;
 
 /// Status of the code display operation
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -115,6 +117,19 @@ pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'
         "Cancel"
     } else {
         "Close"
+    };
+
+    // Footer props
+    let footer_props = ModalFooterProps::new(vec![
+        KeyHint::new("c", "Copy"),
+        KeyHint::new("Esc", footer_close_text),
+    ]);
+
+    // Error status for display
+    let error_status = if has_error {
+        ModalStatus::Error(props.error_message.clone())
+    } else {
+        ModalStatus::Idle
     };
 
     element! {
@@ -234,15 +249,7 @@ pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'
                 })
 
                 // Error message
-                #(if has_error {
-                    Some(element! {
-                        View(margin_top: Spacing::XS) {
-                            Text(content: props.error_message.clone(), color: Theme::ERROR)
-                        }
-                    })
-                } else {
-                    None
-                })
+                #(Some(status_message(&error_status).into()))
 
                 // Copy feedback
                 #(if props.copied {
@@ -258,30 +265,7 @@ pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'
             }
 
             // Footer
-            View(
-                width: 100pct,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                gap: Spacing::LG,
-                padding_left: Spacing::PANEL_PADDING,
-                padding_right: Spacing::PANEL_PADDING,
-                padding_top: Spacing::XS,
-                padding_bottom: Spacing::XS,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                // c to copy
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "c", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Copy", color: Theme::TEXT_MUTED)
-                }
-                // Esc to close
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: footer_close_text.to_string(), color: Theme::TEXT_MUTED)
-                }
-            }
+            #(Some(modal_footer(&footer_props).into()))
         }
     }
 }

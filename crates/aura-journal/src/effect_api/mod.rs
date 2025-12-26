@@ -10,7 +10,7 @@
 //!
 //! **Design Principle** (per docs/109_authorization.md):
 //! All security-critical mutations recorded as AttestedOp (threshold signatures) in fact journal.
-//! Capabilities provide layered authorization via Biscuit tokens (aura-wot/biscuit) evaluated at
+//! Capabilities provide layered authorization via Biscuit tokens (aura-authorization/biscuit) evaluated at
 //! message entry point (aura-protocol/guards/CapGuard).
 
 pub mod capability;

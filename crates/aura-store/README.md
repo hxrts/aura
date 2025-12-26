@@ -18,7 +18,7 @@ This crate provides pure storage domain logic for the Aura platform, including c
 
 ## Storage Authorization - MOVED ⚠️
 
-**Storage authorization has moved to `aura-wot`** as part of the authorization unification effort.
+**Storage authorization has moved to `aura-authorization`** as part of the authorization unification effort.
 
 ### Migration Guide
 
@@ -40,16 +40,16 @@ use aura_wot::{
 
 ### Why the Move?
 
-Authorization logic belongs in the `aura-wot` (Web of Trust) crate to maintain proper domain separation:
+Authorization logic belongs in the `aura-authorization` (Web of Trust) crate to maintain proper domain separation:
 - `aura-store`: Pure storage semantics (chunks, manifests, indices)
-- `aura-wot`: Authorization and capability evaluation (Biscuit tokens, permissions)
+- `aura-authorization`: Authorization and capability evaluation (Biscuit tokens, permissions)
 
 This eliminates circular dependencies and improves architectural clarity.
 
 ### See Also
 
 - [`docs/109_authorization.md`](../../docs/109_authorization.md) - Complete authorization guide
-- [`aura-wot` crate](../aura-wot/) - Authorization implementation
+- [`aura-authorization` crate](../aura-authorization/) - Authorization implementation
 
 ## Core Concepts
 
@@ -95,7 +95,7 @@ let query = SearchQuery {
 
 - **Effect handlers**: Actual filesystem operations live in `aura-effects`
 - **Coordination**: Multi-party storage protocols live in `aura-protocol`
-- **Authorization**: Biscuit-based access control now lives in `aura-wot`
+- **Authorization**: Biscuit-based access control now lives in `aura-authorization`
 - **Runtime**: Storage system assembly lives in `aura-composition` and `aura-agent`
 
 ## API Overview
@@ -114,7 +114,7 @@ let query = SearchQuery {
 - `StorageResource` - Path-based or chunk-based resources
 - `AccessDecision` - Allow/Deny with reasons
 
-**Note**: Biscuit token evaluation now in `aura-wot`.
+**Note**: Biscuit token evaluation now in `aura-authorization`.
 
 ### Search
 
@@ -146,7 +146,7 @@ let config = ErasureConfig {
 
 let layout = compute_chunk_layout(1024 * 1024, config); // 1MB file
 
-// Define storage permissions (evaluation in aura-wot)
+// Define storage permissions (evaluation in aura-authorization)
 let capability = StorageCapability {
     resource: StorageResource::Path("/documents/report.pdf".into()),
     permissions: vec![StoragePermission::Read],
@@ -155,7 +155,7 @@ let capability = StorageCapability {
 
 ## Documentation
 
-- [Authorization](../../docs/109_authorization.md) - Biscuit token system (in aura-wot)
+- [Authorization](../../docs/109_authorization.md) - Biscuit token system (in aura-authorization)
 - [Architecture](../../docs/001_system_architecture.md) - Layer 2 domain patterns
 
 ## Testing

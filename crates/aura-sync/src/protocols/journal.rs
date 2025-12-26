@@ -45,7 +45,7 @@ use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::time::PhysicalTime;
 use aura_core::{AccountId, AttestedOp, DeviceId};
 use aura_guards::BiscuitGuardEvaluator;
-use aura_wot::BiscuitTokenManager;
+use aura_authorization::BiscuitTokenManager;
 use futures;
 
 // =============================================================================

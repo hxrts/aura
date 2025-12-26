@@ -126,7 +126,7 @@ All crates that track session state use the canonical definition from `aura-core
 The capability system intentionally uses multiple architectural layers. Each layer serves legitimate purposes.
 
 - **Canonical types** in `aura-core` provide lightweight references
-- **Authorization layer** (`aura-wot`) adds policy enforcement features
+- **Authorization layer** (`aura-authorization`) adds policy enforcement features
 - **Storage layer** (`aura-store`) implements capability-based access control
 
 Clear conversion paths enable inter-layer communication without confusion.

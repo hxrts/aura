@@ -230,10 +230,10 @@ check_cargo() {
 layer_of() {
   case "$1" in
     aura-core) echo 1 ;;
-    aura-journal|aura-wot|aura-verify|aura-store|aura-transport|aura-mpst|aura-macros) echo 2 ;;
+    aura-journal|aura-authorization|aura-signature|aura-store|aura-transport|aura-mpst|aura-macros) echo 2 ;;
     aura-effects|aura-composition) echo 3 ;;
     aura-protocol|aura-guards|aura-consensus|aura-amp|aura-anti-entropy|aura-bridge) echo 4 ;;
-    aura-authenticate|aura-chat|aura-invitation|aura-recovery|aura-relational|aura-rendezvous|aura-sync|aura-app) echo 5 ;;
+    aura-authentication|aura-chat|aura-invitation|aura-recovery|aura-relational|aura-rendezvous|aura-sync|aura-app) echo 5 ;;
     aura-agent|aura-simulator) echo 6 ;;
     aura-terminal) echo 7 ;;
     aura-testkit|aura-quint) echo 8 ;;
@@ -254,7 +254,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_LAYERS" = true ]; then
   fi
 
   # Domain crates should not depend on runtime/UI layers
-  for crate in aura-authenticate aura-app aura-chat aura-invitation aura-recovery aura-relational aura-rendezvous aura-sync; do
+  for crate in aura-authentication aura-app aura-chat aura-invitation aura-recovery aura-relational aura-rendezvous aura-sync; do
     if [ -d "crates/$crate" ]; then
       if grep -A20 "^\[dependencies\]" crates/$crate/Cargo.toml | grep -E "aura-agent|aura-simulator|aura-terminal" >/dev/null; then
         violation "$crate depends on runtime/UI layers"
@@ -328,7 +328,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   fi
 
   # Check for direct OS operations in domain handlers
-  domain_crates="aura-journal|aura-wot|aura-verify|aura-store|aura-transport|aura-authenticate|aura-recovery|aura-relational"
+  domain_crates="aura-journal|aura-authorization|aura-signature|aura-store|aura-transport|aura-authentication|aura-recovery|aura-relational"
   os_violations=$(find crates/ -path "*/src/*" -name "*.rs" | grep -E "($domain_crates)" | xargs grep -l "std::fs::\|SystemTime::now\|thread_rng()" 2>/dev/null | grep -v "test" || true)
   emit_hits "Direct OS operations in domain crates (should use effect injection)" "$os_violations"
 
@@ -373,7 +373,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   # Allowlist: effect handlers, agent runtime, simulator, terminal UI, composition, testkit, app core (native feature), tests
   # Layer 6 (runtime) and Layer 7 (UI) are allowed to use tokio directly
   # Layer 5 aura-app uses tokio for signal forwarding (cfg-gated for native platforms)
-  # Note: aura-wot/storage_authorization.rs uses tokio::sync::RwLock for AuthorizedStorageHandler
+  # Note: aura-authorization/storage_authorization.rs uses tokio::sync::RwLock for AuthorizedStorageHandler
   # which is a handler wrapper that should eventually move to aura-composition (tracked technical debt)
   # Note: aura-core/effects/reactive.rs uses tokio::sync::broadcast for SignalStream<T> which is
   # part of the ReactiveEffects trait API. This should be abstracted to a runtime-agnostic stream
@@ -386,7 +386,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-composition/" \
     | grep -v "crates/aura-testkit/" \
     | grep -Ev "$APP_NATIVE_ALLOWLIST" \
-    | grep -v "crates/aura-wot/src/storage_authorization.rs" \
+    | grep -v "crates/aura-authorization/src/storage_authorization.rs" \
     | grep -v "crates/aura-core/src/effects/reactive.rs" \
     | grep -v "#\\[tokio::test\\]" \
     | grep -v "#\\[async_std::test\\]" \
@@ -664,7 +664,7 @@ fi
 if [ "$RUN_ALL" = true ] || [ "$RUN_REG" = true ]; then
   section "Handler composition — instantiate aura-effects via EffectRegistry/aura-composition, not direct new(); see docs/106_effect_system_and_runtime.md §3.3 and docs/999_project_structure.md §Layer 3"
   handler_pattern="(aura_effects::.*Handler::new|PhysicalTimeHandler::new|RealRandomHandler::new|FilesystemStorageHandler::new|EncryptedStorageHandler::new|TcpNetworkHandler::new|RealCryptoHandler::new)"
-  instantiation=$(rg --no-heading "$handler_pattern" crates/aura-protocol/src crates/aura-authenticate/src crates/aura-chat/src crates/aura-invitation/src crates/aura-recovery/src crates/aura-relational/src crates/aura-rendezvous/src crates/aura-sync/src -g "*.rs" -g "!tests/**/*" || true)
+  instantiation=$(rg --no-heading "$handler_pattern" crates/aura-protocol/src crates/aura-authentication/src crates/aura-chat/src crates/aura-invitation/src crates/aura-recovery/src crates/aura-relational/src crates/aura-rendezvous/src crates/aura-sync/src -g "*.rs" -g "!tests/**/*" || true)
   emit_hits "Direct aura-effects handler instantiation found (prefer EffectRegistry / composition)" "$instantiation"
 fi
 

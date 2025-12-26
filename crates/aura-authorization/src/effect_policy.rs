@@ -22,7 +22,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use aura_wot::effect_policy::{EffectPolicyRegistry, OperationType, EffectTiming};
+//! use aura_authorization::effect_policy::{EffectPolicyRegistry, OperationType, EffectTiming};
 //!
 //! let registry = EffectPolicyRegistry::default();
 //!

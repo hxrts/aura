@@ -6,7 +6,7 @@
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::config::load_config_utf8;
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_authenticate::{DkdConfig, DkdProtocol};
+use aura_authentication::{DkdConfig, DkdProtocol};
 use aura_core::DeviceId;
 use std::path::PathBuf;
 use uuid::Uuid;

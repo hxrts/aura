@@ -29,7 +29,7 @@
 //!
 //! Storage capability types (`StorageCapability`, `StorageResource`) are **metadata**
 //! describing required access levels. Actual authorization is performed via Biscuit
-//! tokens - see `aura-wot` for the authorization implementation.
+//! tokens - see `aura-authorization` for the authorization implementation.
 //!
 //! ## What's NOT in this crate
 //!
@@ -62,7 +62,7 @@ pub mod errors;
 /// Encrypted local storage for CLI/TUI preferences
 pub mod local;
 
-// Biscuit-based storage authorization moved to aura-wot (proper domain)
+// Biscuit-based storage authorization moved to aura-authorization (proper domain)
 
 // Re-export core types from aura-core
 pub use aura_core::{ChunkId, ContentId, ContentSize};
@@ -81,5 +81,5 @@ pub use local::{
 };
 pub use search::{SearchIndexEntry, SearchQuery, SearchResults, SearchScope};
 
-// Biscuit authorization APIs now available from aura-wot
-// Import like: use aura_wot::{BiscuitStorageEvaluator, StoragePermission, etc.}
+// Biscuit authorization APIs now available from aura-authorization
+// Import like: use aura_authorization::{BiscuitStorageEvaluator, StoragePermission, etc.}

@@ -139,6 +139,8 @@ pub enum EffectCommand {
         topic: Option<String>,
         /// Member authority IDs to add
         members: Vec<String>,
+        /// Optional threshold k (m-of-n)
+        threshold_k: u8,
     },
     /// Close/archive a channel
     CloseChannel {

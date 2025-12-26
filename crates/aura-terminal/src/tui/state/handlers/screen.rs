@@ -9,7 +9,7 @@ use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::QueuedModal;
 use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
-    AddDeviceModalState, ChatFocus, CreateChannelModalState, DetailFocus, DisplayNameModalState,
+    AddDeviceModalState, ChatFocus, DetailFocus, DisplayNameModalState,
     ImportInvitationModalState, NeighborhoodMode,
 };
 use super::super::TuiState;
@@ -72,11 +72,7 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
             _ => {}
         },
         KeyCode::Char('n') => {
-            // Open create channel modal via queue
-            let modal_state = CreateChannelModalState::new();
-            state
-                .modal_queue
-                .enqueue(QueuedModal::ChatCreate(modal_state));
+            commands.push(TuiCommand::Dispatch(DispatchCommand::OpenChatCreateWizard));
         }
         KeyCode::Char('t') => {
             // Open topic edit modal via dispatch (shell populates selected channel details)
@@ -135,8 +131,8 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             // Start chat with selected contact
             commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat));
         }
-        KeyCode::Char('i') => {
-            // Open import invitation modal via queue (accept an invitation code)
+        KeyCode::Char('a') => {
+            // Open accept invitation modal via queue
             state.modal_queue.enqueue(QueuedModal::ContactsImport(
                 ImportInvitationModalState::default(),
             ));
@@ -192,10 +188,32 @@ pub fn handle_neighborhood_key(
                 ));
             }
             KeyCode::Enter => {
+                if state.neighborhood.block_count > 0 {
+                    state.neighborhood.mode = NeighborhoodMode::Detail;
+                    state.neighborhood.entered_block_id =
+                        Some(state.neighborhood.selected_block.to_string());
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::EnterBlock));
+                }
+            }
+            KeyCode::Char('a') => {
+                // Open accept invitation modal
+                state
+                    .modal_queue
+                    .enqueue(QueuedModal::ContactsImport(ImportInvitationModalState::default()));
+            }
+            KeyCode::Char('i') => {
+                // Enter block in insert mode (like chat screen)
                 state.neighborhood.mode = NeighborhoodMode::Detail;
                 state.neighborhood.entered_block_id =
                     Some(state.neighborhood.selected_block.to_string());
+                state.neighborhood.insert_mode = true;
+                state.neighborhood.insert_mode_entry_char = Some('i');
+                state.neighborhood.detail_focus = DetailFocus::Input;
                 commands.push(TuiCommand::Dispatch(DispatchCommand::EnterBlock));
+            }
+            KeyCode::Char('n') => {
+                // Create a new block
+                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenBlockCreate));
             }
             KeyCode::Char('g') | KeyCode::Char('H') => {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::GoHome));
@@ -281,6 +299,7 @@ pub fn handle_neighborhood_key(
 
 /// Handle settings screen key events
 pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
+    let previous_section = state.settings.section;
     match key.code {
         KeyCode::Left | KeyCode::Char('h') => {
             state.settings.focus = state.settings.focus.toggle();
@@ -350,8 +369,15 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 state.modal_queue.enqueue(QueuedModal::SettingsAddDevice(
                     AddDeviceModalState::default(),
                 ));
-            } else if state.settings.section == SettingsSection::Recovery {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::ApproveRecovery));
+            }
+        }
+        KeyCode::Char('i') => {
+            if state.settings.section == SettingsSection::Devices {
+                state
+                    .modal_queue
+                    .enqueue(QueuedModal::SettingsDeviceImport(
+                        ImportInvitationModalState::default(),
+                    ));
             }
         }
         KeyCode::Char('s') => {
@@ -360,6 +386,40 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             }
         }
         _ => {}
+    }
+
+    if key.modifiers.ctrl()
+        && state.settings.section == SettingsSection::Devices
+        && matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'))
+    {
+        if !state.settings.last_device_enrollment_code.is_empty() {
+            state
+                .modal_queue
+                .enqueue(QueuedModal::SettingsDeviceImport(
+                    ImportInvitationModalState::with_code(
+                        &state.settings.last_device_enrollment_code,
+                    ),
+                ));
+        } else {
+            state.next_toast_id += 1;
+            state.toast_queue.enqueue(QueuedToast::new(
+                state.next_toast_id,
+                "Start device enrollment to generate a code first",
+                ToastLevel::Warning,
+            ));
+        }
+    }
+
+    if previous_section != state.settings.section
+        && state.settings.section == SettingsSection::Devices
+        && !state.contacts.demo_alice_code.is_empty()
+    {
+        state.next_toast_id += 1;
+        state.toast_queue.enqueue(QueuedToast::new(
+            state.next_toast_id,
+            "[DEMO] Press Ctrl+m in the import modal to auto-fill the Mobile code",
+            ToastLevel::Info,
+        ));
     }
 }
 

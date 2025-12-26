@@ -619,7 +619,7 @@ async fn handle_tui_launch(
             stdio.println(format_args!(
                 "Creating demo simulator for shared transport..."
             ));
-            let sim = DemoSimulator::new(seed, base_path.clone())
+            let sim = DemoSimulator::new(seed, base_path.clone(), authority_id, context_id)
                 .await
                 .map_err(|e| AuraError::internal(format!("Failed to create simulator: {}", e)))?;
             Some(sim)
@@ -720,6 +720,8 @@ async fn handle_tui_launch(
 
             stdio.println(format_args!("Alice online: {}", sim.alice_authority()));
             stdio.println(format_args!("Carol online: {}", sim.carol_authority()));
+            stdio.println(format_args!("Mobile online: {}", sim.mobile_authority()));
+            std::env::set_var("AURA_DEMO_DEVICE_ID", sim.mobile_device_id().to_string());
 
             // Refresh UI-facing signals from the runtime, including connection status.
             if let Err(e) = aura_app::workflows::system::refresh_account(app_core.raw()).await {
@@ -772,13 +774,18 @@ async fn handle_tui_launch(
                 "  Carol invite code: {}",
                 hints.carol_invite_code
             ));
+            let demo_mobile_agent = simulator
+                .as_ref()
+                .map(|sim| sim.mobile_agent())
+                .expect("Simulator should exist in demo mode");
             let builder = IoContext::builder()
                 .with_app_core(app_core)
                 .with_base_path(base_path.clone())
                 .with_device_id(device_id_for_account.to_string())
                 .with_mode(mode)
                 .with_existing_account(has_existing_account)
-                .with_demo_hints(hints);
+                .with_demo_hints(hints)
+                .with_demo_mobile_agent(demo_mobile_agent);
 
             builder.build().map_err(|e| {
                 crate::error::TerminalError::Config(format!("IoContext build failed: {e}"))

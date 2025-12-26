@@ -19,48 +19,12 @@
 
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::screens::ChatFocus as ScreenChatFocus;
-use crate::tui::state_machine::{
-    BlockFocus, ChatFocus, CreateInvitationField, DetailFocus, GuardianCeremonyResponse,
-    GuardianSetupStep, NeighborhoodMode, QueuedModal, TuiState,
+use crate::tui::state::{
+    ChatFocus, CreateInvitationField, DetailFocus, GuardianCeremonyResponse, GuardianSetupStep,
+    NeighborhoodMode, QueuedModal, TuiState,
 };
 use crate::tui::types::TraversalDepth;
 use tracing::warn;
-
-// ============================================================================
-// Block Screen Props Extraction
-// ============================================================================
-
-/// View state extracted from TuiState for BlockScreen
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct BlockViewProps {
-    pub focus: BlockFocus,
-    pub selected_resident: usize,
-    pub message_scroll: usize,
-    pub insert_mode: bool,
-    pub input_buffer: String,
-    pub invite_modal_open: bool,
-    pub invite_selection: usize,
-}
-
-/// Extract BlockScreen view props from TuiState
-///
-/// This function extracts all view-related state needed by BlockScreen.
-/// Domain data (residents, messages, etc.) is passed separately.
-pub fn extract_block_view_props(state: &TuiState) -> BlockViewProps {
-    BlockViewProps {
-        focus: state.block.focus,
-        selected_resident: state.block.selected_resident,
-        message_scroll: state.block.message_scroll,
-        insert_mode: state.block.insert_mode,
-        input_buffer: state.block.input_buffer.clone(),
-        // Modal visibility from queue, selection from view state (used for navigation)
-        invite_modal_open: state.is_block_invite_modal_active(),
-        invite_selection: match state.modal_queue.current() {
-            Some(QueuedModal::BlockInvite(s)) => s.selected_index,
-            _ => 0,
-        },
-    }
-}
 
 // ============================================================================
 // Chat Screen Props Extraction
@@ -80,6 +44,14 @@ pub struct ChatViewProps {
     pub create_modal_topic: String,
     pub create_modal_active_field: usize,
     pub create_modal_member_count: usize,
+    pub create_modal_step: crate::tui::state::CreateChannelStep,
+    pub create_modal_contacts: Vec<(String, String)>,
+    pub create_modal_selected_indices: Vec<usize>,
+    pub create_modal_focused_index: usize,
+    pub create_modal_threshold_k: u8,
+    pub create_modal_threshold_n: u8,
+    pub create_modal_status: String,
+    pub create_modal_error: String,
     // Topic modal
     pub topic_modal_visible: bool,
     pub topic_modal_value: String,
@@ -101,16 +73,55 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
     };
 
     // Extract modal state from queue (all modals now use queue system)
-    let (create_visible, create_name, create_topic, create_field, create_member_count) =
+    let (
+        create_visible,
+        create_name,
+        create_topic,
+        create_field,
+        create_member_count,
+        create_step,
+        create_contacts,
+        create_selected,
+        create_focused,
+        create_threshold_k,
+        create_threshold_n,
+        create_status,
+        create_error,
+    ) =
         match state.modal_queue.current() {
             Some(QueuedModal::ChatCreate(s)) => (
                 true,
                 s.name.clone(),
                 s.topic.clone(),
                 s.active_field,
-                s.member_ids.len(),
+                s.selected_indices.len(),
+                s.step.clone(),
+                s.contacts
+                    .iter()
+                    .map(|c| (c.id.clone(), c.name.clone()))
+                    .collect(),
+                s.selected_indices.clone(),
+                s.focused_index,
+                s.threshold_k,
+                s.total_participants(),
+                s.status.clone().unwrap_or_default(),
+                s.error.clone().unwrap_or_default(),
             ),
-            _ => (false, String::new(), String::new(), 0, 0),
+            _ => (
+                false,
+                String::new(),
+                String::new(),
+                0,
+                0,
+                crate::tui::state::CreateChannelStep::default(),
+                vec![],
+                vec![],
+                0,
+                1,
+                1,
+                String::new(),
+                String::new(),
+            ),
         };
 
     let (topic_visible, topic_value) = match state.modal_queue.current() {
@@ -135,6 +146,14 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
         create_modal_topic: create_topic,
         create_modal_active_field: create_field,
         create_modal_member_count: create_member_count,
+        create_modal_step: create_step,
+        create_modal_contacts: create_contacts,
+        create_modal_selected_indices: create_selected,
+        create_modal_focused_index: create_focused,
+        create_modal_threshold_k: create_threshold_k,
+        create_modal_threshold_n: create_threshold_n,
+        create_modal_status: create_status,
+        create_modal_error: create_error,
         // Topic modal (from queue)
         topic_modal_visible: topic_visible,
         topic_modal_value: topic_value,
@@ -391,6 +410,9 @@ pub struct SettingsViewProps {
     // Add device modal
     pub add_device_modal_visible: bool,
     pub add_device_modal_name: String,
+    // Import device enrollment code modal
+    pub device_import_modal_visible: bool,
+    pub device_import_modal_code: String,
     // Device enrollment ceremony modal
     pub device_enrollment_modal_visible: bool,
     pub device_enrollment_modal_ceremony_id: String,
@@ -430,6 +452,11 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
 
     let (add_device_visible, add_device_name) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsAddDevice(s)) => (true, s.name.clone()),
+        _ => (false, String::new()),
+    };
+
+    let (device_import_visible, device_import_code) = match state.modal_queue.current() {
+        Some(QueuedModal::SettingsDeviceImport(s)) => (true, s.code.clone()),
         _ => (false, String::new()),
     };
 
@@ -545,6 +572,9 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         // Add device modal (from queue)
         add_device_modal_visible: add_device_visible,
         add_device_modal_name: add_device_name,
+        // Import device enrollment code modal (from queue)
+        device_import_modal_visible: device_import_visible,
+        device_import_modal_code: device_import_code,
         // Device enrollment ceremony modal (from queue)
         device_enrollment_modal_visible: enrollment_visible,
         device_enrollment_modal_ceremony_id: enrollment_ceremony_id,
@@ -602,10 +632,37 @@ pub struct NeighborhoodViewProps {
     pub message_scroll: usize,
     pub message_count: usize,
     pub steward_actions_enabled: bool,
+    // Block create modal
+    pub block_create_modal_visible: bool,
+    pub block_create_modal_name: String,
+    pub block_create_modal_description: String,
+    pub block_create_modal_active_field: usize,
+    pub block_create_modal_error: Option<String>,
+    pub block_create_modal_creating: bool,
 }
 
 /// Extract NeighborhoodScreen view props from TuiState
 pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProps {
+    // Block create modal (from queue)
+    let (
+        block_create_visible,
+        block_create_name,
+        block_create_description,
+        block_create_active_field,
+        block_create_error,
+        block_create_creating,
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::NeighborhoodBlockCreate(s)) => (
+            true,
+            s.name.clone(),
+            s.description.clone(),
+            s.active_field,
+            s.error.clone(),
+            s.creating,
+        ),
+        _ => (false, String::new(), String::new(), 0, None, false),
+    };
+
     NeighborhoodViewProps {
         mode: state.neighborhood.mode,
         detail_focus: state.neighborhood.detail_focus,
@@ -627,6 +684,13 @@ pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProp
         message_scroll: state.neighborhood.message_scroll,
         message_count: state.neighborhood.message_count,
         steward_actions_enabled: state.neighborhood.steward_actions_enabled,
+        // Block create modal
+        block_create_modal_visible: block_create_visible,
+        block_create_modal_name: block_create_name,
+        block_create_modal_description: block_create_description,
+        block_create_modal_active_field: block_create_active_field,
+        block_create_modal_error: block_create_error,
+        block_create_modal_creating: block_create_creating,
     }
 }
 
@@ -657,32 +721,6 @@ pub fn extract_help_view_props(state: &TuiState) -> HelpViewProps {
 #[allow(clippy::field_reassign_with_default)] // Tests construct state incrementally
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_block_view_props_extraction() {
-        use crate::tui::state_machine::ContactSelectModalState;
-
-        let mut state = TuiState::new();
-        state.block.insert_mode = true;
-        state.block.focus = BlockFocus::Input;
-        state.block.input_buffer = "hello".to_string();
-        state.block.selected_resident = 3;
-        // Use queue for modal visibility
-        state.modal_queue.enqueue(QueuedModal::BlockInvite({
-            let mut m = ContactSelectModalState::default();
-            m.selected_index = 2;
-            m
-        }));
-
-        let props = extract_block_view_props(&state);
-
-        assert!(props.insert_mode, "insert_mode must be extracted");
-        assert_eq!(props.focus, BlockFocus::Input);
-        assert_eq!(props.input_buffer, "hello");
-        assert_eq!(props.selected_resident, 3);
-        assert!(props.invite_modal_open);
-        assert_eq!(props.invite_selection, 2);
-    }
 
     #[test]
     fn test_chat_view_props_extraction() {

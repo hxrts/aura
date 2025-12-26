@@ -10,13 +10,13 @@ use std::time::Duration;
 use iocraft::prelude::*;
 
 use aura_app::signal_defs::{
-    ConnectionStatus, NetworkStatus, BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL,
-    CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
-    NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+    ConnectionStatus, NetworkStatus, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
+    INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL,
+    SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
-use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest, Resident};
+use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
 pub struct NavStatusSignals {
@@ -240,69 +240,6 @@ pub fn use_devices_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> 
     shared_devices
 }
 
-/// Shared residents state (current block) that can be read by closures without re-rendering.
-///
-/// This is used for block actions that operate on the currently selected resident.
-pub type SharedResidents = Arc<RwLock<Vec<Resident>>>;
-
-/// Create a shared residents holder and subscribe it to BLOCKS_SIGNAL (preferred) and BLOCK_SIGNAL (fallback).
-///
-/// Priority: if BLOCKS_SIGNAL has a current block, it wins; otherwise BLOCK_SIGNAL is used.
-pub fn use_residents_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> SharedResidents {
-    let shared_residents_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
-    let shared_residents: SharedResidents = shared_residents_ref.read().clone();
-
-    let has_blocks_current_ref = hooks.use_ref(|| Arc::new(AtomicBool::new(false)));
-    let has_blocks_current = has_blocks_current_ref.read().clone();
-
-    // Preferred: multi-block state.
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let residents = shared_residents.clone();
-        let has_blocks_current = has_blocks_current.clone();
-        async move {
-            subscribe_signal_with_retry(app_core, &*BLOCKS_SIGNAL, move |blocks_state| {
-                if let Some(block) = blocks_state.current_block() {
-                    has_blocks_current.store(true, Ordering::Relaxed);
-                    let list: Vec<Resident> = block.residents.iter().map(Resident::from).collect();
-                    if let Ok(mut guard) = residents.write() {
-                        *guard = list;
-                    }
-                } else {
-                    has_blocks_current.store(false, Ordering::Relaxed);
-                    if let Ok(mut guard) = residents.write() {
-                        guard.clear();
-                    }
-                }
-            })
-            .await;
-        }
-    });
-
-    // Fallback: legacy singular block state.
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let residents = shared_residents.clone();
-        let has_blocks_current = has_blocks_current.clone();
-        async move {
-            subscribe_signal_with_retry(app_core, &*BLOCK_SIGNAL, move |block_state| {
-                if has_blocks_current.load(Ordering::Relaxed) {
-                    return;
-                }
-
-                let list: Vec<Resident> =
-                    block_state.residents.iter().map(Resident::from).collect();
-                if let Ok(mut guard) = residents.write() {
-                    *guard = list;
-                }
-            })
-            .await;
-        }
-    });
-
-    shared_residents
-}
-
 /// Shared messages state that can be read by closures without re-rendering.
 ///
 /// This uses Arc<RwLock<Vec<Message>>> instead of State<T> because:
@@ -423,7 +360,14 @@ pub fn use_neighborhood_blocks_subscription(
         let blocks = shared_blocks.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
-                let ids: Vec<String> = n.neighbors.iter().map(|b| b.id.to_string()).collect();
+                let mut ids: Vec<String> = Vec::with_capacity(n.neighbors.len() + 1);
+                ids.push(n.home_block_id.to_string());
+                ids.extend(
+                    n.neighbors
+                        .iter()
+                        .filter(|b| b.id != n.home_block_id)
+                        .map(|b| b.id.to_string()),
+                );
                 if let Ok(mut guard) = blocks.write() {
                     *guard = ids;
                 }

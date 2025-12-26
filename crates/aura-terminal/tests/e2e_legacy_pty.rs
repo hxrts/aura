@@ -4219,16 +4219,16 @@ async fn test_tui_freeze_diagnostic() {
             test_start.elapsed().as_secs()
         );
 
-        // Operation 1: Navigate to Block screen
-        match timed_op("goto Block (1)", freeze_timeout_secs, || tui.goto_screen(1)) {
+        // Operation 1: Navigate to Neighborhood screen
+        match timed_op("goto Neighborhood (1)", freeze_timeout_secs, || tui.goto_screen(1)) {
             Ok((_, ms)) => {
                 total_operations += 1;
                 if ms > 1000 {
                     slow_operations += 1;
                 }
                 max_operation_time_ms = max_operation_time_ms.max(ms);
-                operation_times.push(("goto Block".to_string(), ms));
-                println!("  ✓ goto Block: {}ms", ms);
+                operation_times.push(("goto Neighborhood".to_string(), ms));
+                println!("  ✓ goto Neighborhood: {}ms", ms);
             }
             Err(e) => {
                 println!("  ✗ {}", e);

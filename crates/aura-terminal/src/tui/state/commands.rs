@@ -38,17 +38,10 @@ pub enum DispatchCommand {
     // Navigation
     NavigateTo(Screen),
 
-    // Block screen
+    // Block messaging
     SendBlockMessage {
         content: String,
     },
-    InviteToBlock {
-        contact_id: String,
-    },
-    /// Open block invite modal (shell will populate contacts)
-    OpenBlockInvite,
-    GrantStewardSelected,
-    RevokeStewardSelected,
 
     // Chat screen
     SelectChannel {
@@ -60,11 +53,12 @@ pub enum DispatchCommand {
     RetryMessage,
     OpenChatTopicModal,
     OpenChatInfoModal,
-    OpenChatMemberSelect,
+    OpenChatCreateWizard,
     CreateChannel {
         name: String,
         topic: Option<String>,
         members: Vec<String>,
+        threshold_k: u8,
     },
     SetChannelTopic {
         channel_id: String,
@@ -159,11 +153,22 @@ pub enum DispatchCommand {
     RemoveDevice {
         device_id: String,
     },
+    /// Demo-only: import device enrollment code on the Mobile agent.
+    ImportDeviceEnrollmentOnMobile {
+        code: String,
+    },
 
     // Neighborhood screen
     EnterBlock,
     GoHome,
     BackToStreet,
+    /// Open block creation flow
+    OpenBlockCreate,
+    /// Create a new block
+    CreateBlock {
+        name: String,
+        description: Option<String>,
+    },
 
     // Account setup
     CreateAccount {

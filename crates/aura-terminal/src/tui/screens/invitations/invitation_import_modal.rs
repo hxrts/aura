@@ -5,8 +5,12 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use crate::tui::components::{
+    modal_footer, modal_header, status_message, ModalFooterProps, ModalHeaderProps, ModalStatus,
+};
 use crate::tui::layout::dim;
 use crate::tui::theme::{Borders, Spacing, Theme};
+use crate::tui::types::KeyHint;
 
 /// Callback type for modal cancel
 pub type CancelCallback = Arc<dyn Fn() + Send + Sync>;
@@ -68,6 +72,31 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
         Theme::TEXT
     };
 
+    // Header props
+    let header_props = ModalHeaderProps::new("Accept Invitation");
+
+    // Platform-specific paste key hint
+    #[cfg(target_os = "macos")]
+    let paste_key = "Cmd + v";
+    #[cfg(not(target_os = "macos"))]
+    let paste_key = "Ctrl + v";
+
+    // Footer props
+    let footer_props = ModalFooterProps::new(vec![
+        KeyHint::new("Esc", "Cancel"),
+        KeyHint::new(paste_key, "Paste"),
+        KeyHint::new("Enter", "Accept"),
+    ]);
+
+    // Status for error/importing
+    let status = if !error.is_empty() {
+        ModalStatus::Error(error.clone())
+    } else if importing {
+        ModalStatus::Loading("Importing...".to_string())
+    } else {
+        ModalStatus::Idle
+    };
+
     element! {
         View(
             width: dim::TOTAL_WIDTH,
@@ -79,21 +108,7 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
             overflow: Overflow::Hidden,
         ) {
             // Header
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(
-                    content: "Import Invitation",
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-            }
+            #(Some(modal_header(&header_props).into()))
 
             // Body - fills available space
             View(
@@ -128,53 +143,12 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                     )
                 }
 
-                // Error message (if any)
-                #(if !error.is_empty() {
-                    Some(element! {
-                        View(margin_bottom: Spacing::XS) {
-                            Text(content: error, color: Theme::ERROR)
-                        }
-                    })
-                } else {
-                    None
-                })
-
-                // Status message
-                #(if importing {
-                    Some(element! {
-                        View(margin_top: Spacing::XS) {
-                            Text(content: "Importing...", color: Theme::WARNING)
-                        }
-                    })
-                } else {
-                    None
-                })
+                // Status message (error/loading)
+                #(Some(status_message(&status).into()))
             }
 
-            // Footer with key hints
-            View(
-                width: 100pct,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                padding: Spacing::PANEL_PADDING,
-                gap: Spacing::LG,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Ctrl+V", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Paste", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Import", color: Theme::TEXT_MUTED)
-                }
-            }
+            // Footer
+            #(Some(modal_footer(&footer_props).into()))
         }
     }
 }

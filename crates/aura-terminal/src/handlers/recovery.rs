@@ -7,7 +7,7 @@
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_authenticate::{RecoveryContext, RecoveryOperationType};
+use aura_authentication::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{JournalEffects, StorageEffects};
 use aura_core::hash;
 use aura_core::identifiers::ContextId;

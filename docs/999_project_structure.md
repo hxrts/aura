@@ -111,8 +111,8 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 | Crate | Domain | Responsibility |
 |-------|--------|-----------------|
 | `aura-journal` | Fact-based journal | CRDT semantics, tree state machine, reduction logic, validation (re-exports tree types from `aura-core`) |
-| `aura-wot` | Trust and authorization | Capability refinement, Biscuit token helpers |
-| `aura-verify` | Identity semantics | Signature verification, device lifecycle |
+| `aura-authorization` | Trust and authorization | Capability refinement, Biscuit token helpers |
+| `aura-signature` | Identity semantics | Signature verification, device lifecycle |
 | `aura-store` | Storage domain | Storage types, capabilities, domain logic |
 | `aura-transport` | Transport semantics | P2P communication abstractions |
 
@@ -273,7 +273,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 | Crate | Protocol | Purpose |
 |-------|----------|---------|
-| `aura-authenticate` | Authentication | Device, threshold, and guardian auth flows |
+| `aura-authentication` | Authentication | Device, threshold, and guardian auth flows |
 | `aura-chat` | Chat | Chat domain facts + view reducers; local chat prototype |
 | `aura-invitation` | Invitations | Peer onboarding and relational facts |
 | `aura-recovery` | Guardian recovery | Recovery grants and dispute escalation |
@@ -357,7 +357,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 crates/
 ├── aura-agent           Runtime composition and agent lifecycle
 ├── aura-app             Portable headless application core (multi-platform)
-├── aura-authenticate    Authentication protocols
+├── aura-authentication    Authentication protocols
 ├── aura-anti-entropy    Anti-entropy sync and reconciliation
 ├── aura-amp             Authenticated messaging protocol (AMP)
 ├── aura-bridge          Handler/effect bridge adapters
@@ -383,8 +383,8 @@ crates/
 ├── aura-terminal        Terminal UI (CLI + TUI)
 ├── aura-testkit         Testing utilities and fixtures
 ├── aura-transport       P2P communication layer
-├── aura-verify          Identity verification
-└── aura-wot             Web-of-trust authorization
+├── aura-signature          Identity verification
+└── aura-authorization             Web-of-trust authorization
 ```
 
 ## Dependency Graph
@@ -395,9 +395,9 @@ graph TD
     types[aura-core]
 
     %% Specification Layer
-    verify[aura-verify]
+    verify[aura-signature]
     journal[aura-journal]
-    wot[aura-wot]
+    wot[aura-authorization]
     store[aura-store]
     transport[aura-transport]
     mpst[aura-mpst]
@@ -418,7 +418,7 @@ graph TD
     bridge[aura-bridge]
 
     %% Feature Layer
-    auth[aura-authenticate]
+    auth[aura-authentication]
     chat[aura-chat]
     recovery[aura-recovery]
     invitation[aura-invitation]
@@ -598,8 +598,8 @@ Application effects encode Aura-specific abstractions and business logic. These 
 **Examples**:
 - `JournalEffects`: Fact-based journal operations, specific to Aura's CRDT design (aura-journal)
 - `AuthorityEffects`: Authority-specific operations, central to Aura's identity model
-- `FlowBudgetEffects`: Privacy budget management, unique to Aura's information flow control (aura-wot)
-- `AuthorizationEffects`: Biscuit token evaluation, tied to Aura's capability system (aura-wot)
+- `FlowBudgetEffects`: Privacy budget management, unique to Aura's information flow control (aura-authorization)
+- `AuthorizationEffects`: Biscuit token evaluation, tied to Aura's capability system (aura-authorization)
 - `RelationalContextEffects`: Cross-authority relationship management
 - `GuardianEffects`: Recovery protocol operations
 
@@ -608,7 +608,7 @@ Application effects encode Aura-specific abstractions and business logic. These 
 - `EffectApiEffects`: Event sourcing and audit for protocols
 - `SyncEffects`: Anti-entropy synchronization operations
 
-**Implementation Location**: Application effects are implemented in their respective domain crates (`aura-journal`, `aura-wot`, etc.). Protocol coordination effects are implemented in Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`) as they manage multi-party state.
+**Implementation Location**: Application effects are implemented in their respective domain crates (`aura-journal`, `aura-authorization`, etc.). Protocol coordination effects are implemented in Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`) as they manage multi-party state.
 
 **Why Not in aura-effects?**: Moving these to `aura-effects` would create circular dependencies. Domain crates need to implement these effects using their own domain logic, but `aura-effects` cannot depend on domain crates due to the layered architecture.
 
@@ -1187,7 +1187,7 @@ Run before every commit to maintain architectural compliance and simulation dete
 - **CLI command** → `aura-terminal`
 - **Test scenario** → `aura-testkit`
 - **Choreography protocol** → Feature crate + `aura-mpst`
-- **Authorization logic** → `aura-wot`
+- **Authorization logic** → `aura-authorization`
 - **Consensus protocol** → `aura-consensus` (orchestration) + domain crates (state)
 - **Effect handler** → `aura-effects` (infrastructure) or domain crate (application logic)
 
@@ -1210,7 +1210,7 @@ Run before every commit to maintain architectural compliance and simulation dete
 - **How the mathematical model works** → `docs/002_theoretical_model.md`
 - **How identifiers and boundaries work** → `docs/105_identifiers_and_boundaries.md`
 - **How authorization and capabilities work** → `docs/109_authorization.md`
-- **How Biscuit tokens work** → `docs/109_authorization.md` + `aura-wot/src/biscuit/`
+- **How Biscuit tokens work** → `docs/109_authorization.md` + `aura-authorization/src/biscuit/`
 - **How to get started as a new developer** → `docs/801_hello_world_guide.md`
 - **How core systems work together** → `docs/802_core_systems_guide.md`
 - **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`
@@ -1235,7 +1235,7 @@ Run before every commit to maintain architectural compliance and simulation dete
 ### aura-core
 Foundation types and effect traits. Single source of truth for `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`, error types, configuration, and **commitment tree types** (`TreeOp`, `AttestedOp`, `Policy`, commitment functions).
 
-### aura-verify
+### aura-signature
 Signature verification and identity validation interfaces.
 
 ### aura-journal
@@ -1246,7 +1246,7 @@ CRDT semantics for fact-based journals and commitment trees. Implements tree sta
 ### aura-relational
 Cross-authority relationships, including Guardian relationship protocols with cross-authority consensus coordination and relational state management.
 
-### aura-wot
+### aura-authorization
 Meet-semilattice capability system with policy evaluation and authorization.
 
 ### aura-store
@@ -1285,7 +1285,7 @@ Anti-entropy sync and reconciliation (digest exchange, guarded sync operations).
 ### aura-bridge
 Handler/effect bridge adapters (typed and unified bridges).
 
-### aura-authenticate
+### aura-authentication
 Device, threshold, and guardian authentication protocols.
 
 ### aura-chat

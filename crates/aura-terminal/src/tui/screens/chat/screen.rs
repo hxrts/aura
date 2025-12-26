@@ -249,7 +249,11 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                     selected_index: current_channel_idx,
                     focused: false,
                 )
-                MessagePanel(messages: messages, title: None, empty_message: None)
+                MessagePanel(
+                    messages: messages,
+                    title: Some("Messages".to_string()),
+                    empty_message: Some("Select a channel to view messages".to_string()),
+                )
             }
 
             // Message input (3 rows) - full width

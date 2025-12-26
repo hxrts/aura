@@ -5,8 +5,12 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use super::{
+    modal_footer, modal_header, status_message, ModalFooterProps, ModalHeaderProps, ModalStatus,
+};
 use crate::tui::layout::dim;
 use crate::tui::theme::{Borders, Spacing, Theme};
+use crate::tui::types::KeyHint;
 
 /// Callback type for modal submit (value: String)
 pub type TextInputSubmitCallback = Arc<dyn Fn(String) + Send + Sync>;
@@ -77,6 +81,24 @@ pub fn TextInputModal(props: &TextInputModalProps) -> impl Into<AnyElement<'stat
         Theme::TEXT
     };
 
+    // Header props
+    let header_props = ModalHeaderProps::new(title);
+
+    // Footer props
+    let footer_props = ModalFooterProps::new(vec![
+        KeyHint::new("Esc", "Cancel"),
+        KeyHint::new("Enter", "Save"),
+    ]);
+
+    // Status for error/loading
+    let status = if !error.is_empty() {
+        ModalStatus::Error(error.clone())
+    } else if submitting {
+        ModalStatus::Loading("Saving...".to_string())
+    } else {
+        ModalStatus::Idle
+    };
+
     element! {
         View(
             width: dim::TOTAL_WIDTH,
@@ -88,21 +110,7 @@ pub fn TextInputModal(props: &TextInputModalProps) -> impl Into<AnyElement<'stat
             overflow: Overflow::Hidden,
         ) {
             // Header
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(
-                    content: title,
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-            }
+            #(Some(modal_header(&header_props).into()))
 
             // Body - fills available space
             View(
@@ -139,49 +147,12 @@ pub fn TextInputModal(props: &TextInputModalProps) -> impl Into<AnyElement<'stat
                     None
                 })
 
-                // Error message (if any)
-                #(if !error.is_empty() {
-                    Some(element! {
-                        View(margin_bottom: Spacing::XS) {
-                            Text(content: error, color: Theme::ERROR)
-                        }
-                    })
-                } else {
-                    None
-                })
-
-                // Status message
-                #(if submitting {
-                    Some(element! {
-                        View(margin_top: Spacing::XS) {
-                            Text(content: "Saving...", color: Theme::WARNING)
-                        }
-                    })
-                } else {
-                    None
-                })
+                // Status message (error/loading)
+                #(Some(status_message(&status).into()))
             }
 
-            // Footer with key hints
-            View(
-                width: 100pct,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                padding: Spacing::PANEL_PADDING,
-                gap: Spacing::LG,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Save", color: Theme::TEXT_MUTED)
-                }
-            }
+            // Footer
+            #(Some(modal_footer(&footer_props).into()))
         }
     }
 }

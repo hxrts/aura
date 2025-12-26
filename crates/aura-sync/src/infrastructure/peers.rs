@@ -3,16 +3,16 @@
 //! This module consolidates all peer-related logic for synchronization:
 //! - Discovering sync-capable peers via aura-rendezvous
 //! - Managing peer metadata and connection state
-//! - Capability-based peer selection via aura-wot
+//! - Capability-based peer selection via aura-authorization
 //! - Connection lifecycle management via aura-transport
 //!
 //! # Architecture
 //!
 //! The peer management system integrates with multiple Aura subsystems:
 //! - **aura-rendezvous**: Peer discovery via SBB flooding
-//! - **aura-wot**: Capability-based authorization and trust ranking
+//! - **aura-authorization**: Capability-based authorization and trust ranking
 //! - **aura-transport**: Connection establishment and management
-//! - **aura-verify**: Identity verification for discovered peers
+//! - **aura-signature**: Identity verification for discovered peers
 
 //!
 //! # Usage
@@ -75,7 +75,7 @@ pub struct PeerDiscoveryConfig {
     pub refresh_interval: Duration,
 
     /// Minimum trust level required for sync peers
-    /// Integrates with aura-wot trust ranking
+    /// Integrates with aura-authorization trust ranking
     pub min_trust_level: u8,
 
     /// Maximum number of peers to track
@@ -205,7 +205,7 @@ pub struct PeerMetadata {
     /// Last successful sync time (unified time system)
     pub last_successful_sync: PhysicalTime,
 
-    /// Trust level from aura-wot (0-100)
+    /// Trust level from aura-authorization (0-100)
     pub trust_level: u8,
 
     /// Whether peer has required sync capabilities (checked via Biscuit tokens)
@@ -302,7 +302,7 @@ pub struct PeerInfo {
     /// Basic peer metadata
     pub metadata: PeerMetadata,
 
-    /// Peer's Biscuit token (from aura-wot authorization system)
+    /// Peer's Biscuit token (from aura-authorization authorization system)
     pub token: Option<Vec<u8>>, // Serialized Biscuit token
 
     /// Connection-specific details (from aura-transport)
@@ -345,9 +345,9 @@ pub enum RelationshipType {
 ///
 /// The peer manager integrates with multiple Aura subsystems:
 /// - Uses aura-rendezvous for discovering peers via SBB
-/// - Uses aura-wot for Biscuit token-based authorization and trust ranking
+/// - Uses aura-authorization for Biscuit token-based authorization and trust ranking
 /// - Uses aura-transport for connection management
-/// - Uses aura-verify for identity verification
+/// - Uses aura-signature for identity verification
 ///
 /// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 pub struct PeerManager {
@@ -391,12 +391,12 @@ impl PeerManager {
     /// Discover peers available for synchronization
     ///
     /// This method integrates with aura-rendezvous to discover peers,
-    /// then filters based on capabilities from aura-wot.
+    /// then filters based on capabilities from aura-authorization.
     ///
     /// # Integration Points
     /// - Uses `NetworkEffects` for peer discovery
     /// - Uses `StorageEffects` to persist discovered peers
-    /// - Filters by capabilities via aura-wot integration
+    /// - Filters by capabilities via aura-authorization integration
     ///
     /// # Note
     /// Full rendezvous-based peer discovery is Week 2 work. Currently returns
@@ -443,7 +443,7 @@ impl PeerManager {
     // - validate_discovered_peer: Validates peers from discovery results
     // - extract_device_id_from_peer_token: Extracts DeviceId from peer token
     // - validate_peer_sync_capabilities: Validates peer has sync capabilities
-    // - verify_peer_identity: Verifies peer identity using aura-verify
+    // - verify_peer_identity: Verifies peer identity using aura-signature
     // =============================================================================
 
     /// Add a discovered peer to tracking
@@ -492,7 +492,7 @@ impl PeerManager {
 
     /// Update peer's Biscuit token
     ///
-    /// Integrates with aura-wot to validate token and extract capabilities
+    /// Integrates with aura-authorization to validate token and extract capabilities
     pub async fn update_peer_token(
         &mut self,
         device_id: DeviceId,

@@ -14,6 +14,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use crate::tui::components::{modal_header, status_message, ModalHeaderProps, ModalStatus};
 use crate::tui::layout::dim;
 use crate::tui::state_machine::CreateInvitationField;
 use crate::tui::theme::{Borders, Spacing, Theme};
@@ -151,6 +152,17 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
         type_label.to_string()
     };
 
+    // Header props
+    let header_props = ModalHeaderProps::new("Create Invitation")
+        .with_subtitle("Invite someone to connect with you");
+
+    // Status for error
+    let status = if has_error {
+        ModalStatus::Error(error.clone())
+    } else {
+        ModalStatus::Idle
+    };
+
     element! {
         View(
             width: dim::TOTAL_WIDTH,
@@ -162,25 +174,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
             overflow: Overflow::Hidden,
         ) {
             // Header
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(
-                    content: "Create Invitation",
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-                Text(
-                    content: "Invite someone to connect with you",
-                    color: Theme::TEXT_MUTED,
-                )
-            }
+            #(Some(modal_header(&header_props).into()))
 
             // Form content - fills available space
             View(
@@ -266,15 +260,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 }
 
                 // Error message
-                #(if has_error {
-                    Some(element! {
-                        View(margin_top: Spacing::XS) {
-                            Text(content: error, color: Theme::ERROR)
-                        }
-                    })
-                } else {
-                    None
-                })
+                #(Some(status_message(&status).into()))
             }
 
             // Footer with hints

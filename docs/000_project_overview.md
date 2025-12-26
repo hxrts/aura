@@ -24,13 +24,13 @@ The layers are as follows:
 
 1. Foundation (`aura-core`): Effect traits, domain types, cryptographic utilities, and error types.
 
-2. Specification (`aura-journal`, `aura-wot`, `aura-verify`, `aura-store`, `aura-transport`, `aura-mpst`, `aura-macros`): CRDT domains, capability systems, transport semantics, session type runtime, and choreography DSL.
+2. Specification (`aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`, `aura-mpst`, `aura-macros`): CRDT domains, capability systems, transport semantics, session type runtime, and choreography DSL.
 
 3. Implementation (`aura-effects`, `aura-composition`): Stateless production handlers and handler composition infrastructure.
 
 4. Orchestration (`aura-protocol` + `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`): Multi-party coordination, guard chain, consensus, AMP, and anti-entropy.
 
-5. Feature implementation (`aura-authenticate`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates for authentication, secure messaging, recovery, relational contexts, rendezvous, social topology, and synchronization.
+5. Feature implementation (`aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates for authentication, secure messaging, recovery, relational contexts, rendezvous, social topology, and synchronization.
 
 6. Runtime composition (`aura-agent`, `aura-simulator`, `aura-app`): Complete system assembly, deterministic simulation, and portable application core.
 

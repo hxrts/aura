@@ -14,7 +14,7 @@ use super::{
 };
 use crate::authorization::BiscuitAuthorizationBridge;
 use aura_core::{epochs::Epoch, AuraError, AuraResult, FlowBudget};
-use aura_wot::{AuthorityOp, ResourceScope};
+use aura_authorization::{AuthorityOp, ResourceScope};
 use std::future::Future;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -167,7 +167,7 @@ fn verify_biscuit_token(
 // which is insecure. Token creation and verification should use:
 //   - GuardVerificationContext for explicit verification context
 //   - Effect system metadata for token retrieval (see send_guard.rs)
-//   - BiscuitTokenManager from aura-wot for proper token management
+//   - BiscuitTokenManager from aura-authorization for proper token management
 
 /// Guard evaluation results using Biscuit authorization
 #[derive(Debug)]

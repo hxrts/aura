@@ -1,8 +1,9 @@
 //! # Demo Simulator (Real Runtime Peers)
 //!
 //! Demo mode should exercise the same runtime assembly path as production.
-//! This simulator instantiates real `AuraAgent` runtimes for Alice and Carol and
-//! runs a small automation loop on their behalf (e.g., auto-accept guardian setup).
+//! This simulator instantiates real `AuraAgent` runtimes for Alice, Carol, and a
+//! Mobile device peer and runs a small automation loop on their behalf (e.g.,
+//! auto-accept guardian setup).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use tokio::time::{interval, Duration};
 
 use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::{AuraAgent, EffectContext, SharedTransport};
+use aura_agent::handlers::InvitationType;
 use aura_core::effects::{ExecutionMode, TransportEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
@@ -22,35 +24,44 @@ use aura_recovery::guardian_setup::GuardianAcceptance;
 use crate::error::TerminalResult;
 use crate::ids;
 
-/// Demo simulator that manages Alice and Carol peer runtimes.
+/// Demo simulator that manages Alice, Carol, and Mobile peer runtimes.
 pub struct DemoSimulator {
     seed: u64,
     shared_transport: SharedTransport,
     alice: Arc<AuraAgent>,
     carol: Arc<AuraAgent>,
+    mobile: Arc<AuraAgent>,
     event_loop_handle: Option<JoinHandle<()>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
 }
 
 impl DemoSimulator {
     /// Create a new demo simulator with the given seed and base data dir.
-    pub async fn new(seed: u64, base_path: PathBuf) -> TerminalResult<Self> {
+    pub async fn new(
+        seed: u64,
+        base_path: PathBuf,
+        bob_authority: AuthorityId,
+        bob_context: ContextId,
+    ) -> TerminalResult<Self> {
         let shared_transport = SharedTransport::new();
 
         // Peer identities MUST match demo hint derivations.
         let alice_authority = ids::authority_id(&format!("demo:{}:{}:authority", seed, "Alice"));
         let carol_authority =
             ids::authority_id(&format!("demo:{}:{}:authority", seed + 1, "Carol"));
+        let mobile_authority = bob_authority;
 
         let alice_device = ids::device_id(&format!("demo:{}:{}:device", seed, "Alice"));
         let carol_device = ids::device_id(&format!("demo:{}:{}:device", seed + 1, "Carol"));
+        let mobile_device = ids::device_id(&format!("demo:{}:{}:device", seed + 2, "Mobile"));
 
         // Each peer has its own storage sandbox under the demo directory.
         let peers_root = base_path.join("peers");
         let alice_dir = peers_root.join("alice");
         let carol_dir = peers_root.join("carol");
+        let mobile_dir = peers_root.join("mobile");
 
-        let (alice, carol) = tokio::try_join!(
+        let (alice, carol, mobile) = tokio::try_join!(
             build_demo_peer_agent(
                 seed,
                 "Alice",
@@ -68,6 +79,15 @@ impl DemoSimulator {
                 carol_device,
                 carol_dir,
                 shared_transport.clone(),
+            ),
+            build_demo_peer_agent(
+                seed + 2,
+                "Mobile",
+                mobile_authority,
+                bob_context,
+                mobile_device,
+                mobile_dir,
+                shared_transport.clone(),
             )
         )?;
 
@@ -76,6 +96,7 @@ impl DemoSimulator {
             shared_transport,
             alice,
             carol,
+            mobile,
             event_loop_handle: None,
             shutdown_tx: None,
         })
@@ -99,6 +120,18 @@ impl DemoSimulator {
         self.carol.authority_id()
     }
 
+    pub fn mobile_authority(&self) -> AuthorityId {
+        self.mobile.authority_id()
+    }
+
+    pub fn mobile_agent(&self) -> Arc<AuraAgent> {
+        self.mobile.clone()
+    }
+
+    pub fn mobile_device_id(&self) -> aura_core::DeviceId {
+        self.mobile.runtime().device_id()
+    }
+
     /// Start background automation loops for peer runtimes.
     pub async fn start(&mut self) -> TerminalResult<()> {
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -106,7 +139,7 @@ impl DemoSimulator {
 
         let alice = self.alice.clone();
         let carol = self.carol.clone();
-
+        let mobile = self.mobile.clone();
         self.event_loop_handle = Some(tokio::spawn(async move {
             let mut tick = interval(Duration::from_millis(100));
             loop {
@@ -115,6 +148,9 @@ impl DemoSimulator {
                     _ = tick.tick() => {
                         let _ = process_peer_transport_messages("Alice", &alice).await;
                         let _ = process_peer_transport_messages("Carol", &carol).await;
+
+                        // Mobile runs ceremony processing for device enrollment participation.
+                        let _ = mobile.process_ceremony_acceptances().await;
                     }
                 }
             }
@@ -181,39 +217,58 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
             .is_some_and(|v| v == "application/aura-guardian-proposal")
         {
             if let Some(ceremony_id) = envelope.metadata.get("ceremony-id").cloned() {
-                let mut response_metadata = std::collections::HashMap::new();
-                response_metadata.insert(
-                    "content-type".to_string(),
-                    "application/aura-guardian-acceptance".to_string(),
-                );
-                response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
-                response_metadata
-                    .insert("guardian-id".to_string(), agent.authority_id().to_string());
+            let mut response_metadata = std::collections::HashMap::new();
+            response_metadata.insert(
+                "content-type".to_string(),
+                "application/aura-guardian-acceptance".to_string(),
+            );
+            response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+            response_metadata.insert("guardian-id".to_string(), agent.authority_id().to_string());
 
-                let acceptance = GuardianAcceptance {
-                    guardian_id: agent.authority_id(),
-                    setup_id: ceremony_id,
-                    accepted: true,
-                    public_key: agent.authority_id().to_bytes().to_vec(),
-                    timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                        ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
-                        uncertainty: None,
-                    }),
-                };
+            let acceptance = GuardianAcceptance {
+                guardian_id: agent.authority_id(),
+                setup_id: ceremony_id,
+                accepted: true,
+                public_key: agent.authority_id().to_bytes().to_vec(),
+                timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                    ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
+                    uncertainty: None,
+                }),
+            };
 
-                let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
+            let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
 
-                let response = aura_core::effects::TransportEnvelope {
-                    destination: envelope.source,
-                    source: agent.authority_id(),
-                    context: envelope.context,
-                    payload,
-                    metadata: response_metadata,
-                    receipt: None,
-                };
+            let response = aura_core::effects::TransportEnvelope {
+                destination: envelope.source,
+                source: agent.authority_id(),
+                context: envelope.context,
+                payload,
+                metadata: response_metadata,
+                receipt: None,
+            };
 
-                if let Err(e) = effects.send_envelope(response).await {
-                    tracing::warn!("{name} failed to send guardian acceptance: {e}");
+            if let Err(e) = effects.send_envelope(response).await {
+                tracing::warn!("{name} failed to send guardian acceptance: {e}");
+            }
+        }
+        }
+    }
+
+    // Auto-accept pending channel invitations for demo peers.
+    if let Ok(invitation_service) = agent.invitations() {
+        let pending = invitation_service.list_pending().await;
+        for invitation in pending {
+            if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                if let Err(e) = invitation_service.accept(&invitation.invitation_id).await {
+                    tracing::warn!(
+                        "{name} failed to auto-accept channel invitation {}: {e}",
+                        invitation.invitation_id
+                    );
+                } else {
+                    tracing::info!(
+                        "{name} auto-accepted channel invitation {}",
+                        invitation.invitation_id
+                    );
                 }
             }
         }
@@ -229,9 +284,14 @@ mod tests {
     #[tokio::test]
     async fn demo_simulator_builds_peers() {
         let dir = std::env::temp_dir().join("aura-demo-sim-test");
-        let mut sim = DemoSimulator::new(2024, dir).await.unwrap();
+        let bob_authority = ids::authority_id("demo:test:bob:authority");
+        let bob_context = ids::context_id("demo:test:bob:context");
+        let mut sim = DemoSimulator::new(2024, dir, bob_authority, bob_context)
+            .await
+            .unwrap();
         sim.start().await.unwrap();
         assert_ne!(sim.alice_authority(), sim.carol_authority());
+        assert_ne!(sim.mobile_authority(), sim.alice_authority());
         sim.stop().await.unwrap();
     }
 }

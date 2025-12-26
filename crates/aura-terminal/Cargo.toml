@@ -58,10 +58,10 @@ aura-agent = { path = "../aura-agent" }
 aura-protocol = { path = "../aura-protocol" }
 aura-recovery = { path = "../aura-recovery" }
 aura-invitation = { path = "../aura-invitation" }
-aura-authenticate = { path = "../aura-authenticate" }
+aura-authentication = { path = "../aura-authentication" }
 aura-sync = { path = "../aura-sync" }
 aura-effects = { path = "../aura-effects" }
-aura-wot = { path = "../aura-wot" }
+aura-authorization = { path = "../aura-authorization" }
 aura-chat = { path = "../aura-chat" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }

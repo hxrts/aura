@@ -10,11 +10,11 @@ use iocraft::prelude::*;
 use crate::tui::components::{
     AccountSetupModal, ConfirmModal, ContactSelectModal, HelpModal, ModalFrame, TextInputModal,
 };
-use crate::tui::props::{BlockViewProps, ChatViewProps, ContactsViewProps, SettingsViewProps};
+use crate::tui::props::{ChatViewProps, ContactsViewProps, NeighborhoodViewProps, SettingsViewProps};
 use crate::tui::screens::{
-    ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal, GuardianCandidateProps,
-    GuardianSetupKind, GuardianSetupModal, InvitationCodeModal, InvitationCreateModal,
-    InvitationImportModal,
+    BlockCreateModal, ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal,
+    GuardianCandidateProps, GuardianSetupKind, GuardianSetupModal, InvitationCodeModal,
+    InvitationCreateModal, InvitationImportModal,
 };
 use crate::tui::types::{Contact, InvitationType};
 
@@ -362,12 +362,19 @@ pub fn render_chat_create_modal(chat: &ChatViewProps) -> Option<AnyElement<'stat
                     ChatCreateModal(
                         visible: true,
                         focused: true,
+                        step: chat.create_modal_step.clone(),
                         name: chat.create_modal_name.clone(),
                         topic: chat.create_modal_topic.clone(),
+                        contacts: chat.create_modal_contacts.clone(),
+                        selected_indices: chat.create_modal_selected_indices.clone(),
+                        focused_index: chat.create_modal_focused_index,
+                        threshold_k: chat.create_modal_threshold_k,
+                        threshold_n: chat.create_modal_threshold_n,
                         active_field: chat.create_modal_active_field,
                         members_count: chat.create_modal_member_count,
-                        error: String::new(),
+                        error: chat.create_modal_error.clone(),
                         creating: false,
+                        status: chat.create_modal_status.clone(),
                     )
                 }
             }
@@ -472,6 +479,30 @@ pub fn render_add_device_modal(settings: &SettingsViewProps) -> Option<AnyElemen
     }
 }
 
+pub fn render_device_import_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
+    if settings.device_import_modal_visible {
+        Some(
+            element! {
+                ModalFrame {
+                    TextInputModal(
+                        visible: true,
+                        focused: true,
+                        title: "Import Device Enrollment Code".to_string(),
+                        value: settings.device_import_modal_code.clone(),
+                        placeholder: "Paste enrollment code...".to_string(),
+                        hint: "Used by the new device to join this account".to_string(),
+                        error: String::new(),
+                        submitting: false,
+                    )
+                }
+            }
+            .into_any(),
+        )
+    } else {
+        None
+    }
+}
+
 pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
     if settings.device_enrollment_modal_visible {
         Some(
@@ -524,25 +555,24 @@ pub fn render_remove_device_modal(settings: &SettingsViewProps) -> Option<AnyEle
 }
 
 // =============================================================================
-// Block Screen Modal Render Functions
+// Neighborhood Screen Modal Render Functions
 // =============================================================================
 
-pub fn render_block_invite_modal(
-    block: &BlockViewProps,
-    contacts_list: &[Contact],
+pub fn render_block_create_modal(
+    neighborhood: &NeighborhoodViewProps,
 ) -> Option<AnyElement<'static>> {
-    if block.invite_modal_open {
+    if neighborhood.block_create_modal_visible {
         Some(
             element! {
                 ModalFrame {
-                    ContactSelectModal(
-                        visible: true,
-                        title: "Invite to Block".to_string(),
-                        contacts: contacts_list.to_vec(),
-                        selected_index: block.invite_selection,
-                        error: String::new(),
-                        selected_ids: vec![],
-                        multi_select: false,
+                    BlockCreateModal(
+                        state: crate::tui::state::views::BlockCreateModalState {
+                            name: neighborhood.block_create_modal_name.clone(),
+                            description: neighborhood.block_create_modal_description.clone(),
+                            active_field: neighborhood.block_create_modal_active_field,
+                            error: neighborhood.block_create_modal_error.clone(),
+                            creating: neighborhood.block_create_modal_creating,
+                        },
                     )
                 }
             }

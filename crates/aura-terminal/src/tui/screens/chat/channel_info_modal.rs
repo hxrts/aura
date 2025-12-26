@@ -4,8 +4,10 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::components::{modal_footer, modal_header, ModalFooterProps, ModalHeaderProps};
 use crate::tui::layout::dim;
 use crate::tui::theme::{Borders, Spacing, Theme};
+use crate::tui::types::KeyHint;
 
 /// Props for ChannelInfoModal
 #[derive(Default, Props)]
@@ -38,6 +40,15 @@ pub fn ChannelInfoModal(props: &ChannelInfoModalProps) -> impl Into<AnyElement<'
     let participants = props.participants.clone();
     let participant_count = participants.len();
 
+    // Header props
+    let header_props = ModalHeaderProps::new(format!("Channel: #{}", channel_name));
+
+    // Footer props
+    let footer_props = ModalFooterProps::new(vec![
+        KeyHint::new("Esc", "Close"),
+        KeyHint::new("t", "Edit topic"),
+    ]);
+
     element! {
         View(
             width: dim::TOTAL_WIDTH,
@@ -49,21 +60,7 @@ pub fn ChannelInfoModal(props: &ChannelInfoModalProps) -> impl Into<AnyElement<'
             overflow: Overflow::Hidden,
         ) {
             // Header
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(
-                    content: format!("Channel: #{}", channel_name),
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-            }
+            #(Some(modal_header(&header_props).into()))
 
             // Body - fills available space
             View(
@@ -106,26 +103,8 @@ pub fn ChannelInfoModal(props: &ChannelInfoModalProps) -> impl Into<AnyElement<'
                 }
             }
 
-            // Footer with key hints
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                gap: Spacing::LG,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Close", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "t", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Edit topic", color: Theme::TEXT_MUTED)
-                }
-            }
+            // Footer
+            #(Some(modal_footer(&footer_props).into()))
         }
     }
 }

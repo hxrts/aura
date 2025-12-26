@@ -1,11 +1,11 @@
 [package]
-name = "aura-wot"
+name = "aura-authorization"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Web of Trust and capability-based authorization for Aura"
+description = "Capability-based authorization for Aura"
 repository.workspace = true
 
 [dependencies]

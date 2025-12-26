@@ -342,6 +342,14 @@ pub trait RuntimeBridge: Send + Sync {
 
     async fn amp_leave_channel(&self, params: ChannelLeaveParams) -> Result<(), IntentError>;
 
+    /// Bump channel epoch to rotate the group key.
+    async fn bump_channel_epoch(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+        reason: String,
+    ) -> Result<(), IntentError>;
+
     async fn amp_send_message(
         &self,
         params: ChannelSendParams,
@@ -854,6 +862,17 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn amp_leave_channel(&self, _params: ChannelLeaveParams) -> Result<(), IntentError> {
         Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn bump_channel_epoch(
+        &self,
+        _context: ContextId,
+        _channel: ChannelId,
+        _reason: String,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Channel epoch bump not available in offline mode",
+        ))
     }
 
     async fn amp_send_message(

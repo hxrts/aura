@@ -477,6 +477,7 @@ async fn test_channel_lifecycle() {
             name: "test-channel".to_string(),
             topic: Some("Test topic".to_string()),
             members: vec![],
+            threshold_k: 1,
         })
         .await;
 

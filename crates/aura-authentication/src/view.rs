@@ -21,7 +21,7 @@
 use crate::facts::{AuthFact, AuthFactDelta, AuthFactReducer};
 use crate::guards::RecoveryOperationType;
 use aura_core::identifiers::AuthorityId;
-use aura_verify::session::SessionScope;
+use aura_signature::session::SessionScope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -355,7 +355,7 @@ impl AuthViewReducer {
 mod tests {
     use super::*;
     use aura_core::ContextId;
-    use aura_verify::session::SessionScope;
+    use aura_signature::session::SessionScope;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])

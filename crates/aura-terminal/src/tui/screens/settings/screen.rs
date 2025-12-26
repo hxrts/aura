@@ -28,7 +28,7 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
 use crate::tui::theme::Theme;
-use crate::tui::types::{Device, MfaPolicy, PendingRequest, RecoveryStatus, SettingsSection};
+use crate::tui::types::{Device, MfaPolicy, RecoveryStatus, SettingsSection};
 
 // =============================================================================
 // Callback Types (specialized, kept local)
@@ -97,7 +97,6 @@ pub fn SettingsScreen(
     let reactive_threshold = hooks.use_state(|| (0u8, 0u8));
     let reactive_guardian_count = hooks.use_state(|| 0usize);
     let reactive_recovery_status = hooks.use_state(RecoveryStatus::default);
-    let reactive_pending_requests = hooks.use_state(Vec::new);
 
     // Subscribe to settings signal for domain data
     hooks.use_future({
@@ -126,23 +125,15 @@ pub fn SettingsScreen(
         }
     });
 
-    // Subscribe to recovery signal for guardian count
+    // Subscribe to recovery signal for guardian count and recovery status
     hooks.use_future({
         let mut reactive_guardian_count = reactive_guardian_count.clone();
         let mut reactive_recovery_status = reactive_recovery_status.clone();
-        let mut reactive_pending_requests = reactive_pending_requests.clone();
         let app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |recovery_state| {
                 reactive_guardian_count.set(recovery_state.guardians.len());
                 reactive_recovery_status.set(RecoveryStatus::from(&recovery_state));
-
-                let pending: Vec<PendingRequest> = recovery_state
-                    .pending_requests
-                    .iter()
-                    .map(PendingRequest::from)
-                    .collect();
-                reactive_pending_requests.set(pending);
             })
             .await;
         }
@@ -154,7 +145,6 @@ pub fn SettingsScreen(
     let (threshold_k, threshold_n) = *reactive_threshold.read();
     let guardian_count = *reactive_guardian_count.read();
     let recovery_status = reactive_recovery_status.read().clone();
-    let pending_requests = reactive_pending_requests.read().clone();
 
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_section = props.view.section;
@@ -253,6 +243,7 @@ pub fn SettingsScreen(
                     ("tree state for your account.".into(), Theme::TEXT_MUTED),
                     (String::new(), Theme::TEXT),
                     ("[a] Add device".into(), Theme::SECONDARY),
+                    ("[i] Import device code".into(), Theme::TEXT_MUTED),
                 ]
             } else {
                 let mut lines: Vec<(String, Color)> = devices
@@ -267,66 +258,38 @@ pub fn SettingsScreen(
                     .collect();
                 lines.push((String::new(), Theme::TEXT));
                 lines.push(("[a] Add device".into(), Theme::SECONDARY));
+                lines.push(("[i] Import device code".into(), Theme::TEXT_MUTED));
                 lines.push(("[d] Remove selected".into(), Theme::TEXT_MUTED));
                 lines
             }
         }
         SettingsSection::Recovery => {
-            let mut lines = Vec::new();
-            lines.push((
-                format!("Recovery Status: {}", recovery_status.state.label()),
-                Theme::SECONDARY,
-            ));
-            lines.push((String::new(), Theme::TEXT));
-            lines.push((
-                format!("Pending Requests: {}", pending_requests.len()),
-                Theme::TEXT,
-            ));
-
-            if pending_requests.is_empty() {
-                lines.push((
-                    "No pending recovery requests.".into(),
+            vec![
+                (
+                    format!("Recovery Status: {}", recovery_status.state.label()),
+                    Theme::SECONDARY,
+                ),
+                (String::new(), Theme::TEXT),
+                (
+                    "If you lose access to your devices, you can".into(),
                     Theme::TEXT_MUTED,
-                ));
-            } else {
-                for req in pending_requests.iter().take(3) {
-                    let account = if req.account_name.is_empty() {
-                        "Unknown account".to_string()
-                    } else {
-                        let name = req.account_name.clone();
-                        if name.len() > 16 {
-                            format!("{}…", &name[..8])
-                        } else {
-                            name
-                        }
-                    };
-                    lines.push((
-                        format!(
-                            "- {account} ({}/{})",
-                            req.approvals_received, req.approvals_required
-                        ),
-                        Theme::TEXT,
-                    ));
-                }
-                if pending_requests.len() > 3 {
-                    lines.push((
-                        format!("...and {} more", pending_requests.len() - 3),
-                        Theme::TEXT_MUTED,
-                    ));
-                }
-            }
-
-            lines.push((String::new(), Theme::TEXT));
-            lines.push((
-                "[s] Start recovery".into(),
-                Theme::SECONDARY,
-            ));
-            lines.push((
-                "[a] Approve next request".into(),
-                Theme::TEXT_MUTED,
-            ));
-
-            lines
+                ),
+                (
+                    "request recovery from your guardians.".into(),
+                    Theme::TEXT_MUTED,
+                ),
+                (String::new(), Theme::TEXT),
+                (
+                    "Your guardians will receive a notification".into(),
+                    Theme::TEXT_MUTED,
+                ),
+                (
+                    "and can approve your recovery request.".into(),
+                    Theme::TEXT_MUTED,
+                ),
+                (String::new(), Theme::TEXT),
+                ("[Enter] Start recovery request".into(), Theme::SECONDARY),
+            ]
         }
         SettingsSection::Mfa => {
             vec![
@@ -368,7 +331,7 @@ pub fn SettingsScreen(
                     View(flex_direction: FlexDirection::Column, margin_top: 1) {
                         SimpleSelectableItem(label: "Profile".to_string(), selected: current_section == SettingsSection::Profile)
                         SimpleSelectableItem(label: "Guardian Threshold".to_string(), selected: current_section == SettingsSection::Threshold)
-                        SimpleSelectableItem(label: "Recovery Requests".to_string(), selected: current_section == SettingsSection::Recovery)
+                        SimpleSelectableItem(label: "Request Recovery".to_string(), selected: current_section == SettingsSection::Recovery)
                         SimpleSelectableItem(label: "Devices".to_string(), selected: current_section == SettingsSection::Devices)
                         SimpleSelectableItem(label: "Multifactor Auth".to_string(), selected: current_section == SettingsSection::Mfa)
                     }

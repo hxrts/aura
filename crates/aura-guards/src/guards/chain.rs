@@ -14,7 +14,7 @@ use crate::guards::{privacy::track_leakage_consumption, JournalCoupler, LeakageB
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Receipt};
-use aura_wot::ResourceScope;
+use aura_authorization::ResourceScope;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use biscuit_auth::{Biscuit, PublicKey};
 use tracing::{debug, warn};
@@ -64,7 +64,7 @@ impl SendGuardChain {
         // Use Context scope for send authorization - message sends occur within relational contexts
         let resource = ResourceScope::Context {
             context_id: self.context,
-            operation: aura_wot::ContextOp::UpdateParams, // Send operations use generic context update capability
+            operation: aura_authorization::ContextOp::UpdateParams, // Send operations use generic context update capability
         };
 
         let now_secs = effect_system

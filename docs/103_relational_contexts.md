@@ -525,5 +525,5 @@ The implementation provides concrete types (`RelationalContext`, `GuardianBindin
 - **Consensus Integration**: `crates/aura-consensus/src/consensus/relational.rs` - consensus implementation
 - **Consensus Adapter**: `aura-relational/src/consensus_adapter.rs` - thin consensus delegation layer
 - **Prestate Computation**: `aura-core/src/domain/consensus.rs` - Prestate struct and methods
-- **Protocol Usage**: `aura-authenticate/src/guardian_auth_relational.rs` - Guardian authentication
+- **Protocol Usage**: `aura-authentication/src/guardian_auth_relational.rs` - Guardian authentication
 - **Recovery Flows**: `aura-recovery/src/` - Guardian recovery choreographies

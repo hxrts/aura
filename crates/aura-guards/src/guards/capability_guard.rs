@@ -9,7 +9,7 @@
 use super::{BiscuitGuardEvaluator, GuardResult};
 use crate::authorization::BiscuitAuthorizationBridge;
 use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, Result};
-use aura_wot::{AuthorityOp, ContextOp, ResourceScope};
+use aura_authorization::{AuthorityOp, ContextOp, ResourceScope};
 use biscuit_auth::Biscuit;
 
 /// Guard for evaluating capability-based authorization

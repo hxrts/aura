@@ -58,7 +58,7 @@
 //!     .build();
 //! ```
 
-// NOTE: AuthorizationEffects moved to aura-wot (domain crate) per Layer 2 pattern
+// NOTE: AuthorizationEffects moved to aura-authorization (domain crate) per Layer 2 pattern
 pub mod biometric;
 pub mod console;
 pub mod context;
@@ -88,7 +88,7 @@ pub mod time;
 pub mod transport;
 
 // Re-export production handlers only - mock handlers moved to aura-testkit
-// NOTE: WotAuthorizationHandler moved to aura-wot per Layer 2 pattern
+// NOTE: WotAuthorizationHandler moved to aura-authorization per Layer 2 pattern
 pub use biometric::FallbackBiometricHandler;
 pub use console::RealConsoleHandler;
 pub use context::{ExecutionContext, StandardContextHandler};

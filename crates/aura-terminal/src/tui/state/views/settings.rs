@@ -15,6 +15,8 @@ pub struct SettingsViewState {
     pub selected_index: usize,
     /// Current MFA policy
     pub mfa_policy: MfaPolicy,
+    /// Most recent device enrollment code (demo helper)
+    pub last_device_enrollment_code: String,
     // Note: Modal state is now stored in ModalQueue, not here.
     // Use modal_queue.enqueue(QueuedModal::SettingsDisplayName/AddDevice/RemoveDevice(...)) to show modals.
     // For threshold/guardian changes, use OpenGuardianSetup dispatch which shows GuardianSetup modal.

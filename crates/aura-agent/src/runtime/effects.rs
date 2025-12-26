@@ -39,7 +39,7 @@ use aura_protocol::effects::{
 };
 use aura_guards::GuardContextProvider;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
-use aura_wot::{BiscuitAuthorizationBridge, FlowBudgetHandler};
+use aura_authorization::{BiscuitAuthorizationBridge, FlowBudgetHandler};
 use biscuit_auth::{Biscuit, KeyPair, PublicKey};
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -70,11 +70,11 @@ pub struct AuraEffectSystem {
     logical_clock: LogicalClockHandler,
     order_clock: OrderClockHandler,
     authorization_handler:
-        aura_wot::effects::WotAuthorizationHandler<aura_effects::crypto::RealCryptoHandler>,
+        aura_authorization::effects::WotAuthorizationHandler<aura_effects::crypto::RealCryptoHandler>,
     leakage_handler: aura_effects::leakage::ProductionLeakageHandler<
         EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
     >,
-    journal_policy: Option<(biscuit_auth::Biscuit, aura_wot::BiscuitAuthorizationBridge)>,
+    journal_policy: Option<(biscuit_auth::Biscuit, aura_authorization::BiscuitAuthorizationBridge)>,
     journal_verifying_key: Option<Vec<u8>>,
     authority_id: AuthorityId,
     tree_handler: PersistentTreeHandler,
@@ -626,10 +626,10 @@ impl AuraEffectSystem {
         authority: AuthorityId,
         crypto_handler: &RealCryptoHandler,
         verifying_key: &Option<Vec<u8>>,
-    ) -> aura_wot::effects::WotAuthorizationHandler<RealCryptoHandler> {
+    ) -> aura_authorization::effects::WotAuthorizationHandler<RealCryptoHandler> {
         if let Some(bytes) = verifying_key {
             if let Ok(public_key) = PublicKey::from_bytes(bytes) {
-                return aura_wot::effects::WotAuthorizationHandler::new(
+                return aura_authorization::effects::WotAuthorizationHandler::new(
                     crypto_handler.clone(),
                     public_key,
                     authority,
@@ -637,7 +637,7 @@ impl AuraEffectSystem {
             }
         }
 
-        aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone())
+        aura_authorization::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone())
     }
 
     /// Construct a journal handler with current policy hooks.

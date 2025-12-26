@@ -11,12 +11,13 @@
 #![allow(clippy::manual_map)]
 
 use super::modal_overlays::{
-    render_account_setup_modal, render_add_device_modal, render_block_invite_modal,
+    render_account_setup_modal, render_add_device_modal, render_block_create_modal,
     render_channel_info_modal, render_chat_create_modal, render_confirm_modal,
     render_contact_modal, render_contacts_code_modal, render_contacts_create_modal,
-    render_contacts_import_modal, render_device_enrollment_modal, render_display_name_modal,
-    render_guardian_modal, render_guardian_setup_modal, render_help_modal, render_mfa_setup_modal,
-    render_nickname_modal, render_remove_device_modal, render_topic_modal, GlobalModalProps,
+    render_contacts_import_modal, render_device_enrollment_modal, render_device_import_modal,
+    render_display_name_modal, render_guardian_modal, render_guardian_setup_modal,
+    render_help_modal, render_mfa_setup_modal, render_nickname_modal, render_remove_device_modal,
+    render_topic_modal, GlobalModalProps,
 };
 
 use iocraft::prelude::*;
@@ -41,23 +42,22 @@ use crate::tui::layout::dim;
 use crate::tui::screens::app::subscriptions::{
     use_channels_subscription, use_contacts_subscription, use_devices_subscription,
     use_messages_subscription, use_nav_status_signals, use_neighborhood_blocks_subscription,
-    use_notifications_subscription, use_pending_requests_subscription,
-    use_residents_subscription, use_threshold_subscription,
+    use_notifications_subscription, use_pending_requests_subscription, use_threshold_subscription,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
     ChatScreen, ContactsScreen, NeighborhoodScreenV2, NotificationsScreen, SettingsScreen,
 };
 use crate::tui::types::{
-    BlockBudget, BlockSummary, Channel, Contact, Device, Guardian, Invitation, KeyHint, Message,
-    MfaPolicy, Resident, TraversalDepth,
+    BlockSummary, Channel, Contact, Device, Guardian, Invitation, KeyHint, Message, MfaPolicy,
+    TraversalDepth,
 };
 
 // State machine integration
 use crate::tui::iocraft_adapter::convert_iocraft_event;
 use crate::tui::props::{
-    extract_block_view_props, extract_chat_view_props, extract_contacts_view_props,
-    extract_neighborhood_view_props, extract_notifications_view_props, extract_settings_view_props,
+    extract_chat_view_props, extract_contacts_view_props, extract_neighborhood_view_props,
+    extract_notifications_view_props, extract_settings_view_props,
 };
 use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{ui_update_channel, UiUpdate, UiUpdateReceiver, UiUpdateSender};
@@ -79,11 +79,6 @@ pub struct IoAppProps {
     pub threshold_k: u8,
     pub threshold_n: u8,
     pub mfa_policy: MfaPolicy,
-    // Block screen data
-    pub block_name: String,
-    pub residents: Vec<Resident>,
-    pub block_budget: BlockBudget,
-    pub channel_name: String,
     // Contacts screen data
     pub contacts: Vec<Contact>,
     /// Discovered LAN peers
@@ -325,11 +320,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let shared_devices = use_devices_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
-    // Residents subscription: SharedResidents for dispatch handlers to read
-    // =========================================================================
-    let shared_residents = use_residents_subscription(&mut hooks, &app_ctx);
-
-    // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
     // =========================================================================
     let shared_channels = use_channels_subscription(&mut hooks, &app_ctx);
@@ -549,6 +539,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             );
 
                             tui.with_mut(|state| {
+                                state.settings.last_device_enrollment_code =
+                                    enrollment_code.clone();
                                 state.modal_queue.enqueue(
                                     crate::tui::state_machine::QueuedModal::SettingsDeviceEnrollment(
                                         crate::tui::state_machine::DeviceEnrollmentCeremonyModalState::started(
@@ -1139,15 +1131,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
     let tui_snapshot = tui.read_for_render();
 
-    let block_invite_contacts: Vec<Contact> = match tui_snapshot.modal_queue.current() {
-        Some(QueuedModal::BlockInvite(state)) => state
-            .contacts
-            .iter()
-            .map(|(id, name)| Contact::new(id.clone(), name.clone()))
-            .collect(),
-        _ => Vec::new(),
-    };
-
     // Callbacks registry and individual callback extraction for screen props
     let callbacks = props.callbacks.clone();
 
@@ -1201,7 +1184,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let is_insert_mode = tui_snapshot.is_insert_mode();
 
     // Extract screen view props from TuiState using testable extraction functions
-    let block_props = extract_block_view_props(&tui_snapshot);
     let chat_props = extract_chat_view_props(&tui_snapshot);
     let contacts_props = extract_contacts_view_props(&tui_snapshot);
     let settings_props = extract_settings_view_props(&tui_snapshot);
@@ -1304,15 +1286,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("e", "Edit"),
             KeyHint::new("g", "Guardian"),
             KeyHint::new("c", "Chat"),
-            KeyHint::new("i", "Accept"),
+            KeyHint::new("a", "Accept"),
             KeyHint::new("n", "Invite"),
         ],
         Screen::Neighborhood => vec![
             KeyHint::new("Enter", "Enter"),
             KeyHint::new("Esc", "Map"),
+            KeyHint::new("a", "Accept"),
             KeyHint::new("i", "Insert"),
-            KeyHint::new("d", "Depth"),
-            KeyHint::new("g", "Home"),
+            KeyHint::new("n", "New"),
         ],
         Screen::Notifications => vec![
             KeyHint::new("j/k", "Move"),
@@ -1342,9 +1324,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         // always gets current contacts (not stale props)
         let shared_contacts_for_dispatch = shared_contacts.clone();
         // Clone shared messages Arc for message retry dispatch
-        // Clone shared residents Arc for block moderation dispatch
-        // Used to map selected resident index -> resident ID without placeholders
-        let shared_residents_for_dispatch = shared_residents.clone();
         // Used to look up failed messages by ID to get channel and content for retry
         let shared_messages_for_dispatch = shared_messages.clone();
         // Used to map device selection for MFA wizard
@@ -1381,36 +1360,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.recovery.on_select_guardian)(contact_id);
                                     }
 
-                                    // === Block Screen Commands ===
+                                    // === Block Messaging Commands ===
                                     DispatchCommand::SendBlockMessage { content } => {
                                         (cb.block.on_send)(content);
-                                    }
-                                    DispatchCommand::InviteToBlock { contact_id } => {
-                                        (cb.block.on_invite)(contact_id);
-                                    }
-                                    DispatchCommand::GrantStewardSelected => {
-                                        let idx = new_state.block.selected_resident;
-                                        if let Ok(guard) = shared_residents_for_dispatch.read() {
-                                            if let Some(resident) = guard.get(idx) {
-                                                (cb.block.on_grant_steward)(resident.id.clone());
-                                            } else {
-                                                new_state.toast_error("No resident selected");
-                                            }
-                                        } else {
-                                            new_state.toast_error("Failed to read residents");
-                                        }
-                                    }
-                                    DispatchCommand::RevokeStewardSelected => {
-                                        let idx = new_state.block.selected_resident;
-                                        if let Ok(guard) = shared_residents_for_dispatch.read() {
-                                            if let Some(resident) = guard.get(idx) {
-                                                (cb.block.on_revoke_steward)(resident.id.clone());
-                                            } else {
-                                                new_state.toast_error("No resident selected");
-                                            }
-                                        } else {
-                                            new_state.toast_error("Failed to read residents");
-                                        }
                                     }
 
                                     // === Chat Screen Commands ===
@@ -1521,42 +1473,45 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("Failed to read channels");
                                         }
                                     }
-                                    DispatchCommand::OpenChatMemberSelect => {
+                                    DispatchCommand::OpenChatCreateWizard => {
                                         let current_contacts = shared_contacts_for_dispatch
                                             .read()
                                             .map(|guard| guard.clone())
                                             .unwrap_or_default();
 
-                                        let contacts: Vec<(String, String)> = current_contacts
-                                            .iter()
-                                            .map(|c| (c.id.clone(), c.nickname.clone()))
-                                            .collect();
+                                        let candidates: Vec<crate::tui::state_machine::ChatMemberCandidate> =
+                                            current_contacts
+                                                .iter()
+                                                .map(|c| crate::tui::state_machine::ChatMemberCandidate {
+                                                    id: c.id.clone(),
+                                                    name: c.nickname.clone(),
+                                                })
+                                                .collect();
 
-                                        let Some(crate::tui::state_machine::QueuedModal::ChatCreate(draft)) =
-                                            new_state.modal_queue.current().cloned()
-                                        else {
-                                            new_state.toast_error("Chat create modal is not open");
-                                            continue;
-                                        };
+                                        let mut modal_state =
+                                            crate::tui::state_machine::CreateChannelModalState::new();
+                                        modal_state.contacts = candidates;
+                                        modal_state.ensure_threshold();
 
-                                        let mut picker = crate::tui::state_machine::ContactSelectModalState::multi(
-                                            "Select chat members",
-                                            contacts,
+                                        new_state.modal_queue.enqueue(
+                                            crate::tui::state_machine::QueuedModal::ChatCreate(
+                                                modal_state,
+                                            ),
                                         );
-                                        picker.selected_ids = draft.member_ids.clone();
-
-                                        new_state.modal_queue.update_active(|modal| {
-                                            *modal = crate::tui::state_machine::QueuedModal::ChatMemberSelect(
-                                                crate::tui::state_machine::ChatMemberSelectModalState {
-                                                    picker,
-                                                    draft,
-                                                },
-                                            );
-                                        });
                                     }
 
-                                    DispatchCommand::CreateChannel { name, topic, members } => {
-                                        (cb.chat.on_create_channel)(name, topic, members);
+                                    DispatchCommand::CreateChannel {
+                                        name,
+                                        topic,
+                                        members,
+                                        threshold_k,
+                                    } => {
+                                        (cb.chat.on_create_channel)(
+                                            name,
+                                            topic,
+                                            members,
+                                            threshold_k,
+                                        );
                                     }
                                     DispatchCommand::SetChannelTopic { channel_id, topic } => {
                                         (cb.chat.on_set_topic)(channel_id, topic);
@@ -1701,28 +1656,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         } else {
                                             new_state.toast_error("Failed to read requests");
                                         }
-                                    }
-
-                                    // === Block Invite Modal ===
-                                    DispatchCommand::OpenBlockInvite => {
-                                        let current_contacts = shared_contacts_for_dispatch
-                                            .read()
-                                            .map(|guard| guard.clone())
-                                            .unwrap_or_default();
-
-                                        let contacts: Vec<(String, String)> = current_contacts
-                                            .iter()
-                                            .map(|c| (c.id.clone(), c.nickname.clone()))
-                                            .collect();
-
-                                        new_state.modal_queue.enqueue(
-                                            crate::tui::state_machine::QueuedModal::BlockInvite(
-                                                crate::tui::state_machine::ContactSelectModalState::single(
-                                                    "Invite to Block",
-                                                    contacts,
-                                                ),
-                                            ),
-                                        );
                                     }
 
                                     // === Guardian Setup Modal ===
@@ -2108,6 +2041,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::RemoveDevice { device_id } => {
                                         (cb.settings.on_remove_device)(device_id);
                                     }
+                                    DispatchCommand::ImportDeviceEnrollmentOnMobile { code } => {
+                                        (cb.settings.on_import_device_enrollment_on_mobile)(code);
+                                    }
                                     // Note: Threshold/guardian changes now use OpenGuardianSetup
                                     // which is handled above with the guardian ceremony commands.
 
@@ -2133,6 +2069,21 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::BackToStreet => {
                                         (cb.neighborhood.on_back_to_street)();
+                                    }
+                                    DispatchCommand::OpenBlockCreate => {
+                                        // Open block creation modal
+                                        new_state.modal_queue.enqueue(
+                                            crate::tui::state_machine::QueuedModal::NeighborhoodBlockCreate(
+                                                crate::tui::state_machine::BlockCreateModalState::new(),
+                                            ),
+                                        );
+                                    }
+                                    DispatchCommand::CreateBlock { name, description } => {
+                                        // TODO: Wire to actual block creation via app core
+                                        // For now, show success toast and dismiss modal
+                                        new_state.toast_success(format!("Block '{}' created", name));
+                                        new_state.modal_queue.dismiss();
+                                        let _ = description; // Suppress unused warning until wired
                                     }
 
                                     // === Navigation Commands ===
@@ -2297,13 +2248,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Note: Threshold changes now use OpenGuardianSetup (see contacts screen modals)
             #(render_display_name_modal(&settings_props))
             #(render_add_device_modal(&settings_props))
+            #(render_device_import_modal(&settings_props))
             #(render_device_enrollment_modal(&settings_props))
             #(render_remove_device_modal(&settings_props))
             #(render_mfa_setup_modal(&settings_props))
 
-            // === BLOCK SCREEN MODALS ===
+            // === NEIGHBORHOOD SCREEN MODALS ===
             // Rendered via modal_overlays module for maintainability
-            #(render_block_invite_modal(&block_props, &block_invite_contacts))
+            #(render_block_create_modal(&neighborhood_props))
 
             // === TOAST OVERLAY ===
             // Toast notifications overlay the footer when active
@@ -2367,13 +2319,9 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let guardians = Vec::new();
     let invitations = Vec::new();
     let contacts = Vec::new();
-    let residents = Vec::new();
-    let block_budget = BlockBudget::default();
     let discovered_peers: Vec<DiscoveredPeerInfo> = Vec::new();
 
-    // Block and neighborhood data - reactively updated via signals
-    let block_name = String::from("My Block");
-    let channel_name = String::from("general");
+    // Neighborhood data - reactively updated via signals
     let neighborhood_name = String::from("Neighborhood");
     let blocks: Vec<BlockSummary> = Vec::new();
 
@@ -2423,11 +2371,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         threshold_k: threshold_k,
                         threshold_n: threshold_n,
                         mfa_policy: MfaPolicy::SensitiveOnly,
-                        // Block screen data
-                        block_name: block_name,
-                        residents: residents,
-                        block_budget: block_budget,
-                        channel_name: channel_name,
                         // Contacts screen data
                         contacts: contacts,
                         discovered_peers: discovered_peers,
@@ -2472,11 +2415,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         threshold_k: threshold_k,
                         threshold_n: threshold_n,
                         mfa_policy: MfaPolicy::SensitiveOnly,
-                        // Block screen data
-                        block_name: block_name,
-                        residents: residents,
-                        block_budget: block_budget,
-                        channel_name: channel_name,
                         // Contacts screen data
                         contacts: contacts,
                         discovered_peers: discovered_peers,

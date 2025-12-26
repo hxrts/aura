@@ -6,7 +6,14 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::layout::dim;
+use crate::tui::components::{
+    contact_multi_select, labeled_input, modal_footer, modal_header, status_message,
+    threshold_selector, ContactMultiSelectItem, ContactMultiSelectProps, LabeledInputProps,
+    ModalFooterProps, ModalHeaderProps, ModalStatus, ThresholdSelectorProps,
+};
 use crate::tui::theme::{Borders, Spacing, Theme};
+use crate::tui::types::KeyHint;
+use crate::tui::state::CreateChannelStep;
 
 /// Callback type for modal cancel
 pub type CancelCallback = Arc<dyn Fn() + Send + Sync>;
@@ -21,10 +28,22 @@ pub struct ChatCreateModalProps {
     pub visible: bool,
     /// Whether the input is focused
     pub focused: bool,
+    /// Wizard step
+    pub step: CreateChannelStep,
     /// The current name input
     pub name: String,
     /// The current topic input
     pub topic: String,
+    /// Contact candidates (id, name)
+    pub contacts: Vec<(String, String)>,
+    /// Selected indices
+    pub selected_indices: Vec<usize>,
+    /// Focused contact index
+    pub focused_index: usize,
+    /// Threshold k
+    pub threshold_k: u8,
+    /// Threshold n
+    pub threshold_n: u8,
     /// Number of selected members
     pub members_count: usize,
     /// Which field is active (0 = name, 1 = topic)
@@ -33,6 +52,8 @@ pub struct ChatCreateModalProps {
     pub error: String,
     /// Whether creation is in progress
     pub creating: bool,
+    /// Status text (waiting, etc.)
+    pub status: String,
     /// Callback when creating
     pub on_create: Option<CreateChatCallback>,
     /// Callback when canceling
@@ -54,6 +75,7 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
     let active_field = props.active_field;
     let error = props.error.clone();
     let creating = props.creating;
+    let step = props.step.clone();
 
     // Determine border color based on state
     let border_color = if !error.is_empty() {
@@ -64,7 +86,7 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
         Theme::PRIMARY
     };
 
-    // Display text for fields
+    // Display text for Review step
     let name_display = if name.is_empty() {
         "Enter group name...".to_string()
     } else {
@@ -77,16 +99,48 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
         topic.clone()
     };
 
-    let name_color = if name.is_empty() {
-        Theme::TEXT_MUTED
-    } else {
-        Theme::TEXT
+    // Header props with step indicator
+    let step_num = match step {
+        CreateChannelStep::Details => 1,
+        CreateChannelStep::Members => 2,
+        CreateChannelStep::Threshold => 3,
+        CreateChannelStep::Review => 4,
+        CreateChannelStep::Waiting => 5,
     };
+    let header_props = ModalHeaderProps::new("New Chat Group").with_step(step_num, 5);
 
-    let topic_color = if topic.is_empty() {
-        Theme::TEXT_MUTED
+    // Footer hints vary by step
+    let footer_hints = match step {
+        CreateChannelStep::Details => vec![
+            KeyHint::new("Esc", "Cancel"),
+            KeyHint::new("Tab", "Next Field"),
+            KeyHint::new("Enter", "Continue"),
+        ],
+        CreateChannelStep::Members => vec![
+            KeyHint::new("Esc", "Back"),
+            KeyHint::new("Space", "Select"),
+            KeyHint::new("Enter", "Continue"),
+        ],
+        CreateChannelStep::Threshold => vec![
+            KeyHint::new("Esc", "Back"),
+            KeyHint::new("↑↓", "Adjust"),
+            KeyHint::new("Enter", "Continue"),
+        ],
+        CreateChannelStep::Review => vec![
+            KeyHint::new("Esc", "Back"),
+            KeyHint::new("Enter", "Create"),
+        ],
+        CreateChannelStep::Waiting => vec![KeyHint::new("Esc", "Close")],
+    };
+    let footer_props = ModalFooterProps::new(footer_hints);
+
+    // Status for error/creating states
+    let status = if !error.is_empty() {
+        ModalStatus::Error(error.clone())
+    } else if creating {
+        ModalStatus::Loading("Creating...".to_string())
     } else {
-        Theme::TEXT
+        ModalStatus::Idle
     };
 
     element! {
@@ -100,141 +154,97 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
             overflow: Overflow::Hidden,
         ) {
             // Header
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(
-                    content: "New Chat Group",
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-            }
+            #(Some(modal_header(&header_props).into()))
 
             // Body - fills available space
             View(
                 width: 100pct,
-                padding: Spacing::MODAL_PADDING,
+                padding_left: Spacing::MODAL_PADDING,
+                padding_right: Spacing::MODAL_PADDING,
+                padding_top: Spacing::XS,
+                padding_bottom: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
-                // Name field
-                View(margin_bottom: Spacing::XS) {
-                    Text(content: "Group Name:", color: Theme::TEXT)
-                }
-                View(
-                    width: 100pct,
-                    flex_direction: FlexDirection::Column,
-                    border_style: Borders::INPUT,
-                    border_color: if active_field == 0 { Theme::PRIMARY } else { Theme::BORDER },
-                    padding: Spacing::PANEL_PADDING,
-                    margin_bottom: Spacing::SM,
-                ) {
-                    Text(
-                        content: name_display,
-                        color: name_color,
-                    )
-                }
-
-                // Topic field
-                View(margin_bottom: Spacing::XS) {
-                    Text(content: "Topic (optional):", color: Theme::TEXT)
-                }
-                View(
-                    width: 100pct,
-                    flex_direction: FlexDirection::Column,
-                    border_style: Borders::INPUT,
-                    border_color: if active_field == 1 { Theme::PRIMARY } else { Theme::BORDER },
-                    padding: Spacing::PANEL_PADDING,
-                    margin_bottom: Spacing::XS,
-                ) {
-                    Text(
-                        content: topic_display,
-                        color: topic_color,
-                    )
-                }
-
-
-                // Members
-                View(margin_bottom: Spacing::XS) {
-                    Text(content: "Members:", color: Theme::TEXT)
-                }
-                View(
-                    width: 100pct,
-                    flex_direction: FlexDirection::Column,
-                    border_style: Borders::INPUT,
-                    border_color: Theme::BORDER,
-                    padding: Spacing::PANEL_PADDING,
-                    margin_bottom: Spacing::SM,
-                ) {
-                    Text(
-                        content: if members_count == 0 {
-                            "None selected (press m to choose)".to_string()
-                        } else {
-                            format!("{members_count} selected (press m to edit)")
-                        },
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
-
-                // Error message (if any)
-                #(if !error.is_empty() {
-                    Some(element! {
-                        View(margin_bottom: Spacing::XS) {
-                            Text(content: error, color: Theme::ERROR)
+                #(match step {
+                    CreateChannelStep::Details => {
+                        let name_input = LabeledInputProps::new("Group Name:", "Enter group name...")
+                            .with_value(name.clone())
+                            .with_focused(active_field == 0);
+                        let topic_input = LabeledInputProps::new("Topic (optional):", "Enter topic...")
+                            .with_value(topic.clone())
+                            .with_focused(active_field == 1);
+                        vec![element! {
+                            View(flex_direction: FlexDirection::Column, gap: Spacing::SM) {
+                                #(Some(labeled_input(&name_input).into()))
+                                #(Some(labeled_input(&topic_input).into()))
+                            }
+                        }.into_any()]
+                    }
+                    CreateChannelStep::Members => {
+                        let items = props
+                            .contacts
+                            .iter()
+                            .map(|(_, name)| ContactMultiSelectItem {
+                                name: name.clone(),
+                                badge: None,
+                            })
+                            .collect::<Vec<_>>();
+                        let selector = ContactMultiSelectProps {
+                            prompt: "Invite Contacts".to_string(),
+                            items,
+                            selected: props.selected_indices.clone(),
+                            focused: props.focused_index,
+                            min_selected: None,
+                            footer_hint: Some(
+                                "↑↓/jk Navigate  Space Select  Enter Confirm  Esc Cancel".to_string(),
+                            ),
+                        };
+                        vec![contact_multi_select(&selector).into()]
+                    }
+                    CreateChannelStep::Threshold => {
+                        let selector = ThresholdSelectorProps {
+                            prompt: "Group Threshold".to_string(),
+                            subtext: Some(format!(
+                                "Require {} of {} signatures (includes you)",
+                                props.threshold_k, props.threshold_n
+                            )),
+                            k: props.threshold_k,
+                            n: props.threshold_n,
+                            low_hint: Some("Low: any one signer".to_string()),
+                            show_hint: true,
+                        };
+                        vec![threshold_selector(&selector).into()]
+                    },
+                    CreateChannelStep::Review => vec![element! {
+                        View {
+                            Text(content: "Review", color: Theme::TEXT)
+                            View(margin_top: Spacing::XS) {
+                                Text(content: format!("Name: {}", name_display), color: Theme::TEXT_MUTED)
+                                Text(content: format!("Topic: {}", topic_display), color: Theme::TEXT_MUTED)
+                                Text(content: format!("Invites: {}", members_count), color: Theme::TEXT_MUTED)
+                                Text(content: format!("Threshold: {}-of-{}", props.threshold_k, props.threshold_n), color: Theme::TEXT_MUTED)
+                            }
                         }
-                    })
-                } else {
-                    None
+                    }.into_any()],
+                    CreateChannelStep::Waiting => vec![element! {
+                        View {
+                            Text(content: "Invites Sent", color: Theme::TEXT)
+                            View(margin_top: Spacing::XS) {
+                                Text(content: props.status.clone(), color: Theme::TEXT_MUTED)
+                            }
+                        }
+                    }.into_any()],
                 })
 
-                // Status message
-                #(if creating {
-                    Some(element! {
-                        View(margin_top: Spacing::XS) {
-                            Text(content: "Creating...", color: Theme::WARNING)
-                        }
-                    })
-                } else {
-                    None
-                })
+                // Status message (error/loading)
+                #(Some(status_message(&status).into()))
             }
 
             // Footer with key hints
-            View(
-                width: 100pct,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                padding: Spacing::PANEL_PADDING,
-                gap: Spacing::LG,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Tab", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Next", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "m", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Members", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Create", color: Theme::TEXT_MUTED)
-                }
-            }
+            #(Some(modal_footer(&footer_props).into()))
         }
     }
 }

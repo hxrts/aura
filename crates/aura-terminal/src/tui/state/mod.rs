@@ -38,6 +38,7 @@ pub use modal_queue::{
     ChatMemberSelectModalState, ConfirmAction, ContactSelectModalState, ModalQueue, ModalType,
     QueuedModal,
 };
+pub use views::{ChatMemberCandidate, CreateChannelModalState, CreateChannelStep};
 pub use toast::{QueuedToast, Toast, ToastLevel, ToastQueue};
 pub use transition::transition;
 pub use views::*;
@@ -73,9 +74,6 @@ pub struct TuiState {
     // ========================================================================
     // Screen-Specific State
     // ========================================================================
-    /// Block screen state
-    pub block: BlockViewState,
-
     /// Chat screen state
     pub chat: ChatViewState,
 
@@ -311,14 +309,6 @@ impl TuiState {
     // ========================================================================
     // Modal Type Checking (for tests and rendering)
     // ========================================================================
-
-    /// Check if block invite modal is active
-    pub fn is_block_invite_modal_active(&self) -> bool {
-        matches!(
-            self.modal_queue.current(),
-            Some(QueuedModal::BlockInvite(_))
-        )
-    }
 
     /// Check if chat create modal is active
     pub fn is_chat_create_modal_active(&self) -> bool {

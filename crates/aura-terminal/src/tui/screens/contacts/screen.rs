@@ -13,7 +13,7 @@
 //! ## Invitation Flows
 //!
 //! The contacts screen now handles both:
-//! - **Accept Invitation (i)**: Import a contact invitation code received out-of-band
+//! - **Accept Invitation (a)**: Accept a contact invitation code received out-of-band
 //! - **Send Invitation (n)**: Generate a new invitation code to share with others
 //!
 //! In demo mode, Ctrl+A and Ctrl+L fill Alice's and Carol's codes respectively.

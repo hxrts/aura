@@ -4,6 +4,7 @@
 
 use iocraft::prelude::*;
 
+use crate::tui::components::{modal_header, status_message, ModalHeaderProps, ModalStatus};
 use crate::tui::layout::dim;
 use crate::tui::theme::{Borders, Spacing, Theme};
 
@@ -124,11 +125,20 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
 
     let k = props.threshold_k;
     let n = props.threshold_n;
-    let has_error = !props.error.is_empty();
     let error = props.error.clone();
     let can_decrement = k > 1;
     let can_increment = k < n;
     let can_submit = props.has_changed && !props.submitting;
+
+    // Header props
+    let header_props = ModalHeaderProps::new("Configure Recovery Threshold");
+
+    // Status for error display
+    let status = if !error.is_empty() {
+        ModalStatus::Error(error.clone())
+    } else {
+        ModalStatus::Idle
+    };
 
     // Build threshold display text
     let threshold_text = format!("{} of {} guardians required", k, n);
@@ -160,21 +170,7 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
             overflow: Overflow::Hidden,
         ) {
             // Title bar
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(
-                    content: "Configure Recovery Threshold",
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-            }
+            #(Some(modal_header(&header_props).into()))
 
             // Content area - fills available space
             View(
@@ -257,18 +253,7 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
                 }
 
                 // Error display
-                #(if has_error {
-                    Some(element! {
-                        View(
-                            padding_top: Spacing::XS,
-                            justify_content: JustifyContent::Center,
-                        ) {
-                            Text(content: error, color: Theme::ERROR)
-                        }
-                    })
-                } else {
-                    None
-                })
+                #(Some(status_message(&status).into()))
 
                 // Help text
                 View(

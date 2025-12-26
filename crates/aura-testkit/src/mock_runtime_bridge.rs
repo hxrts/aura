@@ -300,6 +300,15 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
+    async fn bump_channel_epoch(
+        &self,
+        _context: ContextId,
+        _channel: ChannelId,
+        _reason: String,
+    ) -> Result<(), IntentError> {
+        Ok(())
+    }
+
     async fn amp_send_message(
         &self,
         params: ChannelSendParams,

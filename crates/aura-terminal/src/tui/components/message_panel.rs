@@ -23,17 +23,25 @@ pub fn MessagePanel(props: &MessagePanelProps) -> impl Into<AnyElement<'static>>
     let title = props.title.clone().filter(|value| !value.is_empty());
     let empty_message = props.empty_message.clone().filter(|value| !value.is_empty());
 
+    let panel_padding = Spacing::PANEL_PADDING;
+    let padding_top = if title.is_some() { 0 } else { panel_padding };
+
     element! {
         View(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
-            padding: Spacing::PANEL_PADDING,
+            padding_left: panel_padding,
+            padding_right: panel_padding,
+            padding_bottom: panel_padding,
+            padding_top: padding_top,
             overflow: Overflow::Hidden,
         ) {
             #(title.map(|title| element! {
-                Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
+                View(padding_bottom: 1) {
+                    Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
+                }
             }))
             View(
                 flex_direction: FlexDirection::Column,

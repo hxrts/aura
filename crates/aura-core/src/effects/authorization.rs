@@ -7,7 +7,7 @@
 //! # Effect Classification
 //!
 //! - **Category**: Application Effect
-//! - **Implementation**: `aura-wot` / `aura-protocol` (Layer 2/4)
+//! - **Implementation**: `aura-authorization` / `aura-protocol` (Layer 2/4)
 //! - **Usage**: Biscuit token evaluation and capability-based authorization
 //!
 //! This is an application effect implemented in domain crates by composing
@@ -100,7 +100,7 @@ pub struct AuthorizationDecision {
 /// Biscuit token-based authorization effects
 ///
 /// This trait enables Biscuit authorization checks without creating domain dependencies.
-/// The journal domain can use this trait while the implementation lives in aura-wot.
+/// The journal domain can use this trait while the implementation lives in aura-authorization.
 #[async_trait]
 pub trait BiscuitAuthorizationEffects {
     /// Authorize an operation against a Biscuit token and resource scope

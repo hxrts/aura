@@ -5,6 +5,7 @@
 use iocraft::prelude::*;
 
 use super::modal::ModalContent;
+use super::{labeled_input, LabeledInputProps};
 use crate::tui::theme::{Borders, Spacing, Theme};
 
 /// Props for AccountSetupModal
@@ -99,23 +100,10 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     // Show input form (default state, or creating state with inline spinner)
     let can_submit = !display_name.is_empty() && !creating;
 
-    let placeholder = if display_name.is_empty() {
-        "Enter your name...".to_string()
-    } else {
-        display_name.clone()
-    };
-
-    let text_color = if display_name.is_empty() {
-        Theme::TEXT_MUTED
-    } else {
-        Theme::TEXT
-    };
-
-    let border_color = if props.focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
+    // Input field props
+    let input_props = LabeledInputProps::new("Display Name *", "Enter your name...")
+        .with_value(display_name.clone())
+        .with_focused(props.focused);
 
     element! {
         ModalContent(
@@ -156,37 +144,24 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 flex_direction: FlexDirection::Column,
                 overflow: Overflow::Hidden,
             ) {
-                // Description (condensed to 2 lines)
-                Text(
-                    content: "Single-device account with Ed25519 signatures.",
-                    color: Theme::TEXT_MUTED,
-                )
-                Text(
-                    content: "Add additional threshold devices in Settings.",
-                    color: Theme::TEXT_MUTED,
-                )
+                // Description
+                View(width: 100pct, align_items: AlignItems::Center) {
+                    Text(
+                        content: "Create single device account.",
+                        color: Theme::TEXT_MUTED,
+                    )
+                }
 
                 // Display name input
-                View(margin_top: Spacing::SM, flex_direction: FlexDirection::Column) {
-                    Text(content: "Display Name *", color: Theme::TEXT_MUTED)
-                    View(
-                        margin_top: Spacing::XS,
-                        border_style: Borders::INPUT,
-                        border_color: border_color,
-                        padding_left: Spacing::XS,
-                        padding_right: Spacing::XS,
-                        padding_top: 0,
-                        padding_bottom: 0,
-                    ) {
-                        Text(content: placeholder, color: text_color)
-                    }
+                View(margin_top: Spacing::SM) {
+                    #(Some(labeled_input(&input_props).into()))
                 }
             }
 
             // Footer with centered button (or spinner when creating)
             View(
                 width: 100pct,
-                height: 5,
+                height: 6,
                 flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
@@ -232,6 +207,13 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                             }
                         })
                     })
+                }
+                // Hint about settings
+                View(margin_top: 1) {
+                    Text(
+                        content: "Add devices and configure Multifactor Auth in Settings.",
+                        color: Theme::TEXT_MUTED,
+                    )
                 }
             }
         }

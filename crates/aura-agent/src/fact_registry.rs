@@ -29,7 +29,7 @@
 //!
 //! Domain crates implement the `DomainFact` trait and provide a `FactReducer`.
 
-use aura_authenticate::{AuthFact, AuthFactReducer, AUTH_FACT_TYPE_ID};
+use aura_authentication::{AuthFact, AuthFactReducer, AUTH_FACT_TYPE_ID};
 use aura_chat::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 use aura_invitation::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
 use aura_journal::FactRegistry;

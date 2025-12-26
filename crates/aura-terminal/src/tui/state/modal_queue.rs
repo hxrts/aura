@@ -7,10 +7,10 @@ use std::collections::VecDeque;
 use crate::tui::screens::Screen;
 
 use super::views::{
-    AccountSetupModalState, AddDeviceModalState, ChannelInfoModalState, ConfirmRemoveModalState,
-    CreateChannelModalState, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
-    DisplayNameModalState, GuardianSetupModalState, ImportInvitationModalState,
-    InvitationCodeModalState, NicknameModalState, TopicModalState,
+    AccountSetupModalState, AddDeviceModalState, BlockCreateModalState, ChannelInfoModalState,
+    ConfirmRemoveModalState, CreateChannelModalState, CreateInvitationModalState,
+    DeviceEnrollmentCeremonyModalState, DisplayNameModalState, GuardianSetupModalState,
+    ImportInvitationModalState, InvitationCodeModalState, NicknameModalState, TopicModalState,
 };
 
 /// Unified modal enum - ALL modals MUST be one of these variants.
@@ -94,6 +94,9 @@ pub enum QueuedModal {
     /// Add device
     SettingsAddDevice(AddDeviceModalState),
 
+    /// Import device enrollment code (demo/new device)
+    SettingsDeviceImport(ImportInvitationModalState),
+
     /// Device enrollment ceremony (code + progress)
     SettingsDeviceEnrollment(DeviceEnrollmentCeremonyModalState),
 
@@ -101,10 +104,10 @@ pub enum QueuedModal {
     SettingsRemoveDevice(ConfirmRemoveModalState),
 
     // ========================================================================
-    // Block Screen Modals
+    // Neighborhood Screen Modals
     // ========================================================================
-    /// Invite contact to block
-    BlockInvite(ContactSelectModalState),
+    /// Create a new block
+    NeighborhoodBlockCreate(BlockCreateModalState),
 }
 
 /// Action to perform on confirmation

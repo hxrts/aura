@@ -37,9 +37,12 @@ pub async fn handle_messaging(
             name,
             topic,
             members,
+            threshold_k,
         } => {
             let timestamp = super::time::current_time_ms(app_core).await;
-            match create_channel(app_core, name, topic.clone(), members, timestamp).await {
+            match create_channel(app_core, name, topic.clone(), members, *threshold_k, timestamp)
+                .await
+            {
                 Ok(channel_id) => Some(Ok(OpResponse::Data(format!(
                     "Channel created: {}",
                     channel_id

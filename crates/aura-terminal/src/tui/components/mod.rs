@@ -11,6 +11,7 @@ mod account_setup_modal_template;
 mod code_display_modal;
 mod command_palette;
 mod contact_select_modal_template;
+mod contact_multi_select;
 #[cfg(feature = "development")]
 mod demo_hint;
 mod detail_panel;
@@ -26,6 +27,7 @@ mod message_bubble;
 mod message_input;
 mod message_panel;
 mod modal;
+mod modal_primitives;
 mod nav_bar;
 mod panel;
 mod scrollable;
@@ -35,6 +37,7 @@ mod tab_bar;
 mod text_input;
 mod text_input_modal_template;
 mod text_styled;
+mod threshold_selector;
 mod textarea;
 mod toast;
 
@@ -42,6 +45,7 @@ pub use account_setup_modal_template::{AccountSetupModal, AccountSetupState};
 pub use code_display_modal::{copy_to_clipboard, CodeDisplayModal, CodeDisplayStatus};
 pub use command_palette::{CommandItem, CommandPalette, PaletteCommand};
 pub use contact_select_modal_template::{ContactSelectModal, ContactSelectState};
+pub use contact_multi_select::{contact_multi_select, ContactMultiSelectItem, ContactMultiSelectProps};
 #[cfg(feature = "development")]
 pub use demo_hint::{DemoHintBar, DemoInviteCodes};
 pub use detail_panel::DetailPanel;
@@ -60,6 +64,11 @@ pub use message_bubble::{CompactMessage, MessageBubble, MessageGroupHeader, Syst
 pub use message_input::{MessageInput, MessageInputState};
 pub use message_panel::MessagePanel;
 pub use modal::{ConfirmModal, InputModal, ModalContent, ModalFrame};
+pub use modal_primitives::{
+    key_hint_group, labeled_input, modal_footer, modal_header, multi_select_list, status_message,
+    LabeledInputProps, ModalFooterProps, ModalHeaderProps, ModalStatus, MultiSelectListProps,
+    SelectableItem,
+};
 pub use nav_bar::{NavBar, NavBarProps};
 pub use panel::{Panel, PanelStyle};
 pub use scrollable::{calculate_scroll, ScrollDirection, Scrollable};
@@ -72,6 +81,7 @@ pub use tab_bar::{TabBar, TabBarProps, TabItem};
 pub use text_input::TextInput;
 pub use text_input_modal_template::{TextInputModal, TextInputState};
 pub use text_styled::{Badge, Divider, Heading, KeyValue, StyledText, TextStyle};
+pub use threshold_selector::{threshold_selector, ThresholdSelectorProps};
 pub use textarea::{Textarea, TextareaState};
 pub use toast::{
     StatusBar, Toast, ToastContainer, ToastContent, ToastFrame, ToastLevel, ToastMessage,

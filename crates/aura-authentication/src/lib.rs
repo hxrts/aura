@@ -102,21 +102,21 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 // Re-export core types from aura-core (Layer 1)
 pub use aura_core::{AccountId, AuraError, AuraResult, Journal};
 
-// Re-export verification types from aura-verify (Layer 2)
-pub use aura_verify::session::{SessionScope, SessionTicket};
-pub use aura_verify::{
+// Re-export verification types from aura-signature (Layer 2)
+pub use aura_signature::session::{SessionScope, SessionTicket};
+pub use aura_signature::{
     AuthenticationError, IdentityProof, KeyMaterial, Result as AuthenticationResult,
     VerifiedIdentity,
 };
 
 // Re-export Biscuit authorization types
 pub use aura_guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
-pub use aura_wot::{BiscuitTokenManager, ResourceScope, TokenAuthority};
+pub use aura_authorization::{BiscuitTokenManager, ResourceScope, TokenAuthority};
 
 // Deprecated alias for backward compatibility
 #[deprecated(since = "0.2.0", note = "Use TokenAuthority instead")]
 #[allow(deprecated)]
-pub use aura_wot::AccountAuthority;
+pub use aura_authorization::AccountAuthority;
 
 // Re-export DKD types
 pub use dkd::{

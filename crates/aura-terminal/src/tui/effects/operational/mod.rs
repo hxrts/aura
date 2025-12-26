@@ -345,6 +345,7 @@ mod tests {
                 name: "Guardians".to_string(),
                 topic: Some("Guardian coordination".to_string()),
                 members: vec!["authority-00000000-0000-0000-0000-000000000000".to_string()],
+                threshold_k: 2,
             })
             .await;
         match result {

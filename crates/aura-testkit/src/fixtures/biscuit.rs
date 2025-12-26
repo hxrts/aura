@@ -9,7 +9,7 @@
 
 use aura_core::identifiers::AuthorityId;
 use aura_core::scope::{AuthorityOp, ResourceScope};
-use aura_wot::biscuit_token::{BiscuitError, BiscuitTokenManager, TokenAuthority};
+use aura_authorization::biscuit_token::{BiscuitError, BiscuitTokenManager, TokenAuthority};
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 use std::collections::HashMap;
 use std::time::SystemTime;

@@ -51,7 +51,7 @@ Join operations merge device-specific contributions by taking maximum values. Th
 Meet semilattices refine authority through intersection operations:
 
 ```rust
-use aura_wot::CapabilitySet;
+use aura_authorization::CapabilitySet;
 
 impl Meet for CapabilitySet {
     fn meet(&self, other: &Self) -> Self {
@@ -207,7 +207,7 @@ Use relational contexts plus `InvitationService` to model trust formation. Creat
 Compute trust levels using direct and transitive relationships:
 
 ```rust
-use aura_wot::{TrustGraph, TrustLevel};
+use aura_authorization::{TrustGraph, TrustLevel};
 
 pub struct DeviceTrustGraph {
     relationships: BTreeMap<(aura_core::DeviceId, aura_core::DeviceId), TrustLevel>,
@@ -274,7 +274,7 @@ Trust computation considers both direct relationships and transitive paths. Tran
 Use trust levels for authorization decisions:
 
 ```rust
-use aura_wot::{AuthorizationRequest, AuthorizationDecision};
+use aura_authorization::{AuthorizationRequest, AuthorizationDecision};
 
 pub fn evaluate_trust_authorization(
     request: &AuthorizationRequest,

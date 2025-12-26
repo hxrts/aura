@@ -584,7 +584,7 @@ impl SettingsSection {
         match self {
             Self::Profile => "Profile",
             Self::Threshold => "Guardian Threshold",
-            Self::Recovery => "Recovery Requests",
+            Self::Recovery => "Request Recovery",
             Self::Devices => "Devices",
             Self::Mfa => "Multifactor Auth",
         }
@@ -594,7 +594,7 @@ impl SettingsSection {
         match self {
             Self::Profile => "Your display name and account information",
             Self::Threshold => "Configure guardians for account recovery",
-            Self::Recovery => "Approve recovery requests and start recovery",
+            Self::Recovery => "Request account recovery from guardians",
             Self::Devices => "Manage devices linked to your account",
             Self::Mfa => "Set multifactor authentication requirements",
         }

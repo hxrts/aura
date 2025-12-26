@@ -411,6 +411,7 @@ async fn test_complete_demo_invitation_flow() {
                 alice_invitation.sender_id.to_string(),
                 carol_invitation.sender_id.to_string(),
             ],
+            threshold_k: 1,
         })
         .await
         .expect("CreateChannel should succeed");

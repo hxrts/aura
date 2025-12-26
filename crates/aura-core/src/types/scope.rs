@@ -2,7 +2,7 @@
 //!
 //! This module defines resource scopes in terms of AuthorityId and ContextId,
 //! providing a foundation for authority-based authorization across all layers.
-//! These types were moved from aura-wot to eliminate improper domain coupling.
+//! These types were moved from aura-authorization to eliminate improper domain coupling.
 
 use crate::{AuthorityId, ContextId};
 use serde::{Deserialize, Serialize};
