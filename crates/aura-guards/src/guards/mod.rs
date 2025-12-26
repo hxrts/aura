@@ -131,7 +131,7 @@ pub use journal::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
 pub use chain::{create_send_guard, create_send_guard_op, SendGuardChain, SendGuardResult};
-pub use types::GuardOperation;
+pub use types::{GuardOperation, GuardOperationId};
 
 use aura_core::effects::{
     AuthorizationEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
@@ -141,7 +141,6 @@ use aura_core::AuraResult;
 use aura_core::AuthorityId;
 use biscuit_auth::{Biscuit, PublicKey};
 use std::future::Future;
-use crate::guards::privacy::AdversaryClass;
 
 /// Composite effect requirements for guard evaluation/execution.
 pub trait GuardEffects:

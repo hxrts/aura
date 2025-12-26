@@ -2,6 +2,7 @@
 //!
 //! Curated re-exports for handler bridge usage.
 
+#[allow(deprecated)]
 pub use crate::bridges::{TypedHandlerBridge, UnifiedAuraHandlerBridge, UnifiedHandlerBridgeFactory};
 
 /// Composite effect requirements for bridge usage.

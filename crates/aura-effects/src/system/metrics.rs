@@ -5,6 +5,8 @@
 //!
 //! **Layer Constraint**: NO stateful patterns or multi-party coordination.
 //! This module contains only production-grade stateless handlers.
+// System handlers use std sync primitives for lightweight in-process state.
+#![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
 use aura_core::effects::{SystemEffects, SystemError};

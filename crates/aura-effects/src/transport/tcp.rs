@@ -7,7 +7,7 @@
 use super::{TransportConfig, TransportConnection, TransportError, TransportResult};
 use async_trait::async_trait;
 use aura_core::{
-    effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream},
+    effects::{NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream},
     hash,
 };
 use std::collections::HashMap;
@@ -176,7 +176,7 @@ impl TcpTransportHandler {
 }
 
 #[async_trait]
-impl NetworkEffects for TcpTransportHandler {
+impl NetworkCoreEffects for TcpTransportHandler {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         // Convert UUID to socket address - this is a simplified implementation
         // In practice, you'd need a proper peer discovery/registry system
@@ -255,6 +255,10 @@ impl NetworkEffects for TcpTransportHandler {
         buffer.truncate(bytes_read);
         Ok((peer_id, buffer))
     }
+}
+
+#[async_trait]
+impl NetworkExtendedEffects for TcpTransportHandler {
 
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         Err(NetworkError::ReceiveFailed {

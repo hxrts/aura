@@ -69,9 +69,13 @@ pub mod database;
 // NOTE: JournalEffects moved to aura-journal (domain crate) per Layer 2 pattern
 /// Unified encrypted storage wrapper for transparent encryption at rest
 pub mod encrypted_storage;
+/// Error types for Layer 3 handler implementations.
+pub mod error;
 pub mod guard_interpreter;
 pub mod leakage;
+pub mod query;
 pub mod random;
+pub mod reactive;
 pub mod secure;
 #[cfg(feature = "simulation")]
 pub mod simulation;
@@ -86,12 +90,18 @@ pub mod transport;
 pub use biometric::FallbackBiometricHandler;
 pub use console::RealConsoleHandler;
 pub use context::{ExecutionContext, StandardContextHandler};
+pub use error::Layer3Error;
 pub use crypto::RealCryptoHandler;
 pub use database::query::{AuraQuery, FactTerm, QueryError, QueryResult};
+pub use query::{
+    format_rule, format_value, parse_arg_to_value, parse_fact_to_row, CapabilityPolicy,
+    QueryHandler,
+};
 // NOTE: JournalHandler moved to aura-journal per Layer 2 pattern
 pub use guard_interpreter::ProductionEffectInterpreter;
 pub use leakage::ProductionLeakageHandler;
 pub use random::RealRandomHandler;
+pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
 pub use secure::RealSecureStorageHandler;
 #[cfg(feature = "simulation")]
 pub use simulation::FallbackSimulationHandler;
@@ -99,6 +109,7 @@ pub use storage::FilesystemStorageHandler;
 // Re-export the new unified encrypted storage (Task 1.1)
 pub use encrypted_storage::{EncryptedStorage, EncryptedStorageConfig};
 // ProductionSyncExecutor removed - replaced by ProductionEffectInterpreter (ADR-014)
+#[allow(deprecated)]
 pub use time::{
     LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler, TimeComparisonHandler,
 };

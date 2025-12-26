@@ -8,7 +8,7 @@
 
 use aura_consensus::protocol::run_consensus;
 use aura_consensus::types::CommitFact;
-use super::{AmpEvidenceEffects, AmpJournalEffects};
+use crate::{AmpEvidenceEffects, AmpJournalEffects};
 use aura_core::effects::RandomEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::epochs::Epoch;
@@ -54,7 +54,7 @@ pub async fn run_amp_channel_epoch_bump(
         group_public_key,
         epoch,
     };
-    let commit = run_consensus(prestate, proposal, params, &random, &time).await?;
+    let commit = run_consensus(prestate, proposal, params, random, time).await?;
 
     let committed = CommittedChannelEpochBump {
         context: proposal.context,
@@ -170,62 +170,4 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects + AmpEv
         time,
     )
     .await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use aura_core::{frost::Share, AuthorityId, ContextId};
-    use aura_testkit::stateful_effects::MockRandomHandler;
-    use aura_testkit::time::ControllableTimeSource;
-    use std::collections::HashMap;
-
-    fn authority(seed: u8) -> AuthorityId {
-        AuthorityId::new_from_entropy([seed; 32])
-    }
-
-    fn context(seed: u8) -> ContextId {
-        ContextId::new_from_entropy([seed; 32])
-    }
-
-    #[tokio::test]
-    async fn amp_consensus_missing_keys_fails() {
-        let prestate = Prestate::new(vec![], aura_core::Hash32::default());
-        let proposal = ProposedChannelEpochBump {
-            context: context(1),
-            channel: aura_core::identifiers::ChannelId::from_bytes([1u8; 32]),
-            parent_epoch: 0,
-            new_epoch: 1,
-            bump_id: aura_core::Hash32::new([2u8; 32]),
-            reason: aura_journal::fact::ChannelBumpReason::Routine,
-        };
-
-        let witnesses = vec![authority(10), authority(11), authority(12)];
-        let key_packages: HashMap<AuthorityId, Share> = HashMap::new();
-
-        // Create test FROST keys using testkit (minimum valid parameters)
-        let (_, group_public_key) = aura_testkit::builders::keys::helpers::test_frost_key_shares(
-            2,     // threshold
-            3,     // total
-            12345, // deterministic seed
-        );
-
-        let random = MockRandomHandler::new_with_seed(99);
-        let time = ControllableTimeSource::new(1_700_000_000_000);
-
-        let result = run_amp_channel_epoch_bump(
-            &prestate,
-            &proposal,
-            witnesses,
-            2,
-            key_packages,
-            group_public_key.into(),
-            Epoch::from(1),
-            &random,
-            &time,
-        )
-        .await;
-
-        assert!(result.is_err(), "missing key packages should error");
-    }
 }

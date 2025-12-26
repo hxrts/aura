@@ -39,8 +39,10 @@ use aura_core::{
             CryptoError, FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
             SigningKeyGenResult,
         },
-        ConsoleEffects, CryptoEffects, ExecutionMode, JournalEffects, NetworkEffects,
-        PhysicalTimeEffects, RandomEffects, StorageEffects,
+        ConsoleEffects, CryptoEffects, ExecutionMode, JournalEffects, NetworkCoreEffects,
+        NetworkEffects, NetworkExtendedEffects,
+        PhysicalTimeEffects, RandomCoreEffects, RandomEffects, RandomExtendedEffects,
+        StorageEffects,
     },
     AuraResult, DeviceId,
 };
@@ -215,7 +217,7 @@ impl PhysicalTimeEffects for CompositeTestHandler {
 }
 
 #[async_trait]
-impl CryptoEffects for CompositeTestHandler {
+impl CryptoCoreEffects for CompositeTestHandler {
     // Delegate to underlying crypto handler
     async fn hkdf_derive(
         &self,
@@ -258,6 +260,25 @@ impl CryptoEffects for CompositeTestHandler {
             .await
     }
 
+    fn is_simulated(&self) -> bool {
+        aura_core::CryptoEffects::is_simulated(&self.crypto)
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        self.crypto.crypto_capabilities()
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        self.crypto.constant_time_eq(a, b)
+    }
+
+    fn secure_zero(&self, data: &mut [u8]) {
+        self.crypto.secure_zero(data)
+    }
+}
+
+#[async_trait]
+impl CryptoExtendedEffects for CompositeTestHandler {
     async fn frost_generate_keys(
         &self,
         threshold: u16,
@@ -398,26 +419,10 @@ impl CryptoEffects for CompositeTestHandler {
             .verify_signature(message, signature, public_key_package, mode)
             .await
     }
-
-    fn is_simulated(&self) -> bool {
-        aura_core::CryptoEffects::is_simulated(&self.crypto)
-    }
-
-    fn crypto_capabilities(&self) -> Vec<String> {
-        self.crypto.crypto_capabilities()
-    }
-
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        self.crypto.constant_time_eq(a, b)
-    }
-
-    fn secure_zero(&self, data: &mut [u8]) {
-        self.crypto.secure_zero(data)
-    }
 }
 
 #[async_trait]
-impl StorageEffects for CompositeTestHandler {
+impl StorageCoreEffects for CompositeTestHandler {
     async fn store(&self, key: &str, data: Vec<u8>) -> Result<(), StorageError> {
         self.storage.store(key, data).await
     }
@@ -434,6 +439,10 @@ impl StorageEffects for CompositeTestHandler {
         self.storage.list_keys(prefix).await
     }
 
+}
+
+#[async_trait]
+impl StorageExtendedEffects for CompositeTestHandler {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         self.storage.exists(key).await
     }
@@ -462,8 +471,7 @@ impl StorageEffects for CompositeTestHandler {
 }
 
 #[async_trait]
-#[async_trait]
-impl RandomEffects for CompositeTestHandler {
+impl RandomCoreEffects for CompositeTestHandler {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         self.random.random_bytes(len).await
     }
@@ -476,6 +484,10 @@ impl RandomEffects for CompositeTestHandler {
         self.random.random_u64().await
     }
 
+}
+
+#[async_trait]
+impl RandomExtendedEffects for CompositeTestHandler {
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         self.random.random_range(min, max).await
     }
@@ -561,7 +573,7 @@ impl JournalEffects for CompositeTestHandler {
 }
 
 #[async_trait]
-impl NetworkEffects for CompositeTestHandler {
+impl NetworkCoreEffects for CompositeTestHandler {
     async fn send_to_peer(
         &self,
         peer_id: uuid::Uuid,
@@ -579,7 +591,10 @@ impl NetworkEffects for CompositeTestHandler {
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), aura_core::effects::NetworkError> {
         self.network.receive().await
     }
+}
 
+#[async_trait]
+impl NetworkExtendedEffects for CompositeTestHandler {
     async fn receive_from(
         &self,
         peer_id: uuid::Uuid,

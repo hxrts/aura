@@ -14,7 +14,7 @@
 //! with stateless handlers. Domain crates should not implement this trait directly
 //! but rather use it via dependency injection.
 
-use super::RandomEffects;
+use crate::effects::random::RandomCoreEffects;
 use crate::types::identifiers::DeviceId;
 use crate::{AccountId, AuraError};
 use async_trait::async_trait;
@@ -87,7 +87,7 @@ pub struct SigningKeyGenResult {
     pub mode: SigningMode,
 }
 
-/// Cryptographic effects interface
+/// Core cryptographic effects interface
 ///
 /// This trait defines cryptographic operations for the Aura effects system.
 /// The actual cryptographic primitives are implemented in aura-crypto crate.
@@ -96,13 +96,13 @@ pub struct SigningKeyGenResult {
 /// - Testing: Deterministic mock operations
 /// - Simulation: Controlled cryptographic scenarios
 ///
-/// CryptoEffects inherits from RandomEffects to ensure all randomness is deterministic
+/// CryptoCoreEffects inherits from RandomCoreEffects to ensure all randomness is deterministic
 /// and controllable for simulation purposes.
 ///
 /// # Stability: STABLE
 /// This is a core stable API with semver guarantees. Breaking changes require major version bump.
 #[async_trait]
-pub trait CryptoEffects: RandomEffects + Send + Sync {
+pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
     // Note: Hashing is NOT an algebraic effect - it's a pure operation.
     // Use aura_core::hash::hash() for synchronous hashing instead.
     // See docs/002_system_architecture.md for design rationale.
@@ -148,188 +148,6 @@ pub trait CryptoEffects: RandomEffects + Send + Sync {
         public_key: &[u8],
     ) -> Result<bool, CryptoError>;
 
-    // ====== Unified Signing Key Generation ======
-
-    /// Generate signing keys for the given threshold configuration.
-    ///
-    /// This is the unified entry point for key generation that automatically
-    /// selects the appropriate algorithm:
-    /// - For `threshold=1, max_signers=1`: Generates Ed25519 single-signer keys
-    /// - For `threshold>=2`: Generates FROST threshold keys via DKG
-    ///
-    /// # Arguments
-    ///
-    /// * `threshold` - Minimum signers required (1 for single-signer, >=2 for FROST)
-    /// * `max_signers` - Total number of key shares to generate
-    ///
-    /// # Returns
-    ///
-    /// `SigningKeyGenResult` containing key packages and the signing mode used.
-    ///
-    /// # Errors
-    ///
-    /// Returns error if:
-    /// - `threshold > max_signers`
-    /// - `threshold == 0`
-    /// - Key generation fails
-    async fn generate_signing_keys(
-        &self,
-        threshold: u16,
-        max_signers: u16,
-    ) -> Result<SigningKeyGenResult, CryptoError>;
-
-    /// Sign a message using the appropriate algorithm for the key type.
-    ///
-    /// # Arguments
-    ///
-    /// * `message` - The message bytes to sign
-    /// * `key_package` - Serialized key package (SingleSignerKeyPackage or FROST KeyPackage)
-    /// * `mode` - Which signing algorithm to use
-    ///
-    /// # Returns
-    ///
-    /// The 64-byte Ed25519 signature.
-    ///
-    /// # Errors
-    ///
-    /// - For `SingleSigner`: Returns error if key is invalid
-    /// - For `Threshold`: Returns error; use full FROST protocol flow instead
-    async fn sign_with_key(
-        &self,
-        message: &[u8],
-        key_package: &[u8],
-        mode: SigningMode,
-    ) -> Result<Vec<u8>, CryptoError>;
-
-    /// Verify a signature using the appropriate algorithm for the key type.
-    ///
-    /// # Arguments
-    ///
-    /// * `message` - The original message bytes
-    /// * `signature` - The 64-byte signature to verify
-    /// * `public_key_package` - Serialized public key package
-    /// * `mode` - Which verification algorithm to use
-    ///
-    /// # Returns
-    ///
-    /// `true` if signature is valid, `false` otherwise.
-    async fn verify_signature(
-        &self,
-        message: &[u8],
-        signature: &[u8],
-        public_key_package: &[u8],
-        mode: SigningMode,
-    ) -> Result<bool, CryptoError>;
-
-    // ====== FROST Threshold Signatures ======
-
-    /// Generate FROST threshold keypair shares.
-    ///
-    /// **Note**: FROST requires `threshold >= 2`. For 1-of-1 configurations,
-    /// use `generate_signing_keys(1, 1)` instead, which will use Ed25519.
-    ///
-    /// Prefer using `generate_signing_keys()` for new code as it handles
-    /// both single-signer and threshold cases automatically.
-    async fn frost_generate_keys(
-        &self,
-        threshold: u16,
-        max_signers: u16,
-    ) -> Result<FrostKeyGenResult, CryptoError>;
-
-    /// Generate FROST signing nonces for a participant
-    ///
-    /// The nonces are generated from the participant's key package signing share,
-    /// ensuring they are valid for use in the threshold signing protocol.
-    ///
-    /// # Arguments
-    /// * `key_package` - The participant's serialized FROST key package
-    ///
-    /// # Returns
-    /// Serialized nonces and commitments bundle
-    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError>;
-
-    /// Create FROST signing package
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        nonces: &[Vec<u8>],
-        participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<FrostSigningPackage, CryptoError>;
-
-    /// Generate FROST signature share
-    async fn frost_sign_share(
-        &self,
-        signing_package: &FrostSigningPackage,
-        key_share: &[u8],
-        nonces: &[u8],
-    ) -> Result<Vec<u8>, CryptoError>;
-
-    /// Aggregate FROST signature shares into final signature
-    async fn frost_aggregate_signatures(
-        &self,
-        signing_package: &FrostSigningPackage,
-        signature_shares: &[Vec<u8>],
-    ) -> Result<Vec<u8>, CryptoError>;
-
-    /// Verify FROST threshold signature
-    async fn frost_verify(
-        &self,
-        message: &[u8],
-        signature: &[u8],
-        group_public_key: &[u8],
-    ) -> Result<bool, CryptoError>;
-
-    /// Extract public key from Ed25519 private key
-    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError>;
-
-    // ====== Symmetric Encryption ======
-
-    /// Encrypt data with ChaCha20-Poly1305
-    async fn chacha20_encrypt(
-        &self,
-        plaintext: &[u8],
-        key: &[u8; 32],
-        nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError>;
-
-    /// Decrypt data with ChaCha20-Poly1305
-    async fn chacha20_decrypt(
-        &self,
-        ciphertext: &[u8],
-        key: &[u8; 32],
-        nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError>;
-
-    /// Encrypt data with AES-GCM
-    async fn aes_gcm_encrypt(
-        &self,
-        plaintext: &[u8],
-        key: &[u8; 32],
-        nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError>;
-
-    /// Decrypt data with AES-GCM
-    async fn aes_gcm_decrypt(
-        &self,
-        ciphertext: &[u8],
-        key: &[u8; 32],
-        nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError>;
-
-    // ====== Key Rotation & Resharing ======
-
-    /// Rotate FROST threshold keys
-    async fn frost_rotate_keys(
-        &self,
-        old_shares: &[Vec<u8>],
-        old_threshold: u16,
-        new_threshold: u16,
-        new_max_signers: u16,
-    ) -> Result<FrostKeyGenResult, CryptoError>;
-
-    // ====== Utility Methods ======
-
     /// Check if this crypto handler supports simulation mode
     fn is_simulated(&self) -> bool;
 
@@ -343,10 +161,168 @@ pub trait CryptoEffects: RandomEffects + Send + Sync {
     fn secure_zero(&self, data: &mut [u8]);
 }
 
-/// Blanket implementation for Arc<T> where T: CryptoEffects
-/// Note: CryptoEffects inherits RandomEffects, and Arc<T> gets RandomEffects from the blanket impl in random.rs
+/// Optional cryptographic effects that build on the core interface.
 #[async_trait]
-impl<T: CryptoEffects + ?Sized> CryptoEffects for std::sync::Arc<T> {
+pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
+    // ====== Unified Signing Key Generation ======
+
+    async fn generate_signing_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError> {
+        let _ = (threshold, max_signers);
+        Err(AuraError::crypto("generate_signing_keys not supported"))
+    }
+
+    async fn sign_with_key(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = (message, key_package, mode);
+        Err(AuraError::crypto("sign_with_key not supported"))
+    }
+
+    async fn verify_signature(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<bool, CryptoError> {
+        let _ = (message, signature, public_key_package, mode);
+        Err(AuraError::crypto("verify_signature not supported"))
+    }
+
+    // ====== FROST Threshold Signatures ======
+
+    async fn frost_generate_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<FrostKeyGenResult, CryptoError> {
+        let _ = (threshold, max_signers);
+        Err(AuraError::crypto("frost_generate_keys not supported"))
+    }
+
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let _ = key_package;
+        Err(AuraError::crypto("frost_generate_nonces not supported"))
+    }
+
+    async fn frost_create_signing_package(
+        &self,
+        message: &[u8],
+        nonces: &[Vec<u8>],
+        participants: &[u16],
+        public_key_package: &[u8],
+    ) -> Result<FrostSigningPackage, CryptoError> {
+        let _ = (message, nonces, participants, public_key_package);
+        Err(AuraError::crypto("frost_create_signing_package not supported"))
+    }
+
+    async fn frost_sign_share(
+        &self,
+        signing_package: &FrostSigningPackage,
+        key_share: &[u8],
+        nonces: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = (signing_package, key_share, nonces);
+        Err(AuraError::crypto("frost_sign_share not supported"))
+    }
+
+    async fn frost_aggregate_signatures(
+        &self,
+        signing_package: &FrostSigningPackage,
+        signature_shares: &[Vec<u8>],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = (signing_package, signature_shares);
+        Err(AuraError::crypto("frost_aggregate_signatures not supported"))
+    }
+
+    async fn frost_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        group_public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
+        let _ = (message, signature, group_public_key);
+        Err(AuraError::crypto("frost_verify not supported"))
+    }
+
+    /// Extract public key from Ed25519 private key
+    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let _ = private_key;
+        Err(AuraError::crypto("ed25519_public_key not supported"))
+    }
+
+    // ====== Symmetric Encryption ======
+
+    async fn chacha20_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = (plaintext, key, nonce);
+        Err(AuraError::crypto("chacha20_encrypt not supported"))
+    }
+
+    async fn chacha20_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = (ciphertext, key, nonce);
+        Err(AuraError::crypto("chacha20_decrypt not supported"))
+    }
+
+    async fn aes_gcm_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = (plaintext, key, nonce);
+        Err(AuraError::crypto("aes_gcm_encrypt not supported"))
+    }
+
+    async fn aes_gcm_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = (ciphertext, key, nonce);
+        Err(AuraError::crypto("aes_gcm_decrypt not supported"))
+    }
+
+    // ====== Key Rotation & Resharing ======
+
+    async fn frost_rotate_keys(
+        &self,
+        old_shares: &[Vec<u8>],
+        old_threshold: u16,
+        new_threshold: u16,
+        new_max_signers: u16,
+    ) -> Result<FrostKeyGenResult, CryptoError> {
+        let _ = (old_shares, old_threshold, new_threshold, new_max_signers);
+        Err(AuraError::crypto("frost_rotate_keys not supported"))
+    }
+}
+
+/// Combined cryptographic effects surface (core + extended).
+pub trait CryptoEffects: CryptoCoreEffects + CryptoExtendedEffects {}
+
+impl<T: CryptoCoreEffects + CryptoExtendedEffects + ?Sized> CryptoEffects for T {}
+
+/// Blanket implementation for Arc<T> where T: CryptoCoreEffects
+/// Note: CryptoCoreEffects inherits RandomCoreEffects, and Arc<T> gets RandomCoreEffects from the blanket impl in random.rs
+#[async_trait]
+impl<T: CryptoCoreEffects + ?Sized> CryptoCoreEffects for std::sync::Arc<T> {
     async fn hkdf_derive(
         &self,
         ikm: &[u8],
@@ -387,144 +363,6 @@ impl<T: CryptoEffects + ?Sized> CryptoEffects for std::sync::Arc<T> {
             .ed25519_verify(message, signature, public_key)
             .await
     }
-
-    async fn generate_signing_keys(
-        &self,
-        threshold: u16,
-        max_signers: u16,
-    ) -> Result<SigningKeyGenResult, CryptoError> {
-        (**self).generate_signing_keys(threshold, max_signers).await
-    }
-
-    async fn sign_with_key(
-        &self,
-        message: &[u8],
-        key_package: &[u8],
-        mode: SigningMode,
-    ) -> Result<Vec<u8>, CryptoError> {
-        (**self).sign_with_key(message, key_package, mode).await
-    }
-
-    async fn verify_signature(
-        &self,
-        message: &[u8],
-        signature: &[u8],
-        public_key_package: &[u8],
-        mode: SigningMode,
-    ) -> Result<bool, CryptoError> {
-        (**self)
-            .verify_signature(message, signature, public_key_package, mode)
-            .await
-    }
-
-    async fn frost_generate_keys(
-        &self,
-        threshold: u16,
-        max_signers: u16,
-    ) -> Result<FrostKeyGenResult, CryptoError> {
-        (**self).frost_generate_keys(threshold, max_signers).await
-    }
-
-    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        (**self).frost_generate_nonces(key_package).await
-    }
-
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        nonces: &[Vec<u8>],
-        participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<FrostSigningPackage, CryptoError> {
-        (**self)
-            .frost_create_signing_package(message, nonces, participants, public_key_package)
-            .await
-    }
-
-    async fn frost_sign_share(
-        &self,
-        signing_package: &FrostSigningPackage,
-        key_share: &[u8],
-        nonces: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
-        (**self)
-            .frost_sign_share(signing_package, key_share, nonces)
-            .await
-    }
-
-    async fn frost_aggregate_signatures(
-        &self,
-        signing_package: &FrostSigningPackage,
-        signature_shares: &[Vec<u8>],
-    ) -> Result<Vec<u8>, CryptoError> {
-        (**self)
-            .frost_aggregate_signatures(signing_package, signature_shares)
-            .await
-    }
-
-    async fn frost_verify(
-        &self,
-        message: &[u8],
-        signature: &[u8],
-        group_public_key: &[u8],
-    ) -> Result<bool, CryptoError> {
-        (**self)
-            .frost_verify(message, signature, group_public_key)
-            .await
-    }
-
-    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        (**self).ed25519_public_key(private_key).await
-    }
-
-    async fn chacha20_encrypt(
-        &self,
-        plaintext: &[u8],
-        key: &[u8; 32],
-        nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError> {
-        (**self).chacha20_encrypt(plaintext, key, nonce).await
-    }
-
-    async fn chacha20_decrypt(
-        &self,
-        ciphertext: &[u8],
-        key: &[u8; 32],
-        nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError> {
-        (**self).chacha20_decrypt(ciphertext, key, nonce).await
-    }
-
-    async fn aes_gcm_encrypt(
-        &self,
-        plaintext: &[u8],
-        key: &[u8; 32],
-        nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError> {
-        (**self).aes_gcm_encrypt(plaintext, key, nonce).await
-    }
-
-    async fn aes_gcm_decrypt(
-        &self,
-        ciphertext: &[u8],
-        key: &[u8; 32],
-        nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError> {
-        (**self).aes_gcm_decrypt(ciphertext, key, nonce).await
-    }
-
-    async fn frost_rotate_keys(
-        &self,
-        old_shares: &[Vec<u8>],
-        old_threshold: u16,
-        new_threshold: u16,
-        new_max_signers: u16,
-    ) -> Result<FrostKeyGenResult, CryptoError> {
-        (**self)
-            .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
-            .await
-    }
-
     fn is_simulated(&self) -> bool {
         (**self).is_simulated()
     }

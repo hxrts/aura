@@ -658,6 +658,14 @@ impl GuardPlan {
         let request = convert_send_guard_to_request(send_guard, authority)?;
         Ok(Self::new(request, Vec::new()))
     }
+
+    pub fn request(&self) -> &GuardRequest {
+        &self.request
+    }
+
+    pub fn additional_commands(&self) -> &[EffectCommand] {
+        &self.additional_commands
+    }
 }
 
 /// Execute a guard plan (shared for send-site + choreography paths).

@@ -2,6 +2,8 @@
 //!
 //! Implements the ReactiveEffects trait using SignalGraph for state management.
 //! Supports query-bound signals for automatic updates when facts change.
+// Runtime-agnostic handler uses std sync primitives intentionally.
+#![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
 use aura_core::effects::reactive::{

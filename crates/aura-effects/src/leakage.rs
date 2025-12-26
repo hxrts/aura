@@ -175,6 +175,7 @@ impl<S: StorageEffects> LeakageEffects for ProductionLeakageHandler<S> {
 mod tests {
     use super::*;
     use aura_core::effects::StorageStats;
+    use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
     use aura_core::AuthorityId;
     use std::collections::HashMap;
     use tokio::sync::RwLock;
@@ -192,7 +193,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl StorageEffects for TestStorage {
+    impl StorageCoreEffects for TestStorage {
         async fn store(
             &self,
             key: &str,
@@ -227,7 +228,10 @@ mod tests {
             };
             Ok(keys)
         }
+    }
 
+    #[async_trait]
+    impl StorageExtendedEffects for TestStorage {
         async fn exists(
             &self,
             key: &str,

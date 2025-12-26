@@ -16,7 +16,7 @@ impl PlatformDetector {
     pub fn detect_platform() -> Result<PlatformInfo, FactoryError> {
         let storage: std::sync::Arc<dyn StorageEffects> =
             std::sync::Arc::new(PathStorageAdapter::with_default_path());
-        Self::detect_platform_with_storage(&storage)
+        Self::detect_platform_with_storage(storage.as_ref())
     }
 
     /// Detect the current platform using provided storage effects (for deterministic tests)

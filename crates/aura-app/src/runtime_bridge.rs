@@ -47,7 +47,7 @@ use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::FrostThreshold;
 use aura_core::DeviceId;
 use aura_effects::PhysicalTimeHandler;
-use aura_app::ReactiveHandler;
+use crate::ReactiveHandler;
 use aura_journal::fact::RelationalFact;
 use std::sync::Arc;
 
@@ -348,6 +348,14 @@ pub trait RuntimeBridge: Send + Sync {
         context: ContextId,
         channel: ChannelId,
         reason: String,
+    ) -> Result<(), IntentError>;
+
+    /// Start monitoring channel invitations and bump the epoch once all accept.
+    async fn start_channel_invitation_monitor(
+        &self,
+        invitation_ids: Vec<String>,
+        context: ContextId,
+        channel: ChannelId,
     ) -> Result<(), IntentError>;
 
     async fn amp_send_message(
@@ -872,6 +880,17 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
             "Channel epoch bump not available in offline mode",
+        ))
+    }
+
+    async fn start_channel_invitation_monitor(
+        &self,
+        _invitation_ids: Vec<String>,
+        _context: ContextId,
+        _channel: ChannelId,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Channel invitation monitoring not available in offline mode",
         ))
     }
 

@@ -118,7 +118,7 @@ pub use semilattice::{
 };
 
 // Identifiers and contexts
-pub use context::EffectContext;
+pub use context::{ContextSnapshot, EffectContext};
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{
     AccountId, AuthorityId, ChannelId, ContextId, DataId, DeviceId, DkdContextId, EventId,

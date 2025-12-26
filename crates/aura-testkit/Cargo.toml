@@ -30,6 +30,9 @@ aura-social = { path = "../aura-social" }
 aura-transport = { path = "../aura-transport" }
 aura-authorization = { path = "../aura-authorization" }
 aura-consensus = { path = "../aura-consensus" }
+aura-anti-entropy = { path = "../aura-anti-entropy" }
+aura-amp = { path = "../aura-amp" }
+aura-protocol = { path = "../aura-protocol" }
 
 # App core for RuntimeBridge trait and types
 aura-app = { path = "../aura-app" }
@@ -80,3 +83,4 @@ serial_test = { workspace = true }
 [dev-dependencies]
 # For testing the test utilities themselves
 # tokio-test = { workspace = true } # removed - unused
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }

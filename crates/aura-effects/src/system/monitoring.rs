@@ -1,4 +1,6 @@
 //! Simplified monitoring handler that keeps local alert state only.
+// Uses std sync primitives for lightweight in-process state.
+#![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
 use aura_core::effects::{SystemEffects, SystemError};

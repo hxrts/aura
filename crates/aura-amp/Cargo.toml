@@ -10,7 +10,9 @@ license.workspace = true
 workspace = true
 
 [features]
-default = []
+default = ["demo-crypto"]
+# Enable demo XOR-based encryption for simulation/testing (NOT for production)
+demo-crypto = []
 simulation = ["aura-core/simulation"]
 
 [dependencies]
@@ -39,6 +41,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-# Testing infrastructure
-aura-testkit = { path = "../aura-testkit" }
 proptest = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+aura-testkit = { path = "../aura-testkit" }
+async-lock = { workspace = true }

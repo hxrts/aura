@@ -24,6 +24,15 @@ pub struct EffectContext {
     metadata: HashMap<String, String>,
 }
 
+/// Lightweight snapshot of operation context for handlers that don't need metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextSnapshot {
+    authority_id: AuthorityId,
+    context_id: ContextId,
+    session_id: SessionId,
+    execution_mode: ExecutionMode,
+}
+
 impl EffectContext {
     /// Create a new context for an operation scoped to a specific authority and context.
     ///
@@ -86,6 +95,16 @@ impl EffectContext {
         &self.metadata
     }
 
+    /// Create a lightweight snapshot without metadata.
+    pub fn snapshot(&self) -> ContextSnapshot {
+        ContextSnapshot {
+            authority_id: self.authority_id,
+            context_id: self.context_id,
+            session_id: self.session_id,
+            execution_mode: self.execution_mode,
+        }
+    }
+
     /// Create a child context in the same authority, with a new `ContextId`.
     ///
     /// A new `SessionId` is allocated to avoid accidentally smuggling operation boundaries.
@@ -97,5 +116,40 @@ impl EffectContext {
             execution_mode: self.execution_mode,
             metadata: self.metadata.clone(),
         }
+    }
+}
+
+impl ContextSnapshot {
+    /// Create a new snapshot with a fresh session id.
+    pub fn new(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Self {
+        Self {
+            authority_id,
+            context_id,
+            session_id: SessionId::new(),
+            execution_mode,
+        }
+    }
+    /// Authority performing the operation.
+    pub fn authority_id(&self) -> AuthorityId {
+        self.authority_id
+    }
+
+    /// Relational context in which the operation executes.
+    pub fn context_id(&self) -> ContextId {
+        self.context_id
+    }
+
+    /// Operation/session identifier.
+    pub fn session_id(&self) -> SessionId {
+        self.session_id
+    }
+
+    /// Execution mode controlling handler selection.
+    pub fn execution_mode(&self) -> ExecutionMode {
+        self.execution_mode
     }
 }

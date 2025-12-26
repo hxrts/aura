@@ -13,7 +13,7 @@
 use async_trait::async_trait;
 use aura_core::crypto::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyContext};
 use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
-use aura_core::effects::{CryptoEffects, CryptoError, RandomEffects};
+use aura_core::effects::{CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects};
 use aura_core::hash;
 use zeroize::Zeroize;
 
@@ -174,9 +174,9 @@ impl RealCryptoHandler {
     }
 }
 
-// RandomEffects implementation for RealCryptoHandler
+// RandomCoreEffects implementation for RealCryptoHandler
 #[async_trait]
-impl RandomEffects for RealCryptoHandler {
+impl RandomCoreEffects for RealCryptoHandler {
     // JUSTIFICATION: RandomEffects trait doesn't support Results by design.
     // Cryptographic RNG failure is a fatal system error that should panic.
     // OS RNG failure indicates system compromise or resource exhaustion.
@@ -206,28 +206,13 @@ impl RandomEffects for RealCryptoHandler {
         ])
     }
 
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        if min >= max {
-            return min;
-        }
-        let range = max - min;
-        let random = self.random_u64().await;
-        min + (random % range)
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let bytes = self.random_bytes(16).await;
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes);
-        uuid::Uuid::from_bytes(uuid_bytes)
-    }
 }
 
 // (MockCryptoHandler implementation moved to aura-testkit)
 
-// CryptoEffects implementation for RealCryptoHandler
+// Crypto core implementation for RealCryptoHandler
 #[async_trait]
-impl CryptoEffects for RealCryptoHandler {
+impl CryptoCoreEffects for RealCryptoHandler {
     async fn hkdf_derive(
         &self,
         ikm: &[u8],
@@ -333,6 +318,38 @@ impl CryptoEffects for RealCryptoHandler {
         Ok(verifying_key.verify(message, &signature).is_ok())
     }
 
+    fn is_simulated(&self) -> bool {
+        false
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        vec![
+            "ed25519".to_string(),
+            "frost".to_string(),
+            "chacha20".to_string(),
+            "aes-gcm".to_string(),
+        ]
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        let mut result = 0u8;
+        for (x, y) in a.iter().zip(b.iter()) {
+            result |= x ^ y;
+        }
+        result == 0
+    }
+
+    fn secure_zero(&self, data: &mut [u8]) {
+        data.zeroize();
+    }
+}
+
+// Crypto extended implementation for RealCryptoHandler
+#[async_trait]
+impl CryptoExtendedEffects for RealCryptoHandler {
     async fn generate_signing_keys(
         &self,
         threshold: u16,
@@ -882,35 +899,6 @@ impl CryptoEffects for RealCryptoHandler {
             .await
     }
 
-    fn is_simulated(&self) -> bool {
-        false
-    }
-
-    fn crypto_capabilities(&self) -> Vec<String> {
-        vec![
-            "ed25519".to_string(),
-            "frost".to_string(),
-            "aes-gcm".to_string(),
-            "chacha20".to_string(),
-            "hkdf".to_string(),
-        ]
-    }
-
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        if a.len() != b.len() {
-            return false;
-        }
-        // Use a simple constant-time comparison
-        let mut result = 0u8;
-        for (x, y) in a.iter().zip(b.iter()) {
-            result |= x ^ y;
-        }
-        result == 0
-    }
-
-    fn secure_zero(&self, data: &mut [u8]) {
-        data.zeroize();
-    }
 }
 
 #[cfg(test)]

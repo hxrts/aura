@@ -2119,8 +2119,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         } else {
                                             new_state.toast_error("Authority not found");
                                         }
-                                        // TODO: Wire to actual authority switch via app core
-                                        // This will need to update the active authority context
+                                        // UI-only for now; runtime authority changes are managed elsewhere.
                                     }
                                     // Note: Threshold/guardian changes now use OpenGuardianSetup
                                     // which is handled above with the guardian ceremony commands.
@@ -2157,8 +2156,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         );
                                     }
                                     DispatchCommand::CreateBlock { name, description } => {
-                                        // TODO: Wire to actual block creation via app core
-                                        // For now, show success toast and dismiss modal
+                                        // UI-only for now; block creation is not wired to runtime yet.
                                         new_state.toast_success(format!("Block '{}' created", name));
                                         new_state.modal_queue.dismiss();
                                         let _ = description; // Suppress unused warning until wired

@@ -20,7 +20,7 @@
 //! - `GeneratedTestCase`: Test case generated from simulation traces
 
 use async_trait::async_trait;
-use aura_core::effects::RandomEffects;
+use aura_core::effects::{RandomCoreEffects, RandomEffects, RandomExtendedEffects};
 use aura_core::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -206,7 +206,7 @@ impl SeededRandomProvider {
 }
 
 #[async_trait]
-impl RandomEffects for SeededRandomProvider {
+impl RandomCoreEffects for SeededRandomProvider {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         let mut result = Vec::with_capacity(len);
         for _ in 0..len {
@@ -227,6 +227,10 @@ impl RandomEffects for SeededRandomProvider {
         self.next_value()
     }
 
+}
+
+#[async_trait]
+impl RandomExtendedEffects for SeededRandomProvider {
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         if min >= max {
             return min;

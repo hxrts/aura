@@ -39,6 +39,7 @@
 //! }
 //! ```
 
+use aura_core::effects::query::QuerySignalEffects;
 use aura_core::effects::reactive::Signal;
 use std::sync::LazyLock;
 
@@ -362,7 +363,7 @@ pub async fn register_app_signals<R: ReactiveEffects>(handler: &R) -> Result<(),
 ///
 /// // Signals now automatically update when facts change
 /// ```
-pub async fn register_app_signals_with_queries<R: ReactiveEffects>(
+pub async fn register_app_signals_with_queries<R: QuerySignalEffects>(
     handler: &R,
 ) -> Result<(), ReactiveError> {
     use crate::queries::{
@@ -374,22 +375,22 @@ pub async fn register_app_signals_with_queries<R: ReactiveEffects>(
 
     // Chat signal - bound to ChatQuery for automatic channel/message updates
     handler
-        .register_query(&*CHAT_SIGNAL, ChatQuery::default())
+        .register_query_signal(&*CHAT_SIGNAL, ChatQuery::default())
         .await?;
 
     // Recovery signal - bound to RecoveryQuery for threshold/guardian updates
     handler
-        .register_query(&*RECOVERY_SIGNAL, RecoveryQuery)
+        .register_query_signal(&*RECOVERY_SIGNAL, RecoveryQuery)
         .await?;
 
     // Invitations signal - bound to InvitationsQuery for invitation list updates
     handler
-        .register_query(&*INVITATIONS_SIGNAL, InvitationsQuery::default())
+        .register_query_signal(&*INVITATIONS_SIGNAL, InvitationsQuery::default())
         .await?;
 
     // Contacts signal - bound to ContactsQuery for contact list updates
     handler
-        .register_query(&*CONTACTS_SIGNAL, ContactsQuery::default())
+        .register_query_signal(&*CONTACTS_SIGNAL, ContactsQuery::default())
         .await?;
 
     // Block signal - single block state (backwards compatibility)
@@ -400,12 +401,12 @@ pub async fn register_app_signals_with_queries<R: ReactiveEffects>(
 
     // Blocks signal - bound to BlocksQuery for multi-block updates
     handler
-        .register_query(&*BLOCKS_SIGNAL, BlocksQuery::default())
+        .register_query_signal(&*BLOCKS_SIGNAL, BlocksQuery::default())
         .await?;
 
     // Neighborhood signal - bound to NeighborhoodQuery for neighbor updates
     handler
-        .register_query(&*NEIGHBORHOOD_SIGNAL, NeighborhoodQuery::default())
+        .register_query_signal(&*NEIGHBORHOOD_SIGNAL, NeighborhoodQuery::default())
         .await?;
 
     // Register derived/status signals (not query-bound, updated manually)

@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl aura_core::effects::RandomEffects for MockCrypto {
+    impl aura_core::effects::RandomCoreEffects for MockCrypto {
         async fn random_bytes(&self, len: usize) -> Vec<u8> {
             let seed = self.next_seed();
             let mut bytes = vec![0u8; len];
@@ -374,13 +374,16 @@ mod tests {
             bytes
         }
 
+        async fn random_u64(&self) -> u64 {
+            self.next_seed()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl aura_core::effects::RandomExtendedEffects for MockCrypto {
         async fn random_range(&self, min: u64, max: u64) -> u64 {
             let seed = self.next_seed();
             min + (seed % (max - min + 1))
-        }
-
-        async fn random_u64(&self) -> u64 {
-            self.next_seed()
         }
 
         async fn random_uuid(&self) -> uuid::Uuid {
@@ -392,7 +395,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl CryptoEffects for MockCrypto {
+    impl CryptoCoreEffects for MockCrypto {
         async fn hkdf_derive(
             &self,
             ikm: &[u8],
@@ -438,6 +441,27 @@ mod tests {
             Ok(true)
         }
 
+        fn is_simulated(&self) -> bool {
+            true
+        }
+
+        fn crypto_capabilities(&self) -> Vec<String> {
+            vec!["mock".to_string()]
+        }
+
+        fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+            a == b
+        }
+
+        fn secure_zero(&self, data: &mut [u8]) {
+            for b in data.iter_mut() {
+                *b = 0;
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CryptoExtendedEffects for MockCrypto {
         async fn frost_generate_keys(
             &self,
             _threshold: u16,
@@ -558,24 +582,6 @@ mod tests {
                 key_packages: vec![],
                 public_key_package: vec![],
             })
-        }
-
-        fn is_simulated(&self) -> bool {
-            true
-        }
-
-        fn crypto_capabilities(&self) -> Vec<String> {
-            vec!["mock".to_string()]
-        }
-
-        fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-            a == b
-        }
-
-        fn secure_zero(&self, data: &mut [u8]) {
-            for b in data.iter_mut() {
-                *b = 0;
-            }
         }
 
         async fn generate_signing_keys(

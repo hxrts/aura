@@ -62,7 +62,7 @@ impl CompositeHandler {
             return Ok(());
         }
 
-        let adapter = Box::new(HandlerRegistrableAdapter::new(effect_type, handler));
+        let adapter = Box::new(HandlerRegistrableAdapter::new(handler));
         self.registry
             .register_handler(effect_type, adapter)
             .map_err(|e| CompositeError::HandlerExecutionFailed {
@@ -333,16 +333,12 @@ impl RegistrableHandler for CompositeHandlerAdapter {
 
 /// Adapter to expose a `Handler` as a `RegistrableHandler` for registry dispatch.
 struct HandlerRegistrableAdapter {
-    effect_type: EffectType,
     handler: Box<dyn Handler>,
 }
 
 impl HandlerRegistrableAdapter {
-    fn new(effect_type: EffectType, handler: Box<dyn Handler>) -> Self {
-        Self {
-            effect_type,
-            handler,
-        }
+    fn new(handler: Box<dyn Handler>) -> Self {
+        Self { handler }
     }
 }
 

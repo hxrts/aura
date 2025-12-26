@@ -26,8 +26,10 @@ use aura_core::effects::{
         AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, ChannelCloseParams,
         ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
     },
-    BiscuitAuthorizationEffects, CryptoEffects, FlowBudgetEffects, JournalEffects, NetworkEffects,
-    RandomEffects, StorageEffects,
+    BiscuitAuthorizationEffects, CryptoCoreEffects, CryptoEffects, CryptoExtendedEffects,
+    FlowBudgetEffects, JournalEffects, NetworkCoreEffects, NetworkEffects, NetworkExtendedEffects,
+    RandomCoreEffects, RandomEffects, RandomExtendedEffects, StorageCoreEffects, StorageEffects,
+    StorageExtendedEffects,
 };
 use aura_core::epochs::Epoch;
 use aura_core::flow::{FlowBudget, Receipt};
@@ -206,7 +208,7 @@ impl AmpChannelEffects for MockEffects {
 }
 
 #[async_trait]
-impl RandomEffects for MockEffects {
+impl RandomCoreEffects for MockEffects {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         use rand::RngCore;
         let mut state = self.state.lock().unwrap();
@@ -223,16 +225,19 @@ impl RandomEffects for MockEffects {
         bytes
     }
 
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        use rand::Rng;
-        let mut state = self.state.lock().unwrap();
-        state.rng.gen_range(min..=max)
-    }
-
     async fn random_u64(&self) -> u64 {
         use rand::Rng;
         let mut state = self.state.lock().unwrap();
         state.rng.gen()
+    }
+}
+
+#[async_trait]
+impl RandomExtendedEffects for MockEffects {
+    async fn random_range(&self, min: u64, max: u64) -> u64 {
+        use rand::Rng;
+        let mut state = self.state.lock().unwrap();
+        state.rng.gen_range(min..=max)
     }
 
     async fn random_uuid(&self) -> Uuid {
@@ -244,7 +249,7 @@ impl RandomEffects for MockEffects {
 }
 
 #[async_trait]
-impl CryptoEffects for MockEffects {
+impl CryptoCoreEffects for MockEffects {
     async fn hkdf_derive(
         &self,
         _ikm: &[u8],
@@ -288,6 +293,32 @@ impl CryptoEffects for MockEffects {
         Ok(true)
     }
 
+    fn is_simulated(&self) -> bool {
+        true
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        vec![
+            "ed25519".to_string(),
+            "frost".to_string(),
+            "chacha20-poly1305".to_string(),
+            "aes-gcm".to_string(),
+        ]
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        use subtle::ConstantTimeEq;
+        a.ct_eq(b).into()
+    }
+
+    fn secure_zero(&self, data: &mut [u8]) {
+        use zeroize::Zeroize;
+        data.zeroize();
+    }
+}
+
+#[async_trait]
+impl CryptoExtendedEffects for MockEffects {
     async fn frost_generate_keys(
         &self,
         _threshold: u16,
@@ -434,7 +465,6 @@ impl CryptoEffects for MockEffects {
         max_signers: u16,
     ) -> Result<SigningKeyGenResult, aura_core::effects::crypto::CryptoError> {
         if threshold == 1 && max_signers == 1 {
-            // Single-signer: use Ed25519
             let (signing_key, verifying_key) = self.ed25519_generate_keypair().await?;
             let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key.clone());
             let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
@@ -444,7 +474,6 @@ impl CryptoEffects for MockEffects {
                 mode: SigningMode::SingleSigner,
             })
         } else if threshold >= 2 {
-            // Threshold: use FROST
             let frost_result = self.frost_generate_keys(threshold, max_signers).await?;
             Ok(SigningKeyGenResult {
                 key_packages: frost_result.key_packages,
@@ -501,40 +530,13 @@ impl CryptoEffects for MockEffects {
                 self.ed25519_verify(message, signature, package.verifying_key())
                     .await
             }
-            SigningMode::Threshold => {
-                // Use FROST verification
-                self.frost_verify(message, signature, public_key_package)
-                    .await
-            }
+            SigningMode::Threshold => self.frost_verify(message, signature, public_key_package).await,
         }
-    }
-
-    fn is_simulated(&self) -> bool {
-        true
-    }
-
-    fn crypto_capabilities(&self) -> Vec<String> {
-        vec![
-            "ed25519".to_string(),
-            "frost".to_string(),
-            "chacha20-poly1305".to_string(),
-            "aes-gcm".to_string(),
-        ]
-    }
-
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        use subtle::ConstantTimeEq;
-        a.ct_eq(b).into()
-    }
-
-    fn secure_zero(&self, data: &mut [u8]) {
-        use zeroize::Zeroize;
-        data.zeroize();
     }
 }
 
 #[async_trait]
-impl StorageEffects for MockEffects {
+impl StorageCoreEffects for MockEffects {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         let mut state = self.state.lock().unwrap();
         state.storage.insert(key.to_string(), value);
@@ -564,6 +566,10 @@ impl StorageEffects for MockEffects {
         }
     }
 
+}
+
+#[async_trait]
+impl StorageExtendedEffects for MockEffects {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         let state = self.state.lock().unwrap();
         Ok(state.storage.contains_key(key))
@@ -776,7 +782,7 @@ impl JournalEffects for MockEffects {
 }
 
 #[async_trait]
-impl NetworkEffects for MockEffects {
+impl NetworkCoreEffects for MockEffects {
     async fn send_to_peer(&self, _peer_id: Uuid, _message: Vec<u8>) -> Result<(), NetworkError> {
         Ok(())
     }
@@ -789,7 +795,10 @@ impl NetworkEffects for MockEffects {
         // Mock: return empty message
         Ok((Uuid::new_v4(), vec![]))
     }
+}
 
+#[async_trait]
+impl NetworkExtendedEffects for MockEffects {
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         Ok(vec![])
     }

@@ -14,7 +14,7 @@
 use async_trait::async_trait;
 use aura_core::effects::{
     CryptoEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-    StorageEffects, StorageError, StorageStats,
+    StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -135,7 +135,7 @@ impl EncryptedStorageConfig {
 /// ```
 pub struct EncryptedStorage<S, C, Sec>
 where
-    S: StorageEffects,
+    S: StorageCoreEffects + StorageExtendedEffects,
     C: CryptoEffects,
     Sec: SecureStorageEffects,
 {
@@ -155,7 +155,7 @@ where
 
 impl<S, C, Sec> EncryptedStorage<S, C, Sec>
 where
-    S: StorageEffects,
+    S: StorageCoreEffects + StorageExtendedEffects,
     C: CryptoEffects,
     Sec: SecureStorageEffects,
 {
@@ -396,9 +396,9 @@ where
 }
 
 #[async_trait]
-impl<S, C, Sec> StorageEffects for EncryptedStorage<S, C, Sec>
+impl<S, C, Sec> StorageCoreEffects for EncryptedStorage<S, C, Sec>
 where
-    S: StorageEffects + Send + Sync,
+    S: StorageCoreEffects + StorageExtendedEffects + Send + Sync,
     C: CryptoEffects + Send + Sync,
     Sec: SecureStorageEffects + Send + Sync,
 {
@@ -463,6 +463,15 @@ where
         self.inner.list_keys(prefix).await
     }
 
+}
+
+#[async_trait]
+impl<S, C, Sec> StorageExtendedEffects for EncryptedStorage<S, C, Sec>
+where
+    S: StorageCoreEffects + StorageExtendedEffects + Send + Sync,
+    C: CryptoEffects + Send + Sync,
+    Sec: SecureStorageEffects + Send + Sync,
+{
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         if !self.config.enabled {
             return self.inner.exists(key).await;
@@ -537,7 +546,7 @@ where
 // Debug impl that doesn't expose the master key
 impl<S, C, Sec> std::fmt::Debug for EncryptedStorage<S, C, Sec>
 where
-    S: StorageEffects + std::fmt::Debug,
+    S: StorageCoreEffects + StorageExtendedEffects + std::fmt::Debug,
     C: CryptoEffects,
     Sec: SecureStorageEffects,
 {
@@ -554,6 +563,7 @@ where
 mod tests {
     use super::*;
     use aura_core::effects::storage::StorageStats;
+    use aura_core::effects::{CryptoCoreEffects, CryptoExtendedEffects, StorageCoreEffects, StorageExtendedEffects};
     use aura_core::time::PhysicalTime;
     use std::sync::RwLock;
 
@@ -571,7 +581,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl StorageEffects for MockStorage {
+    impl StorageCoreEffects for MockStorage {
         async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
             self.data.write().unwrap().insert(key.to_string(), value);
             Ok(())
@@ -593,6 +603,10 @@ mod tests {
             };
             Ok(keys)
         }
+    }
+
+    #[async_trait]
+    impl StorageExtendedEffects for MockStorage {
 
         async fn exists(&self, key: &str) -> Result<bool, StorageError> {
             Ok(self.data.read().unwrap().contains_key(key))
@@ -633,7 +647,7 @@ mod tests {
     struct MockCrypto;
 
     #[async_trait]
-    impl aura_core::effects::RandomEffects for MockCrypto {
+    impl aura_core::effects::random::RandomCoreEffects for MockCrypto {
         async fn random_bytes(&self, len: usize) -> Vec<u8> {
             vec![42u8; len] // Deterministic for testing
         }
@@ -645,18 +659,10 @@ mod tests {
         async fn random_u64(&self) -> u64 {
             42
         }
-
-        async fn random_range(&self, min: u64, max: u64) -> u64 {
-            min + (max - min) / 2
-        }
-
-        async fn random_uuid(&self) -> uuid::Uuid {
-            uuid::Uuid::from_u128(1)
-        }
     }
 
     #[async_trait]
-    impl CryptoEffects for MockCrypto {
+    impl CryptoCoreEffects for MockCrypto {
         async fn hkdf_derive(
             &self,
             ikm: &[u8],
@@ -702,6 +708,28 @@ mod tests {
         ) -> Result<bool, aura_core::AuraError> {
             Ok(true)
         }
+
+        fn is_simulated(&self) -> bool {
+            true
+        }
+
+        fn crypto_capabilities(&self) -> Vec<String> {
+            vec!["mock".to_string()]
+        }
+
+        fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+            a == b
+        }
+
+        fn secure_zero(&self, data: &mut [u8]) {
+            for byte in data.iter_mut() {
+                *byte = 0;
+            }
+        }
+    }
+
+    #[async_trait]
+    impl CryptoExtendedEffects for MockCrypto {
 
         async fn generate_signing_keys(
             &self,

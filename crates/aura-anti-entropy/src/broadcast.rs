@@ -223,53 +223,6 @@ impl SyncEffects for BroadcasterHandler {
 
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
         let mut oplog = self.oplog.write().await;
-        let mut pending = self.pending_announcements.write().await;
-
-        for op in ops {
-            let cid = Hash32::from(op.op.parent_commitment);
-            oplog.insert(cid, op);
-
-            // Add to pending announcements if not at capacity
-            if pending.len() < self.config.max_pending_announcements {
-                pending.insert(cid, BTreeSet::new());
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
-        let mut pending = self.pending_announcements.write().await;
-
-        if pending.len() >= self.config.max_pending_announcements {
-            return Err(SyncError::OperationNotFound); // Using as "capacity exceeded"
-        }
-
-        pending.insert(cid, BTreeSet::new());
-        Ok(())
-    }
-
-    async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
-        let oplog = self.oplog.read().await;
-        oplog.get(&cid).cloned().ok_or(SyncError::OperationNotFound)
-    }
-
-    async fn push_op_to_peers(&self, op: AttestedOp, _peers: Vec<Uuid>) -> Result<(), SyncError> {
-        let cid = Hash32::from(op.op.parent_commitment);
-        let mut oplog = self.oplog.write().await;
-        oplog.insert(cid, op);
-        Ok(())
-    }
-
-    async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
-        // Broadcaster doesn't track individual peers - return empty list
-        Ok(Vec::new())
-    }
-}
-
-impl BroadcasterHandler {
-    async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
-        let mut oplog = self.oplog.write().await;
 
         for op in ops {
             let cid = Hash32::from(op.op.parent_commitment);
@@ -318,7 +271,7 @@ impl BroadcasterHandler {
         };
 
         // Serialize the operation for transport using the wire module
-        let op_data = crate::sync::wire::serialize_message(&crate::sync::wire::SyncWireMessage::op(op.clone()))?;
+        let op_data = crate::wire::serialize_message(&crate::wire::SyncWireMessage::op(op.clone()))?;
 
         // Send to each peer
         let mut send_errors = Vec::new();

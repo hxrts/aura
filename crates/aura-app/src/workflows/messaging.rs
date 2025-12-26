@@ -4,10 +4,9 @@
 //! Uses typed reactive signals for state reads/writes.
 
 use crate::{
-    signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL},
+    signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL},
     views::{
         chat::{Channel, ChannelType, ChatState, Message},
-        invitations::InvitationStatus,
     },
     AppCore,
 };
@@ -291,82 +290,13 @@ pub async fn create_channel(
     }
 
     if !invitation_ids.is_empty() {
-        let app_core = app_core.clone();
-        let context_id = context_id;
-        let channel_id = channel_id;
-        tokio::spawn(async move {
-            let _ = monitor_channel_invitation_acceptance(
-                &app_core,
-                invitation_ids,
-                context_id,
-                channel_id,
-            )
-            .await;
-        });
+        runtime
+            .start_channel_invitation_monitor(invitation_ids, context_id, channel_id)
+            .await
+            .map_err(|e| AuraError::agent(format!("{e}")))?;
     }
 
     Ok(channel_id.to_string())
-}
-
-/// Monitor channel invitations and bump the channel epoch once all are accepted.
-async fn monitor_channel_invitation_acceptance(
-    app_core: &Arc<RwLock<AppCore>>,
-    invitation_ids: Vec<String>,
-    context_id: ContextId,
-    channel_id: ChannelId,
-) -> Result<(), AuraError> {
-    if invitation_ids.is_empty() {
-        return Ok(());
-    }
-
-    // Poll for up to 2 minutes.
-    for _ in 0..120 {
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-
-        let core = app_core.read().await;
-        let invitations = core
-            .read(&*INVITATIONS_SIGNAL)
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to read INVITATIONS_SIGNAL: {e}")))?;
-
-        let mut all_accepted = true;
-        let mut has_failure = false;
-
-        for id in &invitation_ids {
-            match invitations.invitation(id).map(|inv| inv.status) {
-                Some(InvitationStatus::Accepted) => {}
-                Some(InvitationStatus::Rejected)
-                | Some(InvitationStatus::Expired)
-                | Some(InvitationStatus::Revoked) => {
-                    has_failure = true;
-                    break;
-                }
-                _ => {
-                    all_accepted = false;
-                }
-            }
-        }
-
-        if has_failure {
-            return Ok(());
-        }
-
-        if all_accepted {
-            let runtime = core
-                .runtime()
-                .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-                .clone();
-            drop(core);
-
-            runtime
-                .bump_channel_epoch(context_id, channel_id, "all-invites-accepted".to_string())
-                .await
-                .map_err(|e| AuraError::agent(format!("Failed to bump channel epoch: {e}")))?;
-            return Ok(());
-        }
-    }
-
-    Ok(())
 }
 
 /// Join an existing channel.

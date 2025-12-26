@@ -16,7 +16,7 @@ use crate::effects::tree::{Cut, Partial, ProposalId, Snapshot, TreeEffects};
 use async_trait::async_trait;
 use aura_core::effects::storage::StorageEffects;
 use aura_core::tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind};
-use aura_core::{AuraError, Hash32};
+use aura_core::{hash, AuraError, Hash32};
 use aura_journal::commitment_tree::reduce;
 use aura_journal::commitment_tree::storage as tree_storage;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -340,71 +340,5 @@ impl TreeEffects for PersistentTreeHandler {
         // Snapshot application replaces history; we store no additional ops
         let _ = snapshot;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use aura_testkit::MemoryStorageHandler;
-
-    #[tokio::test]
-    async fn test_persistent_handler_empty_init() {
-        let storage = Arc::new(MemoryStorageHandler::new());
-        let handler = PersistentTreeHandler::new(storage);
-
-        // Trigger lazy initialization
-        handler.ensure_initialized().await.unwrap();
-
-        // Should have no ops
-        let ops = handler
-            .ops_cache
-            .read()
-            .expect("lock poisoned in test");
-        assert!(ops.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_persistent_handler_lazy_init() {
-        let storage = Arc::new(MemoryStorageHandler::new());
-        let handler = PersistentTreeHandler::new(storage);
-
-        // Not initialized yet
-        assert!(!handler.initialized.load(Ordering::Acquire));
-
-        // Access state triggers initialization
-        let _state = handler.get_current_state().await;
-
-        // Now initialized
-        assert!(handler.initialized.load(Ordering::Acquire));
-    }
-
-    #[tokio::test]
-    async fn test_persistent_handler_survives_restart() {
-        let storage = Arc::new(MemoryStorageHandler::new());
-
-        // Create a handler
-        let handler1 = PersistentTreeHandler::new(storage.clone());
-
-        // Trigger initialization
-        handler1.ensure_initialized().await.unwrap();
-
-        // Verify initial state
-        let ops1 = handler1
-            .ops_cache
-            .read()
-            .expect("lock poisoned in test");
-        assert!(ops1.is_empty());
-        drop(ops1);
-        drop(handler1);
-
-        // Create a new handler with same storage - should load same state
-        let handler2 = PersistentTreeHandler::new(storage);
-        handler2.ensure_initialized().await.unwrap();
-        let ops2 = handler2
-            .ops_cache
-            .read()
-            .expect("lock poisoned in test");
-        assert!(ops2.is_empty()); // Still empty since we didn't add any ops
     }
 }

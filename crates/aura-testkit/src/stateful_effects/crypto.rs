@@ -13,7 +13,10 @@ use aura_core::crypto::single_signer::{
 use aura_core::effects::crypto::{
     FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext, SigningKeyGenResult,
 };
-use aura_core::effects::{CryptoEffects, CryptoError, RandomEffects};
+use aura_core::effects::{
+    CryptoCoreEffects, CryptoEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
+    RandomEffects, RandomExtendedEffects,
+};
 use std::sync::{Arc, Mutex};
 
 /// Mock crypto handler for deterministic testing
@@ -47,9 +50,9 @@ impl MockCryptoHandler {
     }
 }
 
-// RandomEffects implementation for MockCryptoHandler
+// RandomCoreEffects implementation for MockCryptoHandler
 #[async_trait]
-impl RandomEffects for MockCryptoHandler {
+impl RandomCoreEffects for MockCryptoHandler {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         let mut bytes = vec![0u8; len];
         let mut counter = self.counter.lock().unwrap();
@@ -73,6 +76,11 @@ impl RandomEffects for MockCryptoHandler {
         self.seed.wrapping_add(*counter)
     }
 
+}
+
+// RandomExtendedEffects implementation for MockCryptoHandler
+#[async_trait]
+impl RandomExtendedEffects for MockCryptoHandler {
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         if min >= max {
             return min;
@@ -90,9 +98,9 @@ impl RandomEffects for MockCryptoHandler {
     }
 }
 
-// CryptoEffects implementation for MockCryptoHandler
+// CryptoCoreEffects implementation for MockCryptoHandler
 #[async_trait]
-impl CryptoEffects for MockCryptoHandler {
+impl CryptoCoreEffects for MockCryptoHandler {
     async fn hkdf_derive(
         &self,
         ikm: &[u8],
@@ -158,12 +166,46 @@ impl CryptoEffects for MockCryptoHandler {
         Ok(signature == expected.as_slice())
     }
 
+    fn is_simulated(&self) -> bool {
+        true
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        vec![
+            "ed25519".to_string(),
+            "frost".to_string(),
+            "aes-gcm".to_string(),
+            "chacha20".to_string(),
+            "hkdf".to_string(),
+        ]
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        let mut result = 0u8;
+        for (x, y) in a.iter().zip(b.iter()) {
+            result |= x ^ y;
+        }
+        result == 0
+    }
+
+    fn secure_zero(&self, data: &mut [u8]) {
+        for byte in data.iter_mut() {
+            *byte = 0;
+        }
+    }
+}
+
+// CryptoExtendedEffects implementation for MockCryptoHandler
+#[async_trait]
+impl CryptoExtendedEffects for MockCryptoHandler {
     async fn frost_generate_keys(
         &self,
         _threshold: u16,
         max_signers: u16,
     ) -> Result<FrostKeyGenResult, CryptoError> {
-        // Mock implementation
         let mut key_packages = Vec::new();
         for i in 0..max_signers {
             let key = vec![self.seed as u8 + i as u8; 32];
@@ -218,7 +260,6 @@ impl CryptoEffects for MockCryptoHandler {
         signature: &[u8],
         _group_public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        // Mock implementation
         let expected = vec![self.seed as u8; 64];
         Ok(signature == expected.as_slice())
     }
@@ -233,8 +274,6 @@ impl CryptoEffects for MockCryptoHandler {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - deterministic XOR incorporating key and nonce
-        // This ensures different keys produce different ciphertext
         let mut key_state = self.seed;
         for byte in key {
             key_state = key_state.wrapping_mul(31).wrapping_add(*byte as u64);
@@ -258,7 +297,6 @@ impl CryptoEffects for MockCryptoHandler {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // XOR is symmetric, so decrypt = encrypt with same key stream
         self.chacha20_encrypt(ciphertext, key, nonce).await
     }
 
@@ -268,7 +306,6 @@ impl CryptoEffects for MockCryptoHandler {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - use same key-sensitive XOR as chacha20
         self.chacha20_encrypt(plaintext, key, nonce).await
     }
 
@@ -278,7 +315,6 @@ impl CryptoEffects for MockCryptoHandler {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - use same key-sensitive XOR as chacha20
         self.chacha20_decrypt(ciphertext, key, nonce).await
     }
 
@@ -289,7 +325,6 @@ impl CryptoEffects for MockCryptoHandler {
         new_threshold: u16,
         new_max_signers: u16,
     ) -> Result<FrostKeyGenResult, CryptoError> {
-        // Mock implementation - generate new keys
         self.frost_generate_keys(new_threshold, new_max_signers)
             .await
     }
@@ -300,7 +335,6 @@ impl CryptoEffects for MockCryptoHandler {
         max_signers: u16,
     ) -> Result<SigningKeyGenResult, CryptoError> {
         if threshold == 1 && max_signers == 1 {
-            // Single-signer: use Ed25519
             let (signing_key, verifying_key) = self.ed25519_generate_keypair().await?;
             let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key.clone());
             let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
@@ -310,7 +344,6 @@ impl CryptoEffects for MockCryptoHandler {
                 mode: SigningMode::SingleSigner,
             })
         } else if threshold >= 2 {
-            // Threshold: use FROST
             let frost_result = self.frost_generate_keys(threshold, max_signers).await?;
             Ok(SigningKeyGenResult {
                 key_packages: frost_result.key_packages,
@@ -364,42 +397,7 @@ impl CryptoEffects for MockCryptoHandler {
                 self.ed25519_verify(message, signature, package.verifying_key())
                     .await
             }
-            SigningMode::Threshold => {
-                // Use FROST verification
-                self.frost_verify(message, signature, public_key_package)
-                    .await
-            }
-        }
-    }
-
-    fn is_simulated(&self) -> bool {
-        true
-    }
-
-    fn crypto_capabilities(&self) -> Vec<String> {
-        vec![
-            "ed25519".to_string(),
-            "frost".to_string(),
-            "aes-gcm".to_string(),
-            "chacha20".to_string(),
-            "hkdf".to_string(),
-        ]
-    }
-
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        if a.len() != b.len() {
-            return false;
-        }
-        let mut result = 0u8;
-        for (x, y) in a.iter().zip(b.iter()) {
-            result |= x ^ y;
-        }
-        result == 0
-    }
-
-    fn secure_zero(&self, data: &mut [u8]) {
-        for byte in data.iter_mut() {
-            *byte = 0;
+            SigningMode::Threshold => self.frost_verify(message, signature, public_key_package).await,
         }
     }
 }

@@ -48,6 +48,4 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-# Testing infrastructure
-aura-testkit = { path = "../aura-testkit" }
 proptest = { workspace = true }

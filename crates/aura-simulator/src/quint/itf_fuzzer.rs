@@ -16,7 +16,9 @@ use super::trace_converter::{ExecutionTrace, QuintTrace, TraceConversionConfig, 
 use super::{ChaosGenerator, QuintCliRunner};
 use crate::quint::simulation_evaluator::SimulationPropertyEvaluator;
 use async_trait::async_trait;
-use aura_core::effects::{StorageEffects, StorageError, StorageStats};
+use aura_core::effects::{
+    StorageCoreEffects, StorageEffects, StorageError, StorageExtendedEffects, StorageStats,
+};
 use aura_core::AuraError;
 use aura_effects::storage::FilesystemStorageHandler;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -2207,7 +2209,7 @@ impl PathStorageAdapter {
 }
 
 #[async_trait]
-impl StorageEffects for PathStorageAdapter {
+impl StorageCoreEffects for PathStorageAdapter {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         self.handler.store(key, value).await
     }
@@ -2224,6 +2226,10 @@ impl StorageEffects for PathStorageAdapter {
         self.handler.list_keys(prefix).await
     }
 
+}
+
+#[async_trait]
+impl StorageExtendedEffects for PathStorageAdapter {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         self.handler.exists(key).await
     }

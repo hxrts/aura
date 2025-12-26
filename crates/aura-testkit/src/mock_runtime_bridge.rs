@@ -309,6 +309,15 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
+    async fn start_channel_invitation_monitor(
+        &self,
+        _invitation_ids: Vec<String>,
+        _context: ContextId,
+        _channel: ChannelId,
+    ) -> Result<(), IntentError> {
+        Ok(())
+    }
+
     async fn amp_send_message(
         &self,
         params: ChannelSendParams,

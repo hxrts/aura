@@ -1,10 +1,10 @@
 //! Consensus integration smoke test for AMP bumps.
 
+use aura_amp::run_amp_channel_epoch_bump;
 use aura_core::epochs::Epoch;
 use aura_core::frost::Share;
 use aura_core::AuthorityId;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
-use aura_amp::run_amp_channel_epoch_bump;
 use aura_testkit::stateful_effects::MockRandomHandler;
 use aura_testkit::time::ControllableTimeSource;
 use std::collections::HashMap;
@@ -106,4 +106,49 @@ async fn amp_consensus_success_path() {
         "consensus should succeed with key material: {:?}",
         result.as_ref().err()
     );
+}
+
+#[tokio::test]
+async fn amp_consensus_missing_keys_fails() {
+    let prestate = aura_core::Prestate::new(vec![], aura_core::Hash32::default());
+    let proposal = ProposedChannelEpochBump {
+        context: aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]),
+        channel: aura_core::identifiers::ChannelId::from_bytes([1u8; 32]),
+        parent_epoch: 0,
+        new_epoch: 1,
+        bump_id: aura_core::Hash32::new([2u8; 32]),
+        reason: ChannelBumpReason::Routine,
+    };
+
+    let witnesses = vec![
+        AuthorityId::new_from_entropy([10u8; 32]),
+        AuthorityId::new_from_entropy([11u8; 32]),
+        AuthorityId::new_from_entropy([12u8; 32]),
+    ];
+    let key_packages: HashMap<AuthorityId, Share> = HashMap::new();
+
+    // Create test FROST keys using testkit (minimum valid parameters)
+    let (_, group_public_key) = aura_testkit::builders::keys::helpers::test_frost_key_shares(
+        2,     // threshold
+        3,     // total
+        12345, // deterministic seed
+    );
+
+    let random = MockRandomHandler::new_with_seed(99);
+    let time = ControllableTimeSource::new(1_700_000_000_000);
+
+    let result = run_amp_channel_epoch_bump(
+        &prestate,
+        &proposal,
+        witnesses,
+        2,
+        key_packages,
+        group_public_key.into(),
+        Epoch::from(1),
+        &random,
+        &time,
+    )
+    .await;
+
+    assert!(result.is_err(), "missing key packages should error");
 }

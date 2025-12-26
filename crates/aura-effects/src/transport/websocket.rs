@@ -6,7 +6,7 @@
 
 use super::{TransportConfig, TransportConnection, TransportError, TransportResult};
 use async_trait::async_trait;
-use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
+use aura_core::effects::{NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use tokio::net::TcpStream;
@@ -211,7 +211,7 @@ impl WebSocketTransportHandler {
 }
 
 #[async_trait]
-impl NetworkEffects for WebSocketTransportHandler {
+impl NetworkExtendedEffects for WebSocketTransportHandler {
     async fn open(&self, endpoint: &str) -> Result<String, NetworkError> {
         let url: Url = endpoint
             .parse()
@@ -271,6 +271,32 @@ impl NetworkEffects for WebSocketTransportHandler {
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
         Ok(())
     }
+    async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
+        Err(NetworkError::ReceiveFailed {
+            reason: "WebSocket receive_from requires connection management".to_string(),
+        })
+    }
+
+    async fn connected_peers(&self) -> Vec<Uuid> {
+        // Stateless WebSocket handler doesn't track connections
+        Vec::new()
+    }
+
+    async fn is_peer_connected(&self, _peer_id: Uuid) -> bool {
+        false
+    }
+
+    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
+        use futures::stream;
+        use std::pin::Pin;
+
+        let stream = stream::empty::<PeerEvent>();
+        Ok(Pin::from(Box::new(stream)))
+    }
+}
+
+#[async_trait]
+impl NetworkCoreEffects for WebSocketTransportHandler {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         // Convert UUID to WebSocket URL - simplified mapping
         let url_str = format!("ws://localhost:8080/{}", peer_id);
@@ -311,28 +337,5 @@ impl NetworkEffects for WebSocketTransportHandler {
         Err(NetworkError::ReceiveFailed {
             reason: "WebSocket receive requires connection management".to_string(),
         })
-    }
-
-    async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
-        Err(NetworkError::ReceiveFailed {
-            reason: "WebSocket receive_from requires connection management".to_string(),
-        })
-    }
-
-    async fn connected_peers(&self) -> Vec<Uuid> {
-        // Stateless WebSocket handler doesn't track connections
-        Vec::new()
-    }
-
-    async fn is_peer_connected(&self, _peer_id: Uuid) -> bool {
-        false
-    }
-
-    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
-        use futures::stream;
-        use std::pin::Pin;
-
-        let stream = stream::empty::<PeerEvent>();
-        Ok(Pin::from(Box::new(stream)))
     }
 }

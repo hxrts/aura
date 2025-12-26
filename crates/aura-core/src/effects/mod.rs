@@ -120,7 +120,7 @@ pub use capability::{
 #[cfg(feature = "simulation")]
 pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 pub use console::ConsoleEffects;
-pub use crypto::{CryptoEffects, CryptoError};
+pub use crypto::{CryptoCoreEffects, CryptoEffects, CryptoError, CryptoExtendedEffects};
 pub use fact::{CheckpointInfo, FactEffects, FactError, TemporalFact};
 pub use flood::{
     FloodAction, FloodBudget, FloodError, LayeredBudget, RendezvousFlooder, RendezvousPacket,
@@ -137,7 +137,15 @@ pub use leakage::{
 };
 #[allow(deprecated)]
 // Migration utilities removed - middleware transition complete
-pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
+pub use network::{
+    NetworkAddress,
+    NetworkCoreEffects,
+    NetworkEffects,
+    NetworkError,
+    NetworkExtendedEffects,
+    PeerEvent,
+    PeerEventStream,
+};
 pub use query::{QueryEffects, QueryError, QuerySubscription};
 #[cfg(feature = "simulation")]
 pub use quint::{
@@ -162,7 +170,7 @@ pub use quint::{
     VerificationId,
     VerificationResult,
 };
-pub use random::RandomEffects;
+pub use random::{RandomCoreEffects, RandomEffects, RandomExtendedEffects};
 pub use reactive::{
     ReactiveDeriveEffects, ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
 };
@@ -194,7 +202,14 @@ pub use simulation::{
     SimulationMetrics, SimulationObservationEffects, SimulationScenario, SimulationTime,
     StorageFault, TimeFault,
 };
-pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
+pub use storage::{
+    StorageCoreEffects,
+    StorageEffects,
+    StorageError,
+    StorageExtendedEffects,
+    StorageLocation,
+    StorageStats,
+};
 pub use supertraits::{
     AntiEntropyEffects, ChoreographyEffects, CrdtEffects, MinimalEffects, SigningEffects,
     SnapshotEffects, TreeEffects,

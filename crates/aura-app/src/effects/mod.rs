@@ -1,7 +1,6 @@
-//! Stateful effect handlers hosted in aura-app (Layer 6).
+//! Stateful effect handler re-exports for aura-app.
 //!
-//! These handlers own runtime state (query caches, signal graphs) and therefore
-//! live above the stateless Layer 3 effects implementations.
+//! Implementations live in `aura-effects`; aura-app re-exports the public types.
 
 pub mod query;
 pub mod reactive;

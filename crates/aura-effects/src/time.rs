@@ -105,6 +105,7 @@ impl aura_core::effects::TimeEffects for PhysicalTimeHandler {}
 #[derive(Debug, Clone, Default)]
 pub struct LogicalClockHandler;
 
+#[allow(deprecated)]
 impl LogicalClockHandler {
     /// Create a new logical clock handler.
     pub fn new() -> Self {
@@ -146,6 +147,7 @@ impl LogicalClockHandler {
 }
 
 #[async_trait]
+#[allow(deprecated)]
 impl LogicalClockEffects for LogicalClockHandler {
     #[tracing::instrument(name = "logical_advance", level = "trace", skip(observed))]
     #[allow(clippy::disallowed_methods)] // Effect implementation uses Instant for metrics

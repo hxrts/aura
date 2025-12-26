@@ -1,3 +1,5 @@
+#![deny(clippy::dbg_macro)]
+#![deny(clippy::todo)]
 //! # Aura Consensus - Layer 4: Strong Agreement
 //!
 //! Consensus protocol implementation (fast path + fallback) for Aura.

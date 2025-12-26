@@ -11,12 +11,15 @@ use aura_app::runtime_bridge::{
     BridgeDeviceInfo, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo,
     RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
+use aura_app::signal_defs::INVITATIONS_SIGNAL;
+use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
 use aura_core::effects::{
     amp::{
         AmpChannelEffects, AmpChannelError, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
         ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
     },
+    reactive::ReactiveEffects,
     time::PhysicalTimeEffects,
     StorageEffects, ThresholdSigningEffects, TransportEffects,
 };
@@ -212,6 +215,68 @@ impl RuntimeBridge for AgentRuntimeBridge {
             reason = %reason,
             "Channel epoch bumped"
         );
+
+        Ok(())
+    }
+
+    async fn start_channel_invitation_monitor(
+        &self,
+        invitation_ids: Vec<String>,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<(), IntentError> {
+        if invitation_ids.is_empty() {
+            return Ok(());
+        }
+
+        let effects = self.agent.runtime().effects();
+        let reactive = effects.reactive_handler();
+        let agent = self.agent.clone();
+
+        tokio::spawn(async move {
+            for _ in 0..120 {
+                let _ = effects.sleep_ms(1000).await;
+
+                let invitations = match reactive.read(&INVITATIONS_SIGNAL).await {
+                    Ok(state) => state,
+                    Err(_) => continue,
+                };
+
+                let mut all_accepted = true;
+                let mut has_failure = false;
+
+                for id in &invitation_ids {
+                    match invitations.invitation(id).map(|inv| inv.status) {
+                        Some(InvitationStatus::Accepted) => {}
+                        Some(InvitationStatus::Rejected)
+                        | Some(InvitationStatus::Expired)
+                        | Some(InvitationStatus::Revoked) => {
+                            has_failure = true;
+                            break;
+                        }
+                        _ => {
+                            all_accepted = false;
+                        }
+                    }
+                }
+
+                if has_failure {
+                    break;
+                }
+
+                if all_accepted {
+                    let bridge = AgentRuntimeBridge::new(agent.clone());
+                    let _ = bridge
+                        .bump_channel_epoch(
+                            context,
+                            channel,
+                            "All invitations accepted".to_string(),
+                        )
+                        .await;
+                    break;
+                }
+            }
+        });
 
         Ok(())
     }

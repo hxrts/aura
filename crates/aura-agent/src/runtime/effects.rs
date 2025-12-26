@@ -792,9 +792,9 @@ impl aura_protocol::effects::TreeEffects for AuraEffectSystem {
     }
 }
 
-// Implementation of RandomEffects
+// Implementation of RandomCoreEffects
 #[async_trait]
-impl RandomEffects for AuraEffectSystem {
+impl RandomCoreEffects for AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         let mut bytes = vec![0u8; len];
@@ -814,6 +814,10 @@ impl RandomEffects for AuraEffectSystem {
         self.random_rng.lock().next_u64()
     }
 
+}
+
+#[async_trait]
+impl RandomExtendedEffects for AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         self.random_rng.lock().gen_range(min..=max)
@@ -1023,9 +1027,9 @@ impl TransportEffects for AuraEffectSystem {
     }
 }
 
-// Implementation of CryptoEffects
+// Implementation of CryptoCoreEffects
 #[async_trait]
-impl CryptoEffects for AuraEffectSystem {
+impl CryptoCoreEffects for AuraEffectSystem {
     async fn hkdf_derive(
         &self,
         ikm: &[u8],
@@ -1069,6 +1073,27 @@ impl CryptoEffects for AuraEffectSystem {
             .await
     }
 
+    fn is_simulated(&self) -> bool {
+        aura_core::CryptoEffects::is_simulated(&self.crypto_handler)
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        self.crypto_handler.crypto_capabilities()
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        self.crypto_handler.constant_time_eq(a, b)
+    }
+
+    fn secure_zero(&self, data: &mut [u8]) {
+        self.crypto_handler.secure_zero(data)
+    }
+
+}
+
+// Implementation of CryptoExtendedEffects
+#[async_trait]
+impl CryptoExtendedEffects for AuraEffectSystem {
     async fn frost_generate_keys(
         &self,
         threshold: u16,
@@ -1081,6 +1106,18 @@ impl CryptoEffects for AuraEffectSystem {
 
     async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
         self.crypto_handler.frost_generate_nonces(key_package).await
+    }
+
+    async fn frost_create_signing_package(
+        &self,
+        message: &[u8],
+        nonces: &[Vec<u8>],
+        participants: &[u16],
+        public_key_package: &[u8],
+    ) -> Result<FrostSigningPackage, CryptoError> {
+        self.crypto_handler
+            .frost_create_signing_package(message, nonces, participants, public_key_package)
+            .await
     }
 
     async fn frost_sign_share(
@@ -1112,34 +1149,6 @@ impl CryptoEffects for AuraEffectSystem {
     ) -> Result<bool, CryptoError> {
         self.crypto_handler
             .frost_verify(message, signature, public_key)
-            .await
-    }
-
-    fn is_simulated(&self) -> bool {
-        aura_core::CryptoEffects::is_simulated(&self.crypto_handler)
-    }
-
-    fn crypto_capabilities(&self) -> Vec<String> {
-        self.crypto_handler.crypto_capabilities()
-    }
-
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        self.crypto_handler.constant_time_eq(a, b)
-    }
-
-    fn secure_zero(&self, data: &mut [u8]) {
-        self.crypto_handler.secure_zero(data)
-    }
-
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        nonces: &[Vec<u8>],
-        participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<FrostSigningPackage, CryptoError> {
-        self.crypto_handler
-            .frost_create_signing_package(message, nonces, participants, public_key_package)
             .await
     }
 
@@ -1239,7 +1248,7 @@ impl CryptoEffects for AuraEffectSystem {
 
 // Implementation of NetworkEffects
 #[async_trait]
-impl NetworkEffects for AuraEffectSystem {
+impl NetworkCoreEffects for AuraEffectSystem {
     async fn send_to_peer(
         &self,
         _peer_id: uuid::Uuid,
@@ -1258,7 +1267,10 @@ impl NetworkEffects for AuraEffectSystem {
         // Mock implementation - return empty data
         Err(NetworkError::NoMessage)
     }
+}
 
+#[async_trait]
+impl NetworkExtendedEffects for AuraEffectSystem {
     async fn receive_from(&self, _peer_id: uuid::Uuid) -> Result<Vec<u8>, NetworkError> {
         // Mock implementation
         Err(NetworkError::NoMessage)
@@ -1297,7 +1309,7 @@ impl NetworkEffects for AuraEffectSystem {
 
 // Implementation of StorageEffects
 #[async_trait]
-impl StorageEffects for AuraEffectSystem {
+impl StorageCoreEffects for AuraEffectSystem {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         self.storage_handler.store(key, value).await
     }
@@ -1314,6 +1326,10 @@ impl StorageEffects for AuraEffectSystem {
         self.storage_handler.list_keys(prefix).await
     }
 
+}
+
+#[async_trait]
+impl StorageExtendedEffects for AuraEffectSystem {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         self.storage_handler.exists(key).await
     }

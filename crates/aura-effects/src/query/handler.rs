@@ -22,8 +22,8 @@ use aura_core::query::{
 use aura_core::{Hash32, ResourceScope};
 use aura_core::effects::reactive::SignalId;
 
-use aura_effects::database::query::AuraQuery;
-use crate::effects::reactive::ReactiveHandler;
+use crate::database::query::AuraQuery;
+use crate::reactive::ReactiveHandler;
 
 use super::datalog::{format_rule, parse_fact_to_row};
 

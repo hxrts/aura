@@ -16,7 +16,7 @@
 //!
 //! ## Query-Signal Integration
 //!
-//! Queries integrate with the reactive system via `ReactiveEffects::register_query()`.
+//! Queries integrate with the reactive system via `QuerySignalEffects::register_query_signal()`.
 //! When facts matching a query's `dependencies()` change, the query is automatically
 //! re-evaluated and the bound signal is updated.
 //!

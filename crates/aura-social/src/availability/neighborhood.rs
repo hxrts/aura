@@ -10,8 +10,8 @@ use aura_core::{
     domain::content::Hash32,
     effects::{
         availability::{AvailabilityError, DataAvailability},
-        network::NetworkEffects,
-        storage::StorageEffects,
+        network::{NetworkCoreEffects, NetworkEffects},
+        storage::{StorageCoreEffects, StorageEffects},
     },
     identifiers::AuthorityId,
 };
@@ -278,7 +278,7 @@ mod tests {
     struct DummyNetwork;
 
     #[async_trait]
-    impl StorageEffects for DummyStorage {
+    impl StorageCoreEffects for DummyStorage {
         async fn store(&self, _key: &str, _value: Vec<u8>) -> Result<(), StorageError> {
             Ok(())
         }
@@ -291,6 +291,10 @@ mod tests {
         async fn list_keys(&self, _prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
             Ok(vec![])
         }
+    }
+
+    #[async_trait]
+    impl StorageExtendedEffects for DummyStorage {
         async fn exists(&self, _key: &str) -> Result<bool, StorageError> {
             Ok(false)
         }
@@ -315,7 +319,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl NetworkEffects for DummyNetwork {
+    impl NetworkCoreEffects for DummyNetwork {
         async fn send_to_peer(
             &self,
             _peer_id: uuid::Uuid,
@@ -329,6 +333,10 @@ mod tests {
         async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), NetworkError> {
             Err(NetworkError::NoMessage)
         }
+    }
+
+    #[async_trait]
+    impl NetworkExtendedEffects for DummyNetwork {
         async fn receive_from(&self, _peer_id: uuid::Uuid) -> Result<Vec<u8>, NetworkError> {
             Err(NetworkError::ReceiveFailed {
                 reason: "not connected".to_string(),

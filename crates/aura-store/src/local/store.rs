@@ -95,7 +95,9 @@ impl LocalStore {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use aura_core::effects::storage::{StorageError, StorageStats};
+    use aura_core::effects::storage::{
+        StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats,
+    };
     use std::collections::HashMap;
     use std::sync::RwLock;
 
@@ -113,7 +115,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl StorageEffects for TestStorage {
+    impl StorageCoreEffects for TestStorage {
         async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
             let mut data = self
                 .data
@@ -151,6 +153,10 @@ mod tests {
             Ok(keys)
         }
 
+    }
+
+    #[async_trait]
+    impl StorageExtendedEffects for TestStorage {
         async fn exists(&self, key: &str) -> Result<bool, StorageError> {
             let data = self
                 .data

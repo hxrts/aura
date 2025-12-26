@@ -10,10 +10,9 @@ use super::GuardEffects;
 use crate::guards::executor::{BorrowedEffectInterpreter, GuardPlan, execute_guard_plan};
 use crate::guards::{
     config::GuardRuntimeConfig,
-    privacy::{track_leakage_consumption, AdversaryClass},
+    privacy::track_leakage_consumption,
     JournalCoupler, LeakageBudget,
 };
-use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Receipt};
 use tracing::{debug, warn};

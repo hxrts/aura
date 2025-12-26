@@ -20,7 +20,7 @@ use aura_journal::fact::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{config::AmpRuntimeConfig, get_channel_state, AmpJournalEffects};
+use crate::{config::AmpRuntimeConfig, get_channel_state, AmpJournalEffects};
 
 /// Simple coordinator that writes AMP channel facts into the context journal.
 pub struct AmpChannelCoordinator<E> {
@@ -298,7 +298,19 @@ fn map_err(e: aura_core::AuraError) -> AmpChannelError {
     }
 }
 
+// ============================================================================
+// Demo Encryption (feature-gated)
+// ============================================================================
+
 /// Derive a deterministic keystream from header + sender and XOR-mask the payload.
+///
+/// # Security Warning
+///
+/// This is a **demo-only** encryption scheme using XOR with a hash-derived keystream.
+/// It provides NO real security guarantees and MUST NOT be used in production.
+/// Production deployments should disable the `demo-crypto` feature and use
+/// proper AEAD encryption via `CryptoEffects`.
+#[cfg(feature = "demo-crypto")]
 fn mask_ciphertext(header: &AmpHeader, sender: &AuthorityId, plaintext: &[u8]) -> Vec<u8> {
     let mut key_material = Vec::new();
     key_material.extend_from_slice(header.channel.as_bytes());
@@ -321,4 +333,13 @@ fn mask_ciphertext(header: &AmpHeader, sender: &AuthorityId, plaintext: &[u8]) -
         .zip(keystream)
         .map(|(p, k)| p ^ k)
         .collect()
+}
+
+/// Placeholder when demo-crypto is disabled - panics to prevent accidental use.
+#[cfg(not(feature = "demo-crypto"))]
+fn mask_ciphertext(_header: &AmpHeader, _sender: &AuthorityId, _plaintext: &[u8]) -> Vec<u8> {
+    panic!(
+        "Demo encryption is disabled. Enable the `demo-crypto` feature for testing, \
+         or use `amp_send` with proper AEAD encryption for production."
+    );
 }

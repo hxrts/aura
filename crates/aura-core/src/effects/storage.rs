@@ -125,7 +125,7 @@ pub struct StorageStats {
     pub backend_type: String,
 }
 
-/// Storage effects interface for key-value operations
+/// Core storage effects interface for key-value operations.
 ///
 /// This trait provides storage operations for the Aura effects system.
 /// Implementations in aura-protocol provide:
@@ -133,7 +133,7 @@ pub struct StorageStats {
 /// - Testing: In-memory storage for fast tests
 /// - Simulation: Configurable storage with fault injection
 #[async_trait]
-pub trait StorageEffects: Send + Sync {
+pub trait StorageCoreEffects: Send + Sync {
     /// Store a value under the given key
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError>;
 
@@ -145,29 +145,59 @@ pub trait StorageEffects: Send + Sync {
 
     /// List all keys with optional prefix filter
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError>;
+}
 
+/// Optional storage effects that build on core storage.
+#[async_trait]
+pub trait StorageExtendedEffects: StorageCoreEffects + Send + Sync {
     /// Check if a key exists
-    async fn exists(&self, key: &str) -> Result<bool, StorageError>;
+    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        let _ = key;
+        Err(StorageError::ConfigurationError {
+            reason: "Storage exists() not supported".to_string(),
+        })
+    }
 
     /// Store multiple key-value pairs atomically
-    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError>;
+    async fn store_batch(&self, _pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
+        Err(StorageError::ConfigurationError {
+            reason: "Storage store_batch() not supported".to_string(),
+        })
+    }
 
     /// Retrieve multiple values by keys
     async fn retrieve_batch(
         &self,
-        keys: &[String],
-    ) -> Result<HashMap<String, Vec<u8>>, StorageError>;
+        _keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+        Err(StorageError::ConfigurationError {
+            reason: "Storage retrieve_batch() not supported".to_string(),
+        })
+    }
 
     /// Clear all stored data
-    async fn clear_all(&self) -> Result<(), StorageError>;
+    async fn clear_all(&self) -> Result<(), StorageError> {
+        Err(StorageError::ConfigurationError {
+            reason: "Storage clear_all() not supported".to_string(),
+        })
+    }
 
     /// Get storage statistics
-    async fn stats(&self) -> Result<StorageStats, StorageError>;
+    async fn stats(&self) -> Result<StorageStats, StorageError> {
+        Err(StorageError::ConfigurationError {
+            reason: "Storage stats() not supported".to_string(),
+        })
+    }
 }
 
-/// Blanket implementation for Arc<T> where T: StorageEffects
+/// Combined storage effects surface (core + extended).
+pub trait StorageEffects: StorageCoreEffects + StorageExtendedEffects {}
+
+impl<T: StorageCoreEffects + StorageExtendedEffects + ?Sized> StorageEffects for T {}
+
+/// Blanket implementation for Arc<T> where T: StorageCoreEffects
 #[async_trait]
-impl<T: StorageEffects + ?Sized> StorageEffects for std::sync::Arc<T> {
+impl<T: StorageCoreEffects + ?Sized> StorageCoreEffects for std::sync::Arc<T> {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         (**self).store(key, value).await
     }
@@ -183,7 +213,11 @@ impl<T: StorageEffects + ?Sized> StorageEffects for std::sync::Arc<T> {
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         (**self).list_keys(prefix).await
     }
+}
 
+/// Blanket implementation for Arc<T> where T: StorageExtendedEffects
+#[async_trait]
+impl<T: StorageExtendedEffects + ?Sized> StorageExtendedEffects for std::sync::Arc<T> {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         (**self).exists(key).await
     }

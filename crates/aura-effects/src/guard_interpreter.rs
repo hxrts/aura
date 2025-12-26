@@ -65,12 +65,14 @@ use async_trait::async_trait;
 use aura_core::{
     effects::{
         guard::{EffectCommand, EffectInterpreter, EffectResult},
-        FlowBudgetEffects, JournalEffects, LeakageEffects, LeakageEvent, NetworkEffects,
-        ObserverClass, PhysicalTimeEffects, RandomEffects, StorageEffects,
+        FlowBudgetEffects, JournalEffects, LeakageEffects, LeakageEvent, NetworkCoreEffects,
+        NetworkEffects, ObserverClass, PhysicalTimeEffects, RandomCoreEffects, RandomEffects,
+        StorageCoreEffects, StorageEffects,
     },
     identifiers::AuthorityId,
     AuraError, AuraResult as Result,
 };
+use crate::Layer3Error;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
@@ -190,7 +192,7 @@ where
                 // Get current journal, merge the new fact, and persist
                 let current = self.journal.get_journal().await.map_err(|e| {
                     error!("Failed to get current journal: {}", e);
-                    AuraError::invalid(format!("Failed to get journal: {}", e))
+                    AuraError::from(Layer3Error::handler_failure(format!("Failed to get journal: {}", e)))
                 })?;
 
                 // Create a delta journal containing the new fact to be merged
@@ -203,13 +205,13 @@ where
                     .await
                     .map_err(|e| {
                         error!("Failed to merge facts: {}", e);
-                        AuraError::invalid(format!("Failed to merge: {}", e))
+                        AuraError::from(Layer3Error::handler_failure(format!("Failed to merge: {}", e)))
                     })?;
 
                 // Persist the updated journal
                 self.journal.persist_journal(&updated).await.map_err(|e| {
                     error!("Failed to persist journal: {}", e);
-                    AuraError::invalid(format!("Failed to persist: {}", e))
+                    AuraError::from(Layer3Error::handler_failure(format!("Failed to persist: {}", e)))
                 })?;
 
                 info!(
@@ -249,7 +251,7 @@ where
 
                 self.leakage.record_leakage(event).await.map_err(|e| {
                     error!("Failed to record leakage: {}", e);
-                    AuraError::invalid(format!("Failed to record leakage: {}", e))
+                    AuraError::from(Layer3Error::handler_failure(format!("Failed to record leakage: {}", e)))
                 })?;
 
                 info!(bits, "Successfully recorded leakage");
@@ -265,7 +267,7 @@ where
 
                 self.storage.store(&key, data).await.map_err(|e| {
                     error!("Failed to store metadata: {}", e);
-                    AuraError::storage(format!("Failed to store: {}", e))
+                    AuraError::from(Layer3Error::handler_failure(format!("Failed to store: {}", e)))
                 })?;
 
                 info!(key, "Successfully stored metadata");
@@ -295,7 +297,7 @@ where
                     .await
                     .map_err(|e| {
                         error!("Failed to send envelope: {}", e);
-                        AuraError::network(format!("Failed to send: {}", e))
+                        AuraError::from(Layer3Error::handler_failure(format!("Failed to send: {}", e)))
                     })?;
 
                 info!(
@@ -336,8 +338,8 @@ mod tests {
     use async_trait::async_trait;
     use aura_core::{
         effects::{
-            FlowBudgetEffects, JournalEffects, LeakageEffects, NetworkEffects, RandomEffects,
-            StorageEffects,
+            FlowBudgetEffects, JournalEffects, LeakageEffects, NetworkEffects, NetworkExtendedEffects,
+            RandomEffects, StorageEffects, StorageExtendedEffects,
         },
         time::PhysicalTime,
     };
@@ -435,7 +437,7 @@ mod tests {
                     sig: vec![],
                 })
             } else {
-                Err(AuraError::invalid("Insufficient budget"))
+                Err(AuraError::from(Layer3Error::invalid_input("Insufficient budget")))
             }
         }
     }
@@ -476,7 +478,7 @@ mod tests {
     struct MockStorageEffects;
 
     #[async_trait]
-    impl StorageEffects for MockStorageEffects {
+    impl StorageCoreEffects for MockStorageEffects {
         async fn store(
             &self,
             _key: &str,
@@ -499,6 +501,16 @@ mod tests {
             Ok(true)
         }
 
+        async fn list_keys(
+            &self,
+            _prefix: Option<&str>,
+        ) -> std::result::Result<Vec<String>, aura_core::effects::StorageError> {
+            Ok(vec![])
+        }
+    }
+
+    #[async_trait]
+    impl StorageExtendedEffects for MockStorageEffects {
         async fn exists(
             &self,
             _key: &str,
@@ -527,13 +539,6 @@ mod tests {
             Ok(())
         }
 
-        async fn list_keys(
-            &self,
-            _prefix: Option<&str>,
-        ) -> std::result::Result<Vec<String>, aura_core::effects::StorageError> {
-            Ok(vec![])
-        }
-
         async fn stats(
             &self,
         ) -> std::result::Result<aura_core::effects::StorageStats, aura_core::effects::StorageError>
@@ -550,7 +555,7 @@ mod tests {
     struct MockNetworkEffects;
 
     #[async_trait]
-    impl NetworkEffects for MockNetworkEffects {
+    impl NetworkCoreEffects for MockNetworkEffects {
         async fn send_to_peer(
             &self,
             _peer_id: uuid::Uuid,
@@ -573,6 +578,10 @@ mod tests {
                 uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"guard_interpreter_destination");
             Ok((deterministic_id, vec![]))
         }
+    }
+
+    #[async_trait]
+    impl NetworkExtendedEffects for MockNetworkEffects {
 
         async fn receive_from(
             &self,
@@ -627,7 +636,7 @@ mod tests {
     struct MockRandomEffects;
 
     #[async_trait]
-    impl RandomEffects for MockRandomEffects {
+    impl RandomCoreEffects for MockRandomEffects {
         async fn random_bytes(&self, len: usize) -> Vec<u8> {
             vec![0x42; len]
         }
@@ -640,14 +649,9 @@ mod tests {
             42
         }
 
-        async fn random_range(&self, _min: u64, _max: u64) -> u64 {
-            42
-        }
-
-        async fn random_uuid(&self) -> uuid::Uuid {
-            uuid::Uuid::from_u128(42)
-        }
     }
+
+    // RandomExtendedEffects is provided by the blanket impl in aura-core.
 
     #[derive(Debug)]
     struct MockTimeEffects;

@@ -495,7 +495,7 @@ pub fn check_biscuit_access(
 // ============================================================================
 
 use async_trait::async_trait;
-use aura_core::effects::{StorageEffects, StorageError, StorageStats};
+use aura_core::effects::{StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -517,7 +517,7 @@ use tokio::sync::RwLock;
 /// // All operations now require valid Biscuit authorization
 /// handler.store("key", data).await?;
 /// ```
-pub struct AuthorizedStorageHandler<S: StorageEffects> {
+pub struct AuthorizedStorageHandler<S: StorageCoreEffects + StorageExtendedEffects> {
     /// Inner storage handler
     inner: S,
     /// Biscuit authorization evaluator
@@ -528,7 +528,7 @@ pub struct AuthorizedStorageHandler<S: StorageEffects> {
     budget: Arc<RwLock<FlowBudget>>,
 }
 
-impl<S: StorageEffects> AuthorizedStorageHandler<S> {
+impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S> {
     /// Create a new authorized storage handler
     pub fn new(inner: S, evaluator: BiscuitStorageEvaluator, budget: FlowBudget) -> Self {
         Self {
@@ -598,7 +598,9 @@ impl<S: StorageEffects> AuthorizedStorageHandler<S> {
 }
 
 #[async_trait]
-impl<S: StorageEffects + Send + Sync> StorageEffects for AuthorizedStorageHandler<S> {
+impl<S: StorageCoreEffects + StorageExtendedEffects + Send + Sync> StorageCoreEffects
+    for AuthorizedStorageHandler<S>
+{
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         let resource = StorageResource::content(key);
         self.check_authorization(&resource, &StoragePermission::Write)
@@ -630,6 +632,12 @@ impl<S: StorageEffects + Send + Sync> StorageEffects for AuthorizedStorageHandle
         self.inner.list_keys(prefix).await
     }
 
+}
+
+#[async_trait]
+impl<S: StorageCoreEffects + StorageExtendedEffects + Send + Sync> StorageExtendedEffects
+    for AuthorizedStorageHandler<S>
+{
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         let resource = StorageResource::content(key);
         self.check_authorization(&resource, &StoragePermission::Read)
@@ -836,7 +844,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl StorageEffects for MockStorage {
+    impl StorageCoreEffects for MockStorage {
         async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
             let mut data = self.data.lock().unwrap();
             data.insert(key.to_string(), value);
@@ -861,7 +869,10 @@ mod tests {
             };
             Ok(keys)
         }
+    }
 
+    #[async_trait]
+    impl StorageExtendedEffects for MockStorage {
         async fn exists(&self, key: &str) -> Result<bool, StorageError> {
             let data = self.data.lock().unwrap();
             Ok(data.contains_key(key))

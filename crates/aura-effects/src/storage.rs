@@ -7,7 +7,7 @@
 //! This module contains only production-grade stateless handlers.
 
 use async_trait::async_trait;
-use aura_core::effects::{StorageEffects, StorageError, StorageStats};
+use aura_core::effects::{StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::fs::DirEntry;
@@ -40,7 +40,7 @@ impl FilesystemStorageHandler {
 }
 
 #[async_trait]
-impl StorageEffects for FilesystemStorageHandler {
+impl StorageCoreEffects for FilesystemStorageHandler {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         if key.is_empty() {
             return Err(StorageError::InvalidKey {
@@ -121,6 +121,10 @@ impl StorageEffects for FilesystemStorageHandler {
         Ok(keys)
     }
 
+}
+
+#[async_trait]
+impl StorageExtendedEffects for FilesystemStorageHandler {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         let file_path = self.base_path.join(format!("{}.dat", key));
         Ok(file_path.exists())

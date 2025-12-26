@@ -452,7 +452,9 @@ fn extract_limits(journal: &Journal, context_id: ContextId) -> Option<LeakageBud
     journal.read_facts().get(&key).and_then(|value| match value {
         FactValue::Bytes(bytes) => serde_json::from_slice(bytes).ok(),
         FactValue::String(text) => serde_json::from_str(text).ok(),
-        FactValue::Nested(nested) => serde_json::from_value(nested.clone()).ok(),
+        FactValue::Nested(nested) => serde_json::to_vec(nested)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok()),
         _ => None,
     })
 }
@@ -477,7 +479,9 @@ fn decode_fact_content(value: &FactValue) -> Option<FactContent> {
     match value {
         FactValue::Bytes(bytes) => serde_json::from_slice(bytes).ok(),
         FactValue::String(text) => serde_json::from_str(text).ok(),
-        FactValue::Nested(nested) => serde_json::from_value(nested.clone()).ok(),
+        FactValue::Nested(nested) => serde_json::to_vec(nested)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok()),
         _ => None,
     }
 }

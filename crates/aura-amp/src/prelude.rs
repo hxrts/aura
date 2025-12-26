@@ -2,13 +2,13 @@
 //!
 //! Curated re-exports for AMP orchestration.
 
-pub use crate::amp::{
+pub use crate::{
     amp_recv, amp_recv_with_receipt, amp_send, commit_bump_with_consensus, emit_proposed_bump,
     prepare_send, validate_header, AmpChannelCoordinator, AmpDelivery, AmpEvidenceEffects,
     AmpJournalEffects, AmpMessage, AmpReceipt, AmpTelemetry, ChannelMembershipFact,
     ChannelParticipantEvent,
 };
-pub use crate::amp::consensus::{
+pub use crate::consensus::{
     finalize_amp_bump_with_journal, finalize_amp_bump_with_journal_default,
     run_amp_channel_epoch_bump, run_amp_channel_epoch_bump_default,
 };

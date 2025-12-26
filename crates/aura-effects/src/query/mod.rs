@@ -4,7 +4,7 @@
 //!
 //! # Effect Classification
 //!
-//! - **Category**: Runtime-owned effect handler (Layer 6)
+//! - **Category**: Runtime-owned effect handler (Layer 3 implementation)
 //! - **Purpose**: Execute typed queries against journal facts via Datalog
 //! - **Dependencies**: JournalEffects, AuthorizationEffects, ReactiveEffects
 //!

@@ -35,7 +35,5 @@ thiserror = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
-# Testing infrastructure
-aura-testkit = { path = "../aura-testkit" }
 proptest = { workspace = true }
 tokio = { workspace = true }

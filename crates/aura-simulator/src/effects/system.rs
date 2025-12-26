@@ -161,7 +161,7 @@ impl SimulationEffectSystem {
 // Implement effect traits by delegating to underlying handlers with fault injection
 
 #[async_trait]
-impl CryptoEffects for SimulationEffectSystem {
+impl CryptoCoreEffects for SimulationEffectSystem {
     async fn hkdf_derive(
         &self,
         ikm: &[u8],
@@ -209,7 +209,25 @@ impl CryptoEffects for SimulationEffectSystem {
             .await
     }
 
-    // Delegate remaining crypto methods to the mock handler
+    fn is_simulated(&self) -> bool {
+        true
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        vec!["simulation".to_string(), "fault_injection".to_string()]
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        self.crypto.constant_time_eq(a, b)
+    }
+
+    fn secure_zero(&self, data: &mut [u8]) {
+        self.crypto.secure_zero(data)
+    }
+}
+
+#[async_trait]
+impl CryptoExtendedEffects for SimulationEffectSystem {
     async fn frost_generate_keys(
         &self,
         threshold: u16,
@@ -353,26 +371,10 @@ impl CryptoEffects for SimulationEffectSystem {
             .verify_signature(message, signature, public_key_package, mode)
             .await
     }
-
-    fn is_simulated(&self) -> bool {
-        true
-    }
-
-    fn crypto_capabilities(&self) -> Vec<String> {
-        vec!["simulation".to_string(), "fault_injection".to_string()]
-    }
-
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        self.crypto.constant_time_eq(a, b)
-    }
-
-    fn secure_zero(&self, data: &mut [u8]) {
-        self.crypto.secure_zero(data)
-    }
 }
 
 #[async_trait]
-impl RandomEffects for SimulationEffectSystem {
+impl RandomCoreEffects for SimulationEffectSystem {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         self.random.random_bytes(len).await
     }
@@ -385,6 +387,10 @@ impl RandomEffects for SimulationEffectSystem {
         self.random.random_u64().await
     }
 
+}
+
+#[async_trait]
+impl RandomExtendedEffects for SimulationEffectSystem {
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         self.random.random_range(min, max).await
     }
@@ -418,7 +424,7 @@ impl ConsoleEffects for SimulationEffectSystem {
 }
 
 #[async_trait]
-impl StorageEffects for SimulationEffectSystem {
+impl StorageCoreEffects for SimulationEffectSystem {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         if let Some(FaultType::StorageFailure) = self.should_trigger_fault("store") {
             return Err(StorageError::WriteFailed(
@@ -441,12 +447,15 @@ impl StorageEffects for SimulationEffectSystem {
         self.storage.remove(key).await
     }
 
-    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        self.storage.exists(key).await
-    }
-
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         self.storage.list_keys(prefix).await
+    }
+}
+
+#[async_trait]
+impl StorageExtendedEffects for SimulationEffectSystem {
+    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        self.storage.exists(key).await
     }
 
     async fn store_batch(
@@ -473,7 +482,7 @@ impl StorageEffects for SimulationEffectSystem {
 }
 
 #[async_trait]
-impl NetworkEffects for SimulationEffectSystem {
+impl NetworkCoreEffects for SimulationEffectSystem {
     async fn send_to_peer(
         &self,
         peer_id: uuid::Uuid,
@@ -496,6 +505,10 @@ impl NetworkEffects for SimulationEffectSystem {
         self.network.receive().await
     }
 
+}
+
+#[async_trait]
+impl NetworkExtendedEffects for SimulationEffectSystem {
     async fn receive_from(&self, peer_id: uuid::Uuid) -> Result<Vec<u8>, NetworkError> {
         self.network.receive_from(peer_id).await
     }

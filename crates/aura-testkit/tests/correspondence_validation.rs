@@ -223,7 +223,7 @@ proptest! {
         count in 0usize..20,
         threshold in 0usize..25,
     ) {
-        use crate::common::reference::check_threshold_ref;
+        use aura_testkit::consensus::check_threshold_ref;
 
         let proposals: Vec<ShareProposal> = (0..count)
             .map(|i| ShareProposal {

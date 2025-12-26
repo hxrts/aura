@@ -7,7 +7,10 @@ use async_trait::async_trait;
 
 use crate::handlers::{AuraContext, AuraHandlerError, EffectType};
 use aura_composition::registry::Handler;
+use aura_core::context::ContextSnapshot;
 use aura_core::effects::ExecutionMode;
+use aura_core::hash::hash;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_mpst::LocalSessionType;
 
 /// Primary interface for all Aura handlers
@@ -69,7 +72,10 @@ impl AuraHandler for CompositeHandlerAdapter {
         ctx: &AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError> {
         // Convert AuraContext to HandlerContext
-        let handler_ctx = aura_composition::HandlerContext::new(ctx.device_id, ctx.execution_mode);
+        let authority_id = AuthorityId::from_uuid(ctx.device_id.into());
+        let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+        let snapshot = ContextSnapshot::new(authority_id, context_id, ctx.execution_mode);
+        let handler_ctx = aura_composition::HandlerContext::from_snapshot(snapshot);
 
         // Execute through composite handler
         self.composite
@@ -84,7 +90,10 @@ impl AuraHandler for CompositeHandlerAdapter {
         ctx: &AuraContext,
     ) -> Result<(), AuraHandlerError> {
         // Convert AuraContext to HandlerContext
-        let handler_ctx = aura_composition::HandlerContext::new(ctx.device_id, ctx.execution_mode);
+        let authority_id = AuthorityId::from_uuid(ctx.device_id.into());
+        let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+        let snapshot = ContextSnapshot::new(authority_id, context_id, ctx.execution_mode);
+        let handler_ctx = aura_composition::HandlerContext::from_snapshot(snapshot);
 
         // Execute through composite handler
         self.composite

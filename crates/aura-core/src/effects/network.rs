@@ -159,7 +159,7 @@ pub enum PeerEvent {
     ConnectionFailed(Uuid, String),
 }
 
-/// Network effects interface for communication operations
+/// Core network effects interface for communication operations.
 ///
 /// This trait defines network operations for the Aura effects system.
 /// Implementations are provided in aura-protocol handlers using aura-transport.
@@ -168,7 +168,7 @@ pub enum PeerEvent {
 /// - Testing: Mock network with controllable message delivery
 /// - Simulation: Network scenarios with partitions and faults
 #[async_trait]
-pub trait NetworkEffects: Send + Sync {
+pub trait NetworkCoreEffects: Send + Sync {
     /// Send a message to a specific peer
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError>;
 
@@ -177,18 +177,30 @@ pub trait NetworkEffects: Send + Sync {
 
     /// Receive the next available message
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError>;
+}
 
+/// Optional network effects that build on the core interface.
+#[async_trait]
+pub trait NetworkExtendedEffects: NetworkCoreEffects + Send + Sync {
     /// Receive message from a specific peer
-    async fn receive_from(&self, peer_id: Uuid) -> Result<Vec<u8>, NetworkError>;
+    async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
 
     /// Get list of currently connected peers
-    async fn connected_peers(&self) -> Vec<Uuid>;
+    async fn connected_peers(&self) -> Vec<Uuid> {
+        Vec::new()
+    }
 
     /// Check if a peer is connected
-    async fn is_peer_connected(&self, peer_id: Uuid) -> bool;
+    async fn is_peer_connected(&self, _peer_id: Uuid) -> bool {
+        false
+    }
 
     /// Subscribe to peer connection events
-    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError>;
+    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
 
     // === Connection-oriented methods (for transport coordination) ===
 
@@ -196,22 +208,32 @@ pub trait NetworkEffects: Send + Sync {
     ///
     /// Returns a connection identifier that can be used with `send` and `close`.
     /// This provides lower-level connection management for transport coordinators.
-    async fn open(&self, address: &str) -> Result<String, NetworkError>;
+    async fn open(&self, _address: &str) -> Result<String, NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
 
     /// Send data over an established connection
     ///
     /// The connection_id must be from a previous successful `open` call.
-    async fn send(&self, connection_id: &str, data: Vec<u8>) -> Result<(), NetworkError>;
+    async fn send(&self, _connection_id: &str, _data: Vec<u8>) -> Result<(), NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
 
     /// Close an established connection
     ///
     /// After closing, the connection_id is no longer valid.
-    async fn close(&self, connection_id: &str) -> Result<(), NetworkError>;
+    async fn close(&self, _connection_id: &str) -> Result<(), NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
 }
 
-/// Blanket implementation for Arc<T> where T: NetworkEffects
+/// Combined network effects surface (core + extended).
+pub trait NetworkEffects: NetworkCoreEffects + NetworkExtendedEffects {}
+
+impl<T: NetworkCoreEffects + NetworkExtendedEffects + ?Sized> NetworkEffects for T {}
+/// Blanket implementation for Arc<T> where T: NetworkCoreEffects
 #[async_trait]
-impl<T: NetworkEffects + ?Sized> NetworkEffects for std::sync::Arc<T> {
+impl<T: NetworkCoreEffects + ?Sized> NetworkCoreEffects for std::sync::Arc<T> {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         (**self).send_to_peer(peer_id, message).await
     }
@@ -222,33 +244,5 @@ impl<T: NetworkEffects + ?Sized> NetworkEffects for std::sync::Arc<T> {
 
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
         (**self).receive().await
-    }
-
-    async fn receive_from(&self, peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
-        (**self).receive_from(peer_id).await
-    }
-
-    async fn connected_peers(&self) -> Vec<Uuid> {
-        (**self).connected_peers().await
-    }
-
-    async fn is_peer_connected(&self, peer_id: Uuid) -> bool {
-        (**self).is_peer_connected(peer_id).await
-    }
-
-    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
-        (**self).subscribe_to_peer_events().await
-    }
-
-    async fn open(&self, address: &str) -> Result<String, NetworkError> {
-        (**self).open(address).await
-    }
-
-    async fn send(&self, connection_id: &str, data: Vec<u8>) -> Result<(), NetworkError> {
-        (**self).send(connection_id, data).await
-    }
-
-    async fn close(&self, connection_id: &str) -> Result<(), NetworkError> {
-        (**self).close(connection_id).await
     }
 }

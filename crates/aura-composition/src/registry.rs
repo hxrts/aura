@@ -5,7 +5,7 @@
 //! and runtime reconfiguration of effect handlers.
 
 use async_trait::async_trait;
-use aura_core::{AuthorityId, ContextId, EffectType, ExecutionMode, SessionId};
+use aura_core::{AuthorityId, ContextId, ContextSnapshot, EffectType, ExecutionMode, SessionId};
 use aura_mpst::LocalSessionType;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -37,6 +37,18 @@ impl HandlerContext {
             execution_mode,
             session_id: SessionId::new(),
             operation_id,
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Create a new handler context from a lightweight snapshot.
+    pub fn from_snapshot(snapshot: ContextSnapshot) -> Self {
+        Self {
+            authority_id: snapshot.authority_id(),
+            context_id: snapshot.context_id(),
+            execution_mode: snapshot.execution_mode(),
+            session_id: snapshot.session_id(),
+            operation_id: Uuid::new_v4(),
             metadata: HashMap::new(),
         }
     }

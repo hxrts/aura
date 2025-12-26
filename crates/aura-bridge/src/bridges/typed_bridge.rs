@@ -25,14 +25,14 @@
 //! let bytes = bridge.random_bytes(32).await;
 //! ```
 
-use aura_protocol::effects::params::{RandomBytesParams, RandomRangeParams};
-use aura_protocol::effects::*;
+use aura_protocol::effects::params::RandomBytesParams;
 use aura_protocol::handlers::{AuraContext, AuraHandler, EffectType, HandlerUtils};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::crypto::{FrostKeyGenResult, SigningKeyGenResult};
-use aura_core::effects::CryptoError;
+use aura_core::effects::random::RandomCoreEffects;
+use aura_core::effects::{CryptoCoreEffects, CryptoError, CryptoExtendedEffects};
 use aura_core::AuraError;
 use std::sync::Arc;
 use crate::bridges::config::BridgeRuntimeConfig;
@@ -96,24 +96,24 @@ impl TypedHandlerBridge {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// RandomEffects Implementation for TypedHandlerBridge
+// RandomCoreEffects Implementation for TypedHandlerBridge
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[async_trait]
-impl aura_core::effects::RandomEffects for TypedHandlerBridge {
+impl RandomCoreEffects for TypedHandlerBridge {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         let mut handler = self.handler.write().await;
         let ctx = self.get_context().await;
 
         HandlerUtils::execute_typed_effect::<Vec<u8>>(
             &mut **handler,
-            EffectType::Crypto,
+            EffectType::Random,
             "random_bytes",
             RandomBytesParams { len },
             &ctx,
         )
         .await
-        .unwrap_or_else(|err| self.handle_error(err))
+        .unwrap_or_else(|err| self.handle_error(err.into()))
     }
 
     async fn random_bytes_32(&self) -> [u8; 32] {
@@ -122,13 +122,13 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
 
         HandlerUtils::execute_typed_effect::<[u8; 32]>(
             &mut **handler,
-            EffectType::Crypto,
+            EffectType::Random,
             "random_bytes_32",
             RandomBytesParams { len: 32 },
             &ctx,
         )
         .await
-        .unwrap_or_else(|err| self.handle_error(err))
+        .unwrap_or_else(|err| self.handle_error(err.into()))
     }
 
     async fn random_u64(&self) -> u64 {
@@ -137,43 +137,13 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
 
         HandlerUtils::execute_typed_effect::<u64>(
             &mut **handler,
-            EffectType::Crypto,
+            EffectType::Random,
             "random_u64",
             (),
             &ctx,
         )
         .await
-        .unwrap_or_else(|err| self.handle_error(err))
-    }
-
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        let mut handler = self.handler.write().await;
-        let ctx = self.get_context().await;
-
-        HandlerUtils::execute_typed_effect::<u64>(
-            &mut **handler,
-            EffectType::Crypto,
-            "random_range",
-            RandomRangeParams {
-                start: min,
-                end: max,
-            },
-            &ctx,
-        )
-        .await
-        .unwrap_or_else(|err| {
-            if self.config.panic_on_error {
-                panic!("TypedHandlerBridge random_range failed: {err}");
-            }
-            min
-        })
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let bytes = self.random_bytes(16).await;
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes);
-        uuid::Uuid::from_bytes(uuid_bytes)
+        .unwrap_or_else(|err| self.handle_error(err.into()))
     }
 }
 
@@ -182,7 +152,7 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[async_trait]
-impl CryptoEffects for TypedHandlerBridge {
+impl CryptoCoreEffects for TypedHandlerBridge {
     // Note: hash is NOT an algebraic effect - use aura_core::hash::hash() instead
 
     async fn ed25519_sign(&self, data: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
@@ -239,31 +209,6 @@ impl CryptoEffects for TypedHandlerBridge {
         .unwrap_or_else(|_| Err(AuraError::crypto("ed25519_generate_keypair bridge failed")))
     }
 
-    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        let mut handler = self.handler.write().await;
-        let ctx = self.get_context().await;
-
-        HandlerUtils::execute_typed_effect::<Result<Vec<u8>, CryptoError>>(
-            &mut **handler,
-            EffectType::Crypto,
-            "ed25519_public_key",
-            private_key.to_vec(),
-            &ctx,
-        )
-        .await
-        .unwrap_or_else(|_| Err(AuraError::crypto("ed25519_public_key bridge failed")))
-    }
-
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        use subtle::ConstantTimeEq;
-        a.ct_eq(b).into()
-    }
-
-    fn secure_zero(&self, data: &mut [u8]) {
-        use zeroize::Zeroize;
-        data.zeroize();
-    }
-
     async fn hkdf_derive(
         &self,
         ikm: &[u8],
@@ -308,6 +253,46 @@ impl CryptoEffects for TypedHandlerBridge {
         )
         .await
         .unwrap_or_else(|_| Err(AuraError::crypto("derive_key bridge failed")))
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        use subtle::ConstantTimeEq;
+        a.ct_eq(b).into()
+    }
+
+    fn secure_zero(&self, data: &mut [u8]) {
+        use zeroize::Zeroize;
+        data.zeroize();
+    }
+
+    fn is_simulated(&self) -> bool {
+        false // Bridge implementations assume production mode
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        vec![
+            "bridge_hash".to_string(),
+            "bridge_sha256".to_string(),
+            "bridge_hkdf".to_string(),
+        ]
+    }
+}
+
+#[async_trait]
+impl CryptoExtendedEffects for TypedHandlerBridge {
+    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let mut handler = self.handler.write().await;
+        let ctx = self.get_context().await;
+
+        HandlerUtils::execute_typed_effect::<Result<Vec<u8>, CryptoError>>(
+            &mut **handler,
+            EffectType::Crypto,
+            "ed25519_public_key",
+            private_key.to_vec(),
+            &ctx,
+        )
+        .await
+        .unwrap_or_else(|_| Err(AuraError::crypto("ed25519_public_key bridge failed")))
     }
 
     async fn frost_generate_keys(
@@ -457,18 +442,6 @@ impl CryptoEffects for TypedHandlerBridge {
         Err(AuraError::crypto(
             "verify_signature not supported through bridge",
         ))
-    }
-
-    fn is_simulated(&self) -> bool {
-        false // Bridge implementations assume production mode
-    }
-
-    fn crypto_capabilities(&self) -> Vec<String> {
-        vec![
-            "bridge_hash".to_string(),
-            "bridge_sha256".to_string(),
-            "bridge_hkdf".to_string(),
-        ]
     }
 }
 

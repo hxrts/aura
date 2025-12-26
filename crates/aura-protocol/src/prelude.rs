@@ -5,7 +5,9 @@
 pub use crate::error::ProtocolError;
 pub use crate::handlers::*;
 pub use crate::session::{SessionOutcome, SessionStatus};
-pub use crate::types::{ProtocolConfig, ProtocolId, ProtocolType};
+pub use crate::types::{
+    ProtocolDuration, ProtocolMode, ProtocolPriority, ProtocolSessionStatus, ProtocolType,
+};
 
 /// Composite effect requirements for protocol orchestration (excludes StorageEffects).
 pub trait ProtocolEffects:

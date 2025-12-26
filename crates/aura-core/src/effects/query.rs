@@ -31,6 +31,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::effects::reactive::SignalStream;
+use crate::effects::reactive::{ReactiveEffects, ReactiveError, Signal, SignalId};
 use crate::query::{
     ConsensusId, DatalogBindings, Query, QueryCapability, QueryIsolation, QueryParseError,
     QueryStats,
@@ -256,6 +257,26 @@ pub trait QueryEffects: Send + Sync {
         isolation: QueryIsolation,
     ) -> Result<(Q::Result, QueryStats), QueryError>;
 }
+
+/// Convenience extension trait to register query-bound signals via QueryEffects.
+#[allow(async_fn_in_trait)]
+pub trait QuerySignalEffects: QueryEffects + ReactiveEffects {
+    /// Register a reactive signal that is bound to a query.
+    async fn register_query_signal<Q: Query>(
+        &self,
+        signal: &Signal<Q::Result>,
+        query: Q,
+    ) -> Result<(), ReactiveError> {
+        self.register_query(signal, query).await
+    }
+
+    /// Read query dependencies for a signal id.
+    fn query_dependencies_for(&self, signal_id: &SignalId) -> Option<Vec<crate::query::FactPredicate>> {
+        self.query_dependencies(signal_id)
+    }
+}
+
+impl<T: QueryEffects + ReactiveEffects> QuerySignalEffects for T {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Query Subscription

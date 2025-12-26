@@ -7,8 +7,10 @@
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::{
-    ConsoleEffects, CryptoEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects,
-    StorageEffects, SystemEffects,
+    ConsoleEffects, CryptoCoreEffects, CryptoExtendedEffects, LogicalClockEffects,
+    NetworkCoreEffects, NetworkExtendedEffects, OrderClockEffects, PhysicalTimeEffects,
+    RandomCoreEffects, RandomExtendedEffects, StorageCoreEffects, StorageExtendedEffects,
+    SystemEffects,
 };
 use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext, SigningMode};
 use aura_core::effects::registry as effect_registry;
@@ -905,6 +907,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
 /// Adapter for PhysicalTimeHandler (domain-specific time effects)
 pub struct TimeHandlerAdapter {
     physical: PhysicalTimeHandler,
+    #[allow(deprecated)]
     logical: aura_effects::time::LogicalClockHandler,
     order: aura_effects::time::OrderClockHandler,
 }
@@ -913,8 +916,9 @@ impl TimeHandlerAdapter {
     pub fn new(handler: PhysicalTimeHandler) -> Self {
         Self {
             physical: handler,
+            #[allow(deprecated)]
             logical: aura_effects::time::LogicalClockHandler::new(),
-            order: aura_effects::time::OrderClockHandler::new(),
+            order: aura_effects::time::OrderClockHandler::default(),
         }
     }
 }
@@ -1094,7 +1098,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 Ok(Vec::new()) // broadcast returns void
             }
             "receive" => {
-                let received = NetworkEffects::receive(&self.handler).await.map_err(|e| {
+                let received = NetworkCoreEffects::receive(&self.handler).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
@@ -1160,7 +1164,10 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                let connection_id = self.handler.open(&address).await.map_err(|e| {
+                let connection_id =
+                    NetworkExtendedEffects::open(&self.handler, &address)
+                        .await
+                        .map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
@@ -1180,7 +1187,9 @@ impl RegistrableHandler for TransportHandlerAdapter {
                             source: Box::new(e),
                         }
                     })?;
-                self.handler.send(&connection_id, data).await.map_err(|e| {
+                NetworkExtendedEffects::send(&self.handler, &connection_id, data)
+                    .await
+                    .map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
@@ -1195,7 +1204,9 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                self.handler.close(&connection_id).await.map_err(|e| {
+                NetworkExtendedEffects::close(&self.handler, &connection_id)
+                    .await
+                    .map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }

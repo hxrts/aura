@@ -6,7 +6,10 @@
 use async_channel::unbounded as async_unbounded;
 use async_lock::RwLock;
 use async_trait::async_trait;
-use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
+use aura_core::effects::{
+    NetworkCoreEffects, NetworkEffects, NetworkError, NetworkExtendedEffects, PeerEvent,
+    PeerEventStream,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -263,7 +266,7 @@ pub struct TransportStats {
 }
 
 #[async_trait]
-impl NetworkEffects for InMemoryTransportHandler {
+impl NetworkCoreEffects for InMemoryTransportHandler {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         let peer_str = peer_id.to_string();
         self.send_to_peer(&peer_str, message)
@@ -289,7 +292,10 @@ impl NetworkEffects for InMemoryTransportHandler {
                 .to_string(),
         })
     }
+}
 
+#[async_trait]
+impl NetworkExtendedEffects for InMemoryTransportHandler {
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         Err(NetworkError::ReceiveFailed {
             reason: "Receive_from not supported; tests should use registered receiver".to_string(),

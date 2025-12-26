@@ -11,6 +11,8 @@
 // Allow expect on RwLock::read/write - lock poisoning from panics
 // is unrecoverable, so expect() is the appropriate handling pattern.
 #![allow(clippy::expect_used)]
+// Runtime-agnostic sync primitive is intentional here.
+#![allow(clippy::disallowed_types)]
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};

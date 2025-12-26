@@ -6,7 +6,9 @@
 
 use async_lock::RwLock;
 use async_trait::async_trait;
-use aura_core::effects::{StorageEffects, StorageError, StorageStats};
+use aura_core::effects::{
+    StorageCoreEffects, StorageEffects, StorageError, StorageExtendedEffects, StorageStats,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -54,7 +56,7 @@ impl MemoryStorageHandler {
 }
 
 #[async_trait]
-impl StorageEffects for MemoryStorageHandler {
+impl StorageCoreEffects for MemoryStorageHandler {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         let mut data = self.data.write().await;
         data.insert(key.to_string(), value);
@@ -84,6 +86,10 @@ impl StorageEffects for MemoryStorageHandler {
         Ok(keys)
     }
 
+}
+
+#[async_trait]
+impl StorageExtendedEffects for MemoryStorageHandler {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         let data = self.data.read().await;
         Ok(data.contains_key(key))

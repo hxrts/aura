@@ -2,6 +2,8 @@
 //!
 //! This places flow budget accounting in the Layer 2 domain crate so that
 //! capability and privacy policy live alongside WoT authorization semantics.
+// Flow budget handler uses std sync primitives for simple in-memory state.
+#![allow(clippy::disallowed_types)]
 
 use crate::{AuraResult, BiscuitAuthorizationBridge, ContextOp, ResourceScope};
 use async_trait::async_trait;

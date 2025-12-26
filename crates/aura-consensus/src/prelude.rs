@@ -3,8 +3,7 @@
 //! Curated re-exports for consensus orchestration.
 
 pub use crate::consensus::protocol::{run_consensus, ConsensusParams};
-pub use crate::consensus::types::{CommitFact, ConsensusError};
-pub use crate::consensus::{ConsensusId, ConsensusProtocol};
+pub use crate::consensus::{CommitFact, ConsensusError, ConsensusId, ConsensusProtocol};
 
 /// Composite effect requirements for consensus orchestration.
 pub trait ConsensusEffects:

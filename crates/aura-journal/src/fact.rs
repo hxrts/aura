@@ -321,8 +321,11 @@ pub struct ChannelPolicy {
 /// Observer classes for leakage tracking in journals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LeakageObserverClass {
+    /// Observer outside the local neighborhood (public/internet visibility).
     External,
+    /// Observer within the local neighborhood but outside the group.
     Neighbor,
+    /// Observer within the group context.
     InGroup,
 }
 
@@ -349,12 +352,19 @@ impl From<aura_core::effects::ObserverClass> for LeakageObserverClass {
 /// Leakage event fact stored in relational journals.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct LeakageFact {
+    /// Relational context where the leakage occurred.
     pub context_id: ContextId,
+    /// Authority that originated the message.
     pub source: AuthorityId,
+    /// Authority that received the message.
     pub destination: AuthorityId,
+    /// Observer classification for leakage accounting.
     pub observer: LeakageObserverClass,
+    /// Amount of leakage budget consumed.
     pub amount: u64,
+    /// Operation label for audit and diagnostics.
     pub operation: String,
+    /// Timestamp for leakage accounting.
     pub timestamp: aura_core::time::PhysicalTime,
 }
 

@@ -1,7 +1,8 @@
 use aura_core::effects::guard::{EffectCommand, EffectInterpreter, EffectResult};
 use aura_core::effects::{
     AuthorizationEffects, FlowBudgetEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects,
-    RandomEffects, StorageEffects,
+    RandomCoreEffects, RandomEffects, RandomExtendedEffects, StorageCoreEffects, StorageEffects,
+    StorageExtendedEffects,
 };
 use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, AuraResult, Cap, FlowBudget, Journal};
@@ -90,7 +91,7 @@ impl PhysicalTimeEffects for TestEffects {
 }
 
 #[async_trait]
-impl RandomEffects for TestEffects {
+impl RandomCoreEffects for TestEffects {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         let base = self.nonce.fetch_add(1, Ordering::SeqCst);
         (0..len).map(|i| (base as u8).wrapping_add(i as u8)).collect()
@@ -105,6 +106,10 @@ impl RandomEffects for TestEffects {
         self.nonce.fetch_add(1, Ordering::SeqCst)
     }
 
+}
+
+#[async_trait]
+impl RandomExtendedEffects for TestEffects {
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         if min >= max {
             return min;
@@ -122,7 +127,7 @@ impl RandomEffects for TestEffects {
 }
 
 #[async_trait]
-impl StorageEffects for TestEffects {
+impl StorageCoreEffects for TestEffects {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         self.storage.lock().unwrap().insert(key.to_string(), value);
         Ok(())
@@ -145,6 +150,10 @@ impl StorageEffects for TestEffects {
         Ok(keys)
     }
 
+}
+
+#[async_trait]
+impl StorageExtendedEffects for TestEffects {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         Ok(self.storage.lock().unwrap().contains_key(key))
     }
