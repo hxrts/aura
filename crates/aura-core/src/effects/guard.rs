@@ -190,6 +190,8 @@ pub enum EffectCommand {
     SendEnvelope {
         /// Target address
         to: NetworkAddress,
+        /// Optional explicit peer ID (avoids address-derived IDs)
+        peer_id: Option<uuid::Uuid>,
         /// Envelope payload
         envelope: Vec<u8>,
     },

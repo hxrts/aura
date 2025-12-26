@@ -81,6 +81,7 @@ async fn test_multi_party_protocol_simulation() {
     alice_interp
         .execute(EffectCommand::SendEnvelope {
             to: NetworkAddress::new("test://bob".to_string()),
+            peer_id: None,
             envelope: signing_request.clone(),
         })
         .await
@@ -89,6 +90,7 @@ async fn test_multi_party_protocol_simulation() {
     alice_interp
         .execute(EffectCommand::SendEnvelope {
             to: NetworkAddress::new("test://carol".to_string()),
+            peer_id: None,
             envelope: signing_request,
         })
         .await
@@ -163,6 +165,7 @@ async fn test_multi_party_protocol_simulation() {
     bob_interp
         .execute(EffectCommand::SendEnvelope {
             to: NetworkAddress::new("test://alice".to_string()),
+            peer_id: None,
             envelope: bob_nonce.clone(),
         })
         .await
@@ -171,6 +174,7 @@ async fn test_multi_party_protocol_simulation() {
     carol_interp
         .execute(EffectCommand::SendEnvelope {
             to: NetworkAddress::new("test://alice".to_string()),
+            peer_id: None,
             envelope: carol_nonce.clone(),
         })
         .await
@@ -263,6 +267,7 @@ async fn test_guard_chain_simulation() {
         },
         EffectCommand::SendEnvelope {
             to: NetworkAddress::new("test://client".to_string()),
+            peer_id: None,
             envelope: vec![200], // HTTP 200 OK
         },
     ];

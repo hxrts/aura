@@ -91,6 +91,7 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
     // Send response
     effects.push(EffectCommand::SendEnvelope {
         to: NetworkAddress::new("test://client".to_string()),
+        peer_id: None,
         envelope: vec![1, 2, 3], // Mock response
     });
 

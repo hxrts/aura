@@ -8,7 +8,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
 use aura_core::Hash32;
-use aura_effects::ReactiveHandler;
+use aura_app::ReactiveHandler;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};

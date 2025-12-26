@@ -107,6 +107,19 @@ pub struct CapabilityGuard;
 
 impl Guard for CapabilityGuard {
     fn evaluate(&self, snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
+        if !request.operation.is_empty() {
+            let authz_key = format!("authz:{}", request.operation);
+            match snapshot.metadata.get(&authz_key) {
+                Some("allow") => {}
+                Some("deny") => {
+                    return GuardOutcome::denied("Authorization denied");
+                }
+                Some(_) | None => {
+                    return GuardOutcome::denied("Missing authorization decision");
+                }
+            }
+        }
+
         // Basic check: if a capability is required, ensure the snapshot carries one.
         let capability_ok = request.capability.is_empty()
             || (!snapshot.caps.is_empty() && snapshot.caps == request.capability);
@@ -290,6 +303,9 @@ mod tests {
         let mut budgets = HashMap::new();
         budgets.insert((test_context(), test_authority()), 1000);
 
+        let mut metadata = HashMap::new();
+        metadata.insert("authz:test_op".to_string(), "allow".to_string());
+
         GuardSnapshot {
             now: TimeStamp::PhysicalClock(PhysicalTime {
                 ts_ms: 1000,
@@ -297,7 +313,7 @@ mod tests {
             }),
             caps: Cap::default(),
             budgets: FlowBudgetView::new(budgets),
-            metadata: MetadataView::default(),
+            metadata: MetadataView::new(metadata),
             rng_seed: [0u8; 32],
         }
     }

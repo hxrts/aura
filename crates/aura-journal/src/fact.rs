@@ -318,6 +318,46 @@ pub struct ChannelPolicy {
     pub skip_window: Option<u32>,
 }
 
+/// Observer classes for leakage tracking in journals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum LeakageObserverClass {
+    External,
+    Neighbor,
+    InGroup,
+}
+
+impl From<LeakageObserverClass> for aura_core::effects::ObserverClass {
+    fn from(value: LeakageObserverClass) -> Self {
+        match value {
+            LeakageObserverClass::External => aura_core::effects::ObserverClass::External,
+            LeakageObserverClass::Neighbor => aura_core::effects::ObserverClass::Neighbor,
+            LeakageObserverClass::InGroup => aura_core::effects::ObserverClass::InGroup,
+        }
+    }
+}
+
+impl From<aura_core::effects::ObserverClass> for LeakageObserverClass {
+    fn from(value: aura_core::effects::ObserverClass) -> Self {
+        match value {
+            aura_core::effects::ObserverClass::External => LeakageObserverClass::External,
+            aura_core::effects::ObserverClass::Neighbor => LeakageObserverClass::Neighbor,
+            aura_core::effects::ObserverClass::InGroup => LeakageObserverClass::InGroup,
+        }
+    }
+}
+
+/// Leakage event fact stored in relational journals.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LeakageFact {
+    pub context_id: ContextId,
+    pub source: AuthorityId,
+    pub destination: AuthorityId,
+    pub observer: LeakageObserverClass,
+    pub amount: u64,
+    pub operation: String,
+    pub timestamp: aura_core::time::PhysicalTime,
+}
+
 /// Relational fact for cross-authority relationships
 ///
 /// # Protocol-Level vs Domain-Level Facts
@@ -394,6 +434,8 @@ pub enum RelationalFact {
     AmpCommittedChannelEpochBump(CommittedChannelEpochBump),
     /// Channel policy overrides
     AmpChannelPolicy(ChannelPolicy),
+    /// Leakage tracking event (privacy budget accounting)
+    LeakageEvent(LeakageFact),
 
     // ========================================================================
     // Domain-Level Facts (extensibility point for application facts)

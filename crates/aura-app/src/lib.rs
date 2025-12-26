@@ -123,6 +123,7 @@ uniffi::custom_type!(ContextId, String);
 
 pub mod bridge;
 pub mod core;
+pub mod effects;
 pub mod errors;
 pub mod queries;
 pub mod runtime_bridge;
@@ -169,6 +170,11 @@ pub use crate::workflows::budget::{
 
 // Re-export error types
 pub use crate::errors::{AppError, AuthFailure, NetworkErrorCode, SyncStage, ToastSeverity};
+
+// Re-export stateful effect handlers hosted in aura-app (Layer 6)
+pub use crate::effects::query::QueryHandler;
+pub use crate::effects::reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
+pub use crate::effects::unified_handler::UnifiedHandler;
 
 // Re-export signal definitions for convenience
 // Note: SyncStatus and ConnectionStatus are signal-specific types in signal_defs module.

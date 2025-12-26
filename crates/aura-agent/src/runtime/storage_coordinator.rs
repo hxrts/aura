@@ -3,6 +3,8 @@
 //! This module provides coordination across multiple storage handlers,
 //! enabling composition of different storage backends and capabilities.
 
+#![allow(dead_code)]
+
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::{identifiers::DeviceId, AuraResult};
 use aura_effects::FilesystemStorageHandler;

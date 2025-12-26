@@ -1,20 +1,3 @@
-#![allow(
-    missing_docs,
-    unused_variables,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    dead_code,
-    clippy::match_like_matches_macro,
-    clippy::type_complexity,
-    clippy::while_let_loop,
-    clippy::redundant_closure,
-    clippy::large_enum_variant,
-    clippy::unused_unit,
-    clippy::get_first,
-    clippy::single_range_in_vec_init,
-    clippy::disallowed_methods,  // Orchestration layer coordinates time/random effects
-    deprecated  // Deprecated time/random functions used intentionally for effect coordination
-)]
 #![deny(clippy::await_holding_lock)]
 #![deny(clippy::disallowed_types)]
 //! # Aura Protocol - Layer 4: Orchestration (Multi-Party Coordination)
@@ -127,6 +110,7 @@ pub use aura_anti_entropy as sync;
 pub mod choreography;
 pub mod effects;
 pub mod error;
+pub mod config;
 pub mod facades; // High-level facade traits (Layer 4 appropriate - traits only, implementations in Layer 6)
 pub mod handlers;
 pub mod messages;
@@ -134,6 +118,7 @@ pub mod session; // Session orchestration types (SessionStatus, SessionOutcome)
 pub mod state;
 pub mod transport;
 pub mod types; // Protocol orchestration types
+pub mod prelude;
 
 pub use error::ProtocolError;
 

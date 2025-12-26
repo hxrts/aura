@@ -315,6 +315,9 @@ async fn test_guard_chain_integration() {
     let mut budgets = HashMap::new();
     budgets.insert((context, authority), 500);
 
+    let mut metadata = HashMap::new();
+    metadata.insert("authz:test_op".to_string(), "allow".to_string());
+
     let snapshot = GuardSnapshot {
         now: TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 1000,
@@ -322,7 +325,7 @@ async fn test_guard_chain_integration() {
         }),
         caps: Cap::default(),
         budgets: FlowBudgetView::new(budgets),
-        metadata: MetadataView::default(),
+        metadata: MetadataView::new(metadata),
         rng_seed: [0u8; 32],
     };
 

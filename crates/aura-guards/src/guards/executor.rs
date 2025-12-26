@@ -8,7 +8,9 @@ use super::{
     chain::{SendGuardChain, SendGuardMetrics, SendGuardResult},
     pure::{Guard, GuardChain, GuardRequest},
 };
-use crate::guards::traits::GuardContextProvider;
+use crate::authorization::BiscuitAuthorizationBridge;
+use crate::guards::biscuit_evaluator::BiscuitGuardEvaluator;
+use crate::guards::traits::{require_biscuit_metadata, GuardContextProvider};
 use aura_core::{
     effects::{
         guard::{
@@ -29,6 +31,9 @@ pub use aura_core::effects::guard::{
     EffectCommand as ChoreographyCommand, EffectResult as ChoreographyResult,
 };
 use std::{collections::HashMap, sync::Arc};
+use aura_authorization::ResourceScope;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use biscuit_auth::{Biscuit, PublicKey};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -57,7 +62,11 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
         request: &GuardRequest,
     ) -> Result<GuardChainResult>
     where
-        E: crate::guards::GuardEffects + PhysicalTimeEffects + FlowBudgetEffects + StorageEffects,
+        E: crate::guards::GuardEffects
+            + GuardContextProvider
+            + PhysicalTimeEffects
+            + FlowBudgetEffects
+            + StorageEffects,
     {
         let start_time_ms = Self::current_time_ms(effect_system).await?;
 
@@ -166,6 +175,7 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
     ) -> Result<GuardSnapshot>
     where
         E: crate::guards::GuardEffects
+            + GuardContextProvider
             + PhysicalTimeEffects
             + FlowBudgetEffects
             + StorageEffects
@@ -190,6 +200,15 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
         // Get metadata
         let mut metadata_map = HashMap::new();
         metadata_map.insert("authority_id".to_string(), request.authority.to_string());
+
+        let authz_key = format!("authz:{}", request.operation);
+        let authz_ok = self
+            .evaluate_biscuit_authorization(effect_system, request)
+            .await;
+        metadata_map.insert(
+            authz_key,
+            if authz_ok { "allow".to_string() } else { "deny".to_string() },
+        );
         let metadata = MetadataView::new(metadata_map);
 
         // Generate deterministic RNG seed
@@ -215,6 +234,107 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
     fn derive_context_id(operation: &str) -> ContextId {
         let uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, operation.as_bytes());
         ContextId::from_uuid(uuid)
+    }
+
+    async fn evaluate_biscuit_authorization<E>(
+        &self,
+        effect_system: &E,
+        request: &GuardRequest,
+    ) -> bool
+    where
+        E: GuardContextProvider + PhysicalTimeEffects,
+    {
+        if request.operation.is_empty() {
+            return true;
+        }
+
+        let (token_b64, root_pk_b64) = match require_biscuit_metadata(effect_system) {
+            Ok(values) => values,
+            Err(err) => {
+                if !effect_system.execution_mode().is_production() {
+                    debug!(
+                        operation = %request.operation,
+                        error = %err,
+                        "Missing Biscuit metadata in non-production mode; allowing"
+                    );
+                    return true;
+                }
+                warn!(
+                    operation = %request.operation,
+                    error = %err,
+                    "Missing Biscuit metadata in production; denying"
+                );
+                return false;
+            }
+        };
+
+        let root_bytes = match BASE64.decode(&root_pk_b64) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                warn!(
+                    operation = %request.operation,
+                    error = %err,
+                    "Failed to decode Biscuit root key"
+                );
+                return false;
+            }
+        };
+
+        let root_pk = match PublicKey::from_bytes(&root_bytes) {
+            Ok(key) => key,
+            Err(err) => {
+                warn!(
+                    operation = %request.operation,
+                    error = %err,
+                    "Invalid Biscuit root key"
+                );
+                return false;
+            }
+        };
+
+        let token = match Biscuit::from_base64(&token_b64, |_| Ok(root_pk)) {
+            Ok(token) => token,
+            Err(err) => {
+                warn!(
+                    operation = %request.operation,
+                    error = %err,
+                    "Invalid Biscuit token"
+                );
+                return false;
+            }
+        };
+
+        let bridge = BiscuitAuthorizationBridge::new(root_pk, effect_system.authority_id());
+        let evaluator = BiscuitGuardEvaluator::new(bridge);
+
+        let resource = ResourceScope::Context {
+            context_id: request.context,
+            operation: aura_authorization::ContextOp::UpdateParams,
+        };
+
+        let now_secs = match effect_system.physical_time().await {
+            Ok(time) => time.ts_ms / 1000,
+            Err(err) => {
+                warn!(
+                    operation = %request.operation,
+                    error = %err,
+                    "Failed to fetch time for Biscuit evaluation"
+                );
+                return false;
+            }
+        };
+
+        match evaluator.check_guard(&token, &request.operation, &resource, now_secs) {
+            Ok(authorized) => authorized,
+            Err(err) => {
+                warn!(
+                    operation = %request.operation,
+                    error = %err,
+                    "Biscuit authorization evaluation failed"
+                );
+                false
+            }
+        }
     }
 }
 
@@ -508,22 +628,65 @@ pub async fn execute_guarded_choreography<E, I>(
     interpreter: Arc<I>,
 ) -> Result<GuardChainResult>
 where
-    E: crate::guards::GuardEffects + PhysicalTimeEffects + FlowBudgetEffects + StorageEffects,
+    E: crate::guards::GuardEffects
+        + GuardContextProvider
+        + PhysicalTimeEffects
+        + FlowBudgetEffects
+        + StorageEffects,
+    I: EffectInterpreter,
+{
+    let plan = GuardPlan::new(request.clone(), additional_commands);
+    execute_guard_plan(effect_system, &plan, interpreter).await
+}
+
+/// Shared guard plan for send-site and choreography execution.
+#[derive(Debug, Clone)]
+pub struct GuardPlan {
+    request: GuardRequest,
+    additional_commands: Vec<EffectCommand>,
+}
+
+impl GuardPlan {
+    pub fn new(request: GuardRequest, additional_commands: Vec<EffectCommand>) -> Self {
+        Self {
+            request,
+            additional_commands,
+        }
+    }
+
+    pub fn from_send_guard(send_guard: &SendGuardChain, authority: AuthorityId) -> Result<Self> {
+        let request = convert_send_guard_to_request(send_guard, authority)?;
+        Ok(Self::new(request, Vec::new()))
+    }
+}
+
+/// Execute a guard plan (shared for send-site + choreography paths).
+pub async fn execute_guard_plan<E, I>(
+    effect_system: &E,
+    plan: &GuardPlan,
+    interpreter: Arc<I>,
+) -> Result<GuardChainResult>
+where
+    E: crate::guards::GuardEffects
+        + GuardContextProvider
+        + PhysicalTimeEffects
+        + FlowBudgetEffects
+        + StorageEffects,
     I: EffectInterpreter,
 {
     // First, execute the standard guard chain
     let guard_chain = GuardChain::standard();
     let executor = GuardChainExecutor::new(guard_chain, interpreter.clone());
-    let mut result = executor.execute(effect_system, request).await?;
+    let mut result = executor.execute(effect_system, &plan.request).await?;
 
     // If guard chain passed and we have additional commands, execute them
-    if result.authorized && !additional_commands.is_empty() {
+    if result.authorized && !plan.additional_commands.is_empty() {
         debug!(
-            additional_count = additional_commands.len(),
+            additional_count = plan.additional_commands.len(),
             "Executing additional choreography commands after guard chain"
         );
 
-        for (i, command) in additional_commands.into_iter().enumerate() {
+        for (i, command) in plan.additional_commands.iter().cloned().enumerate() {
             match interpreter.execute(command).await {
                 Ok(_) => {
                     result.effects_executed += 1;

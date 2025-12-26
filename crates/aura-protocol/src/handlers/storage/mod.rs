@@ -5,7 +5,6 @@
 //!
 //! **Coordinator Types**:
 //! - **StorageAccessCoordinator**: Capability-based access control with authorization checks
-//! - **StorageCoordinator**: Multi-handler composition and transaction coordination
 //! - **ReplicationCoordinator**: Data replication and erasure coding across replicas
 //!
 //! **Integration** (per docs/003_information_flow_contract.md):
@@ -15,13 +14,9 @@
 /// Storage access control and capability coordination
 pub mod access_coordinator;
 
-/// Multi-handler storage coordination
-pub mod storage_coordinator;
-
 /// Replication and erasure coding coordination
 pub mod replication_coordinator;
 
 // Re-export main coordination types
 pub use access_coordinator::{AccessDecision, AccessRequest, StorageAccessCoordinator};
 pub use replication_coordinator::{ReplicationCoordinator, ReplicationStrategy};
-pub use storage_coordinator::{StorageCoordinator, StorageCoordinatorBuilder};

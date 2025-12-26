@@ -5,8 +5,7 @@
 //! and runtime reconfiguration of effect handlers.
 
 use async_trait::async_trait;
-use aura_core::hash;
-use aura_core::{AccountId, DeviceId, EffectType, ExecutionMode, SessionId};
+use aura_core::{AuthorityId, ContextId, EffectType, ExecutionMode, SessionId};
 use aura_mpst::LocalSessionType;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -15,10 +14,10 @@ use uuid::Uuid;
 /// Simplified context for handler execution
 #[derive(Debug, Clone)]
 pub struct HandlerContext {
-    pub device_id: DeviceId,
+    pub authority_id: AuthorityId,
+    pub context_id: ContextId,
     pub execution_mode: ExecutionMode,
-    pub session_id: Option<SessionId>,
-    pub account_id: Option<AccountId>,
+    pub session_id: SessionId,
     pub operation_id: Uuid,
     pub metadata: HashMap<String, String>,
 }
@@ -26,18 +25,17 @@ pub struct HandlerContext {
 impl HandlerContext {
     // Registry helper
     /// Create a new handler context
-    pub fn new(device_id: DeviceId, execution_mode: ExecutionMode) -> Self {
-        let operation_id = {
-            let digest = hash::hash(b"handler-context-operation");
-            let mut bytes = [0u8; 16];
-            bytes.copy_from_slice(&digest[..16]);
-            Uuid::from_bytes(bytes)
-        };
+    pub fn new(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Self {
+        let operation_id = Uuid::new_v4();
         Self {
-            device_id,
+            authority_id,
+            context_id,
             execution_mode,
-            session_id: None,
-            account_id: None,
+            session_id: SessionId::new(),
             operation_id,
             metadata: HashMap::new(),
         }
@@ -45,13 +43,7 @@ impl HandlerContext {
 
     /// Set session ID
     pub fn with_session_id(mut self, session_id: SessionId) -> Self {
-        self.session_id = Some(session_id);
-        self
-    }
-
-    /// Set account ID
-    pub fn with_account_id(mut self, account_id: AccountId) -> Self {
-        self.account_id = Some(account_id);
+        self.session_id = session_id;
         self
     }
 
@@ -711,5 +703,15 @@ mod tests {
         assert!(capabilities.supports_execution_mode(ExecutionMode::Testing));
         assert!(capabilities.supports_execution_mode(ExecutionMode::Production));
         assert!(!capabilities.supports_execution_mode(ExecutionMode::Simulation { seed: 42 }));
+    }
+
+    #[test]
+    fn test_handler_context_operation_id_unique() {
+        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
+        let ctx1 = HandlerContext::new(authority_id, context_id, ExecutionMode::Testing);
+        let ctx2 = HandlerContext::new(authority_id, context_id, ExecutionMode::Testing);
+
+        assert_ne!(ctx1.operation_id, ctx2.operation_id);
     }
 }

@@ -98,6 +98,10 @@ impl PhysicalTimeEffects for PhysicalTimeHandler {
 impl aura_core::effects::TimeEffects for PhysicalTimeHandler {}
 
 /// Simple logical clock handler - stateless pure functions for logical clock operations.
+#[deprecated(
+    note = "Use the runtime-owned LogicalClockService (aura-agent) for stateful logical clocks. \
+            This handler remains as a pure helper."
+)]
 #[derive(Debug, Clone, Default)]
 pub struct LogicalClockHandler;
 

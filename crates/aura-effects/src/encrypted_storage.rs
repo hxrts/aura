@@ -46,6 +46,10 @@ pub struct EncryptedStorageConfig {
     pub key_namespace: Option<String>,
     /// Custom key identifier within namespace
     pub key_id: Option<String>,
+    /// Allow reading legacy plaintext blobs when encryption is enabled
+    pub allow_plaintext_read: bool,
+    /// If true, re-encrypt legacy plaintext blobs on read
+    pub migrate_on_read: bool,
 }
 
 impl Default for EncryptedStorageConfig {
@@ -55,6 +59,8 @@ impl Default for EncryptedStorageConfig {
             opaque_names: false,
             key_namespace: None,
             key_id: None,
+            allow_plaintext_read: false,
+            migrate_on_read: false,
         }
     }
 }
@@ -86,6 +92,18 @@ impl EncryptedStorageConfig {
     /// Set custom key identifier
     pub fn with_key_id(mut self, id: impl Into<String>) -> Self {
         self.key_id = Some(id.into());
+        self
+    }
+
+    /// Allow legacy plaintext reads when encryption is enabled.
+    pub fn with_plaintext_read(mut self, allowed: bool) -> Self {
+        self.allow_plaintext_read = allowed;
+        self
+    }
+
+    /// Enable migration of plaintext blobs on read.
+    pub fn with_migrate_on_read(mut self, enabled: bool) -> Self {
+        self.migrate_on_read = enabled;
         self
     }
 }
@@ -400,8 +418,24 @@ where
         let storage_key = self.storage_key(key).await?;
         match self.inner.retrieve(&storage_key).await? {
             Some(blob) => {
-                let decrypted = self.decrypt(key, &blob).await?;
-                Ok(Some(decrypted))
+                if Self::is_encrypted(&blob) {
+                    let decrypted = self.decrypt(key, &blob).await?;
+                    return Ok(Some(decrypted));
+                }
+
+                if !self.config.allow_plaintext_read {
+                    return Err(StorageError::DecryptionFailed {
+                        reason: "Plaintext blob detected while encryption is enabled".to_string(),
+                    });
+                }
+
+                // Optionally migrate plaintext to encrypted form.
+                if self.config.migrate_on_read {
+                    let encrypted = self.encrypt(key, &blob).await?;
+                    self.inner.store(&storage_key, encrypted).await?;
+                }
+
+                Ok(Some(blob))
             }
             None => Ok(None),
         }
@@ -1078,5 +1112,55 @@ mod tests {
 
         let stats = encrypted.stats().await.unwrap();
         assert!(stats.backend_type.starts_with("encrypted("));
+    }
+
+    #[tokio::test]
+    async fn test_plaintext_read_allowed() {
+        let storage = MockStorage::new();
+        let crypto = Arc::new(MockCrypto);
+        let secure = Arc::new(MockSecureStorage::new());
+
+        let config = EncryptedStorageConfig::default()
+            .with_plaintext_read(true)
+            .with_migrate_on_read(false);
+
+        let encrypted = EncryptedStorage::new(storage, crypto, secure, config);
+
+        // Write plaintext directly to inner storage.
+        encrypted
+            .inner()
+            .store("legacy", b"legacy-data".to_vec())
+            .await
+            .unwrap();
+
+        let retrieved = encrypted.retrieve("legacy").await.unwrap().unwrap();
+        assert_eq!(retrieved, b"legacy-data");
+    }
+
+    #[tokio::test]
+    async fn test_plaintext_migrated_on_read() {
+        let storage = MockStorage::new();
+        let crypto = Arc::new(MockCrypto);
+        let secure = Arc::new(MockSecureStorage::new());
+
+        let config = EncryptedStorageConfig::default()
+            .with_plaintext_read(true)
+            .with_migrate_on_read(true);
+
+        let encrypted = EncryptedStorage::new(storage, crypto, secure, config);
+
+        encrypted
+            .inner()
+            .store("legacy", b"legacy-data".to_vec())
+            .await
+            .unwrap();
+
+        let retrieved = encrypted.retrieve("legacy").await.unwrap().unwrap();
+        assert_eq!(retrieved, b"legacy-data");
+
+        let raw = encrypted.inner().retrieve("legacy").await.unwrap().unwrap();
+        assert!(EncryptedStorage::<MockStorage, MockCrypto, MockSecureStorage>::is_encrypted(
+            &raw
+        ));
     }
 }

@@ -21,13 +21,14 @@ use aura_core::{
 };
 use aura_effects::{
     crypto::RealCryptoHandler,
-    database::IndexedJournalHandler,
     encrypted_storage::{EncryptedStorage, EncryptedStorageConfig},
     secure::RealSecureStorageHandler,
     storage::FilesystemStorageHandler,
-    time::{LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler},
-    ReactiveHandler,
+    time::{OrderClockHandler, PhysicalTimeHandler},
 };
+use aura_app::ReactiveHandler;
+use crate::database::IndexedJournalHandler;
+use crate::handlers::logical_clock_service::LogicalClockService;
 use aura_journal::commitment_tree::state::TreeState as JournalTreeState;
 use aura_journal::extensibility::{DomainFact, FactRegistry};
 use aura_journal::fact::{Fact as TypedFact, FactContent, RelationalFact};
@@ -67,7 +68,7 @@ pub struct AuraEffectSystem {
         EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
     >,
     time_handler: PhysicalTimeHandler,
-    logical_clock: LogicalClockHandler,
+    logical_clock: LogicalClockService,
     order_clock: OrderClockHandler,
     authorization_handler:
         aura_authorization::effects::WotAuthorizationHandler<aura_effects::crypto::RealCryptoHandler>,
@@ -241,7 +242,7 @@ impl AuraEffectSystem {
             random_rng: parking_lot::Mutex::new(random_rng),
             storage_handler,
             time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockHandler::new(),
+            logical_clock: LogicalClockService::new(Some(config.device_id())),
             order_clock: OrderClockHandler,
             authorization_handler,
             leakage_handler,

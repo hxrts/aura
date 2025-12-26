@@ -1,3 +1,20 @@
+#![allow(
+    missing_docs,
+    unused_variables,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    dead_code,
+    clippy::match_like_matches_macro,
+    clippy::type_complexity,
+    clippy::while_let_loop,
+    clippy::redundant_closure,
+    clippy::large_enum_variant,
+    clippy::unused_unit,
+    clippy::get_first,
+    clippy::single_range_in_vec_init,
+    clippy::disallowed_methods, // Orchestration layer coordinates time/random effects
+    deprecated // Deprecated time/random functions used intentionally for effect coordination
+)]
 //! Layer 4: Protocol Message Types - Domain-Separated, Versioned, Typed
 //!
 //! Message type definitions organized by domain with version compatibility.
@@ -42,7 +59,7 @@ pub use crypto::*;
 pub use social_types::*;
 
 /// Current wire format version
-pub const WIRE_FORMAT_VERSION: u16 = 1;
+pub const WIRE_FORMAT_VERSION: u16 = crate::config::DEFAULT_WIRE_FORMAT_VERSION;
 
 /// Unified message envelope for all protocols
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

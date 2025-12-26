@@ -69,6 +69,27 @@ pub enum AuraError {
     Terminal(String),
 }
 
+/// Shared error code mapping for protocol-level errors.
+pub trait ProtocolErrorCode {
+    fn code(&self) -> &'static str;
+}
+
+impl ProtocolErrorCode for AuraError {
+    fn code(&self) -> &'static str {
+        match self {
+            AuraError::Invalid { .. } => "invalid",
+            AuraError::NotFound { .. } => "not_found",
+            AuraError::PermissionDenied { .. } => "permission_denied",
+            AuraError::Crypto { .. } => "crypto",
+            AuraError::Network { .. } => "network",
+            AuraError::Serialization { .. } => "serialization",
+            AuraError::Storage { .. } => "storage",
+            AuraError::Internal { .. } => "internal",
+            AuraError::Terminal(_) => "terminal",
+        }
+    }
+}
+
 impl AuraError {
     /// Create an invalid input error
     pub fn invalid(message: impl Into<String>) -> Self {

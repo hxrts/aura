@@ -20,9 +20,7 @@ use aura_journal::fact::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{get_channel_state, AmpJournalEffects};
-
-const DEFAULT_WINDOW: u32 = 1024;
+use super::{config::AmpRuntimeConfig, get_channel_state, AmpJournalEffects};
 
 /// Simple coordinator that writes AMP channel facts into the context journal.
 pub struct AmpChannelCoordinator<E> {
@@ -47,12 +45,18 @@ where
         let channel = if let Some(id) = params.channel {
             id
         } else {
-            // Derive a ChannelId from random bytes
-            let bytes = self.effects.random_bytes(32).await;
-            aura_core::identifiers::ChannelId::from_bytes(hash(&bytes))
+            let order = self
+                .effects
+                .order_time()
+                .await
+                .map_err(|e| AmpChannelError::Internal(e.to_string()))?;
+            aura_core::identifiers::ChannelId::from_bytes(order.0)
         };
 
-        let window = params.skip_window.unwrap_or(DEFAULT_WINDOW);
+        let config = AmpRuntimeConfig::default();
+        let window = params
+            .skip_window
+            .unwrap_or(config.default_skip_window);
 
         let checkpoint = ChannelCheckpoint {
             context: params.context,
@@ -218,6 +222,8 @@ pub enum ChannelParticipantEvent {
 /// Domain fact that records AMP channel membership events.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelMembershipFact {
+    #[serde(default = "channel_membership_schema_version")]
+    schema_version: u16,
     context: ContextId,
     channel: ChannelId,
     participant: AuthorityId,
@@ -234,6 +240,7 @@ impl ChannelMembershipFact {
         timestamp: TimeStamp,
     ) -> Self {
         Self {
+            schema_version: channel_membership_schema_version(),
             context,
             channel,
             participant,
@@ -243,9 +250,18 @@ impl ChannelMembershipFact {
     }
 
     pub async fn random_timestamp<A: AmpJournalEffects>(effects: &A) -> TimeStamp {
-        let bytes = effects.random_bytes(16).await;
-        TimeStamp::OrderClock(OrderTime(hash(&bytes)))
+        match effects.order_time().await {
+            Ok(order) => TimeStamp::OrderClock(order),
+            Err(err) => {
+                tracing::warn!("order_time unavailable: {err}; falling back to zero order");
+                TimeStamp::OrderClock(OrderTime([0u8; 32]))
+            }
+        }
     }
+}
+
+fn channel_membership_schema_version() -> u16 {
+    1
 }
 
 impl DomainFact for ChannelMembershipFact {

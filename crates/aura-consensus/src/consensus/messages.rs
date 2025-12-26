@@ -166,6 +166,20 @@ pub enum ConsensusError {
     Internal(String),
 }
 
+impl aura_core::ProtocolErrorCode for ConsensusError {
+    fn code(&self) -> &'static str {
+        match self {
+            ConsensusError::Timeout(_) => "timeout",
+            ConsensusError::Conflict(_) => "conflict",
+            ConsensusError::InsufficientWitnesses { .. } => "insufficient_witnesses",
+            ConsensusError::InvalidPrestate(_) => "invalid_prestate",
+            ConsensusError::Crypto(_) => "crypto",
+            ConsensusError::Network(_) => "network",
+            ConsensusError::Internal(_) => "internal",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

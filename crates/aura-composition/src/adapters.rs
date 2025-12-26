@@ -10,6 +10,8 @@ use aura_core::effects::{
     ConsoleEffects, CryptoEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects,
     StorageEffects, SystemEffects,
 };
+use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext, SigningMode};
+use aura_core::effects::registry as effect_registry;
 use aura_core::{EffectType, ExecutionMode};
 use aura_effects::{
     console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
@@ -110,16 +112,10 @@ impl RegistrableHandler for ConsoleHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if effect_type == EffectType::Console {
-            vec![
-                "log_info".to_string(),
-                "log_warn".to_string(),
-                "log_error".to_string(),
-                "log_debug".to_string(),
-            ]
-        } else {
-            Vec::new()
-        }
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -187,6 +183,29 @@ impl RegistrableHandler for RandomHandlerAdapter {
                     source: Box::new(e),
                 })
             }
+            "random_range" => {
+                let (min, max): (u64, u64) = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                let result = self.handler.random_range(min, max).await;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "random_uuid" => {
+                let result = self.handler.random_uuid().await;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,
                 operation: operation.to_string(),
@@ -195,15 +214,10 @@ impl RegistrableHandler for RandomHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if effect_type == EffectType::Random {
-            vec![
-                "random_bytes".to_string(),
-                "random_bytes_32".to_string(),
-                "random_u64".to_string(),
-            ]
-        } else {
-            Vec::new()
-        }
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -254,6 +268,28 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                 let result = self
                     .handler
                     .hkdf_derive(&params.0, &salt, &params.2, params.3)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "derive_key" => {
+                let params: (Vec<u8>, KeyDerivationContext) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .derive_key(&params.0, &params.1)
                     .await
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -317,6 +353,334 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     source: Box::new(e),
                 })
             }
+            "ed25519_public_key" => {
+                let private_key: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                let result = self
+                    .handler
+                    .ed25519_public_key(&private_key)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "generate_signing_keys" => {
+                let (threshold, max_signers): (u16, u16) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .generate_signing_keys(threshold, max_signers)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "sign_with_key" => {
+                let params: (Vec<u8>, Vec<u8>, SigningMode) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .sign_with_key(&params.0, &params.1, params.2)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "verify_signature" => {
+                let params: (Vec<u8>, Vec<u8>, Vec<u8>, SigningMode) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .verify_signature(&params.0, &params.1, &params.2, params.3)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "frost_generate_keys" => {
+                let (threshold, max_signers): (u16, u16) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .frost_generate_keys(threshold, max_signers)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "frost_generate_nonces" => {
+                let key_package: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                let result = self
+                    .handler
+                    .frost_generate_nonces(&key_package)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "frost_create_signing_package" => {
+                let params: (Vec<u8>, Vec<Vec<u8>>, Vec<u16>, Vec<u8>) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .frost_create_signing_package(&params.0, &params.1, &params.2, &params.3)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "frost_sign_share" => {
+                let params: (FrostSigningPackage, Vec<u8>, Vec<u8>) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .frost_sign_share(&params.0, &params.1, &params.2)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "frost_aggregate_signatures" => {
+                let params: (FrostSigningPackage, Vec<Vec<u8>>) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .frost_aggregate_signatures(&params.0, &params.1)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "frost_verify" => {
+                let params: (Vec<u8>, Vec<u8>, Vec<u8>) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .frost_verify(&params.0, &params.1, &params.2)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "aes_gcm_encrypt" => {
+                let params: (Vec<u8>, [u8; 32], [u8; 12]) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .aes_gcm_encrypt(&params.0, &params.1, &params.2)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "aes_gcm_decrypt" => {
+                let params: (Vec<u8>, [u8; 32], [u8; 12]) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .aes_gcm_decrypt(&params.0, &params.1, &params.2)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "chacha20_encrypt" => {
+                let params: (Vec<u8>, [u8; 32], [u8; 12]) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .chacha20_encrypt(&params.0, &params.1, &params.2)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "chacha20_decrypt" => {
+                let params: (Vec<u8>, [u8; 32], [u8; 12]) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .chacha20_decrypt(&params.0, &params.1, &params.2)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "frost_rotate_keys" => {
+                let params: (Vec<Vec<u8>>, u16, u16, u16) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .handler
+                    .frost_rotate_keys(&params.0, params.1, params.2, params.3)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,
                 operation: operation.to_string(),
@@ -325,16 +689,10 @@ impl RegistrableHandler for CryptoHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if effect_type == EffectType::Crypto {
-            vec![
-                "hkdf_derive".to_string(),
-                "ed25519_generate_keypair".to_string(),
-                "ed25519_sign".to_string(),
-                "ed25519_verify".to_string(),
-            ]
-        } else {
-            Vec::new()
-        }
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -447,6 +805,80 @@ impl RegistrableHandler for StorageHandlerAdapter {
                     source: Box::new(e),
                 })
             }
+            "exists" => {
+                let key: String = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                let result = self.handler.exists(&key).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "store_batch" => {
+                let pairs: std::collections::HashMap<String, Vec<u8>> =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                self.handler.store_batch(pairs).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(Vec::new())
+            }
+            "retrieve_batch" => {
+                let keys: Vec<String> = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                let result = self.handler.retrieve_batch(&keys).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "clear_all" => {
+                self.handler.clear_all().await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(Vec::new())
+            }
+            "stats" => {
+                let result = self.handler.stats().await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,
                 operation: operation.to_string(),
@@ -455,16 +887,10 @@ impl RegistrableHandler for StorageHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if effect_type == EffectType::Storage {
-            vec![
-                "store".to_string(),
-                "retrieve".to_string(),
-                "remove".to_string(),
-                "list_keys".to_string(),
-            ]
-        } else {
-            Vec::new()
-        }
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -478,12 +904,18 @@ impl RegistrableHandler for StorageHandlerAdapter {
 
 /// Adapter for PhysicalTimeHandler (domain-specific time effects)
 pub struct TimeHandlerAdapter {
-    handler: PhysicalTimeHandler,
+    physical: PhysicalTimeHandler,
+    logical: aura_effects::time::LogicalClockHandler,
+    order: aura_effects::time::OrderClockHandler,
 }
 
 impl TimeHandlerAdapter {
     pub fn new(handler: PhysicalTimeHandler) -> Self {
-        Self { handler }
+        Self {
+            physical: handler,
+            logical: aura_effects::time::LogicalClockHandler::new(),
+            order: aura_effects::time::OrderClockHandler::new(),
+        }
     }
 }
 
@@ -501,6 +933,18 @@ impl RegistrableHandler for TimeHandlerAdapter {
         }
 
         match operation {
+            "physical_time" => {
+                let result = self.physical.physical_time().await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
             "sleep_ms" => {
                 let millis: u64 = bincode::deserialize(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
@@ -509,7 +953,7 @@ impl RegistrableHandler for TimeHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                let _ = PhysicalTimeEffects::sleep_ms(&self.handler, millis).await;
+                let _ = PhysicalTimeEffects::sleep_ms(&self.physical, millis).await;
                 Ok(Vec::new()) // sleep returns void
             }
             "sleep_until" => {
@@ -520,8 +964,54 @@ impl RegistrableHandler for TimeHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                self.handler.sleep_until(epoch).await;
+                self.physical.sleep_until(epoch).await;
                 Ok(Vec::new())
+            }
+            "logical_advance" => {
+                let observed: Option<aura_core::time::VectorClock> =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self
+                    .logical
+                    .logical_advance(observed.as_ref())
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "logical_now" => {
+                let result = self.logical.logical_now().await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "order_time" => {
+                let result = self.order.order_time().await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
             }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,
@@ -531,11 +1021,10 @@ impl RegistrableHandler for TimeHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if effect_type == EffectType::Time {
-            vec!["sleep_ms".to_string(), "sleep_until".to_string()]
-        } else {
-            Vec::new()
-        }
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -616,6 +1105,103 @@ impl RegistrableHandler for TransportHandlerAdapter {
                     source: Box::new(e),
                 })
             }
+            "receive_from" => {
+                let peer_id: uuid::Uuid = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                let received = self
+                    .handler
+                    .receive_from(peer_id)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&received).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "connected_peers" => {
+                let peers = self.handler.connected_peers().await;
+                bincode::serialize(&peers).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "is_peer_connected" => {
+                let peer_id: uuid::Uuid = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                let result = self.handler.is_peer_connected(peer_id).await;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "subscribe_to_peer_events" => Err(HandlerError::ExecutionFailed {
+                source: "Peer event streams are not serializable in registry adapters".into(),
+            }),
+            "open" => {
+                let address: String = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                let connection_id = self.handler.open(&address).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&connection_id).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "send" => {
+                let (connection_id, data): (String, Vec<u8>) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                self.handler.send(&connection_id, data).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(Vec::new())
+            }
+            "close" => {
+                let connection_id: String = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                self.handler.close(&connection_id).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(Vec::new())
+            }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,
                 operation: operation.to_string(),
@@ -624,15 +1210,10 @@ impl RegistrableHandler for TransportHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if effect_type == EffectType::Network {
-            vec![
-                "send_to_peer".to_string(),
-                "broadcast".to_string(),
-                "receive".to_string(),
-            ]
-        } else {
-            Vec::new()
-        }
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -811,21 +1392,10 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if effect_type == EffectType::System {
-            vec![
-                "log".to_string(),
-                "log_with_context".to_string(),
-                "health_check".to_string(),
-                "get_system_info".to_string(),
-                "set_config".to_string(),
-                "get_config".to_string(),
-                "get_metrics".to_string(),
-                "restart_component".to_string(),
-                "shutdown".to_string(),
-            ]
-        } else {
-            Vec::new()
-        }
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -834,5 +1404,35 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
 
     fn execution_mode(&self) -> ExecutionMode {
         ExecutionMode::Production
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::effects::registry::operations_for;
+
+    #[test]
+    fn test_supported_operations_match_registry_map() {
+        let console_ops = ConsoleHandlerAdapter::new(RealConsoleHandler::new())
+            .supported_operations(EffectType::Console);
+        assert_eq!(
+            console_ops,
+            operations_for(EffectType::Console)
+                .iter()
+                .map(|op| (*op).to_string())
+                .collect::<Vec<_>>()
+        );
+
+        let random_ops =
+            RandomHandlerAdapter::new(RealRandomHandler::new()).supported_operations(EffectType::Random);
+        assert!(random_ops.contains(&"random_range".to_string()));
+        assert!(random_ops.contains(&"random_uuid".to_string()));
+
+        let storage_ops =
+            StorageHandlerAdapter::new(FilesystemStorageHandler::with_default_path())
+                .supported_operations(EffectType::Storage);
+        assert!(storage_ops.contains(&"store_batch".to_string()));
+        assert!(storage_ops.contains(&"stats".to_string()));
     }
 }

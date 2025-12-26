@@ -341,7 +341,7 @@ impl EffectInterpreter for SimulationEffectInterpreter {
                 Ok(EffectResult::Success)
             }
 
-            EffectCommand::SendEnvelope { to, envelope } => {
+            EffectCommand::SendEnvelope { to, peer_id: _, envelope } => {
                 debug!(
                     ?to,
                     envelope_len = envelope.len(),
@@ -483,6 +483,7 @@ mod tests {
             EffectCommand::RecordLeakage { bits: 128 },
             EffectCommand::SendEnvelope {
                 to: NetworkAddress::new("test://addr2".to_string()),
+                peer_id: None,
                 envelope: vec![1, 2, 3, 4],
             },
         ];

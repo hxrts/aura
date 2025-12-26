@@ -34,7 +34,7 @@ use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::FrostThreshold;
 use aura_core::SigningContext;
 use aura_core::{DeviceId, ThresholdSignature};
-use aura_effects::ReactiveHandler;
+use aura_app::ReactiveHandler;
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_relational::ContactFact;
 use base64::Engine;

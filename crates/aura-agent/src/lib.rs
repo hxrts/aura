@@ -87,6 +87,9 @@ mod runtime;
 // Handler modules (public for service access)
 pub mod handlers;
 
+// Runtime-owned indexed journal utilities (stateful)
+pub mod database;
+
 // Reactive programming infrastructure (public)
 pub mod reactive;
 

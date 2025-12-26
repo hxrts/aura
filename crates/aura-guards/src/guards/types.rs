@@ -166,6 +166,7 @@ pub fn validate_charge_before_send<C>(
 /// Typed guard operation identifiers to avoid stringly-typed call sites.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GuardOperation {
+    AmpSend,
     SyncRequestDigest,
     SyncRequestOps,
     SyncPushOps,
@@ -177,6 +178,7 @@ pub enum GuardOperation {
 impl GuardOperation {
     pub fn as_str(&self) -> &str {
         match self {
+            GuardOperation::AmpSend => "amp:send",
             GuardOperation::SyncRequestDigest => "sync:request_digest",
             GuardOperation::SyncRequestOps => "sync:request_ops",
             GuardOperation::SyncPushOps => "sync:push_ops",
@@ -184,6 +186,42 @@ impl GuardOperation {
             GuardOperation::SyncPushOp => "sync:push_op",
             GuardOperation::Custom(value) => value.as_str(),
         }
+    }
+}
+
+/// Typed operation identifiers for logging/metrics.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GuardOperationId {
+    AmpSend,
+    SyncRequestDigest { peer: uuid::Uuid },
+    SyncRequestOps { peer: uuid::Uuid, count: usize },
+    SyncAnnounceOp { peer: uuid::Uuid, cid: aura_core::Hash32 },
+    SyncPushOp { peer: uuid::Uuid, cid: aura_core::Hash32 },
+    Custom(String),
+}
+
+impl std::fmt::Display for GuardOperationId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GuardOperationId::AmpSend => write!(f, "amp_send"),
+            GuardOperationId::SyncRequestDigest { peer } => write!(f, "digest_request_{peer}"),
+            GuardOperationId::SyncRequestOps { peer, count } => {
+                write!(f, "ops_request_{peer}_{count}")
+            }
+            GuardOperationId::SyncAnnounceOp { peer, cid } => {
+                write!(f, "announce_{peer}_{cid:?}")
+            }
+            GuardOperationId::SyncPushOp { peer, cid } => {
+                write!(f, "push_op_{peer}_{cid:?}")
+            }
+            GuardOperationId::Custom(value) => write!(f, "{value}"),
+        }
+    }
+}
+
+impl From<GuardOperationId> for String {
+    fn from(value: GuardOperationId) -> Self {
+        value.to_string()
     }
 }
 

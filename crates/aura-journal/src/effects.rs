@@ -66,6 +66,7 @@ fn relational_context_id(rel: &crate::fact::RelationalFact) -> ContextId {
         AmpProposedChannelEpochBump(proposed) => proposed.context,
         AmpCommittedChannelEpochBump(committed) => committed.context,
         AmpChannelPolicy(policy) => policy.context,
+        LeakageEvent(event) => event.context_id,
         // Generic handles all domain-specific facts (ChatFact, InvitationFact, ContactFact)
         // via DomainFact::to_generic() - context_id is always stored in the binding
         Generic { context_id, .. } => *context_id,

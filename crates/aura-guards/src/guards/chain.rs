@@ -4,19 +4,18 @@
 //! and docs/101_auth_authz.md, providing the CapGuard → FlowGuard → JournalCoupler sequence
 //! that enforces both authorization and budget constraints at every protocol send site.
 
-use super::traits::{require_biscuit_metadata, GuardContextProvider};
+use super::traits::GuardContextProvider;
 use super::types::GuardOperation;
 use super::GuardEffects;
-use crate::authorization::BiscuitAuthorizationBridge;
-use crate::guards::biscuit_evaluator::BiscuitGuardEvaluator;
-use crate::guards::executor::{BorrowedEffectInterpreter, GuardChainExecutor};
-use crate::guards::{privacy::track_leakage_consumption, JournalCoupler, LeakageBudget};
+use crate::guards::executor::{BorrowedEffectInterpreter, GuardPlan, execute_guard_plan};
+use crate::guards::{
+    config::GuardRuntimeConfig,
+    privacy::{track_leakage_consumption, AdversaryClass},
+    JournalCoupler, LeakageBudget,
+};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Receipt};
-use aura_authorization::ResourceScope;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use biscuit_auth::{Biscuit, PublicKey};
 use tracing::{debug, warn};
 
 /// Complete send-site guard chain implementing the formal predicate:
@@ -40,54 +39,6 @@ pub struct SendGuardChain {
 }
 
 impl SendGuardChain {
-    async fn evaluate_authorization_guard<E: GuardContextProvider + PhysicalTimeEffects>(
-        &self,
-        effect_system: &E,
-    ) -> AuraResult<(bool, String)> {
-        if self.message_authorization.is_empty() {
-            return Ok((true, "none".to_string()));
-        }
-
-        let (token_b64, root_pk_b64) = require_biscuit_metadata(effect_system)?;
-
-        let root_bytes = BASE64
-            .decode(&root_pk_b64)
-            .map_err(|e| AuraError::invalid(format!("{}", e)))?;
-        let root_pk = PublicKey::from_bytes(&root_bytes)
-            .map_err(|e| AuraError::invalid(format!("invalid root pk: {e}")))?;
-        let token = Biscuit::from_base64(&token_b64, |_| Ok(root_pk))
-            .map_err(|e| AuraError::invalid(format!("invalid biscuit token: {e}")))?;
-
-        let bridge = BiscuitAuthorizationBridge::new(root_pk, effect_system.authority_id());
-        let evaluator = BiscuitGuardEvaluator::new(bridge);
-
-        // Use Context scope for send authorization - message sends occur within relational contexts
-        let resource = ResourceScope::Context {
-            context_id: self.context,
-            operation: aura_authorization::ContextOp::UpdateParams, // Send operations use generic context update capability
-        };
-
-        let now_secs = effect_system
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::invalid(format!("time error: {e}")))?
-            .ts_ms
-            / 1000;
-
-        match evaluator.evaluate_guard(
-            &token,
-            &self.message_authorization,
-            &resource,
-            self.cost as u64,
-            &mut aura_core::FlowBudget::default(),
-            now_secs,
-        ) {
-            Ok(result) if result.authorized => Ok((true, "biscuit".to_string())),
-            Ok(_) => Ok((false, "authorization_failed".to_string())),
-            Err(e) => Err(AuraError::invalid(format!("biscuit eval failed: {e}"))),
-        }
-    }
-
     pub fn authorization_requirement(&self) -> &str {
         &self.message_authorization
     }
@@ -225,62 +176,33 @@ impl SendGuardChain {
             "Starting send guard evaluation (pure executor path)"
         );
 
-        let (authorization_satisfied, authorization_level) = self
-            .evaluate_authorization_guard(effect_system)
-            .await
-            .unwrap_or_else(|_| (false, "authorization_failed".to_string()));
-
-        if !authorization_satisfied {
-            warn!(
-                operation_id = operation_id,
-                authorization = %self.message_authorization,
-                "Send denied: authorization requirement not satisfied"
-            );
-
-            return Ok(SendGuardResult {
-                authorized: false,
-                authorization_satisfied: false,
-                flow_authorized: false,
-                receipt: None,
-                authorization_level: Some(authorization_level.clone()),
-                metrics: SendGuardMetrics::default(),
-                denial_reason: Some(format!(
-                    "Missing required authorization: {}",
-                    self.message_authorization
-                )),
-            });
-        }
-
         if let Some(budget) = &self.leakage_budget {
-            track_leakage_consumption(budget, operation_id, effect_system).await?;
+            let config = GuardRuntimeConfig::default();
+            track_leakage_consumption(
+                self.context,
+                Some(self.peer),
+                budget,
+                operation_id,
+                config.default_observers.clone(),
+                effect_system,
+            )
+            .await?;
         }
 
         let authority = GuardContextProvider::authority_id(effect_system);
         let interpreter = std::sync::Arc::new(BorrowedEffectInterpreter::new(effect_system));
-        let pure_result =
-            GuardChainExecutor::new(crate::guards::pure::GuardChain::standard(), interpreter)
-                .execute(
-                    effect_system,
-                    &crate::guards::executor::convert_send_guard_to_request(self, authority)?,
-                )
-                .await?;
-
-        let authorized = authorization_satisfied && pure_result.authorized;
+        let plan = GuardPlan::from_send_guard(self, authority)?;
+        let pure_result = execute_guard_plan(effect_system, &plan, interpreter).await?;
 
         Ok(SendGuardResult {
-            authorized,
-            authorization_satisfied,
+            authorized: pure_result.authorized,
+            authorization_satisfied: pure_result.authorized,
             flow_authorized: pure_result.authorized,
             receipt: pure_result.receipt,
             authorization_level: Some(self.message_authorization.clone()),
             metrics: SendGuardMetrics::default(),
-            denial_reason: if authorized {
+            denial_reason: if pure_result.authorized {
                 None
-            } else if !authorization_satisfied {
-                Some(format!(
-                    "Missing required authorization: {}",
-                    self.message_authorization
-                ))
             } else {
                 pure_result.denial_reason
             },

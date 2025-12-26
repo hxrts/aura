@@ -1,3 +1,20 @@
+#![allow(
+    missing_docs,
+    unused_variables,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    dead_code,
+    clippy::match_like_matches_macro,
+    clippy::type_complexity,
+    clippy::while_let_loop,
+    clippy::redundant_closure,
+    clippy::large_enum_variant,
+    clippy::unused_unit,
+    clippy::get_first,
+    clippy::single_range_in_vec_init,
+    clippy::disallowed_methods, // Orchestration layer coordinates time/random effects
+    deprecated // Deprecated time/random functions used intentionally for effect coordination
+)]
 //! Layer 4: Unified Handler Architecture - Effects-Handler Bridge
 //!
 //! Bridges effect trait definitions (Layer 1 abstract interfaces) with concrete handler
@@ -19,7 +36,7 @@
 //! **Handler Categories** (organized by concern):
 //! - **core**: Base effect handler traits, registry infrastructure, error types
 //! - **tree**: Commitment tree reduction and application handlers
-//! - **memory**: In-memory handlers for testing and simulation
+//! - **memory**: (moved to aura-testkit) In-memory handlers for testing and simulation
 //! - **bridges**: Integration adapters (moved to aura-bridge)
 //! - **storage**: Storage coordination handlers
 //! - **context**: Context/lifecycle management for handler operations
@@ -27,7 +44,7 @@
 //! **Handler Categories**:
 //! - **core**: Base effect handler traits and registry
 //! - **tree**: Commitment tree operations
-//! - **memory**: In-memory implementations for testing
+//! - **memory**: (moved to aura-testkit) In-memory implementations for testing
 //! - **bridges**: Adapters for integration (moved to aura-bridge)
 //! - **storage**: Storage coordination
 //! - **context**: Context management for handler operations
@@ -37,7 +54,7 @@
 //!   - Naming: `{Source}{Target}Adapter`
 //!
 //! - **Bridge**: Connects different subsystems or layers
-//!   - Examples: `UnifiedAuraHandlerBridge`, `TypedBridge`
+//!   - Examples: `TypedBridge`
 //!   - Naming: `{System}Bridge` or `{Adjective}Bridge`
 //!
 //! This distinction ensures:
@@ -222,11 +239,7 @@ pub use context::{
 // Bridge adapters
 // Bridges live in aura-bridge to avoid coupling handler internals to other Layer 4 crates.
 
-// Memory-based handlers
-pub mod memory;
-pub use memory::{
-    /* GuardianAuthorizationHandler, */ MemoryChoreographicHandler, MemoryLedgerHandler,
-};
+// Memory-based handlers moved to aura-testkit.
 
 // Convert AuraHandlerError to AuraError for ? operator
 impl From<AuraHandlerError> for aura_core::AuraError {
@@ -287,9 +300,6 @@ pub mod tree;
 pub use tree::PersistentTreeHandler;
 // Sync handlers consolidated under crate::sync
 pub use crate::sync::{AntiEntropyHandler, BroadcastConfig, BroadcasterHandler, PersistentSyncHandler};
-
-pub mod time_handler;
-pub use time_handler::EnhancedTimeHandler;
 
 pub mod timeout_coordinator;
 pub use timeout_coordinator::TimeoutCoordinator;

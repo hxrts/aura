@@ -317,10 +317,8 @@ impl BroadcasterHandler {
             return Ok(());
         };
 
-        // Serialize the operation for transport
-        let op_data = bincode::serialize(&op).map_err(|e| {
-            SyncError::NetworkError(format!("Failed to serialize operation: {}", e))
-        })?;
+        // Serialize the operation for transport using the wire module
+        let op_data = crate::sync::wire::serialize_message(&crate::sync::wire::SyncWireMessage::op(op.clone()))?;
 
         // Send to each peer
         let mut send_errors = Vec::new();

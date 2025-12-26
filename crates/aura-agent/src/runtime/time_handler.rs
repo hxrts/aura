@@ -1,8 +1,9 @@
 //! Enhanced time handler for production use with advanced scheduling capabilities.
 
-use crate::effects::{TimeoutHandle, WakeCondition};
-use async_lock::RwLock;
-use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
+#![allow(dead_code)]
+
+use tokio::sync::RwLock;
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects, TimeoutHandle, WakeCondition};
 use aura_core::{AuraError, Result};
 use std::collections::HashMap;
 use std::sync::Arc;

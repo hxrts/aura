@@ -30,6 +30,8 @@ pub mod operations;
 pub mod reduction;
 /// Commitment tree state representation
 pub mod state;
+/// Shared storage helpers for tree op persistence
+pub mod storage;
 
 pub use application::{
     apply_verified, apply_verified_sync, validate_invariants, ApplicationError, ApplicationResult,

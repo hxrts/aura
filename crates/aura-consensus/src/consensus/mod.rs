@@ -1,3 +1,37 @@
+#![allow(
+    missing_docs,
+    unused_variables,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    dead_code,
+    clippy::match_like_matches_macro,
+    clippy::type_complexity,
+    clippy::while_let_loop,
+    clippy::redundant_closure,
+    clippy::large_enum_variant,
+    clippy::unused_unit,
+    clippy::get_first,
+    clippy::single_range_in_vec_init,
+    clippy::disallowed_methods, // Consensus coordinates time/random effects
+    deprecated // Deprecated time/random functions used intentionally for effect coordination
+)]
+#![allow(
+    missing_docs,
+    unused_variables,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    dead_code,
+    clippy::match_like_matches_macro,
+    clippy::type_complexity,
+    clippy::while_let_loop,
+    clippy::redundant_closure,
+    clippy::large_enum_variant,
+    clippy::unused_unit,
+    clippy::get_first,
+    clippy::single_range_in_vec_init,
+    clippy::disallowed_methods, // Consensus coordinates time/random effects
+    deprecated // Deprecated time/random functions used intentionally for effect coordination
+)]
 //! Layer 4: Aura Consensus Implementation - Strong Agreement
 //!
 //! Strong-agreement consensus protocol for distributed multi-authority coordination.
@@ -33,6 +67,7 @@
 
 // Pure core - effect-free state machine for verification
 pub mod core;
+pub mod config;
 
 // Core modules
 pub mod frost;

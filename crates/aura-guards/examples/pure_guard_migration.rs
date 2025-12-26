@@ -121,6 +121,9 @@ async fn run_examples() -> AuraResult<()> {
     let mut budgets = HashMap::new();
     budgets.insert((context, authority), 1000);
 
+    let mut metadata = HashMap::new();
+    metadata.insert("authz:send_message".to_string(), "allow".to_string());
+
     let snapshot = GuardSnapshot {
         now: TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 1000,
@@ -128,7 +131,7 @@ async fn run_examples() -> AuraResult<()> {
         }),
         caps: Cap::default(),
         budgets: FlowBudgetView::new(budgets),
-        metadata: MetadataView::default(),
+        metadata: MetadataView::new(metadata),
         rng_seed: [0u8; 32],
     };
 

@@ -155,7 +155,7 @@ impl HandlerUtils {
     {
         // Serialize parameters
         let param_bytes =
-            serde_json::to_vec(&parameters).map_err(|e| AuraHandlerError::EffectSerialization {
+            bincode::serialize(&parameters).map_err(|e| AuraHandlerError::EffectSerialization {
                 effect_type,
                 operation: operation.to_string(),
                 source: e.into(),
@@ -167,7 +167,7 @@ impl HandlerUtils {
             .await?;
 
         // Deserialize the result
-        serde_json::from_slice(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
+        bincode::deserialize(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
             effect_type,
             operation: operation.to_string(),
             source: e.into(),
@@ -178,6 +178,7 @@ impl HandlerUtils {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use aura_core::identifiers::DeviceId;
 
     #[tokio::test]
@@ -229,5 +230,61 @@ mod tests {
             // If no effects are supported, just verify the handler interface works
             assert_eq!(handler.execution_mode(), ExecutionMode::Testing);
         }
+    }
+
+    #[tokio::test]
+    async fn test_typed_effect_bincode_roundtrip() {
+        #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+        struct EchoParams {
+            value: u32,
+        }
+
+        struct EchoHandler;
+
+        #[async_trait]
+        impl AuraHandler for EchoHandler {
+            async fn execute_effect(
+                &self,
+                _effect_type: EffectType,
+                _operation: &str,
+                parameters: &[u8],
+                _ctx: &AuraContext,
+            ) -> Result<Vec<u8>, AuraHandlerError> {
+                Ok(parameters.to_vec())
+            }
+
+            async fn execute_session(
+                &self,
+                _session: LocalSessionType,
+                _ctx: &AuraContext,
+            ) -> Result<(), AuraHandlerError> {
+                Ok(())
+            }
+
+            fn supports_effect(&self, _effect_type: EffectType) -> bool {
+                true
+            }
+
+            fn execution_mode(&self) -> ExecutionMode {
+                ExecutionMode::Testing
+            }
+        }
+
+        let device_id = DeviceId::deterministic_test_id();
+        let ctx = AuraContext::for_testing(device_id);
+        let mut handler = EchoHandler;
+
+        let input = EchoParams { value: 42 };
+        let output: EchoParams = HandlerUtils::execute_typed_effect(
+            &mut handler,
+            EffectType::Console,
+            "echo",
+            input,
+            &ctx,
+        )
+        .await
+        .expect("roundtrip should succeed");
+
+        assert_eq!(output, EchoParams { value: 42 });
     }
 }

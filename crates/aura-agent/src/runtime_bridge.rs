@@ -26,7 +26,7 @@ use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::types::FrostThreshold;
 use aura_core::DeviceId;
 use aura_core::EffectContext;
-use aura_effects::ReactiveHandler;
+use aura_app::ReactiveHandler;
 use aura_journal::fact::{CommittedChannelEpochBump, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
@@ -1047,9 +1047,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
 
         use base64::Engine;
-        let config_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config);
-        let pubkey_b64 =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package);
+        let config_b64 = if threshold_config.is_empty() {
+            None
+        } else {
+            Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config))
+        };
+        let pubkey_b64 = if public_key_package.is_empty() {
+            None
+        } else {
+            Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package))
+        };
 
         for device_id in parsed_devices.iter().copied() {
             if device_id == current_device_id {
@@ -1079,8 +1086,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 "aura-destination-device-id".to_string(),
                 device_id.to_string(),
             );
-            metadata.insert("threshold-config".to_string(), config_b64.clone());
-            metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
+            if let Some(config_b64) = config_b64.as_ref() {
+                metadata.insert("threshold-config".to_string(), config_b64.clone());
+            }
+            if let Some(pubkey_b64) = pubkey_b64.as_ref() {
+                metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
+            }
 
             let envelope = aura_core::effects::TransportEnvelope {
                 destination: authority_id,
@@ -1206,7 +1217,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             format!("{}", pending_epoch),
         );
 
-        let public_key_package = effects
+        let public_key_package = match effects
             .secure_retrieve(
                 &pubkey_location,
                 &[
@@ -1215,13 +1226,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 ],
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to load threshold public key package: {e}"
-                ))
-            })?;
+        {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!(error = %e, "Missing device enrollment public key package");
+                Vec::new()
+            }
+        };
 
-        let threshold_config = effects
+        let threshold_config = match effects
             .secure_retrieve(
                 &config_location,
                 &[
@@ -1230,11 +1243,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 ],
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to load threshold config metadata: {e}"
-                ))
-            })?;
+        {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!(error = %e, "Missing device enrollment threshold config");
+                Vec::new()
+            }
+        };
 
         let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
             std::collections::HashMap::new();
@@ -1313,10 +1328,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
         // Distribute new-epoch key packages to existing devices (so they are not bricked).
         if !other_device_ids.is_empty() {
             use base64::Engine;
-            let config_b64 =
-                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config);
-            let pubkey_b64 =
-                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package);
+            let config_b64 = if threshold_config.is_empty() {
+                None
+            } else {
+                Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+                    &threshold_config,
+                ))
+            };
+            let pubkey_b64 = if public_key_package.is_empty() {
+                None
+            } else {
+                Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+                    &public_key_package,
+                ))
+            };
             let context_entropy = {
                 let mut h = aura_core::hash::hasher();
                 h.update(b"DEVICE_ENROLLMENT_CONTEXT");
@@ -1351,8 +1376,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     "aura-destination-device-id".to_string(),
                     device_id.to_string(),
                 );
-                metadata.insert("threshold-config".to_string(), config_b64.clone());
-                metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
+                if let Some(config_b64) = config_b64.as_ref() {
+                    metadata.insert("threshold-config".to_string(), config_b64.clone());
+                }
+                if let Some(pubkey_b64) = pubkey_b64.as_ref() {
+                    metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
+                }
 
                 let envelope = aura_core::effects::TransportEnvelope {
                     destination: authority_id,

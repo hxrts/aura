@@ -19,7 +19,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use aura_effects::UnifiedHandler;
+//! use aura_app::UnifiedHandler;
 //!
 //! // Create with default configuration
 //! let handler = UnifiedHandler::new();
@@ -47,8 +47,8 @@ use aura_core::query::{
     QueryStats,
 };
 
-use crate::query::QueryHandler;
-use crate::reactive::ReactiveHandler;
+use crate::effects::query::{CapabilityPolicy, QueryHandler};
+use crate::effects::reactive::ReactiveHandler;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Unified Handler
@@ -74,7 +74,7 @@ impl UnifiedHandler {
     /// Create a new unified handler with default configuration.
     pub fn new() -> Self {
         let reactive = Arc::new(ReactiveHandler::new());
-        let query = QueryHandler::new(reactive.clone());
+        let query = QueryHandler::new_with_policy(reactive.clone(), CapabilityPolicy::DenyUnlessGranted);
 
         Self {
             query,
@@ -87,7 +87,7 @@ impl UnifiedHandler {
     ///
     /// Allows multiple handlers to share the same signal graph.
     pub fn with_reactive(reactive: Arc<ReactiveHandler>) -> Self {
-        let query = QueryHandler::new(reactive.clone());
+        let query = QueryHandler::new_with_policy(reactive.clone(), CapabilityPolicy::DenyUnlessGranted);
 
         Self {
             query,
@@ -105,7 +105,11 @@ impl UnifiedHandler {
         reactive: Arc<ReactiveHandler>,
         indexed_journal: Arc<dyn IndexedJournalEffects + Send + Sync>,
     ) -> Self {
-        let query = QueryHandler::with_indexed_journal(reactive.clone(), indexed_journal);
+        let query = QueryHandler::with_indexed_journal_with_policy(
+            reactive.clone(),
+            indexed_journal,
+            CapabilityPolicy::DenyUnlessGranted,
+        );
 
         Self {
             query,
@@ -124,6 +128,13 @@ impl UnifiedHandler {
     /// Clear the capability context.
     pub fn clear_capability_context(&mut self) {
         self.capability_context = None;
+    }
+
+    /// Allow all queries regardless of capabilities (testing/offline convenience).
+    pub async fn allow_unrestricted_queries(&self) {
+        self.query
+            .set_capability_policy(CapabilityPolicy::AllowAll)
+            .await;
     }
 
     /// Get a reference to the query handler.
@@ -239,7 +250,15 @@ impl UnifiedHandler {
         signal: &Signal<Q::Result>,
         query: Q,
     ) -> Result<(), ReactiveError> {
-        self.reactive.register_query(signal, query).await
+        let query_clone = query.clone();
+        self.reactive.register_query(signal, query).await?;
+        self.query
+            .register_query_binding(signal, query_clone)
+            .await
+            .map_err(|e| ReactiveError::Internal {
+                reason: e.to_string(),
+            })?;
+        Ok(())
     }
 
     /// Read a signal's current value.
@@ -418,6 +437,54 @@ impl ReactiveEffects for UnifiedHandler {
 mod tests {
     use super::*;
     use aura_core::effects::reactive::Signal;
+    use aura_core::query::{DatalogFact, DatalogProgram, DatalogRule, DatalogValue};
+
+    #[derive(Clone)]
+    struct ContactQuery;
+
+    impl Query for ContactQuery {
+        type Result = Vec<(String, String)>;
+
+        fn to_datalog(&self) -> DatalogProgram {
+            let head = DatalogFact::new(
+                "result",
+                vec![DatalogValue::var("a"), DatalogValue::var("b")],
+            );
+            let body = vec![DatalogFact::new(
+                "contact",
+                vec![DatalogValue::var("a"), DatalogValue::var("b")],
+            )];
+            DatalogProgram {
+                rules: vec![DatalogRule { head, body }],
+            }
+        }
+
+        fn required_capabilities(&self) -> Vec<QueryCapability> {
+            vec![]
+        }
+
+        fn dependencies(&self) -> Vec<FactPredicate> {
+            vec![FactPredicate::new("contact")]
+        }
+
+        fn parse(
+            bindings: DatalogBindings,
+        ) -> Result<Self::Result, aura_core::query::QueryParseError> {
+            let mut out = Vec::new();
+            for row in bindings.rows {
+                let a = row
+                    .get("arg0")
+                    .and_then(|v| v.as_string())
+                    .unwrap_or_default();
+                let b = row
+                    .get("arg1")
+                    .and_then(|v| v.as_string())
+                    .unwrap_or_default();
+                out.push((a, b));
+            }
+            Ok(out)
+        }
+    }
 
     #[tokio::test]
     async fn test_unified_handler_creation() {
@@ -482,6 +549,36 @@ mod tests {
             .await;
 
         // In a full implementation, bound signals would be re-evaluated
+    }
+
+    #[tokio::test]
+    async fn test_query_bound_signal_updates_on_commit() {
+        let handler = UnifiedHandler::new();
+        let signal: Signal<Vec<(String, String)>> = Signal::new("contact_query");
+
+        handler
+            .register_query_signal(&signal, ContactQuery)
+            .await
+            .unwrap();
+
+        let mut stream = handler.subscribe_signal(&signal);
+
+        handler
+            .commit_fact("contact", vec!["alice".to_string(), "bob".to_string()])
+            .await;
+
+        let mut updated = None;
+        for _ in 0..3 {
+            if let Ok(value) = stream.recv().await {
+                if value.len() == 1 {
+                    updated = Some(value);
+                    break;
+                }
+            }
+        }
+
+        let updated = updated.expect("expected query signal update");
+        assert_eq!(updated[0], ("alice".to_string(), "bob".to_string()));
     }
 
     #[tokio::test]

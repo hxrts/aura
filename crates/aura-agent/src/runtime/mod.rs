@@ -54,6 +54,10 @@ pub mod reliability;
 // Choreography integration
 pub mod choreography_adapter;
 
+// Runtime utilities
+pub mod storage_coordinator;
+pub mod time_handler;
+
 // Re-export main types for convenience
 pub use builder::EffectSystemBuilder;
 pub use choreography_adapter::{AuraHandlerAdapter, ChoreographyAdapter};

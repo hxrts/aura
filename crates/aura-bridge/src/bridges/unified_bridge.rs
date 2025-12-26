@@ -23,6 +23,7 @@ use serde::Serialize;
 /// - Runtime reconfiguration of effect implementations
 /// - Type-safe effect dispatch through trait objects
 /// - Middleware composition and decoration
+#[deprecated(note = "Prefer aura-protocol AuraHandler + aura-composition CompositeHandlerAdapter for unified dispatch.")]
 pub struct UnifiedAuraHandlerBridge {
     /// The wrapped effect implementation
     effects: Arc<Mutex<dyn AuraEffects>>,
@@ -723,6 +724,7 @@ impl UnifiedAuraHandlerBridge {
 }
 
 /// Factory for creating unified handler bridges
+#[deprecated(note = "Prefer aura-protocol AuraHandlerFactory for unified dispatch.")]
 pub struct UnifiedHandlerBridgeFactory;
 
 impl UnifiedHandlerBridgeFactory {

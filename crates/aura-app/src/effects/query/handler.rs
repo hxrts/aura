@@ -20,11 +20,49 @@ use aura_core::query::{
     QueryIsolation, QueryStats,
 };
 use aura_core::{Hash32, ResourceScope};
+use aura_core::effects::reactive::SignalId;
 
-use crate::database::query::AuraQuery;
-use crate::reactive::ReactiveHandler;
+use aura_effects::database::query::AuraQuery;
+use crate::effects::reactive::ReactiveHandler;
 
 use super::datalog::{format_rule, parse_fact_to_row};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Query Registration
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[async_trait]
+trait QueryRegistration: Send + Sync {
+    fn signal_id(&self) -> &SignalId;
+    fn dependencies(&self) -> &[FactPredicate];
+    async fn refresh(&self, handler: &QueryHandler) -> Result<(), QueryError>;
+}
+
+struct QueryRegistrationImpl<Q: Query> {
+    signal: Signal<Q::Result>,
+    query: Q,
+    deps: Vec<FactPredicate>,
+}
+
+#[async_trait]
+impl<Q: Query> QueryRegistration for QueryRegistrationImpl<Q> {
+    fn signal_id(&self) -> &SignalId {
+        self.signal.id()
+    }
+
+    fn dependencies(&self) -> &[FactPredicate] {
+        &self.deps
+    }
+
+    async fn refresh(&self, handler: &QueryHandler) -> Result<(), QueryError> {
+        let result = handler.query(&self.query).await?;
+        handler
+            .reactive
+            .emit(&self.signal, result)
+            .await
+            .map_err(|e| QueryError::execution_error(e.to_string()))
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Query Facts Store
@@ -81,34 +119,57 @@ impl QueryFacts {
 // Capability Checker
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Policy for capability enforcement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityPolicy {
+    /// Allow all queries regardless of granted capabilities.
+    AllowAll,
+    /// Deny queries unless capabilities are explicitly granted.
+    DenyUnlessGranted,
+}
+
+impl Default for CapabilityPolicy {
+    fn default() -> Self {
+        CapabilityPolicy::DenyUnlessGranted
+    }
+}
+
 /// Capability checker for query authorization.
 ///
-/// Uses a permissive model: queries pass if no capabilities are explicitly
-/// required OR if all required capabilities are granted. In production,
-/// capabilities are derived from Biscuit tokens via `AuthorizationEffects`.
-#[derive(Debug, Default)]
+/// Uses a strict-by-default model: queries pass only if all required
+/// capabilities are granted (unless policy is AllowAll).
+#[derive(Debug)]
 pub(super) struct CapabilityChecker {
     /// Granted capabilities (derived from Biscuit tokens in production)
     granted: Vec<QueryCapability>,
+    /// Capability enforcement policy
+    policy: CapabilityPolicy,
 }
 
 impl CapabilityChecker {
     /// Check if a capability is granted.
     ///
     /// Returns true if:
-    /// - No capabilities have been granted (permissive default), OR
+    /// - Policy is AllowAll, OR
     /// - The requested capability matches a granted capability
     pub fn check(&self, cap: &QueryCapability) -> bool {
-        self.granted.is_empty()
-            || self
-                .granted
-                .iter()
-                .any(|g| g.resource == cap.resource && g.action == cap.action)
+        if self.policy == CapabilityPolicy::AllowAll {
+            return true;
+        }
+
+        self.granted
+            .iter()
+            .any(|g| g.resource == cap.resource && g.action == cap.action)
     }
 
     /// Grant a capability for subsequent queries.
     pub fn grant(&mut self, cap: QueryCapability) {
         self.granted.push(cap);
+    }
+
+    /// Set capability enforcement policy.
+    pub fn set_policy(&mut self, policy: CapabilityPolicy) {
+        self.policy = policy;
     }
 }
 
@@ -348,6 +409,8 @@ pub struct QueryHandler {
     snapshot_store: Arc<RwLock<SnapshotStore>>,
     /// Pending consensus tracker for ReadLatest isolation
     pending_consensus: Arc<RwLock<PendingConsensusTracker>>,
+    /// Registered query bindings for reactive refresh
+    query_bindings: Arc<RwLock<HashMap<SignalId, Box<dyn QueryRegistration>>>>,
     /// Timeout for waiting on consensus
     consensus_timeout: Duration,
 }
@@ -355,14 +418,23 @@ pub struct QueryHandler {
 impl QueryHandler {
     /// Create a new query handler with a reactive handler for subscriptions.
     pub fn new(reactive: Arc<ReactiveHandler>) -> Self {
+        Self::new_with_policy(reactive, CapabilityPolicy::default())
+    }
+
+    /// Create a new query handler with an explicit capability policy.
+    pub fn new_with_policy(reactive: Arc<ReactiveHandler>, policy: CapabilityPolicy) -> Self {
         Self {
             reactive,
             facts: Arc::new(RwLock::new(QueryFacts::default())),
-            capabilities: Arc::new(RwLock::new(CapabilityChecker::default())),
+            capabilities: Arc::new(RwLock::new(CapabilityChecker {
+                granted: Vec::new(),
+                policy,
+            })),
             indexed_journal: None,
             consensus_tracker: Arc::new(RwLock::new(ConsensusTracker::default())),
             snapshot_store: Arc::new(RwLock::new(SnapshotStore::new(DEFAULT_MAX_SNAPSHOTS))),
             pending_consensus: Arc::new(RwLock::new(PendingConsensusTracker::default())),
+            query_bindings: Arc::new(RwLock::new(HashMap::new())),
             consensus_timeout: DEFAULT_CONSENSUS_TIMEOUT,
         }
     }
@@ -376,14 +448,31 @@ impl QueryHandler {
         reactive: Arc<ReactiveHandler>,
         indexed_journal: Arc<dyn IndexedJournalEffects + Send + Sync>,
     ) -> Self {
+        Self::with_indexed_journal_with_policy(
+            reactive,
+            indexed_journal,
+            CapabilityPolicy::default(),
+        )
+    }
+
+    /// Create a query handler with indexed journal support and explicit policy.
+    pub fn with_indexed_journal_with_policy(
+        reactive: Arc<ReactiveHandler>,
+        indexed_journal: Arc<dyn IndexedJournalEffects + Send + Sync>,
+        policy: CapabilityPolicy,
+    ) -> Self {
         Self {
             reactive,
             facts: Arc::new(RwLock::new(QueryFacts::default())),
-            capabilities: Arc::new(RwLock::new(CapabilityChecker::default())),
+            capabilities: Arc::new(RwLock::new(CapabilityChecker {
+                granted: Vec::new(),
+                policy,
+            })),
             indexed_journal: Some(indexed_journal),
             consensus_tracker: Arc::new(RwLock::new(ConsensusTracker::default())),
             snapshot_store: Arc::new(RwLock::new(SnapshotStore::new(DEFAULT_MAX_SNAPSHOTS))),
             pending_consensus: Arc::new(RwLock::new(PendingConsensusTracker::default())),
+            query_bindings: Arc::new(RwLock::new(HashMap::new())),
             consensus_timeout: DEFAULT_CONSENSUS_TIMEOUT,
         }
     }
@@ -427,6 +516,14 @@ impl QueryHandler {
         checker.grant(cap);
     }
 
+    /// Set capability enforcement policy.
+    ///
+    /// Use AllowAll in tests or offline scenarios that do not enforce Biscuit checks.
+    pub async fn set_capability_policy(&self, policy: CapabilityPolicy) {
+        let mut checker = self.capabilities.write().await;
+        checker.set_policy(policy);
+    }
+
     /// Load facts from the indexed journal for a specific predicate.
     ///
     /// This uses O(log n) B-tree lookup to fetch all facts matching the predicate.
@@ -465,6 +562,54 @@ impl QueryHandler {
         match &self.indexed_journal {
             Some(indexed) => indexed.might_contain(predicate, value),
             None => true, // Without indexed journal, assume facts might exist
+        }
+    }
+
+    /// Register a query binding for reactive refresh.
+    ///
+    /// This stores the query and signal mapping and emits the initial query result.
+    pub async fn register_query_binding<Q: Query>(
+        &self,
+        signal: &Signal<Q::Result>,
+        query: Q,
+    ) -> Result<(), QueryError> {
+        let deps = query.dependencies();
+        let registration = QueryRegistrationImpl {
+            signal: signal.clone(),
+            query: query.clone(),
+            deps,
+        };
+
+        self.query_bindings
+            .write()
+            .await
+            .insert(signal.id().clone(), Box::new(registration));
+
+        let result = self.query(&query).await?;
+        self.reactive
+            .emit(signal, result)
+            .await
+            .map_err(|e| QueryError::execution_error(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn refresh_queries_for_predicate(&self, predicate: &FactPredicate) {
+        let bindings = self.query_bindings.read().await;
+        for registration in bindings.values() {
+            if registration
+                .dependencies()
+                .iter()
+                .any(|dep| dep.matches(predicate))
+            {
+                if let Err(err) = registration.refresh(self).await {
+                    tracing::warn!(
+                        error = %err,
+                        signal_id = %registration.signal_id(),
+                        "Failed to refresh query-bound signal"
+                    );
+                }
+            }
         }
     }
 
@@ -691,6 +836,7 @@ impl Clone for QueryHandler {
             consensus_tracker: self.consensus_tracker.clone(),
             snapshot_store: self.snapshot_store.clone(),
             pending_consensus: self.pending_consensus.clone(),
+            query_bindings: self.query_bindings.clone(),
             consensus_timeout: self.consensus_timeout,
         }
     }
@@ -747,6 +893,7 @@ impl QueryEffects for QueryHandler {
 
     async fn invalidate(&self, predicate: &FactPredicate) {
         self.reactive.invalidate_queries(predicate).await;
+        self.refresh_queries_for_predicate(predicate).await;
     }
 
     async fn query_with_isolation<Q: Query>(
@@ -883,6 +1030,15 @@ mod tests {
         // Empty capabilities should pass (no restrictions)
         let result = handler.check_capabilities(&[]).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_check_capabilities_denied_by_default() {
+        let handler = QueryHandler::default();
+
+        let cap = QueryCapability::read("messages");
+        let result = handler.check_capabilities(&[cap]).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

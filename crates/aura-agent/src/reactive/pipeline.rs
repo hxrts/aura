@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
-use aura_effects::ReactiveHandler;
+use aura_app::ReactiveHandler;
 use aura_journal::fact::Fact;
 use aura_journal::FactRegistry;
 use tokio::sync::{broadcast, mpsc};

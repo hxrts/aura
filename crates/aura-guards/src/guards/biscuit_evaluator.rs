@@ -116,3 +116,14 @@ pub enum GuardError {
     #[error("Flow budget error: {0}")]
     FlowBudget(String),
 }
+
+impl aura_core::ProtocolErrorCode for GuardError {
+    fn code(&self) -> &'static str {
+        match self {
+            GuardError::BudgetExceeded { .. } => "budget_exceeded",
+            GuardError::AuthorizationFailed(_) => "unauthorized",
+            GuardError::Biscuit(_) => "biscuit_error",
+            GuardError::FlowBudget(_) => "flow_budget",
+        }
+    }
+}

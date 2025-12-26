@@ -416,37 +416,41 @@ impl InvitationHandler {
                 format!("{}", enrollment.pending_epoch),
             );
 
-            effects
-                .secure_store(
-                    &config_location,
-                    &enrollment.threshold_config,
-                    &[
-                        SecureStorageCapability::Read,
-                        SecureStorageCapability::Write,
-                    ],
-                )
-                .await
-                .map_err(|e| {
-                    crate::core::AgentError::effects(format!(
-                        "store device enrollment threshold config: {e}"
-                    ))
-                })?;
+            if !enrollment.threshold_config.is_empty() {
+                effects
+                    .secure_store(
+                        &config_location,
+                        &enrollment.threshold_config,
+                        &[
+                            SecureStorageCapability::Read,
+                            SecureStorageCapability::Write,
+                        ],
+                    )
+                    .await
+                    .map_err(|e| {
+                        crate::core::AgentError::effects(format!(
+                            "store device enrollment threshold config: {e}"
+                        ))
+                    })?;
+            }
 
-            effects
-                .secure_store(
-                    &pubkey_location,
-                    &enrollment.public_key_package,
-                    &[
-                        SecureStorageCapability::Read,
-                        SecureStorageCapability::Write,
-                    ],
-                )
-                .await
-                .map_err(|e| {
-                    crate::core::AgentError::effects(format!(
-                        "store device enrollment public key package: {e}"
-                    ))
-                })?;
+            if !enrollment.public_key_package.is_empty() {
+                effects
+                    .secure_store(
+                        &pubkey_location,
+                        &enrollment.public_key_package,
+                        &[
+                            SecureStorageCapability::Read,
+                            SecureStorageCapability::Write,
+                        ],
+                    )
+                    .await
+                    .map_err(|e| {
+                        crate::core::AgentError::effects(format!(
+                            "store device enrollment public key package: {e}"
+                        ))
+                    })?;
+            }
 
             // Send an acceptance envelope to the initiator device.
             let context_entropy = {

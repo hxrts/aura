@@ -3,25 +3,21 @@
 
 //! Persistent sync handler backed by StorageEffects.
 //!
-//! This handler shares the same storage keys as `PersistentTreeHandler`, ensuring
-//! both handlers operate on the same source of truth for tree operations.
+//! This handler shares the same storage keys as `PersistentTreeHandler` via
+//! `aura_journal::commitment_tree::storage`, ensuring both handlers operate on
+//! the same source of truth for tree operations.
 
 use super::effects::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use async_trait::async_trait;
 use aura_core::effects::storage::StorageEffects;
-use aura_core::hash;
 use aura_core::tree::AttestedOp;
 use aura_core::Hash32;
+use aura_journal::commitment_tree::storage as tree_storage;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use async_lock::RwLock;
 use std::sync::Arc;
 use uuid::Uuid;
-
-/// Storage key prefix for tree operations (shared with PersistentTreeHandler)
-pub const TREE_OPS_PREFIX: &str = "tree_ops/";
-/// Storage key for the operation index (shared with PersistentTreeHandler)
-pub const TREE_OPS_INDEX_KEY: &str = "tree_ops_index";
 
 /// Persistent sync handler backed by StorageEffects.
 ///
@@ -89,29 +85,26 @@ impl PersistentSyncHandler {
 
         // Load the index of op hashes
         let index_bytes = storage
-            .retrieve(TREE_OPS_INDEX_KEY)
+            .retrieve(tree_storage::TREE_OPS_INDEX_KEY)
             .await
             .map_err(|e| AuraError::storage(format!("Failed to load tree ops index: {}", e)))?;
 
         let op_hashes: Vec<[u8; 32]> = match index_bytes {
-            Some(bytes) => bincode::deserialize(&bytes).map_err(|e| {
-                AuraError::internal(format!("Failed to deserialize ops index: {}", e))
-            })?,
+            Some(bytes) => tree_storage::deserialize_op_index(&bytes)?,
             None => Vec::new(),
         };
 
         // Load each operation by hash
         let mut ops = Vec::with_capacity(op_hashes.len());
         for op_hash in op_hashes {
-            let key = format!("{}{}", TREE_OPS_PREFIX, hex::encode(op_hash));
+            let key = tree_storage::op_key(op_hash);
             let op_bytes = storage
                 .retrieve(&key)
                 .await
                 .map_err(|e| AuraError::storage(format!("Failed to load tree op {}: {}", key, e)))?
                 .ok_or_else(|| AuraError::storage(format!("Missing tree op: {}", key)))?;
 
-            let op: AttestedOp = bincode::deserialize(&op_bytes)
-                .map_err(|e| AuraError::internal(format!("Failed to deserialize tree op: {}", e)))?;
+            let op: AttestedOp = tree_storage::deserialize_op(&op_bytes)?;
             ops.push(op);
         }
 
@@ -127,11 +120,10 @@ impl PersistentSyncHandler {
         use aura_core::AuraError;
 
         // Serialize the operation
-        let op_bytes = bincode::serialize(op)
-            .map_err(|e| AuraError::internal(format!("Failed to serialize tree op: {}", e)))?;
+        let op_bytes = tree_storage::serialize_op(op)?;
 
         // Store the operation by hash
-        let key = format!("{}{}", TREE_OPS_PREFIX, hex::encode(op_hash));
+        let key = tree_storage::op_key(op_hash);
         self.storage
             .store(&key, op_bytes)
             .await
@@ -142,28 +134,20 @@ impl PersistentSyncHandler {
             let ops = self.ops_cache.read().await;
             let mut hashes = Vec::with_capacity(ops.len());
             for op in ops.iter() {
-                let op_hash = Self::op_hash(op)?;
+                let op_hash = tree_storage::op_hash(op)?;
                 hashes.push(op_hash);
             }
             hashes
         };
 
-        let index_bytes = bincode::serialize(&hashes)
-            .map_err(|e| AuraError::internal(format!("Failed to serialize ops index: {}", e)))?;
+        let index_bytes = tree_storage::serialize_op_index(&hashes)?;
 
         self.storage
-            .store(TREE_OPS_INDEX_KEY, index_bytes)
+            .store(tree_storage::TREE_OPS_INDEX_KEY, index_bytes)
             .await
             .map_err(|e| AuraError::storage(format!("Failed to store ops index: {}", e)))?;
 
         Ok(())
-    }
-
-    /// Compute hash for an operation (for deduplication and CID).
-    fn op_hash(op: &AttestedOp) -> Result<[u8; 32], aura_core::AuraError> {
-        let bytes = bincode::serialize(op)
-            .map_err(|e| aura_core::AuraError::internal(format!("hash serialize: {e}")))?;
-        Ok(hash::hash(&bytes))
     }
 
     /// Invalidate the cache to force reload from storage on next access.
@@ -191,7 +175,7 @@ impl SyncEffects for PersistentSyncHandler {
 
         let mut cids = BTreeSet::new();
         for op in ops.iter() {
-            if let Ok(hash) = Self::op_hash(op) {
+            if let Ok(hash) = tree_storage::op_hash(op) {
                 cids.insert(Hash32(hash));
             }
         }
@@ -227,13 +211,13 @@ impl SyncEffects for PersistentSyncHandler {
 
         for op in ops {
             let op_hash =
-                Self::op_hash(&op).map_err(|e| SyncError::VerificationFailed(e.to_string()))?;
+                tree_storage::op_hash(&op).map_err(|e| SyncError::VerificationFailed(e.to_string()))?;
 
             // Check for duplicate
             let already = {
                 let store = self.ops_cache.read().await;
                 store.iter().any(|existing| {
-                    Self::op_hash(existing)
+                    tree_storage::op_hash(existing)
                         .map(|h| h == op_hash)
                         .unwrap_or(false)
                 })
@@ -267,7 +251,7 @@ impl SyncEffects for PersistentSyncHandler {
         let store = self.ops_cache.read().await;
 
         for op in store.iter() {
-            if let Ok(hash) = Self::op_hash(op) {
+            if let Ok(hash) = tree_storage::op_hash(op) {
                 if Hash32(hash) == cid {
                     return Ok(op.clone());
                 }

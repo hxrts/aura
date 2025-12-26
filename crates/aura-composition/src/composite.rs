@@ -7,16 +7,17 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 
-use crate::registry::{Handler, HandlerContext, HandlerError, RegistrableHandler};
+use crate::registry::{EffectRegistry, Handler, HandlerContext, HandlerError, RegistrableHandler};
+use aura_core::effects::registry as effect_registry;
 use aura_core::{DeviceId, EffectType, ExecutionMode};
 use aura_mpst::LocalSessionType;
 
 /// A composite handler that delegates to specialized handlers based on effect type
 pub struct CompositeHandler {
-    /// Map of effect types to their handlers
-    handlers: HashMap<EffectType, Box<dyn Handler>>,
-    /// Default execution mode
-    execution_mode: ExecutionMode,
+    /// Effect registry for dispatching operations
+    registry: EffectRegistry,
+    /// Optional session handler for choreographic execution
+    session_handler: Option<Box<dyn Handler>>,
     /// Device ID
     device_id: DeviceId,
 }
@@ -26,8 +27,8 @@ impl CompositeHandler {
     /// Create a new composite handler
     pub fn new(device_id: DeviceId, execution_mode: ExecutionMode) -> Self {
         Self {
-            handlers: HashMap::new(),
-            execution_mode,
+            registry: EffectRegistry::new(execution_mode),
+            session_handler: None,
             device_id,
         }
     }
@@ -56,24 +57,51 @@ impl CompositeHandler {
         if !handler.supports_effect(effect_type) {
             return Err(CompositeError::UnsupportedEffect { effect_type });
         }
+        if effect_type == EffectType::Choreographic {
+            self.session_handler = Some(handler);
+            return Ok(());
+        }
 
-        self.handlers.insert(effect_type, handler);
+        let adapter = Box::new(HandlerRegistrableAdapter::new(effect_type, handler));
+        self.registry
+            .register_handler(effect_type, adapter)
+            .map_err(|e| CompositeError::HandlerExecutionFailed {
+                effect_type,
+                source: HandlerError::ExecutionFailed {
+                    source: Box::new(e),
+                },
+            })?;
+
         Ok(())
     }
 
     /// Unregister a handler for a specific effect type
-    pub fn unregister_handler(&mut self, effect_type: EffectType) -> Option<Box<dyn Handler>> {
-        self.handlers.remove(&effect_type)
+    pub fn unregister_handler(
+        &mut self,
+        effect_type: EffectType,
+    ) -> Option<Box<dyn RegistrableHandler>> {
+        if effect_type == EffectType::Choreographic {
+            self.session_handler.take();
+            return None;
+        }
+        self.registry.unregister_handler(effect_type)
     }
 
     /// Check if a handler is registered for an effect type
     pub fn has_handler(&self, effect_type: EffectType) -> bool {
-        self.handlers.contains_key(&effect_type)
+        if effect_type == EffectType::Choreographic {
+            return self.session_handler.is_some();
+        }
+        self.registry.is_registered(effect_type)
     }
 
     /// Get all registered effect types
     pub fn registered_effect_types(&self) -> Vec<EffectType> {
-        self.handlers.keys().copied().collect()
+        let mut effects = self.registry.registered_effect_types();
+        if self.session_handler.is_some() {
+            effects.push(EffectType::Choreographic);
+        }
+        effects
     }
 
     /// Get the device ID
@@ -112,14 +140,9 @@ impl Handler for CompositeHandler {
         parameters: &[u8],
         ctx: &HandlerContext,
     ) -> Result<Vec<u8>, HandlerError> {
-        match self.handlers.get(&effect_type) {
-            Some(handler) => {
-                handler
-                    .execute_effect(effect_type, operation, parameters, ctx)
-                    .await
-            }
-            None => Err(HandlerError::UnsupportedEffect { effect_type }),
-        }
+        self.registry
+            .execute_effect(effect_type, operation, parameters, ctx)
+            .await
     }
 
     async fn execute_session(
@@ -128,7 +151,7 @@ impl Handler for CompositeHandler {
         ctx: &HandlerContext,
     ) -> Result<(), HandlerError> {
         // Sessions are executed exclusively by a registered choreographic handler
-        if let Some(handler) = self.handlers.get(&EffectType::Choreographic) {
+        if let Some(handler) = self.session_handler.as_ref() {
             handler.execute_session(session, ctx).await
         } else {
             // Return a session execution error if no choreographic handler is available
@@ -139,14 +162,14 @@ impl Handler for CompositeHandler {
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
-        self.handlers
-            .get(&effect_type)
-            .map(|h| h.supports_effect(effect_type))
-            .unwrap_or(false)
+        if effect_type == EffectType::Choreographic {
+            return self.session_handler.is_some();
+        }
+        self.registry.supports_effect(effect_type)
     }
 
     fn execution_mode(&self) -> ExecutionMode {
-        self.execution_mode
+        self.registry.execution_mode()
     }
 }
 
@@ -191,7 +214,7 @@ impl CompositeHandlerBuilder {
         let mut composite = CompositeHandler::new(self.device_id, self.execution_mode);
         for (effect_type, handler) in self.handlers {
             // We know the handler supports the effect type from the with_handler check
-            composite.handlers.insert(effect_type, handler);
+            let _ = composite.register_handler(effect_type, handler);
         }
         composite
     }
@@ -293,44 +316,10 @@ impl RegistrableHandler for CompositeHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        // Return the standard operation mapping regardless of whether handlers are registered
-        // This allows for capability discovery even before handlers are initialized
-        match effect_type {
-            EffectType::Console => vec![
-                String::from("log_info"),
-                String::from("log_warn"),
-                String::from("log_error"),
-                String::from("log_debug"),
-            ],
-            EffectType::Random => vec![
-                String::from("random_bytes"),
-                String::from("random_bytes_32"),
-                String::from("random_u64"),
-            ],
-            EffectType::Crypto => vec![
-                String::from("hkdf_derive"),
-                String::from("ed25519_generate_keypair"),
-                String::from("ed25519_sign"),
-                String::from("ed25519_verify"),
-            ],
-            EffectType::Network => vec![
-                String::from("send_to_peer"),
-                String::from("broadcast"),
-                String::from("receive"),
-            ],
-            EffectType::Storage => vec![
-                String::from("store"),
-                String::from("retrieve"),
-                String::from("remove"),
-                String::from("list_keys"),
-            ],
-            EffectType::Time => vec![
-                String::from("current_epoch"),
-                String::from("current_timestamp"),
-                String::from("sleep_ms"),
-            ],
-            _ => Vec::new(),
-        }
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -339,6 +328,51 @@ impl RegistrableHandler for CompositeHandlerAdapter {
 
     fn execution_mode(&self) -> ExecutionMode {
         self.composite.execution_mode()
+    }
+}
+
+/// Adapter to expose a `Handler` as a `RegistrableHandler` for registry dispatch.
+struct HandlerRegistrableAdapter {
+    effect_type: EffectType,
+    handler: Box<dyn Handler>,
+}
+
+impl HandlerRegistrableAdapter {
+    fn new(effect_type: EffectType, handler: Box<dyn Handler>) -> Self {
+        Self {
+            effect_type,
+            handler,
+        }
+    }
+}
+
+#[async_trait]
+impl RegistrableHandler for HandlerRegistrableAdapter {
+    async fn execute_operation_bytes(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+        ctx: &HandlerContext,
+    ) -> Result<Vec<u8>, HandlerError> {
+        self.handler
+            .execute_effect(effect_type, operation, parameters, ctx)
+            .await
+    }
+
+    fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
+    }
+
+    fn supports_effect(&self, effect_type: EffectType) -> bool {
+        self.handler.supports_effect(effect_type)
+    }
+
+    fn execution_mode(&self) -> ExecutionMode {
+        self.handler.execution_mode()
     }
 }
 

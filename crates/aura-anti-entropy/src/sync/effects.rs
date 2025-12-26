@@ -108,6 +108,23 @@ pub enum SyncError {
     GuardChainFailure(String),
 }
 
+impl aura_core::ProtocolErrorCode for SyncError {
+    fn code(&self) -> &'static str {
+        match self {
+            SyncError::PeerUnreachable(_) => "peer_unreachable",
+            SyncError::VerificationFailed(_) => "verification_failed",
+            SyncError::NetworkError(_) => "network",
+            SyncError::RateLimitExceeded(_) => "rate_limit",
+            SyncError::InvalidDigest(_) => "invalid_digest",
+            SyncError::OperationNotFound => "not_found",
+            SyncError::BackPressure => "back_pressure",
+            SyncError::TimeError => "time_error",
+            SyncError::AuthorizationFailed => "unauthorized",
+            SyncError::GuardChainFailure(_) => "guard_chain",
+        }
+    }
+}
+
 // SyncMetrics is re-exported from aura_core::effects::sync above
 
 /// Sync effect traits for anti-entropy and broadcast operations

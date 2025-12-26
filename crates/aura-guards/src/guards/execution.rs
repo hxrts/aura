@@ -246,8 +246,11 @@ where
 
             // Phase 4: Track privacy budget consumption
             let consumed_budget = track_leakage_consumption(
+                guard.context_id,
+                None,
                 &guard.leakage_budget,
                 &guard.operation_id,
+                guard.observable_by.clone(),
                 effect_system,
             )
             .await?;
@@ -292,8 +295,11 @@ where
 
             // Still consume privacy budget even on failure (information leakage occurred)
             let _consumed_budget = track_leakage_consumption(
+                guard.context_id,
+                None,
                 &guard.leakage_budget,
                 &guard.operation_id,
+                guard.observable_by.clone(),
                 effect_system,
             )
             .await
@@ -364,8 +370,11 @@ where
                 all_deltas.extend(guard.delta_facts.clone());
 
                 let consumed_budget = track_leakage_consumption(
+                    guard.context_id,
+                    None,
                     &guard.leakage_budget,
                     &guard.operation_id,
+                    guard.observable_by.clone(),
                     effect_system,
                 )
                 .await?;

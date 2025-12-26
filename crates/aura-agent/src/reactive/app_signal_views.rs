@@ -24,7 +24,7 @@ use aura_app::views::{
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::AuthorityId;
-use aura_effects::ReactiveHandler;
+use aura_app::ReactiveHandler;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use tokio::sync::Mutex;

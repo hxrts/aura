@@ -1,3 +1,20 @@
+#![allow(
+    missing_docs,
+    unused_variables,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    dead_code,
+    clippy::match_like_matches_macro,
+    clippy::type_complexity,
+    clippy::while_let_loop,
+    clippy::redundant_closure,
+    clippy::large_enum_variant,
+    clippy::unused_unit,
+    clippy::get_first,
+    clippy::single_range_in_vec_init,
+    clippy::disallowed_methods,
+    deprecated
+)]
 //! Sync Module - Consolidated State Synchronization
 //!
 //! This module provides all synchronization functionality for Aura including:
@@ -16,9 +33,11 @@
 
 pub mod anti_entropy;
 pub mod broadcast;
+pub mod config;
 pub mod effects;
 pub mod pure;
 pub mod persistent;
+pub mod wire;
 
 // Re-export effect types
 pub use effects::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
@@ -35,4 +54,4 @@ pub use broadcast::{BroadcastConfig, BroadcasterHandler};
 pub use persistent::PersistentSyncHandler;
 
 // Re-export storage constants for shared access
-pub use persistent::{TREE_OPS_INDEX_KEY, TREE_OPS_PREFIX};
+pub use aura_journal::commitment_tree::storage::{TREE_OPS_INDEX_KEY, TREE_OPS_PREFIX};

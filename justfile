@@ -176,6 +176,21 @@ clippy:
 clippy-strict:
     cargo clippy --workspace --all-targets --verbose -- -D warnings -D clippy::disallowed_methods -D clippy::disallowed_types
 
+# Ensure Layer 4 crates do not reintroduce crate-level allow attributes
+check-layer4-lints:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if rg -n "^#!\\[allow" \
+        crates/aura-guards/src/lib.rs \
+        crates/aura-consensus/src/lib.rs \
+        crates/aura-amp/src/lib.rs \
+        crates/aura-anti-entropy/src/lib.rs \
+        crates/aura-bridge/src/lib.rs \
+        crates/aura-protocol/src/lib.rs; then
+        echo "crate-level #![allow] found in Layer 4 lib.rs; move to module scope"
+        exit 1
+    fi
+
 # Test lint enforcement (should fail)
 lint-test:
     cargo check test_lints.rs

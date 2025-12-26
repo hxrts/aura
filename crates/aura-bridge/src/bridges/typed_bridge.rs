@@ -35,6 +35,7 @@ use aura_core::effects::crypto::{FrostKeyGenResult, SigningKeyGenResult};
 use aura_core::effects::CryptoError;
 use aura_core::AuraError;
 use std::sync::Arc;
+use crate::bridges::config::BridgeRuntimeConfig;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Newtype Wrapper to Avoid Orphan Rules
@@ -45,6 +46,7 @@ use std::sync::Arc;
 pub struct TypedHandlerBridge {
     handler: Arc<RwLock<Box<dyn AuraHandler>>>,
     context: Arc<RwLock<AuraContext>>,
+    config: BridgeRuntimeConfig,
 }
 
 impl TypedHandlerBridge {
@@ -53,6 +55,20 @@ impl TypedHandlerBridge {
         Self {
             handler,
             context: Arc::new(RwLock::new(context)),
+            config: BridgeRuntimeConfig::default(),
+        }
+    }
+
+    /// Create a new typed handler bridge with explicit config.
+    pub fn new_with_config(
+        handler: Arc<RwLock<Box<dyn AuraHandler>>>,
+        context: AuraContext,
+        config: BridgeRuntimeConfig,
+    ) -> Self {
+        Self {
+            handler,
+            context: Arc::new(RwLock::new(context)),
+            config,
         }
     }
 
@@ -69,6 +85,13 @@ impl TypedHandlerBridge {
 
     async fn get_context(&self) -> AuraContext {
         self.context.read().await.clone()
+    }
+
+    fn handle_error<T: Default>(&self, err: AuraError) -> T {
+        if self.config.panic_on_error {
+            panic!("TypedHandlerBridge error: {err}");
+        }
+        T::default()
     }
 }
 
@@ -90,9 +113,7 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
             &ctx,
         )
         .await
-        .unwrap_or_else(|err| {
-            panic!("TypedHandlerBridge random_bytes failed: {err}");
-        })
+        .unwrap_or_else(|err| self.handle_error(err))
     }
 
     async fn random_bytes_32(&self) -> [u8; 32] {
@@ -107,9 +128,7 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
             &ctx,
         )
         .await
-        .unwrap_or_else(|err| {
-            panic!("TypedHandlerBridge random_bytes_32 failed: {err}");
-        })
+        .unwrap_or_else(|err| self.handle_error(err))
     }
 
     async fn random_u64(&self) -> u64 {
@@ -124,9 +143,7 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
             &ctx,
         )
         .await
-        .unwrap_or_else(|err| {
-            panic!("TypedHandlerBridge random_u64 failed: {err}");
-        })
+        .unwrap_or_else(|err| self.handle_error(err))
     }
 
     async fn random_range(&self, min: u64, max: u64) -> u64 {
@@ -145,7 +162,10 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
         )
         .await
         .unwrap_or_else(|err| {
-            panic!("TypedHandlerBridge random_range failed: {err}");
+            if self.config.panic_on_error {
+                panic!("TypedHandlerBridge random_range failed: {err}");
+            }
+            min
         })
     }
 

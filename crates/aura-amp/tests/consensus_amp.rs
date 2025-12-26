@@ -5,6 +5,8 @@ use aura_core::frost::Share;
 use aura_core::AuthorityId;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_amp::run_amp_channel_epoch_bump;
+use aura_testkit::stateful_effects::MockRandomHandler;
+use aura_testkit::time::ControllableTimeSource;
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -32,6 +34,9 @@ async fn amp_consensus_smoke() {
         12345, // deterministic seed
     );
 
+    let random = MockRandomHandler::new_with_seed(101);
+    let time = ControllableTimeSource::new(1_700_000_000_100);
+
     // This should currently fail because key_packages are empty; ensures error path is exercised.
     let result = run_amp_channel_epoch_bump(
         &prestate,
@@ -41,6 +46,8 @@ async fn amp_consensus_smoke() {
         key_packages,
         group_public_key.into(),
         Epoch::from(1),
+        &random,
+        &time,
     )
     .await;
 
@@ -79,6 +86,9 @@ async fn amp_consensus_success_path() {
         key_packages.insert(*witness, key_pkg.into());
     }
 
+    let random = MockRandomHandler::new_with_seed(202);
+    let time = ControllableTimeSource::new(1_700_000_000_200);
+
     let result = run_amp_channel_epoch_bump(
         &prestate,
         &proposal,
@@ -87,6 +97,8 @@ async fn amp_consensus_success_path() {
         key_packages,
         gp.into(),
         Epoch::from(1),
+        &random,
+        &time,
     )
     .await;
     assert!(

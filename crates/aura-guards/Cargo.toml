@@ -14,6 +14,7 @@ workspace = true
 aura-core = { path = "../aura-core" }
 aura-authorization = { path = "../aura-authorization" }
 aura-mpst = { path = "../aura-mpst" }
+aura-journal = { path = "../aura-journal" }
 
 # Serialization
 serde = { workspace = true }
@@ -27,6 +28,7 @@ uuid = { workspace = true }
 tracing = { workspace = true }
 base64 = { workspace = true }
 thiserror = { workspace = true }
+hex = { workspace = true }
 
 # Authorization tokens
 biscuit-auth = { workspace = true }

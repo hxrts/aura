@@ -9,6 +9,7 @@ use crate::fact::{
 };
 use aura_core::{
     authority::TreeStateSummary,
+    effects::LeakageBudget,
     epochs::Epoch,
     hash,
     identifiers::{AuthorityId, ChannelId, ContextId},
@@ -244,6 +245,12 @@ fn compute_relational_state_hash(state: &RelationalState) -> Hash32 {
         hasher.update(&amount.to_le_bytes());
     }
 
+    // Hash leakage budgets
+    hasher.update(b"LEAKAGE_BUDGET");
+    hasher.update(&state.leakage_budget.external_consumed.to_le_bytes());
+    hasher.update(&state.leakage_budget.neighbor_consumed.to_le_bytes());
+    hasher.update(&state.leakage_budget.in_group_consumed.to_le_bytes());
+
     hasher.update(b"CHANNEL_EPOCHS");
     for (channel_id, epoch_state) in &state.channel_epochs {
         hasher.update(channel_id.as_bytes());
@@ -391,6 +398,8 @@ pub struct RelationalState {
     pub bindings: Vec<RelationalBinding>,
     /// Flow budget state by context
     pub flow_budgets: BTreeMap<(AuthorityId, AuthorityId, u64), u64>,
+    /// Leakage budget totals for this context
+    pub leakage_budget: LeakageBudget,
     /// AMP channel epoch state keyed by channel id
     pub channel_epochs: BTreeMap<ChannelId, ChannelEpochState>,
 }
@@ -471,6 +480,7 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
         JournalNamespace::Context(context_id) => {
             let mut bindings = Vec::new();
             let flow_budgets = BTreeMap::new();
+            let mut leakage_budget = LeakageBudget::zero();
             let mut channel_checkpoints: BTreeMap<(ChannelId, u64), Vec<ChannelCheckpoint>> =
                 BTreeMap::new();
             let mut proposed_bumps = Vec::new();
@@ -543,6 +553,13 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 .or_insert_with(|| policy.clone());
                             continue;
                         }
+                        RelationalFact::LeakageEvent(event) => {
+                            let observer = aura_core::effects::ObserverClass::from(event.observer);
+                            let current = leakage_budget.for_observer(observer);
+                            let next = current.saturating_add(event.amount);
+                            leakage_budget.set_for_observer(observer, next);
+                            continue;
+                        }
                         // Generic bindings handle all domain-specific facts
                         // (ChatFact, InvitationFact, ContactFact, etc.)
                         // via DomainFact::to_generic()
@@ -605,6 +622,7 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
             Ok(RelationalState {
                 bindings,
                 flow_budgets,
+                leakage_budget,
                 channel_epochs,
             })
         }

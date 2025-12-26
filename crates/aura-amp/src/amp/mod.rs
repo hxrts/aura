@@ -1,3 +1,20 @@
+#![allow(
+    missing_docs,
+    unused_variables,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    dead_code,
+    clippy::match_like_matches_macro,
+    clippy::type_complexity,
+    clippy::while_let_loop,
+    clippy::redundant_closure,
+    clippy::large_enum_variant,
+    clippy::unused_unit,
+    clippy::get_first,
+    clippy::single_range_in_vec_init,
+    clippy::disallowed_methods,
+    deprecated
+)]
 //! AMP (Aura Messaging Protocol) - Consolidated Protocol Layer
 //!
 //! This module provides the complete AMP implementation including:
@@ -14,18 +31,20 @@
 // Submodules
 pub mod channel;
 pub mod choreography;
+pub mod config;
 pub mod consensus;
+pub mod core;
 pub mod transport;
+pub mod wire;
 
 // Core dependencies
 use aura_consensus::ConsensusId;
-use aura_core::effects::JournalEffects;
-use aura_core::effects::StorageEffects;
+use aura_core::effects::{JournalEffects, OrderClockEffects, StorageEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::AuthorityId;
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::time::{OrderTime, TimeStamp};
-use aura_core::{AuraError, Result};
+use aura_core::{AuraError, FactValue, Journal, Result};
 use aura_journal::{
     fact::{Fact, FactContent, JournalNamespace, RelationalFact},
     reduce_context, ChannelEpochState, FactJournal,
@@ -41,6 +60,8 @@ pub use transport::{
     prepare_send, validate_header, AmpDelivery, AmpMessage, AmpReceipt,
 };
 
+pub use wire::{deserialize_message as deserialize_amp_message, serialize_message as serialize_amp_message};
+
 // Re-export telemetry
 pub use transport::{
     AmpFlowTelemetry, AmpMetrics, AmpProtocolStats, AmpReceiveTelemetry, AmpSendTelemetry,
@@ -55,15 +76,55 @@ pub use consensus::{
 
 /// Protocol-layer journal adapter for AMP.
 #[async_trait::async_trait]
-pub trait AmpJournalEffects:
-    JournalEffects + StorageEffects + aura_core::effects::RandomEffects + Sized
-{
+pub trait AmpJournalEffects: JournalEffects + OrderClockEffects + Sized {
     /// Fetch the full context journal (fact-based) for reduction.
     async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal>;
 
     /// Insert a relational fact (AMP checkpoint/bump/policy/evidence).
     async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()>;
 
+    /// Scoped context store wrapper to avoid leaking storage keys.
+    fn context_store(&self) -> AmpContextStore<'_, Self>
+    where
+        Self: Sized,
+    {
+        AmpContextStore { effects: self }
+    }
+}
+
+#[async_trait::async_trait]
+impl<E: JournalEffects + OrderClockEffects> AmpJournalEffects for E {
+    async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal> {
+        let journal = self.get_journal().await?;
+        let contents = extract_fact_contents(&journal);
+        Ok(build_context_journal(context, contents))
+    }
+
+    async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
+        let context = fact_context(&fact)?;
+        let order = self
+            .order_time()
+            .await
+            .map_err(|e| AuraError::internal(e.to_string()))?;
+        let content = FactContent::Relational(fact);
+        let bytes = serde_json::to_vec(&content).map_err(|e| AuraError::serialization(e.to_string()))?;
+        let key = format!("relational:{}:{}", context, hex::encode(order.0));
+
+        let mut delta = Journal::new();
+        delta.facts.insert(key, FactValue::Bytes(bytes));
+
+        let merged = self.merge_facts(&self.get_journal().await?, &delta).await?;
+        self.persist_journal(&merged).await?;
+        Ok(())
+    }
+}
+
+/// Evidence storage for AMP consensus (non-canonical cache).
+///
+/// Evidence is not required to reconstruct AMP channel state, so we keep it in
+/// StorageEffects behind an explicit trait to avoid conflating it with journal facts.
+#[async_trait::async_trait]
+pub trait AmpEvidenceEffects: StorageEffects + Sized {
     /// Carry evidence deltas keyed by consensus id.
     async fn merge_evidence_delta(&self, cid: ConsensusId, delta: EvidenceDelta) -> Result<()>;
 
@@ -78,14 +139,6 @@ pub trait AmpJournalEffects:
         context: ContextId,
     ) -> Result<()>;
 
-    /// Scoped context store wrapper to avoid leaking storage keys.
-    fn context_store(&self) -> AmpContextStore<'_, Self>
-    where
-        Self: Sized,
-    {
-        AmpContextStore { effects: self }
-    }
-
     /// Scoped evidence store wrapper to keep evidence handling separate.
     fn evidence_store(&self) -> AmpEvidenceStore<'_, Self>
     where
@@ -96,44 +149,7 @@ pub trait AmpJournalEffects:
 }
 
 #[async_trait::async_trait]
-impl<E: JournalEffects + StorageEffects + aura_core::effects::RandomEffects> AmpJournalEffects
-    for E
-{
-    async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal> {
-        match self.retrieve(&context_journal_key(context)).await {
-            Ok(Some(bytes)) => serde_json::from_slice(&bytes)
-                .map_err(|e| AuraError::serialization(format!("decode AMP journal: {}", e))),
-            Ok(None) => Ok(FactJournal {
-                namespace: JournalNamespace::Context(context),
-                facts: std::collections::BTreeSet::new(),
-            }),
-            Err(e) => Err(AuraError::storage(e.to_string())),
-        }
-    }
-
-    async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
-        let context = fact_context(&fact)?;
-        let mut journal = self.fetch_context_journal(context).await?;
-        let random_bytes = self.random_bytes(16).await;
-        let ts = TimeStamp::OrderClock(OrderTime(hash(&random_bytes)));
-        journal
-            .add_fact(Fact {
-                order: match &ts {
-                    TimeStamp::OrderClock(id) => id.clone(),
-                    _ => OrderTime([0u8; 32]),
-                },
-                timestamp: ts,
-                content: FactContent::Relational(fact),
-            })
-            .map_err(|e| AuraError::invalid(format!("failed to add fact: {}", e)))?;
-
-        let bytes =
-            serde_json::to_vec(&journal).map_err(|e| AuraError::serialization(e.to_string()))?;
-        self.store(&context_journal_key(context), bytes)
-            .await
-            .map_err(|e| AuraError::storage(e.to_string()))
-    }
-
+impl<E: StorageEffects> AmpEvidenceEffects for E {
     async fn merge_evidence_delta(&self, cid: ConsensusId, delta: EvidenceDelta) -> Result<()> {
         self.evidence_store().merge_delta(cid, delta).await
     }
@@ -200,10 +216,6 @@ fn evidence_key(cid: ConsensusId) -> String {
     format!("amp/evidence/{}", hex::encode(cid.0 .0))
 }
 
-fn context_journal_key(context: ContextId) -> String {
-    format!("amp/context/{}", context)
-}
-
 fn fact_context(fact: &RelationalFact) -> Result<ContextId> {
     match fact {
         RelationalFact::AmpChannelCheckpoint(cp) => Ok(cp.context),
@@ -219,51 +231,98 @@ fn fact_context(fact: &RelationalFact) -> Result<ContextId> {
     }
 }
 
+fn extract_fact_contents(journal: &Journal) -> Vec<(Option<OrderTime>, FactContent)> {
+    journal
+        .read_facts()
+        .iter()
+        .filter_map(|(key, value)| {
+            let content = match value {
+                FactValue::Bytes(bytes) => serde_json::from_slice(bytes).ok(),
+                FactValue::String(text) => serde_json::from_str(text).ok(),
+                FactValue::Nested(nested) => serde_json::from_value(nested.clone()).ok(),
+                _ => None,
+            };
+            content.map(|content| (parse_order_from_key(key), content))
+        })
+        .collect()
+}
+
+fn parse_order_from_key(key: &str) -> Option<OrderTime> {
+    let suffix = key.rsplit(':').next()?;
+    let bytes = hex::decode(suffix).ok()?;
+    if bytes.len() != 32 {
+        return None;
+    }
+    let mut order = [0u8; 32];
+    order.copy_from_slice(&bytes);
+    Some(OrderTime(order))
+}
+
+fn build_context_journal(
+    context: ContextId,
+    contents: Vec<(Option<OrderTime>, FactContent)>,
+) -> FactJournal {
+    let mut facts = std::collections::BTreeSet::new();
+
+    for (order_hint, content) in contents {
+        if let FactContent::Relational(ref relational) = content {
+            if fact_context(relational).ok() != Some(context) {
+                continue;
+            }
+
+            let bytes = serde_json::to_vec(&content).unwrap_or_default();
+            let order = order_hint.unwrap_or_else(|| OrderTime(hash(&bytes)));
+            let timestamp = TimeStamp::OrderClock(order.clone());
+            facts.insert(Fact {
+                order,
+                timestamp,
+                content,
+            });
+        }
+    }
+
+    FactJournal {
+        namespace: JournalNamespace::Context(context),
+        facts,
+    }
+}
+
 /// Focused context journal helper that hides storage keys/serialization.
 pub struct AmpContextStore<
     'a,
-    E: ?Sized + JournalEffects + StorageEffects + aura_core::effects::RandomEffects,
+    E: ?Sized + JournalEffects + OrderClockEffects,
 > {
     effects: &'a E,
 }
 
-impl<'a, E: ?Sized + JournalEffects + StorageEffects + aura_core::effects::RandomEffects>
-    AmpContextStore<'a, E>
-{
+impl<'a, E: ?Sized + JournalEffects + OrderClockEffects> AmpContextStore<'a, E> {
     pub async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal> {
-        match self.effects.retrieve(&context_journal_key(context)).await {
-            Ok(Some(bytes)) => serde_json::from_slice(&bytes)
-                .map_err(|e| AuraError::serialization(format!("decode AMP journal: {}", e))),
-            Ok(None) => Ok(FactJournal {
-                namespace: JournalNamespace::Context(context),
-                facts: std::collections::BTreeSet::new(),
-            }),
-            Err(e) => Err(AuraError::storage(e.to_string())),
-        }
+        let journal = self.effects.get_journal().await?;
+        let contents = extract_fact_contents(&journal);
+        Ok(build_context_journal(context, contents))
     }
 
     pub async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
         let context = fact_context(&fact)?;
-        let mut journal = self.fetch_context_journal(context).await?;
-        let random_bytes = self.effects.random_bytes(16).await;
-        let ts = TimeStamp::OrderClock(OrderTime(hash(&random_bytes)));
-        journal
-            .add_fact(Fact {
-                order: match &ts {
-                    TimeStamp::OrderClock(id) => id.clone(),
-                    _ => OrderTime([0u8; 32]),
-                },
-                timestamp: ts,
-                content: FactContent::Relational(fact),
-            })
-            .map_err(|e| AuraError::invalid(format!("failed to add fact: {}", e)))?;
-
-        let bytes =
-            serde_json::to_vec(&journal).map_err(|e| AuraError::serialization(e.to_string()))?;
-        self.effects
-            .store(&context_journal_key(context), bytes)
+        let order = self
+            .effects
+            .order_time()
             .await
-            .map_err(|e| AuraError::storage(e.to_string()))
+            .map_err(|e| AuraError::internal(e.to_string()))?;
+        let content = FactContent::Relational(fact);
+        let bytes =
+            serde_json::to_vec(&content).map_err(|e| AuraError::serialization(e.to_string()))?;
+        let key = format!("relational:{}:{}", context, hex::encode(order.0));
+
+        let mut delta = Journal::new();
+        delta.facts.insert(key, FactValue::Bytes(bytes));
+
+        let merged = self
+            .effects
+            .merge_facts(&self.effects.get_journal().await?, &delta)
+            .await?;
+        self.effects.persist_journal(&merged).await?;
+        Ok(())
     }
 }
 

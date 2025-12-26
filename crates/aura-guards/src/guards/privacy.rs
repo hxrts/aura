@@ -5,7 +5,12 @@
 //! neighbor, and in-group adversaries with appropriate privacy guarantees.
 
 use super::{traits::GuardContextProvider, GuardEffects, LeakageBudget};
-use aura_core::{effects::PhysicalTimeEffects, identifiers::AuthorityId, AuraError, AuraResult};
+use aura_core::{
+    effects::PhysicalTimeEffects,
+    identifiers::{AuthorityId, ContextId},
+    AuraError, AuraResult, FactValue, Journal,
+};
+use aura_journal::fact::{FactContent, LeakageFact, LeakageObserverClass, RelationalFact};
 // TimeEffects removed - using PhysicalTimeEffects directly
 use tracing::{debug, info, warn};
 
@@ -207,20 +212,16 @@ impl PrivacyBudgetTracker {
 pub async fn track_leakage_consumption<
     E: GuardEffects + PhysicalTimeEffects + GuardContextProvider,
 >(
+    context_id: ContextId,
+    peer: Option<AuthorityId>,
     leakage_budget: &LeakageBudget,
     operation_id: &str,
+    observable_by: Vec<AdversaryClass>,
     effect_system: &E,
 ) -> AuraResult<LeakageBudget> {
-    // Get current authority ID from effect system
     let authority_id = effect_system.authority_id();
 
-    // Load current privacy budget state from storage
-    let mut tracker = load_privacy_tracker(authority_id, effect_system).await?;
-
-    // Classify which adversary classes can observe this operation
-    let observable_by = classify_operation_observability(operation_id, effect_system).await;
-
-    // Check if we can afford this operation
+    let tracker = load_privacy_tracker(context_id, authority_id, effect_system).await?;
     if !tracker.can_afford_operation(leakage_budget) {
         return Err(AuraError::permission_denied(format!(
             "Operation '{}' would exceed privacy budget limits",
@@ -228,187 +229,188 @@ pub async fn track_leakage_consumption<
         )));
     }
 
-    // Consume the budget and record the operation
-    tracker
-        .consume_budget(
-            operation_id.to_string(),
-            leakage_budget.clone(),
-            observable_by,
-            effect_system,
-        )
-        .await?;
+    append_leakage_facts(
+        context_id,
+        authority_id,
+        peer.unwrap_or(authority_id),
+        leakage_budget,
+        operation_id,
+        effect_system,
+        observable_by,
+    )
+    .await?;
 
-    // Clean up old records outside the tracking window
-    tracker.cleanup_old_records(effect_system).await?;
-
-    // Save updated state back to storage
-    save_privacy_tracker(&tracker, effect_system).await?;
+    let updated = load_privacy_tracker(context_id, authority_id, effect_system).await?;
 
     debug!(
         operation_id = %operation_id,
         external = leakage_budget.external,
         neighbor = leakage_budget.neighbor,
         in_group = leakage_budget.in_group,
-        remaining_external = tracker.get_available_budget().external,
-        remaining_neighbor = tracker.get_available_budget().neighbor,
-        remaining_in_group = tracker.get_available_budget().in_group,
-        "Privacy budget consumption tracked and persisted"
+        remaining_external = updated.get_available_budget().external,
+        remaining_neighbor = updated.get_available_budget().neighbor,
+        remaining_in_group = updated.get_available_budget().in_group,
+        "Privacy budget consumption tracked and persisted via journal facts"
     );
 
-    Ok(leakage_budget.clone())
+    Ok(updated.state.consumed_budget)
 }
 
-/// Classify which adversary classes can observe an operation
-async fn classify_operation_observability<E: GuardEffects>(
-    operation_id: &str,
-    effect_system: &E,
-) -> Vec<AdversaryClass> {
-    // Simplified classification; in practice this should analyze operation type, network patterns, and protocol specifics
 
-    let mut observable_by = Vec::new();
+const RESET_OPERATION: &str = "privacy:reset";
 
-    // Network operations are observable by external and neighbor adversaries
-    if operation_id.contains("send") || operation_id.contains("receive") {
-        observable_by.push(AdversaryClass::External);
-        observable_by.push(AdversaryClass::Neighbor);
+fn default_limits() -> LeakageBudget {
+    LeakageBudget {
+        external: 1000,
+        neighbor: 500,
+        in_group: 100,
     }
-
-    // Peer-to-peer operations are observable by in-group adversaries
-    if operation_id.contains("p2p") || operation_id.contains("peer") {
-        observable_by.push(AdversaryClass::InGroup);
-    }
-
-    // Broadcast operations are observable by all adversary classes
-    if operation_id.contains("broadcast") || operation_id.contains("gossip") {
-        observable_by.push(AdversaryClass::External);
-        observable_by.push(AdversaryClass::Neighbor);
-        observable_by.push(AdversaryClass::InGroup);
-    }
-
-    debug!(
-        operation_id = %operation_id,
-        observable_by = ?observable_by,
-        "Classified operation observability"
-    );
-
-    observable_by
 }
 
-/// Load privacy tracker state from persistent storage
-async fn load_privacy_tracker<E: GuardEffects>(
+/// Load privacy tracker state from journal facts
+async fn load_privacy_tracker<E: GuardEffects + PhysicalTimeEffects>(
+    context_id: ContextId,
     authority_id: AuthorityId,
     effect_system: &E,
 ) -> AuraResult<PrivacyBudgetTracker> {
-    let storage_key = format!("privacy_budget_{}", authority_id);
+    let journal = effect_system.get_journal().await?;
+    let events = extract_leakage_facts(&journal, context_id);
+    let limits = extract_limits(&journal, context_id).unwrap_or_else(default_limits);
 
-    let storage_result = effect_system.retrieve(&storage_key).await;
+    let mut tracker = PrivacyBudgetTracker::new(authority_id, limits);
 
-    match storage_result {
-        Ok(Some(data)) => {
-            // Deserialize existing tracker state
-            let state: PrivacyBudgetState = serde_json::from_slice(&data).map_err(|e| {
-                AuraError::invalid(format!("Failed to deserialize privacy state: {}", e))
-            })?;
+    let now_ms = effect_system.physical_time().await?.ts_ms;
+    let window_start =
+        now_ms.saturating_sub(tracker.state.tracking_window_hours.saturating_mul(3600_000));
 
-            Ok(PrivacyBudgetTracker {
-                authority_id,
-                state,
-            })
+    let reset_ts = events
+        .iter()
+        .filter(|event| event.operation == RESET_OPERATION)
+        .map(|event| event.timestamp.ts_ms)
+        .max()
+        .unwrap_or(0);
+
+    for event in events {
+        if event.timestamp.ts_ms < window_start || event.timestamp.ts_ms < reset_ts {
+            continue;
         }
-        Ok(None) => {
-            // Create new tracker with default limits
-            let default_limits = LeakageBudget {
-                external: 1000, // Conservative daily limits
-                neighbor: 500,
-                in_group: 100,
-            };
-            Ok(PrivacyBudgetTracker::new(authority_id, default_limits))
-        }
-        Err(e) => {
-            warn!("Failed to load privacy budget state: {}", e);
-            // Fallback to conservative default
-            let default_limits = LeakageBudget {
-                external: 100, // Very conservative fallback
-                neighbor: 50,
-                in_group: 10,
-            };
-            Ok(PrivacyBudgetTracker::new(authority_id, default_limits))
-        }
+
+        let consumed = leakage_budget_from_event(&event);
+        tracker.state.consumed_budget = tracker.state.consumed_budget.add(&consumed);
+        tracker.state.operation_history.push(BudgetConsumption {
+            operation_id: event.operation.clone(),
+            consumed,
+            timestamp: event.timestamp.ts_ms,
+            observable_by: vec![adversary_from_observer(event.observer)],
+        });
     }
+
+    Ok(tracker)
 }
 
-/// Save privacy tracker state to persistent storage
-async fn save_privacy_tracker<E: GuardEffects>(
-    tracker: &PrivacyBudgetTracker,
+async fn append_leakage_facts<
+    E: GuardEffects + PhysicalTimeEffects + GuardContextProvider,
+>(
+    context_id: ContextId,
+    source: AuthorityId,
+    destination: AuthorityId,
+    leakage_budget: &LeakageBudget,
+    operation_id: &str,
     effect_system: &E,
+    observable_by: Vec<AdversaryClass>,
 ) -> AuraResult<()> {
-    let storage_key = format!("privacy_budget_{}", tracker.authority_id);
+    let timestamp = effect_system.physical_time().await?;
+    let mut delta = Journal::new();
 
-    let serialized = serde_json::to_vec(&tracker.state)
-        .map_err(|e| AuraError::invalid(format!("Failed to serialize privacy state: {}", e)))?;
+    for (observer, amount) in leakage_budget_entries(leakage_budget, &observable_by) {
+        if amount == 0 {
+            continue;
+        }
 
-    // Uses StorageEffects via GuardEffects
-    effect_system
-        .store(&storage_key, serialized)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to store privacy state: {}", e)))?;
+        let leakage_fact = LeakageFact {
+            context_id,
+            source,
+            destination,
+            observer,
+            amount: amount as u64,
+            operation: operation_id.to_string(),
+            timestamp: timestamp.clone(),
+        };
+
+        let fact_content = FactContent::Relational(RelationalFact::LeakageEvent(leakage_fact));
+        let bytes = serde_json::to_vec(&fact_content)
+            .map_err(|e| AuraError::serialization(e.to_string()))?;
+        let nonce = effect_system.random_bytes(8).await;
+        let key = leakage_fact_key(context_id, observer, timestamp.ts_ms, &nonce);
+
+        delta.facts.insert(key, FactValue::Bytes(bytes));
+    }
+
+    if delta.facts.is_empty() {
+        return Ok(());
+    }
+
+    let merged = effect_system.merge_facts(&effect_system.get_journal().await?, &delta).await?;
+    effect_system.persist_journal(&merged).await?;
 
     Ok(())
 }
 
 /// Check if an authority can afford a specific operation using persistent state
-pub async fn can_afford_operation<E: GuardEffects>(
+pub async fn can_afford_operation<E: GuardEffects + PhysicalTimeEffects>(
+    context_id: ContextId,
     authority_id: AuthorityId,
     requested_budget: &LeakageBudget,
     effect_system: &E,
 ) -> AuraResult<bool> {
-    // Load current tracker state
-    let tracker = load_privacy_tracker(authority_id, effect_system).await?;
-
-    // Check affordability
+    let tracker = load_privacy_tracker(context_id, authority_id, effect_system).await?;
     Ok(tracker.can_afford_operation(requested_budget))
 }
 
 /// Get privacy budget status for an authority using persistent storage
-pub async fn get_privacy_budget_status<E: GuardEffects>(
+pub async fn get_privacy_budget_status<E: GuardEffects + PhysicalTimeEffects>(
+    context_id: ContextId,
     authority_id: AuthorityId,
     effect_system: &E,
 ) -> AuraResult<Option<PrivacyBudgetState>> {
-    match load_privacy_tracker(authority_id, effect_system).await {
-        Ok(tracker) => {
-            let mut state = tracker.state.clone();
-            // Clean up old records before returning status
-            let current_time = effect_system
-                .physical_time()
-                .await
-                .map_err(|e| AuraError::internal(format!("time provider unavailable: {}", e)))?
-                .ts_ms;
-            let window_start = current_time.saturating_sub(state.tracking_window_hours * 3600);
-
-            state
-                .operation_history
-                .retain(|record| record.timestamp >= window_start);
-
-            Ok(Some(state))
-        }
-        Err(_) => {
-            // Return None if no state exists or cannot be loaded
-            Ok(None)
-        }
+    match load_privacy_tracker(context_id, authority_id, effect_system).await {
+        Ok(tracker) => Ok(Some(tracker.state.clone())),
+        Err(_) => Ok(None),
     }
 }
 
 /// Reset privacy budget for an authority with new limits
-pub async fn reset_privacy_budget<E: GuardEffects>(
+pub async fn reset_privacy_budget<E: GuardEffects + PhysicalTimeEffects + GuardContextProvider>(
+    context_id: ContextId,
     authority_id: AuthorityId,
     new_limits: LeakageBudget,
     effect_system: &E,
 ) -> AuraResult<()> {
-    // Create fresh tracker with new limits
-    let tracker = PrivacyBudgetTracker::new(authority_id, new_limits.clone());
+    let mut delta = Journal::new();
+    let limits_key = privacy_limits_key(context_id);
+    let limits_bytes =
+        serde_json::to_vec(&new_limits).map_err(|e| AuraError::serialization(e.to_string()))?;
+    delta
+        .facts
+        .insert(limits_key, FactValue::Bytes(limits_bytes));
 
-    // Save to persistent storage
-    save_privacy_tracker(&tracker, effect_system).await?;
+    let reset_event = LeakageFact {
+        context_id,
+        source: authority_id,
+        destination: authority_id,
+        observer: LeakageObserverClass::External,
+        amount: 0,
+        operation: RESET_OPERATION.to_string(),
+        timestamp: effect_system.physical_time().await?,
+    };
+    let reset_content = FactContent::Relational(RelationalFact::LeakageEvent(reset_event));
+    let reset_bytes = serde_json::to_vec(&reset_content)
+        .map_err(|e| AuraError::serialization(e.to_string()))?;
+    let reset_key = leakage_fact_key(context_id, LeakageObserverClass::External, 0, b"reset");
+    delta.facts.insert(reset_key, FactValue::Bytes(reset_bytes));
+
+    let merged = effect_system.merge_facts(&effect_system.get_journal().await?, &delta).await?;
+    effect_system.persist_journal(&merged).await?;
 
     info!(
         authority_id = ?authority_id,
@@ -419,4 +421,97 @@ pub async fn reset_privacy_budget<E: GuardEffects>(
     );
 
     Ok(())
+}
+
+fn privacy_limits_key(context_id: ContextId) -> String {
+    format!("privacy_limits:{}", context_id)
+}
+
+fn leakage_fact_key(
+    context_id: ContextId,
+    observer: LeakageObserverClass,
+    timestamp_ms: u64,
+    nonce: &[u8],
+) -> String {
+    let observer_tag = match observer {
+        LeakageObserverClass::External => "external",
+        LeakageObserverClass::Neighbor => "neighbor",
+        LeakageObserverClass::InGroup => "in_group",
+    };
+    format!(
+        "leakage:{}:{}:{}:{}",
+        context_id,
+        observer_tag,
+        timestamp_ms,
+        hex::encode(nonce)
+    )
+}
+
+fn extract_limits(journal: &Journal, context_id: ContextId) -> Option<LeakageBudget> {
+    let key = privacy_limits_key(context_id);
+    journal.read_facts().get(&key).and_then(|value| match value {
+        FactValue::Bytes(bytes) => serde_json::from_slice(bytes).ok(),
+        FactValue::String(text) => serde_json::from_str(text).ok(),
+        FactValue::Nested(nested) => serde_json::from_value(nested.clone()).ok(),
+        _ => None,
+    })
+}
+
+fn extract_leakage_facts(journal: &Journal, context_id: ContextId) -> Vec<LeakageFact> {
+    journal
+        .read_facts()
+        .iter()
+        .filter_map(|(_key, value)| decode_fact_content(value))
+        .filter_map(|content| match content {
+            FactContent::Relational(RelationalFact::LeakageEvent(event))
+                if event.context_id == context_id =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn decode_fact_content(value: &FactValue) -> Option<FactContent> {
+    match value {
+        FactValue::Bytes(bytes) => serde_json::from_slice(bytes).ok(),
+        FactValue::String(text) => serde_json::from_str(text).ok(),
+        FactValue::Nested(nested) => serde_json::from_value(nested.clone()).ok(),
+        _ => None,
+    }
+}
+
+fn leakage_budget_entries(
+    budget: &LeakageBudget,
+    observable_by: &[AdversaryClass],
+) -> Vec<(LeakageObserverClass, u32)> {
+    let mut entries = Vec::new();
+    for observer in observable_by {
+        match observer {
+            AdversaryClass::External => entries.push((LeakageObserverClass::External, budget.external)),
+            AdversaryClass::Neighbor => entries.push((LeakageObserverClass::Neighbor, budget.neighbor)),
+            AdversaryClass::InGroup => entries.push((LeakageObserverClass::InGroup, budget.in_group)),
+        }
+    }
+    entries
+}
+
+fn leakage_budget_from_event(event: &LeakageFact) -> LeakageBudget {
+    let mut budget = LeakageBudget::zero();
+    let amount = u64::min(event.amount, u64::from(u32::MAX)) as u32;
+    match event.observer {
+        LeakageObserverClass::External => budget.external = amount,
+        LeakageObserverClass::Neighbor => budget.neighbor = amount,
+        LeakageObserverClass::InGroup => budget.in_group = amount,
+    }
+    budget
+}
+
+fn adversary_from_observer(observer: LeakageObserverClass) -> AdversaryClass {
+    match observer {
+        LeakageObserverClass::External => AdversaryClass::External,
+        LeakageObserverClass::Neighbor => AdversaryClass::Neighbor,
+        LeakageObserverClass::InGroup => AdversaryClass::InGroup,
+    }
 }

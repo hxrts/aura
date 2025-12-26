@@ -27,7 +27,7 @@ use aura_core::query::{FactPredicate, Query};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::FrostThreshold;
 use aura_core::AccountId;
-use aura_effects::ReactiveHandler;
+use aura_app::ReactiveHandler;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

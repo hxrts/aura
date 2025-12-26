@@ -188,11 +188,12 @@ impl ConsensusConfig {
             ));
         }
 
+        let runtime = crate::consensus::config::ConsensusRuntimeConfig::default();
         Ok(Self {
             threshold,
             witness_set,
-            timeout_ms: 30000, // 30 seconds default
-            enable_pipelining: true,
+            timeout_ms: runtime.default_timeout_ms,
+            enable_pipelining: runtime.enable_pipelining,
             epoch,
         })
     }

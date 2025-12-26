@@ -11,7 +11,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use aura_effects::reactive::ReactiveHandler;
+//! use aura_app::reactive::ReactiveHandler;
 //! use aura_core::effects::reactive::{ReactiveEffects, Signal};
 //!
 //! let handler = ReactiveHandler::new();
@@ -39,7 +39,7 @@
 //!
 //! ```ignore
 //! use std::sync::Arc;
-//! use aura_effects::reactive::{ReactiveHandler, SignalGraph};
+//! use aura_app::reactive::{ReactiveHandler, SignalGraph};
 //!
 //! let graph = Arc::new(SignalGraph::new());
 //! let handler1 = ReactiveHandler::with_graph(graph.clone());

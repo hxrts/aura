@@ -1,12 +1,13 @@
-use super::effects::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError, SyncMetrics};
+use super::config::AntiEntropyRuntimeConfig;
+use super::effects::{AntiEntropyConfig, BloomDigest, SyncError};
 use super::pure;
 use aura_guards::chain::create_send_guard_op;
 use aura_guards::traits::GuardContextProvider;
 use aura_guards::GuardEffects;
-use aura_guards::GuardOperation;
+use aura_guards::{GuardOperation, GuardOperationId};
 use async_lock::RwLock;
-use async_trait::async_trait;
 use aura_core::effects::time::PhysicalTimeEffects;
+use aura_core::effects::TransportEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::BTreeSet;
@@ -18,6 +19,11 @@ pub trait GuardChainEffects: GuardEffects + GuardContextProvider + PhysicalTimeE
 
 // Blanket impl for any type implementing all required traits
 impl<T> GuardChainEffects for T where T: GuardEffects + GuardContextProvider + PhysicalTimeEffects {}
+
+/// Composite trait bound for anti-entropy protocol operations.
+pub trait AntiEntropyProtocolEffects: GuardChainEffects + TransportEffects {}
+
+impl<T> AntiEntropyProtocolEffects for T where T: GuardChainEffects + TransportEffects {}
 
 /// Handler implementing anti-entropy synchronization protocol
 ///
@@ -34,6 +40,8 @@ pub struct AntiEntropyHandler {
     peers: Arc<RwLock<BTreeSet<Uuid>>>,
     /// Context ID for guard chain operations
     context_id: ContextId,
+    /// Runtime cost configuration
+    runtime: AntiEntropyRuntimeConfig,
 }
 
 impl AntiEntropyHandler {
@@ -43,6 +51,7 @@ impl AntiEntropyHandler {
             oplog: Arc::new(RwLock::new(Vec::new())),
             peers: Arc::new(RwLock::new(BTreeSet::new())),
             context_id,
+            runtime: AntiEntropyRuntimeConfig::default(),
         }
     }
 
@@ -55,21 +64,22 @@ impl AntiEntropyHandler {
     ///
     /// This method enforces the guard chain predicate:
     /// need("sync:request_digest") ≤ Auth(ctx) ∧ headroom(ctx, 10)
-    async fn request_digest_from_peer_guarded<E: GuardChainEffects>(
+    async fn request_digest_from_peer_guarded<E: AntiEntropyProtocolEffects>(
         &self,
         peer_id: Uuid,
         effect_system: &E,
     ) -> Result<BloomDigest, SyncError> {
         let peer_authority = AuthorityId::from(peer_id);
+        let cost = self.runtime.digest_cost;
 
         // Create and evaluate guard chain for digest request
         let guard_chain = create_send_guard_op(
             GuardOperation::SyncRequestDigest,
             self.context_id,
             peer_authority,
-            10, // low cost for digest request
+            cost,
         )
-        .with_operation_id(format!("digest_request_{}", peer_id));
+        .with_operation_id(GuardOperationId::SyncRequestDigest { peer: peer_id });
 
         // Evaluate guard chain - this enforces authorization and flow budget
         let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
@@ -151,23 +161,9 @@ impl AntiEntropyHandler {
     }
 }
 
-#[async_trait]
-impl SyncEffects for AntiEntropyHandler {
-    /// Sync with peer requires guard chain - returns error from trait impl.
-    ///
-    /// Use `sync_with_peer_guarded()` with an effect system for production sync.
-    async fn sync_with_peer(&self, peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
-        tracing::warn!(
-            peer = ?peer_id,
-            "sync_with_peer called without effect system - use sync_with_peer_guarded() instead"
-        );
-        Err(SyncError::GuardChainFailure(
-            "sync_with_peer requires guard chain - use sync_with_peer_guarded() with effect system"
-                .to_string(),
-        ))
-    }
-
-    async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
+impl AntiEntropyHandler {
+    /// Get digest of local OpLog.
+    pub async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
         let oplog = self.oplog.read().await;
         let cids: BTreeSet<Hash32> = oplog
             .iter()
@@ -177,7 +173,8 @@ impl SyncEffects for AntiEntropyHandler {
         Ok(BloomDigest { cids })
     }
 
-    async fn get_missing_ops(
+    /// Get operations that are missing between local and remote digests.
+    pub async fn get_missing_ops(
         &self,
         remote_digest: &BloomDigest,
     ) -> Result<Vec<AttestedOp>, SyncError> {
@@ -185,25 +182,8 @@ impl SyncEffects for AntiEntropyHandler {
         self.compute_ops_to_push(&local_digest, remote_digest).await
     }
 
-    /// Request ops from peer requires guard chain - returns error from trait impl.
-    ///
-    /// Use `request_ops_from_peer_guarded()` with an effect system for production.
-    async fn request_ops_from_peer(
-        &self,
-        peer_id: Uuid,
-        _cids: Vec<Hash32>,
-    ) -> Result<Vec<AttestedOp>, SyncError> {
-        tracing::warn!(
-            peer = ?peer_id,
-            "request_ops_from_peer called without effect system - use request_ops_from_peer_guarded()"
-        );
-        Err(SyncError::GuardChainFailure(
-            "request_ops_from_peer requires guard chain - use request_ops_from_peer_guarded()"
-                .to_string(),
-        ))
-    }
-
-    async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
+    /// Merge remote operations into the local OpLog.
+    pub async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
         for op in ops {
             // Verify before merging
             self.verify_operation(&op)?;
@@ -216,20 +196,8 @@ impl SyncEffects for AntiEntropyHandler {
         Ok(())
     }
 
-    /// Announce op requires guard chain - returns error from trait impl.
-    ///
-    /// Use `announce_new_op_guarded()` with an effect system for production.
-    async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
-        tracing::warn!(
-            cid = ?cid,
-            "announce_new_op called without effect system - use announce_new_op_guarded()"
-        );
-        Err(SyncError::GuardChainFailure(
-            "announce_new_op requires guard chain - use announce_new_op_guarded()".to_string(),
-        ))
-    }
-
-    async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
+    /// Request a specific operation by CID.
+    pub async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
         // Local oplog lookup - no network request needed
         let oplog = self.oplog.read().await;
         oplog
@@ -239,47 +207,24 @@ impl SyncEffects for AntiEntropyHandler {
             .ok_or(SyncError::OperationNotFound)
     }
 
-    /// Push op to peers requires guard chain - returns error from trait impl.
-    ///
-    /// Use `push_op_to_peers_guarded()` with an effect system for production.
-    async fn push_op_to_peers(&self, op: AttestedOp, _peers: Vec<Uuid>) -> Result<(), SyncError> {
-        let cid = Hash32::from(op.op.parent_commitment);
-        tracing::warn!(
-            cid = ?cid,
-            "push_op_to_peers called without effect system - use push_op_to_peers_guarded()"
-        );
-        Err(SyncError::GuardChainFailure(
-            "push_op_to_peers requires guard chain - use push_op_to_peers_guarded()".to_string(),
-        ))
-    }
-
-    async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
+    /// Get list of currently connected peers.
+    pub async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
         let peers = self.peers.read().await;
         Ok(peers.iter().copied().collect())
-    }
-}
-
-impl AntiEntropyHandler {
-    /// Get operations that are missing between local and remote digests
-    pub async fn get_missing_ops_public(
-        &self,
-        remote_digest: &BloomDigest,
-    ) -> Result<Vec<AttestedOp>, SyncError> {
-        self.get_missing_ops(remote_digest).await
     }
 
     /// Request operations from peer with guard chain enforcement
     ///
     /// Evaluates guard chain predicate:
     /// need("sync:request_ops") ≤ Auth(ctx) ∧ headroom(ctx, cids.len() * 5)
-    async fn request_ops_from_peer_guarded<E: GuardChainEffects>(
+    async fn request_ops_from_peer_guarded<E: AntiEntropyProtocolEffects>(
         &self,
         peer_id: Uuid,
         cids: Vec<Hash32>,
         effect_system: &E,
     ) -> Result<Vec<AttestedOp>, SyncError> {
         let peer_authority = AuthorityId::from(peer_id);
-        let cost = cids.len() as u32 * 5;
+        let cost = cids.len() as u32 * self.runtime.request_cost_per_cid;
 
         let guard_chain = create_send_guard_op(
             GuardOperation::SyncRequestOps,
@@ -287,7 +232,10 @@ impl AntiEntropyHandler {
             peer_authority,
             cost,
         )
-        .with_operation_id(format!("ops_request_{}_{}", peer_id, cids.len()));
+        .with_operation_id(GuardOperationId::SyncRequestOps {
+            peer: peer_id,
+            count: cids.len(),
+        });
 
         // Evaluate guard chain
         let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
@@ -332,7 +280,7 @@ impl AntiEntropyHandler {
     ///
     /// Evaluates guard chain for each peer:
     /// need("sync:announce_op") ≤ Auth(ctx) ∧ headroom(ctx, 5)
-    async fn announce_new_op_guarded<E: GuardChainEffects>(
+    async fn announce_new_op_guarded<E: AntiEntropyProtocolEffects>(
         &self,
         cid: Hash32,
         effect_system: &E,
@@ -347,9 +295,12 @@ impl AntiEntropyHandler {
                 GuardOperation::SyncAnnounceOp,
                 self.context_id,
                 peer_authority,
-                5, // low cost for announcement
+                self.runtime.announce_cost,
             )
-            .with_operation_id(format!("announce_{}_{}", cid, peer_uuid));
+            .with_operation_id(GuardOperationId::SyncAnnounceOp {
+                peer: peer_uuid,
+                cid,
+            });
 
             // Evaluate guard chain for this peer
             match guard_chain.evaluate(effect_system).await {
@@ -399,7 +350,7 @@ impl AntiEntropyHandler {
     ///
     /// Evaluates guard chain for each peer:
     /// need("sync:push_op") ≤ Auth(ctx) ∧ headroom(ctx, cost)
-    pub async fn push_op_to_peers_guarded<E: GuardChainEffects>(
+    pub async fn push_op_to_peers_guarded<E: AntiEntropyProtocolEffects>(
         &self,
         op: AttestedOp,
         peers: Vec<Uuid>,
@@ -410,7 +361,7 @@ impl AntiEntropyHandler {
 
         for peer_uuid in &peers {
             let peer_authority = AuthorityId::from(*peer_uuid);
-            let cost = 50; // moderate cost for op push
+            let cost = self.runtime.push_cost;
 
             let guard_chain = create_send_guard_op(
                 GuardOperation::SyncPushOp,
@@ -418,7 +369,10 @@ impl AntiEntropyHandler {
                 peer_authority,
                 cost,
             )
-            .with_operation_id(format!("push_op_{}_{}", cid, peer_uuid));
+            .with_operation_id(GuardOperationId::SyncPushOp {
+                peer: *peer_uuid,
+                cid,
+            });
 
             // Evaluate guard chain for this peer
             match guard_chain.evaluate(effect_system).await {
@@ -468,7 +422,7 @@ impl AntiEntropyHandler {
     ///
     /// This is the secure entry point for peer synchronization.
     /// All operations flow through the guard chain.
-    pub async fn sync_with_peer_guarded<E: GuardChainEffects>(
+    pub async fn sync_with_peer_guarded<E: AntiEntropyProtocolEffects>(
         &self,
         peer_id: Uuid,
         effect_system: &E,

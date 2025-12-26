@@ -292,7 +292,7 @@ use aura_core::effects::reactive::{ReactiveEffects, ReactiveError};
 /// # Example
 ///
 /// ```rust,ignore
-/// use aura_effects::ReactiveHandler;
+/// use aura_app::ReactiveHandler;
 /// use aura_app::signal_defs::register_app_signals;
 ///
 /// let handler = ReactiveHandler::new();
@@ -354,7 +354,7 @@ pub async fn register_app_signals<R: ReactiveEffects>(handler: &R) -> Result<(),
 /// # Example
 ///
 /// ```rust,ignore
-/// use aura_effects::ReactiveHandler;
+/// use aura_app::ReactiveHandler;
 /// use aura_app::signal_defs::register_app_signals_with_queries;
 ///
 /// let handler = ReactiveHandler::new();

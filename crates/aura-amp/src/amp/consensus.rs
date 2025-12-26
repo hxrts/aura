@@ -8,13 +8,12 @@
 
 use aura_consensus::protocol::run_consensus;
 use aura_consensus::types::CommitFact;
-use super::AmpJournalEffects;
-// use aura_core::effects::{PhysicalTimeEffects, RandomEffects}; // Available if needed
+use super::{AmpEvidenceEffects, AmpJournalEffects};
+use aura_core::effects::RandomEffects;
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::epochs::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::{AuthorityId, Prestate, Result};
-use aura_effects::random::RealRandomHandler;
-use aura_effects::time::PhysicalTimeHandler;
 use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};
 use std::collections::HashMap;
 
@@ -44,10 +43,9 @@ pub async fn run_amp_channel_epoch_bump(
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
-    let random = RealRandomHandler;
-    let time = PhysicalTimeHandler;
-
     // Consensus over the proposal itself; serialization is handled by `run_consensus`.
     let params = aura_consensus::protocol::ConsensusParams {
         witnesses,
@@ -77,6 +75,8 @@ pub async fn run_amp_channel_epoch_bump_default(
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
     let (witnesses, threshold) = default_witness_policy(prestate);
     run_amp_channel_epoch_bump(
@@ -87,6 +87,8 @@ pub async fn run_amp_channel_epoch_bump_default(
         key_packages,
         group_public_key,
         epoch,
+        random,
+        time,
     )
     .await
 }
@@ -95,7 +97,7 @@ pub async fn run_amp_channel_epoch_bump_default(
 ///
 /// Evidence plumbing: Inserts committed bump + consensus commit fact + evidence deltas.
 /// Tracks message provenance per AMP specification requirements.
-pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
+pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects + AmpEvidenceEffects>(
     journal: &J,
     prestate: &Prestate,
     proposal: &ProposedChannelEpochBump,
@@ -104,6 +106,8 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<CommittedChannelEpochBump> {
     let (committed, commit) = run_amp_channel_epoch_bump(
         prestate,
@@ -113,6 +117,8 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
         key_packages,
         group_public_key,
         epoch,
+        random,
+        time,
     )
     .await?;
 
@@ -140,13 +146,15 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
 }
 
 /// Run consensus with default witness policy and persist committed fact.
-pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
+pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects + AmpEvidenceEffects>(
     journal: &J,
     prestate: &Prestate,
     proposal: &ProposedChannelEpochBump,
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<CommittedChannelEpochBump> {
     let (witnesses, threshold) = default_witness_policy(prestate);
     finalize_amp_bump_with_journal(
@@ -158,6 +166,8 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
         key_packages,
         group_public_key,
         epoch,
+        random,
+        time,
     )
     .await
 }
@@ -166,6 +176,8 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
 mod tests {
     use super::*;
     use aura_core::{frost::Share, AuthorityId, ContextId};
+    use aura_testkit::stateful_effects::MockRandomHandler;
+    use aura_testkit::time::ControllableTimeSource;
     use std::collections::HashMap;
 
     fn authority(seed: u8) -> AuthorityId {
@@ -198,6 +210,9 @@ mod tests {
             12345, // deterministic seed
         );
 
+        let random = MockRandomHandler::new_with_seed(99);
+        let time = ControllableTimeSource::new(1_700_000_000_000);
+
         let result = run_amp_channel_epoch_bump(
             &prestate,
             &proposal,
@@ -206,6 +221,8 @@ mod tests {
             key_packages,
             group_public_key.into(),
             Epoch::from(1),
+            &random,
+            &time,
         )
         .await;
 

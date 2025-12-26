@@ -66,6 +66,7 @@ pub mod network;
 pub mod query; // Datalog query effects (bridges Journal + Biscuit + Reactive)
 pub mod random;
 pub mod reactive; // FRP as algebraic effects
+pub mod registry; // Canonical operation mappings
 pub mod relay; // Relay selection for message forwarding
 pub mod reliability;
 pub mod secure;

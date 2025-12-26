@@ -8,15 +8,21 @@ use super::telemetry::{
     AmpSendTelemetry, AMP_TELEMETRY,
 };
 use crate::amp::{
-    consensus::finalize_amp_bump_with_journal_default, get_channel_state, AmpJournalEffects,
+    config::AmpRuntimeConfig,
+    consensus::finalize_amp_bump_with_journal_default,
+    core::{nonce_from_header, ratchet_from_epoch_state},
+    get_channel_state,
+    wire::{deserialize_message, serialize_message, AmpMessage},
+    AmpEvidenceEffects, AmpJournalEffects,
 };
 use aura_guards::traits::GuardContextProvider;
 use aura_guards::GuardEffects;
-use aura_core::effects::{CryptoEffects, NetworkEffects};
+use aura_core::effects::{CryptoEffects, NetworkEffects, RandomEffects};
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Result};
-use aura_journal::{fact::ProposedChannelEpochBump, ChannelEpochState};
+use aura_journal::fact::ProposedChannelEpochBump;
 use aura_transport::amp::{
     derive_for_recv, derive_for_send, AmpError, AmpHeader, AmpRatchetState, RatchetDerivation,
 };
@@ -28,18 +34,7 @@ fn map_amp_error(err: AmpError) -> AuraError {
     AuraError::invalid(format!("AMP ratchet error: {}", err))
 }
 
-/// Simple wire format for AMP messages (header + opaque payload).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AmpMessage {
-    pub header: AmpHeader,
-    pub payload: Vec<u8>,
-}
-
 impl AmpMessage {
-    pub fn new(header: AmpHeader, payload: Vec<u8>) -> Self {
-        Self { header, payload }
-    }
-
     pub fn receipt(&self) -> AmpReceipt {
         AmpReceipt {
             context: self.header.context,
@@ -64,14 +59,6 @@ pub struct AmpReceipt {
 pub struct AmpDelivery {
     pub receipt: AmpReceipt,
     pub payload: Vec<u8>,
-}
-
-/// Derive nonce from AMP header using centralized crypto utilities.
-///
-/// This function delegates to `aura_core::crypto::amp::derive_nonce_from_ratchet`
-/// to ensure consistent nonce derivation across the codebase.
-fn nonce_from_header(header: &AmpHeader) -> [u8; 12] {
-    aura_core::crypto::amp::derive_nonce_from_ratchet(header.ratchet_gen, header.chan_epoch)
 }
 
 /// Create a configured guard chain for AMP send operations.
@@ -107,7 +94,8 @@ fn build_amp_send_guard(
     use aura_guards::chain::SendGuardChain;
     use aura_guards::journal::JournalCoupler;
 
-    let cost = flow_cost.unwrap_or(1);
+    let config = AmpRuntimeConfig::default();
+    let cost = flow_cost.unwrap_or(config.default_flow_cost);
     SendGuardChain::new("amp:send".to_string(), context, peer, cost)
         .with_operation_id("amp_send")
         .with_journal_coupler(JournalCoupler::new())
@@ -141,15 +129,6 @@ pub async fn validate_header<E: AmpJournalEffects>(
         .map_err(map_amp_error)
 }
 
-fn ratchet_from_epoch_state(state: &ChannelEpochState) -> AmpRatchetState {
-    AmpRatchetState {
-        chan_epoch: state.chan_epoch,
-        last_checkpoint_gen: state.last_checkpoint_gen,
-        skip_window: state.skip_window as u64,
-        pending_epoch: state.pending_bump.as_ref().map(|p| p.new_epoch),
-    }
-}
-
 /// Insert a proposed bump as a fact.
 pub async fn emit_proposed_bump<E: AmpJournalEffects>(
     effects: &E,
@@ -163,7 +142,7 @@ pub async fn emit_proposed_bump<E: AmpJournalEffects>(
 }
 
 /// Finalize a pending bump via consensus and insert committed fact using default witness policy.
-pub async fn commit_bump_with_consensus<E: AmpJournalEffects>(
+pub async fn commit_bump_with_consensus<E: AmpJournalEffects + AmpEvidenceEffects + RandomEffects + PhysicalTimeEffects>(
     effects: &E,
     prestate: &aura_core::Prestate,
     proposal: &ProposedChannelEpochBump,
@@ -177,6 +156,8 @@ pub async fn commit_bump_with_consensus<E: AmpJournalEffects>(
         key_packages,
         group_public_key,
         aura_core::epochs::Epoch::from(proposal.new_epoch),
+        effects,
+        effects,
     )
     .await?;
     Ok(())
@@ -241,10 +222,9 @@ where
     };
 
     let msg = AmpMessage::new(header, sealed.clone());
-    let bytes = match serde_json::to_vec(&msg) {
+    let bytes = match serialize_message(&msg) {
         Ok(bytes) => bytes,
-        Err(e) => {
-            let error = AuraError::serialization(e.to_string());
+        Err(error) => {
             AMP_TELEMETRY.log_send_failure(
                 context,
                 channel,
@@ -375,10 +355,9 @@ where
     let wire_size = bytes.len();
 
     // Phase 1: Deserialize wire message
-    let wire: AmpMessage = match serde_json::from_slice(&bytes) {
+    let wire: AmpMessage = match deserialize_message(&bytes) {
         Ok(wire) => wire,
-        Err(e) => {
-            let error = AuraError::serialization(e.to_string());
+        Err(error) => {
             AMP_TELEMETRY.log_receive_failure(
                 context,
                 None,

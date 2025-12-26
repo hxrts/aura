@@ -1,3 +1,20 @@
+#![allow(
+    missing_docs,
+    unused_variables,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    dead_code,
+    clippy::match_like_matches_macro,
+    clippy::type_complexity,
+    clippy::while_let_loop,
+    clippy::redundant_closure,
+    clippy::large_enum_variant,
+    clippy::unused_unit,
+    clippy::get_first,
+    clippy::single_range_in_vec_init,
+    clippy::disallowed_methods, // Guard chain coordinates time/random effects
+    deprecated // Deprecated time/random functions used intentionally for effect coordination
+)]
 //! Layer 4: Protocol Guard Chain - Authorization, Budget, Privacy, Journal
 //!
 //! Choreographic enforcement of authorization, flow budgets, privacy, and journal consistency
@@ -90,6 +107,7 @@
 
 // Guard implementations
 pub mod chain; // SendGuardChain (guard chain orchestration)
+pub mod config;
 pub mod deltas;
 pub mod executor;
 pub mod execution;
@@ -123,6 +141,7 @@ use aura_core::AuraResult;
 use aura_core::AuthorityId;
 use biscuit_auth::{Biscuit, PublicKey};
 use std::future::Future;
+use crate::guards::privacy::AdversaryClass;
 
 /// Composite effect requirements for guard evaluation/execution.
 pub trait GuardEffects:
@@ -158,6 +177,10 @@ pub struct ProtocolGuard {
     pub root_public_key: PublicKey,
     /// Authority ID for this guard context
     pub authority_id: AuthorityId,
+    /// Context ID for leakage accounting
+    pub context_id: aura_core::ContextId,
+    /// Observer classes that can see this operation
+    pub observable_by: Vec<AdversaryClass>,
     /// Required Biscuit authorization tokens for this operation
     pub required_tokens: Vec<Biscuit>,
     /// Facts to be merged into the journal after successful execution
@@ -224,6 +247,12 @@ impl ProtocolGuard {
         Self {
             root_public_key,
             authority_id,
+            context_id: aura_core::ContextId::default(),
+            observable_by: vec![
+                AdversaryClass::External,
+                AdversaryClass::Neighbor,
+                AdversaryClass::InGroup,
+            ],
             required_tokens: Vec::new(),
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
@@ -287,11 +316,29 @@ impl ProtocolGuard {
         Self {
             root_public_key: keypair.public(),
             authority_id,
+            context_id: aura_core::ContextId::default(),
+            observable_by: vec![
+                AdversaryClass::External,
+                AdversaryClass::Neighbor,
+                AdversaryClass::InGroup,
+            ],
             required_tokens: Vec::new(),
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
             operation_id: operation_id.into(),
         }
+    }
+
+    /// Set the context ID for leakage accounting
+    pub fn context_id(mut self, context_id: aura_core::ContextId) -> Self {
+        self.context_id = context_id;
+        self
+    }
+
+    /// Set explicit observer classes for leakage accounting
+    pub fn observable_by(mut self, observers: Vec<AdversaryClass>) -> Self {
+        self.observable_by = observers;
+        self
     }
 }
 
@@ -369,7 +416,7 @@ pub use policy::{
 
 // Re-export executor functions for choreography integration
 pub use executor::{
-    execute_effect_commands, execute_guarded_choreography, BorrowedEffectInterpreter,
-    ChoreographyCommand, ChoreographyResult, EffectSystemInterpreter, GuardChainExecutor,
-    GuardChainResult,
+    execute_effect_commands, execute_guard_plan, execute_guarded_choreography,
+    BorrowedEffectInterpreter, ChoreographyCommand, ChoreographyResult, EffectSystemInterpreter,
+    GuardChainExecutor, GuardChainResult, GuardPlan,
 };

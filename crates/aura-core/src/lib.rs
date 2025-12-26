@@ -170,7 +170,7 @@ pub use util::serialization::{
 
 // Errors
 #[doc = "stable: Error types with semver guarantees"]
-pub use errors::{AuraError, Result as AuraResult};
+pub use errors::{AuraError, ProtocolErrorCode, Result as AuraResult};
 
 // Effect interfaces
 pub use effects::{

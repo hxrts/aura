@@ -177,11 +177,7 @@ where
                     "Successfully charged flow budget"
                 );
 
-                // Return remaining budget (we'll use the charged amount as a proxy)
-                // In production, you'd query the actual remaining budget from the journal
-                Ok(EffectResult::RemainingBudget(
-                    1000u32.saturating_sub(receipt.cost),
-                ))
+                Ok(EffectResult::Receipt(receipt))
             }
 
             EffectCommand::AppendJournal { entry } => {
@@ -277,20 +273,21 @@ where
                 Ok(EffectResult::Success)
             }
 
-            EffectCommand::SendEnvelope { to, envelope } => {
+            EffectCommand::SendEnvelope { to, peer_id, envelope } => {
                 debug!(
                     to = ?to,
                     envelope_size = envelope.len(),
                     "Sending network envelope"
                 );
 
-                // Deterministic peer id derived from network address bytes
-                let mut h = aura_core::hash::hasher();
-                h.update(to.as_str().as_bytes());
-                let digest = h.finalize();
-                let mut peer_bytes = [0u8; 16];
-                peer_bytes.copy_from_slice(&digest[..16]);
-                let peer_id = uuid::Uuid::from_bytes(peer_bytes);
+                let peer_id = peer_id.unwrap_or_else(|| {
+                    let mut h = aura_core::hash::hasher();
+                    h.update(to.as_str().as_bytes());
+                    let digest = h.finalize();
+                    let mut peer_bytes = [0u8; 16];
+                    peer_bytes.copy_from_slice(&digest[..16]);
+                    uuid::Uuid::from_bytes(peer_bytes)
+                });
 
                 // Send via network effects
                 self.network
@@ -697,10 +694,10 @@ mod tests {
 
         let result = interpreter.execute(cmd).await.unwrap();
         match result {
-            EffectResult::RemainingBudget(remaining) => {
-                assert_eq!(remaining, 900);
+            EffectResult::Receipt(receipt) => {
+                assert_eq!(receipt.cost, 100);
             }
-            _ => panic!("Expected RemainingBudget result"),
+            _ => panic!("Expected Receipt result"),
         }
     }
 

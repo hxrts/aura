@@ -27,6 +27,20 @@ pub enum AmpChannelError {
     Internal(String),
 }
 
+impl crate::ProtocolErrorCode for AmpChannelError {
+    fn code(&self) -> &'static str {
+        match self {
+            AmpChannelError::NotFound => "not_found",
+            AmpChannelError::ContextNotFound => "not_found",
+            AmpChannelError::InvalidState(_) => "invalid_state",
+            AmpChannelError::Unauthorized => "unauthorized",
+            AmpChannelError::Storage(_) => "storage",
+            AmpChannelError::Crypto(_) => "crypto",
+            AmpChannelError::Internal(_) => "internal",
+        }
+    }
+}
+
 /// AMP message header (additional authenticated data)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AmpHeader {

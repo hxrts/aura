@@ -282,6 +282,20 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_DEPS" = true ]; then
   else
     violation "cargo unavailable; dependency direction not checked"
   fi
+
+  # Layer 4 dependency firewall: prevent upward deps into Layer 6+
+  section "Layer 4 firewall — disallow dependencies on runtime/UI/testkit layers"
+  l4_crates=(aura-protocol aura-guards aura-consensus aura-amp aura-anti-entropy aura-bridge)
+  l4_blocked="aura-agent|aura-simulator|aura-app|aura-terminal|aura-testkit"
+  for crate in "${l4_crates[@]}"; do
+    if [ -f "crates/$crate/Cargo.toml" ]; then
+      if rg -n "^(.*\\[dependencies\\].*|.*\\[dev-dependencies\\].*|.*\\[build-dependencies\\].*|.*$l4_blocked.*)" "crates/$crate/Cargo.toml" | rg -n "$l4_blocked" >/dev/null; then
+        violation "$crate depends on Layer 6+ ($l4_blocked) — forbidden by firewall"
+      else
+        info "$crate: firewall clean"
+      fi
+    fi
+  done
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then

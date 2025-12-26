@@ -4,7 +4,7 @@
 //!
 //! # Effect Classification
 //!
-//! - **Category**: Application Effect (Layer 3)
+//! - **Category**: Runtime-owned effect handler (Layer 6)
 //! - **Purpose**: Execute typed queries against journal facts via Datalog
 //! - **Dependencies**: JournalEffects, AuthorizationEffects, ReactiveEffects
 //!
@@ -27,7 +27,7 @@ mod datalog;
 mod handler;
 
 // Re-export the main handler
-pub use handler::QueryHandler;
+pub use handler::{CapabilityPolicy, QueryHandler};
 
 // Re-export datalog utilities for external use
 pub use datalog::{format_rule, format_value, parse_arg_to_value, parse_fact_to_row};

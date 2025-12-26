@@ -47,7 +47,7 @@ use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::FrostThreshold;
 use aura_core::DeviceId;
 use aura_effects::PhysicalTimeHandler;
-use aura_effects::ReactiveHandler;
+use aura_app::ReactiveHandler;
 use aura_journal::fact::RelationalFact;
 use std::sync::Arc;
 
