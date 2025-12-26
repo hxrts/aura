@@ -36,6 +36,7 @@ GEMINI.md
 # Aura data directories (mode-specific)
 # All data (leakage/, secure_store/, etc.) is now inside these directories
 .aura/
+aura-data/
 .aura-demo/
 .aura-test/
 *.sealed
