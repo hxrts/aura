@@ -129,6 +129,8 @@ impl InvitationService {
         ceremony_id: String,
         pending_epoch: u64,
         key_package: Vec<u8>,
+        threshold_config: Vec<u8>,
+        public_key_package: Vec<u8>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
         self.handler
@@ -143,6 +145,8 @@ impl InvitationService {
                     ceremony_id,
                     pending_epoch,
                     key_package,
+                    threshold_config,
+                    public_key_package,
                 },
                 None,
                 expires_in_ms,

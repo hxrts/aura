@@ -702,8 +702,9 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         let new_config = ThresholdConfig::new(config_metadata.threshold_k, config_metadata.total_n)
             .map_err(|e| AuraError::internal(format!("Invalid threshold config: {}", e)))?;
 
-        // Update in-memory context to use the new epoch with proper config
+        // Update or create in-memory context to use the new epoch with proper config.
         let mut contexts = self.contexts.write().await;
+        let participants = config_metadata.resolved_participants();
 
         if let Some(state) = contexts.get_mut(authority) {
             let old_epoch = state.epoch;
@@ -711,7 +712,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             state.public_key_package = public_key_package;
             state.config = new_config;
             state.mode = config_metadata.mode;
-            state.participants = config_metadata.resolved_participants();
+            state.participants = participants;
 
             tracing::info!(
                 ?authority,
@@ -722,10 +723,30 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 "Key rotation committed - new epoch is now active"
             );
         } else {
-            return Err(AuraError::internal(format!(
-                "No signing context found for authority {:?}",
-                authority
-            )));
+            let device_id = self.effects.device_id();
+            let my_signer_index = participants
+                .iter()
+                .position(|p| matches!(p, ParticipantIdentity::Device(id) if *id == device_id))
+                .map(|idx| (idx + 1) as u16);
+
+            let state = SigningContextState {
+                config: new_config,
+                my_signer_index,
+                epoch: new_epoch,
+                public_key_package,
+                mode: config_metadata.mode,
+                participants,
+            };
+
+            contexts.insert(*authority, state);
+
+            tracing::info!(
+                ?authority,
+                new_epoch,
+                threshold_k = config_metadata.threshold_k,
+                total_n = config_metadata.total_n,
+                "Key rotation committed - new authority context loaded"
+            );
         }
 
         Ok(())

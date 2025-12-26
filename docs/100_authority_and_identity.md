@@ -8,6 +8,8 @@ An authority is a cryptographic actor represented by a public key. An authority 
 
 An authority has an internal journal namespace. The journal namespace stores facts relevant to that authority. The authority derives its state from deterministic reduction of that fact set. The authority does not expose any information about its devices or operators.
 
+Devices are not exclusive to a single authority. A single device may hold threshold shares for multiple authorities at the same time, and joining a new authority adds signing capability for that authority without removing any existing authority memberships.
+
 ```rust
 pub struct AuthorityId(Uuid);
 ```

@@ -1083,8 +1083,47 @@ fn handle_mfa_setup_key_queue(
     key: KeyEvent,
     modal_state: GuardianSetupModalState,
 ) {
+    let is_ctrl_m =
+        key.modifiers.ctrl() && matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'));
     match modal_state.step {
-        GuardianSetupStep::SelectContacts => match key.code {
+        GuardianSetupStep::SelectContacts => {
+            if is_ctrl_m {
+                let mobile_id = state.settings.demo_mobile_device_id.clone();
+                if !mobile_id.is_empty() {
+                    let mut found = false;
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::MfaSetup(ref mut s) = modal {
+                            if let Some(idx) =
+                                s.contacts.iter().position(|c| c.id == mobile_id)
+                            {
+                                found = true;
+                                if !s.selected_indices.contains(&idx) {
+                                    s.selected_indices.push(idx);
+                                }
+                                s.focused_index = idx;
+                            }
+                        }
+                    });
+                    if !found {
+                        state.next_toast_id += 1;
+                        state.toast_queue.enqueue(QueuedToast::new(
+                            state.next_toast_id,
+                            "Mobile device not found in the list yet.",
+                            ToastLevel::Warning,
+                        ));
+                    }
+                } else {
+                    state.next_toast_id += 1;
+                    state.toast_queue.enqueue(QueuedToast::new(
+                        state.next_toast_id,
+                        "Demo Mobile device id unavailable.",
+                        ToastLevel::Warning,
+                    ));
+                }
+                return;
+            }
+
+            match key.code {
             KeyCode::Esc => {
                 state.modal_queue.dismiss();
             }
@@ -1123,6 +1162,7 @@ fn handle_mfa_setup_key_queue(
                 }
             }
             _ => {}
+        }
         },
         GuardianSetupStep::ChooseThreshold => match key.code {
             KeyCode::Esc => {

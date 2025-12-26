@@ -63,6 +63,8 @@ All key rotation ceremonies follow this common shape:
 - A device leaf is added/activated in the commitment tree (or equivalent membership facts are emitted).
 - Device list / membership views update via the same reactive signals as production.
 
+**Multi-authority note**: Device enrollment adds signing capability for the account authority but does not replace any other authorities the device participates in. Devices may hold threshold shares for multiple authorities concurrently.
+
 ### Group / block membership changes
 
 These are conceptually identical ceremonies applied to different authorities/contexts:
@@ -89,4 +91,3 @@ Frontends (TUI, mobile, web) should treat ceremonies as first-class operations w
 - On cancellation/failure: show explicit rollback messaging; do not leave UI in a partially-updated state.
 
 The UI must not invent state transitions: ceremony progress should be driven from runtime status + signals.
-

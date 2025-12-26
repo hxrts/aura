@@ -1,3 +1,6 @@
+//! Tests for consensus share ordering semantics.
+#![allow(missing_docs)]
+
 use aura_consensus::core::state::{PathSelection, ShareData, ShareProposal};
 use aura_consensus::core::transitions::{apply_share, start_consensus, TransitionResult};
 use std::collections::BTreeSet;

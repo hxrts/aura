@@ -93,6 +93,8 @@ pub struct IoContextBuilder {
     demo_bridge: Option<Arc<crate::demo::SimulatedBridge>>,
     #[cfg(feature = "development")]
     demo_mobile_agent: Option<Arc<AuraAgent>>,
+    #[cfg(feature = "development")]
+    demo_mobile_device_id: Option<String>,
 }
 
 impl IoContextBuilder {
@@ -152,6 +154,13 @@ impl IoContextBuilder {
         self
     }
 
+    /// Set the demo Mobile device id for MFA shortcuts.
+    #[cfg(feature = "development")]
+    pub fn with_demo_mobile_device_id(mut self, device_id: String) -> Self {
+        self.demo_mobile_device_id = Some(device_id);
+        self
+    }
+
     /// Build the IoContext, returning an error if required fields are missing.
     pub fn build(self) -> Result<IoContext, ContextBuildError> {
         let app_core = self
@@ -205,6 +214,8 @@ impl IoContextBuilder {
             demo_bridge: self.demo_bridge,
             #[cfg(feature = "development")]
             demo_mobile_agent: self.demo_mobile_agent,
+            #[cfg(feature = "development")]
+            demo_mobile_device_id: self.demo_mobile_device_id,
             invited_lan_peers,
             current_context,
             channel_modes,
@@ -235,6 +246,8 @@ pub struct IoContext {
     demo_bridge: Option<Arc<crate::demo::SimulatedBridge>>,
     #[cfg(feature = "development")]
     demo_mobile_agent: Option<Arc<AuraAgent>>,
+    #[cfg(feature = "development")]
+    demo_mobile_device_id: Option<String>,
     invited_lan_peers: Arc<RwLock<HashSet<String>>>,
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
@@ -451,6 +464,11 @@ impl IoContext {
             .unwrap_or_default()
     }
 
+    #[cfg(feature = "development")]
+    pub fn demo_mobile_device_id(&self) -> String {
+        self.demo_mobile_device_id.clone().unwrap_or_default()
+    }
+
     #[cfg(not(feature = "development"))]
     pub fn demo_alice_code(&self) -> String {
         String::new()
@@ -458,6 +476,11 @@ impl IoContext {
 
     #[cfg(not(feature = "development"))]
     pub fn demo_carol_code(&self) -> String {
+        String::new()
+    }
+
+    #[cfg(not(feature = "development"))]
+    pub fn demo_mobile_device_id(&self) -> String {
         String::new()
     }
 

@@ -1,3 +1,6 @@
+//! Property-based tests for guard chain invariants.
+#![allow(missing_docs)]
+
 use aura_guards::types::validate_charge_before_send;
 use proptest::prelude::*;
 

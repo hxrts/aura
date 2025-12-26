@@ -405,6 +405,49 @@ impl InvitationHandler {
                     ))
                 })?;
 
+            let config_location = SecureStorageLocation::with_sub_key(
+                "threshold_config",
+                format!("{}", enrollment.subject_authority),
+                format!("{}", enrollment.pending_epoch),
+            );
+            let pubkey_location = SecureStorageLocation::with_sub_key(
+                "threshold_pubkey",
+                format!("{}", enrollment.subject_authority),
+                format!("{}", enrollment.pending_epoch),
+            );
+
+            effects
+                .secure_store(
+                    &config_location,
+                    &enrollment.threshold_config,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await
+                .map_err(|e| {
+                    crate::core::AgentError::effects(format!(
+                        "store device enrollment threshold config: {e}"
+                    ))
+                })?;
+
+            effects
+                .secure_store(
+                    &pubkey_location,
+                    &enrollment.public_key_package,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await
+                .map_err(|e| {
+                    crate::core::AgentError::effects(format!(
+                        "store device enrollment public key package: {e}"
+                    ))
+                })?;
+
             // Send an acceptance envelope to the initiator device.
             let context_entropy = {
                 let mut h = aura_core::hash::hasher();
@@ -581,11 +624,10 @@ impl InvitationHandler {
                     ceremony_id,
                     pending_epoch,
                     key_package,
+                    threshold_config,
+                    public_key_package,
                 } = &inv.invitation_type
                 {
-                    if *subject_authority != own_id {
-                        return Ok(None);
-                    }
                     return Ok(Some(DeviceEnrollmentInvitation {
                         subject_authority: *subject_authority,
                         initiator_device_id: *initiator_device_id,
@@ -593,6 +635,8 @@ impl InvitationHandler {
                         ceremony_id: ceremony_id.clone(),
                         pending_epoch: *pending_epoch,
                         key_package: key_package.clone(),
+                        threshold_config: threshold_config.clone(),
+                        public_key_package: public_key_package.clone(),
                     }));
                 }
             }
@@ -611,12 +655,10 @@ impl InvitationHandler {
                 ceremony_id,
                 pending_epoch,
                 key_package,
+                threshold_config,
+                public_key_package,
             } = shareable.invitation_type
             {
-                if subject_authority != own_id {
-                    return Ok(None);
-                }
-
                 return Ok(Some(DeviceEnrollmentInvitation {
                     subject_authority,
                     initiator_device_id,
@@ -624,6 +666,8 @@ impl InvitationHandler {
                     ceremony_id,
                     pending_epoch,
                     key_package,
+                    threshold_config,
+                    public_key_package,
                 }));
             }
         }
@@ -821,6 +865,8 @@ struct DeviceEnrollmentInvitation {
     ceremony_id: String,
     pending_epoch: u64,
     key_package: Vec<u8>,
+    threshold_config: Vec<u8>,
+    public_key_package: Vec<u8>,
 }
 
 // =============================================================================

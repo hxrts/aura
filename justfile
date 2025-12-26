@@ -836,7 +836,7 @@ quint-parse input output:
     @echo "Parsing Quint file to JSON..."
     @echo "Input: {{input}}"
     @echo "Output: {{output}}"
-    nix develop --command quint compile --target json --out {{output}} {{input}}
+    nix develop --command quint parse --out {{output}} {{input}}
     @echo "Parse completed successfully!"
 
 # Parse Quint file and display AST structure
@@ -856,7 +856,7 @@ quint-compile input output:
     @echo "Input: {{input}}"
     @echo "Output: {{output}}"
     nix develop --command quint typecheck {{input}}
-    nix develop --command quint compile --target json --out {{output}} {{input}}
+    nix develop --command quint parse --out {{output}} {{input}}
     @echo "Compilation completed successfully!"
 
 # Regenerate deterministic ITF trace for the TUI replay tests

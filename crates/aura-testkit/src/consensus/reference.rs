@@ -19,8 +19,8 @@
 //! 2. **Simplicity over efficiency**: Prefer clarity to optimization
 //! 3. **Property annotations**: Document which theorem each function relates to
 
-use aura_consensus::core::{ConsensusPhase, ConsensusState, ShareProposal};
 use aura_consensus::core::state::PureCommitFact;
+use aura_consensus::core::{ConsensusPhase, ConsensusState, ShareProposal};
 use std::collections::BTreeSet;
 
 /// Reference evidence structure for CRDT merge
@@ -168,7 +168,13 @@ pub fn aggregate_shares_ref(
     Some(ThresholdSignature {
         sig_value,
         signer_set: proposals.iter().map(|p| p.witness.clone()).collect(),
-        bound_cid: first.share.data_binding.split(':').next().unwrap_or("").to_string(),
+        bound_cid: first
+            .share
+            .data_binding
+            .split(':')
+            .next()
+            .unwrap_or("")
+            .to_string(),
         bound_rid: first.result_id.clone(),
         bound_phash: first
             .share
@@ -314,13 +320,16 @@ pub fn apply_share_ref(state: &ConsensusState, proposal: ShareProposal) -> Trans
 
     // Check if threshold is met after adding proposal
     // Count proposals for each result
-    let mut result_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut result_counts: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
     for p in &new_state.proposals {
         *result_counts.entry(&p.result_id).or_insert(0) += 1;
     }
 
     // Check if any result has threshold
-    let threshold_met = result_counts.values().any(|&count| count >= new_state.threshold);
+    let threshold_met = result_counts
+        .values()
+        .any(|&count| count >= new_state.threshold);
 
     if threshold_met {
         new_state.phase = ConsensusPhase::Committed;
@@ -352,10 +361,7 @@ pub fn apply_share_ref(state: &ConsensusState, proposal: ShareProposal) -> Trans
 pub fn trigger_fallback_ref(state: &ConsensusState) -> TransitionResultRef {
     // Precondition: must be in fast path
     if state.phase != ConsensusPhase::FastPathActive {
-        return TransitionResultRef::NotEnabled(format!(
-            "not in fast path: {:?}",
-            state.phase
-        ));
+        return TransitionResultRef::NotEnabled(format!("not in fast path: {:?}", state.phase));
     }
 
     let mut new_state = state.clone();
@@ -428,7 +434,10 @@ pub fn check_invariants_ref(state: &ConsensusState) -> Option<String> {
     let mut seen_witnesses: BTreeSet<&str> = BTreeSet::new();
     for proposal in &state.proposals {
         if seen_witnesses.contains(proposal.witness.as_str()) {
-            return Some(format!("duplicate proposal from witness: {}", proposal.witness));
+            return Some(format!(
+                "duplicate proposal from witness: {}",
+                proposal.witness
+            ));
         }
         seen_witnesses.insert(&proposal.witness);
     }

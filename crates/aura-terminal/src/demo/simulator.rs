@@ -40,8 +40,8 @@ impl DemoSimulator {
     pub async fn new(
         seed: u64,
         base_path: PathBuf,
-        bob_authority: AuthorityId,
-        bob_context: ContextId,
+        _bob_authority: AuthorityId,
+        _bob_context: ContextId,
     ) -> TerminalResult<Self> {
         let shared_transport = SharedTransport::new();
 
@@ -49,7 +49,8 @@ impl DemoSimulator {
         let alice_authority = ids::authority_id(&format!("demo:{}:{}:authority", seed, "Alice"));
         let carol_authority =
             ids::authority_id(&format!("demo:{}:{}:authority", seed + 1, "Carol"));
-        let mobile_authority = bob_authority;
+        let mobile_authority =
+            ids::authority_id(&format!("demo:{}:{}:authority", seed + 2, "Mobile"));
 
         let alice_device = ids::device_id(&format!("demo:{}:{}:device", seed, "Alice"));
         let carol_device = ids::device_id(&format!("demo:{}:{}:device", seed + 1, "Carol"));
@@ -84,7 +85,7 @@ impl DemoSimulator {
                 seed + 2,
                 "Mobile",
                 mobile_authority,
-                bob_context,
+                ids::context_id(&format!("demo:{}:{}:context", seed + 2, "Mobile")),
                 mobile_device,
                 mobile_dir,
                 shared_transport.clone(),
@@ -224,6 +225,10 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
             );
             response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
             response_metadata.insert("guardian-id".to_string(), agent.authority_id().to_string());
+            if let Ok(bob_device_id) = std::env::var("AURA_DEMO_BOB_DEVICE_ID") {
+                response_metadata
+                    .insert("aura-destination-device-id".to_string(), bob_device_id);
+            }
 
             let acceptance = GuardianAcceptance {
                 guardian_id: agent.authority_id(),

@@ -13,10 +13,8 @@
 //! - Evidence merge properties (associative, commutative, idempotent)
 //! - Threshold arithmetic correctness
 
-mod common;
-
 use aura_consensus::core::state::{ShareData, ShareProposal};
-use common::reference::{detect_equivocators_ref, merge_evidence_ref, Evidence, Vote};
+use aura_testkit::consensus::{detect_equivocators_ref, merge_evidence_ref, Evidence, Vote};
 use proptest::prelude::*;
 use std::collections::HashSet;
 

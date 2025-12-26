@@ -112,6 +112,7 @@
 // Existing modular structure
 pub mod builders;
 pub mod configuration;
+pub mod consensus; // ITF conformance and differential testing for consensus
 pub mod differential; // Lean oracle differential testing (T7.11)
 pub mod effect_api;
 pub mod fixtures;

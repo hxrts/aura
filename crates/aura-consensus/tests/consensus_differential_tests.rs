@@ -28,13 +28,11 @@
 //! PROPTEST_CASES=1000 cargo test -p aura-consensus --test consensus_differential_tests
 //! ```
 
-mod common;
-
 use aura_consensus::core::{
     state::{ShareData, ShareProposal},
     validation::{is_equivocator, shares_consistent},
 };
-use common::reference::{
+use aura_testkit::consensus::{
     check_threshold_ref, detect_equivocators_ref, merge_evidence_ref, shares_consistent_ref,
     Evidence, Vote,
 };

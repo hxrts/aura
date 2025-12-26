@@ -574,6 +574,7 @@ async fn handle_tui_launch(
 
     stdio.println(format_args!("Data directory: {}", base_path.display()));
     stdio.println(format_args!("Device ID: {}", device_id));
+    std::env::set_var("AURA_DEMO_BOB_DEVICE_ID", device_id.to_string());
 
     // Determine device ID string for account derivation
     let device_id_for_account = device_id_str.unwrap_or("tui:production-device");
@@ -778,6 +779,10 @@ async fn handle_tui_launch(
                 .as_ref()
                 .map(|sim| sim.mobile_agent())
                 .expect("Simulator should exist in demo mode");
+            let demo_mobile_device_id = simulator
+                .as_ref()
+                .map(|sim| sim.mobile_device_id().to_string())
+                .expect("Simulator should exist in demo mode");
             let builder = IoContext::builder()
                 .with_app_core(app_core)
                 .with_base_path(base_path.clone())
@@ -785,7 +790,8 @@ async fn handle_tui_launch(
                 .with_mode(mode)
                 .with_existing_account(has_existing_account)
                 .with_demo_hints(hints)
-                .with_demo_mobile_agent(demo_mobile_agent);
+                .with_demo_mobile_agent(demo_mobile_agent)
+                .with_demo_mobile_device_id(demo_mobile_device_id);
 
             builder.build().map_err(|e| {
                 crate::error::TerminalError::Config(format!("IoContext build failed: {e}"))

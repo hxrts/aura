@@ -919,13 +919,20 @@ impl TransportEffects for AuraEffectSystem {
             inbox
                 .iter()
                 .position(|env| {
-                    if env.destination != self.authority_id {
-                        return false;
+                    let device_match = env
+                        .metadata
+                        .get("aura-destination-device-id")
+                        .is_some_and(|dst| dst == &self_device_id);
+
+                    if env.destination == self.authority_id {
+                        return match env.metadata.get("aura-destination-device-id") {
+                            Some(dst) => dst == &self_device_id,
+                            None => true,
+                        };
                     }
-                    match env.metadata.get("aura-destination-device-id") {
-                        Some(dst) => dst == &self_device_id,
-                        None => true,
-                    }
+
+                    // Allow device-targeted envelopes for other authorities (multi-authority devices).
+                    device_match
                 })
                 .map(|pos| inbox.remove(pos))
         };
@@ -958,13 +965,21 @@ impl TransportEffects for AuraEffectSystem {
             inbox
                 .iter()
                 .position(|env| {
-                    env.destination == self.authority_id
-                        && env.source == source
-                        && env.context == context
-                        && match env.metadata.get("aura-destination-device-id") {
-                            Some(dst) => dst == &self_device_id,
-                            None => true,
-                        }
+                    let device_match = env
+                        .metadata
+                        .get("aura-destination-device-id")
+                        .is_some_and(|dst| dst == &self_device_id);
+
+                    if env.destination == self.authority_id {
+                        env.source == source
+                            && env.context == context
+                            && match env.metadata.get("aura-destination-device-id") {
+                                Some(dst) => dst == &self_device_id,
+                                None => true,
+                            }
+                    } else {
+                        env.source == source && env.context == context && device_match
+                    }
                 })
                 .map(|pos| inbox.remove(pos))
         };
@@ -2596,6 +2611,10 @@ impl AuraEffectSystem {
         } else {
             ExecutionMode::Production
         }
+    }
+
+    pub fn device_id(&self) -> aura_core::DeviceId {
+        self.config.device_id
     }
 
     /// Get the current active epoch for an authority's threshold keys

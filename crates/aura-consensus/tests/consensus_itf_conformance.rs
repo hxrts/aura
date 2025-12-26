@@ -26,14 +26,13 @@
 //! cargo test -p aura-consensus --test consensus_itf_conformance
 //! ```
 
-mod common;
-
 use aura_consensus::core::{
     state::{ConsensusPhase, ConsensusState},
     validation::check_invariants,
 };
-use common::divergence::{DivergenceReport, InstanceDiff, StateDiff};
-use common::itf_loader::{load_itf_trace, parse_itf_trace, ITFState};
+use aura_testkit::consensus::{
+    load_itf_trace, parse_itf_trace, DivergenceReport, ITFState, InstanceDiff, StateDiff,
+};
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;

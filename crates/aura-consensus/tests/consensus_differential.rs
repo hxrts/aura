@@ -12,14 +12,12 @@
 //!
 //! This catches subtle bugs that ITF traces might miss due to limited coverage.
 
-mod common;
-
 use aura_consensus::core::{
     state::{ConsensusPhase, ConsensusState, PathSelection, ShareData, ShareProposal},
     transitions::{apply_share, fail_consensus, trigger_fallback, TransitionResult},
     validation::{check_invariants, is_equivocator, shares_consistent},
 };
-use common::reference::{
+use aura_testkit::consensus::{
     aggregate_shares_ref, apply_share_ref, check_invariants_ref, check_threshold_ref,
     detect_equivocators_ref, fail_consensus_ref, shares_consistent_ref, trigger_fallback_ref,
     TransitionResultRef, Vote,

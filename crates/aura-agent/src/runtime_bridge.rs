@@ -870,7 +870,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         total_n: u16,
         device_ids: &[String],
     ) -> Result<String, IntentError> {
-        use aura_core::effects::{RandomEffects, ThresholdSigningEffects};
+        use aura_core::effects::{
+            RandomEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+            ThresholdSigningEffects,
+        };
         use aura_core::hash::hash;
         use aura_core::threshold::ParticipantIdentity;
 
@@ -928,6 +931,47 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to prepare device rotation: {e}"))
+            })?;
+
+        let pubkey_location = SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority_id),
+            format!("{}", pending_epoch),
+        );
+        let config_location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            format!("{}", authority_id),
+            format!("{}", pending_epoch),
+        );
+
+        let public_key_package = effects
+            .secure_retrieve(
+                &pubkey_location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to load threshold public key package: {e}"
+                ))
+            })?;
+
+        let threshold_config = effects
+            .secure_retrieve(
+                &config_location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to load threshold config metadata: {e}"
+                ))
             })?;
 
         let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
@@ -1002,6 +1046,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
         let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
 
+        use base64::Engine;
+        let config_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config);
+        let pubkey_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package);
+
         for device_id in parsed_devices.iter().copied() {
             if device_id == current_device_id {
                 continue;
@@ -1030,6 +1079,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 "aura-destination-device-id".to_string(),
                 device_id.to_string(),
             );
+            metadata.insert("threshold-config".to_string(), config_b64.clone());
+            metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
 
             let envelope = aura_core::effects::TransportEnvelope {
                 destination: authority_id,
@@ -1055,7 +1106,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         device_name: String,
     ) -> Result<aura_app::runtime_bridge::DeviceEnrollmentStart, IntentError> {
-        use aura_core::effects::{RandomEffects, ThresholdSigningEffects};
+        use aura_core::effects::{
+            RandomEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+            ThresholdSigningEffects,
+        };
         use aura_core::hash::hash;
         use aura_core::threshold::ParticipantIdentity;
 
@@ -1101,10 +1155,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Prepare new key material for the updated participant set.
         //
-        // Threshold policy (current):
-        // - single device: 1-of-1
-        // - two devices: 2-of-2
-        // - three+ devices: 2-of-n (avoid single-signer fast path, keep usability)
+        // Threshold policy:
+        // - Prefer existing device MFA threshold config, if present.
+        // - Otherwise fall back to a simple default (1-of-1, 2-of-2, else 2-of-n).
         let mut other_device_ids: Vec<aura_core::DeviceId> = device_ids
             .into_iter()
             .filter(|id| *id != current_device_id)
@@ -1124,13 +1177,63 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .collect();
 
         let total_n = participants.len() as u16;
-        let threshold_k: u16 = if total_n <= 2 { total_n } else { 2 };
+        let mut threshold_k = if let Some(config) = self.get_threshold_config().await {
+            config.threshold
+        } else if total_n <= 2 {
+            total_n
+        } else {
+            2
+        };
+        if threshold_k == 0 || threshold_k > total_n {
+            threshold_k = total_n;
+        }
 
         let (pending_epoch, key_packages, _public_key) = effects
             .rotate_keys(&authority_id, threshold_k, total_n, &participants)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to prepare device rotation: {e}"))
+            })?;
+
+        let pubkey_location = SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority_id),
+            format!("{}", pending_epoch),
+        );
+        let config_location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            format!("{}", authority_id),
+            format!("{}", pending_epoch),
+        );
+
+        let public_key_package = effects
+            .secure_retrieve(
+                &pubkey_location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to load threshold public key package: {e}"
+                ))
+            })?;
+
+        let threshold_config = effects
+            .secure_retrieve(
+                &config_location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to load threshold config metadata: {e}"
+                ))
             })?;
 
         let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
@@ -1189,13 +1292,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map(ParticipantIdentity::device)
             .collect();
         let acceptance_n = acceptors.len() as u16;
+        let acceptance_threshold = threshold_k.min(acceptance_n);
 
         let tracker = self.agent.ceremony_tracker().await;
         tracker
             .register(
                 ceremony_id.clone(),
                 aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
-                acceptance_n,
+                acceptance_threshold,
                 acceptance_n,
                 acceptors,
                 pending_epoch,
@@ -1208,6 +1312,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Distribute new-epoch key packages to existing devices (so they are not bricked).
         if !other_device_ids.is_empty() {
+            use base64::Engine;
+            let config_b64 =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config);
+            let pubkey_b64 =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package);
             let context_entropy = {
                 let mut h = aura_core::hash::hasher();
                 h.update(b"DEVICE_ENROLLMENT_CONTEXT");
@@ -1242,6 +1351,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     "aura-destination-device-id".to_string(),
                     device_id.to_string(),
                 );
+                metadata.insert("threshold-config".to_string(), config_b64.clone());
+                metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
 
                 let envelope = aura_core::effects::TransportEnvelope {
                     destination: authority_id,
@@ -1276,6 +1387,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 ceremony_id.clone(),
                 pending_epoch,
                 invited_key_package,
+                threshold_config.clone(),
+                public_key_package.clone(),
                 None,
             )
             .await
@@ -1979,6 +2092,8 @@ fn convert_invitation_type_to_bridge(
             ceremony_id,
             pending_epoch,
             key_package: _,
+            threshold_config: _,
+            public_key_package: _,
         } => InvitationBridgeType::DeviceEnrollment {
             subject_authority: *subject_authority,
             initiator_device_id: *initiator_device_id,

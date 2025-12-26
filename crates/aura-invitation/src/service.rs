@@ -131,6 +131,10 @@ pub enum InvitationType {
         pending_epoch: u64,
         /// Encrypted/opaque key package for the invited device
         key_package: Vec<u8>,
+        /// Serialized threshold config metadata for the pending epoch
+        threshold_config: Vec<u8>,
+        /// Public key package for the pending epoch
+        public_key_package: Vec<u8>,
     },
 }
 

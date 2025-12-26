@@ -16,6 +16,8 @@ The architecture consists of five integrated systems. The async effect system pr
 
 An authority is a cryptographic actor represented by a public key that hides its internal structure. An authority may contain one or more devices but never exposes information about its devices or operators. The authority derives its state from deterministic reduction of facts in its journal namespace.
 
+Devices can participate in multiple authorities concurrently. Authority membership is per-authority share material, so adding a new authority does not replace existing authority memberships on the device.
+
 ```rust
 pub struct AuthorityId(Uuid);
 ```

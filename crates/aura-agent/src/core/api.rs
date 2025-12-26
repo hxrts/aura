@@ -290,6 +290,9 @@ impl AuraAgent {
                     use aura_core::effects::{
                         SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
                     };
+                    use base64::Engine;
+
+                    let authority_id = envelope.destination;
 
                     let (Some(ceremony_id), Some(pending_epoch_str), Some(initiator_device_id_str)) = (
                         envelope.metadata.get("ceremony-id"),
@@ -369,6 +372,63 @@ impl AuraAgent {
                         continue;
                     }
 
+                    if let (Some(config_b64), Some(pubkey_b64)) = (
+                        envelope.metadata.get("threshold-config"),
+                        envelope.metadata.get("threshold-pubkey"),
+                    ) {
+                        if let (Ok(config_bytes), Ok(pubkey_bytes)) = (
+                            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(config_b64),
+                            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(pubkey_b64),
+                        ) {
+                            let config_location = SecureStorageLocation::with_sub_key(
+                                "threshold_config",
+                                format!("{}", authority_id),
+                                format!("{}", pending_epoch),
+                            );
+                            let pubkey_location = SecureStorageLocation::with_sub_key(
+                                "threshold_pubkey",
+                                format!("{}", authority_id),
+                                format!("{}", pending_epoch),
+                            );
+
+                            if let Err(e) = effects
+                                .secure_store(
+                                    &config_location,
+                                    &config_bytes,
+                                    &[
+                                        SecureStorageCapability::Read,
+                                        SecureStorageCapability::Write,
+                                    ],
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    ceremony_id = %ceremony_id,
+                                    error = %e,
+                                    "Failed to store threshold config metadata"
+                                );
+                            }
+
+                            if let Err(e) = effects
+                                .secure_store(
+                                    &pubkey_location,
+                                    &pubkey_bytes,
+                                    &[
+                                        SecureStorageCapability::Read,
+                                        SecureStorageCapability::Write,
+                                    ],
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    ceremony_id = %ceremony_id,
+                                    error = %e,
+                                    "Failed to store threshold public key package"
+                                );
+                            }
+                        }
+                    }
+
                     // Acknowledge storage to the initiator device.
                     let context_entropy = {
                         let mut h = aura_core::hash::hasher();
@@ -414,6 +474,9 @@ impl AuraAgent {
                     use aura_core::effects::{
                         SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
                     };
+                    use base64::Engine;
+
+                    let authority_id = envelope.destination;
 
                     let (Some(ceremony_id), Some(pending_epoch_str), Some(initiator_device_id_str)) = (
                         envelope.metadata.get("ceremony-id"),
@@ -491,6 +554,63 @@ impl AuraAgent {
                             "Failed to store device threshold key package"
                         );
                         continue;
+                    }
+
+                    if let (Some(config_b64), Some(pubkey_b64)) = (
+                        envelope.metadata.get("threshold-config"),
+                        envelope.metadata.get("threshold-pubkey"),
+                    ) {
+                        if let (Ok(config_bytes), Ok(pubkey_bytes)) = (
+                            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(config_b64),
+                            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(pubkey_b64),
+                        ) {
+                            let config_location = SecureStorageLocation::with_sub_key(
+                                "threshold_config",
+                                format!("{}", authority_id),
+                                format!("{}", pending_epoch),
+                            );
+                            let pubkey_location = SecureStorageLocation::with_sub_key(
+                                "threshold_pubkey",
+                                format!("{}", authority_id),
+                                format!("{}", pending_epoch),
+                            );
+
+                            if let Err(e) = effects
+                                .secure_store(
+                                    &config_location,
+                                    &config_bytes,
+                                    &[
+                                        SecureStorageCapability::Read,
+                                        SecureStorageCapability::Write,
+                                    ],
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    ceremony_id = %ceremony_id,
+                                    error = %e,
+                                    "Failed to store threshold config metadata"
+                                );
+                            }
+
+                            if let Err(e) = effects
+                                .secure_store(
+                                    &pubkey_location,
+                                    &pubkey_bytes,
+                                    &[
+                                        SecureStorageCapability::Read,
+                                        SecureStorageCapability::Write,
+                                    ],
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    ceremony_id = %ceremony_id,
+                                    error = %e,
+                                    "Failed to store threshold public key package"
+                                );
+                            }
+                        }
                     }
 
                     // Acknowledge storage to the initiator device.
@@ -595,6 +715,17 @@ impl AuraAgent {
                     let enrolled_device_id = ceremony_state
                         .enrollment_device_id
                         .unwrap_or(acceptor_device_id);
+
+                    if !ceremony_state.accepted_participants.contains(
+                        &aura_core::threshold::ParticipantIdentity::device(enrolled_device_id),
+                    ) {
+                        tracing::info!(
+                            ceremony_id = %ceremony_id,
+                            enrolled_device_id = %enrolled_device_id,
+                            "Device enrollment waiting for enrolled device acceptance"
+                        );
+                        continue;
+                    }
 
                     if ceremony_state.is_committed {
                         continue;
@@ -755,8 +886,82 @@ impl AuraAgent {
                         continue;
                     }
 
+                    let commit_context = {
+                        let mut h = aura_core::hash::hasher();
+                        h.update(b"DEVICE_THRESHOLD_CONTEXT");
+                        h.update(&authority_id.to_bytes());
+                        h.update(ceremony_id.as_bytes());
+                        aura_core::identifiers::ContextId::new_from_entropy(h.finalize())
+                    };
+                    let participants = ceremony_state.participants.clone();
+                    for participant in participants {
+                        let aura_core::threshold::ParticipantIdentity::Device(device_id) =
+                            participant
+                        else {
+                            continue;
+                        };
+
+                        let mut metadata = std::collections::HashMap::new();
+                        metadata.insert(
+                            "content-type".to_string(),
+                            "application/aura-device-threshold-commit".to_string(),
+                        );
+                        metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+                        metadata.insert("new-epoch".to_string(), new_epoch.to_string());
+                        metadata.insert(
+                            "aura-destination-device-id".to_string(),
+                            device_id.to_string(),
+                        );
+
+                        let envelope = aura_core::effects::TransportEnvelope {
+                            destination: authority_id,
+                            source: authority_id,
+                            context: commit_context,
+                            payload: Vec::new(),
+                            metadata,
+                            receipt: None,
+                        };
+
+                        if let Err(e) = effects.send_envelope(envelope).await {
+                            tracing::warn!(
+                                ceremony_id = %ceremony_id,
+                                device_id = %device_id,
+                                error = %e,
+                                "Failed to send device threshold commit notice"
+                            );
+                        }
+                    }
+
                     let _ = ceremony_tracker.mark_committed(ceremony_id).await;
                     completed_count += 1;
+                }
+
+                "application/aura-device-enrollment-commit"
+                | "application/aura-device-threshold-commit" => {
+                    let Some(new_epoch_str) = envelope.metadata.get("new-epoch") else {
+                        continue;
+                    };
+                    let new_epoch: u64 = match new_epoch_str.parse() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!(
+                                new_epoch = %new_epoch_str,
+                                error = %e,
+                                "Invalid epoch in device commit notice"
+                            );
+                            continue;
+                        }
+                    };
+
+                    let authority_id = envelope.destination;
+                    if let Err(e) = effects.commit_key_rotation(&authority_id, new_epoch).await {
+                        tracing::warn!(
+                            authority_id = %authority_id,
+                            new_epoch,
+                            error = %e,
+                            "Failed to activate committed device threshold epoch"
+                        );
+                    }
                 }
                 _ => {
                     effects.requeue_envelope(envelope);

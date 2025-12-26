@@ -196,6 +196,8 @@ pub struct LabeledInputProps {
     pub placeholder: String,
     /// Whether this input is focused
     pub focused: bool,
+    /// Whether this field is required (adds " *" to label)
+    pub required: bool,
     /// Optional error message
     pub error: Option<String>,
 }
@@ -207,6 +209,7 @@ impl LabeledInputProps {
             value: String::new(),
             placeholder: placeholder.into(),
             focused: false,
+            required: false,
             error: None,
         }
     }
@@ -225,6 +228,11 @@ impl LabeledInputProps {
         self.error = error;
         self
     }
+
+    pub fn with_required(mut self, required: bool) -> Self {
+        self.required = required;
+        self
+    }
 }
 
 /// Label + input field combination with consistent styling
@@ -240,7 +248,11 @@ impl LabeledInputProps {
 /// }))
 /// ```
 pub fn labeled_input(props: &LabeledInputProps) -> impl Into<AnyElement<'static>> {
-    let label = props.label.clone();
+    let label = if props.required {
+        format!("{}*", props.label)
+    } else {
+        props.label.clone()
+    };
     let value = props.value.clone();
     let placeholder = props.placeholder.clone();
     let focused = props.focused;

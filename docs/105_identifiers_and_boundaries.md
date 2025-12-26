@@ -16,7 +16,7 @@ This identifier selects the journal namespace associated with the authority. The
 
 ### 1.2 DeviceId
 
-`DeviceId` is a random UUID identifying a device within a threshold account. Each device holds shares of the root key. The identifier is visible only inside the authority namespace and never crosses authority boundaries without explicit consent.
+`DeviceId` is a random UUID identifying a device within a threshold account. Each device holds shares of the root key. A single device can participate in multiple authorities, holding separate share material per authority. The identifier is visible only inside the authority namespace and never crosses authority boundaries without explicit consent.
 
 ```rust
 pub struct DeviceId(Uuid);

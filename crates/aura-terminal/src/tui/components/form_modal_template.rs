@@ -5,6 +5,7 @@
 use iocraft::prelude::*;
 
 use super::modal::ModalContent;
+use super::{labeled_input, LabeledInputProps};
 use crate::tui::theme::{Borders, Spacing, Theme};
 
 /// A form field definition
@@ -70,51 +71,23 @@ pub struct FormFieldProps {
 }
 
 /// A single form field display
+///
+/// Wraps `labeled_input` for consistent styling across all modals.
 #[component]
 pub fn FormFieldComponent(props: &FormFieldProps) -> impl Into<AnyElement<'static>> {
-    let label = props.label.clone();
-    let value = props.value.clone();
-    let placeholder = props.placeholder.clone();
-    let has_error = !props.error.is_empty();
-    let error = props.error.clone();
-
-    let display_text = if value.is_empty() { placeholder } else { value };
-
-    let text_color = if props.value.is_empty() {
-        Theme::TEXT_MUTED
-    } else {
-        Theme::TEXT
-    };
-
-    let border_color = if has_error {
-        Theme::ERROR
-    } else if props.focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
-
-    let required_marker = if props.required { " *" } else { "" };
-    let full_label = format!("{}{}", label, required_marker);
+    let input_props = LabeledInputProps::new(props.label.clone(), props.placeholder.clone())
+        .with_value(props.value.clone())
+        .with_focused(props.focused)
+        .with_required(props.required)
+        .with_error(if props.error.is_empty() {
+            None
+        } else {
+            Some(props.error.clone())
+        });
 
     element! {
-        View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
-            Text(content: full_label, color: Theme::TEXT_MUTED)
-            View(
-                border_style: Borders::INPUT,
-                border_color: border_color,
-                padding_left: Spacing::LIST_ITEM_PADDING,
-                padding_right: Spacing::LIST_ITEM_PADDING,
-            ) {
-                Text(content: display_text, color: text_color)
-            }
-            #(if has_error {
-                Some(element! {
-                    Text(content: error, color: Theme::ERROR)
-                })
-            } else {
-                None
-            })
+        View(margin_bottom: Spacing::XS) {
+            #(Some(labeled_input(&input_props).into()))
         }
     }
 }

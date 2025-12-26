@@ -62,7 +62,7 @@ pub use error::CrdtCoordinatorError;
 mod tests {
     use super::*;
     use crate::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
-    use crate::effects::semilattice::{CmHandler, CvHandler, DeltaHandler, MvHandler};
+    use crate::effects::semilattice::CvHandler;
     use aura_core::{
         semilattice::{
             Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, JoinSemilattice, MvState,

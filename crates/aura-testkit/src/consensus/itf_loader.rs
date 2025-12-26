@@ -12,11 +12,9 @@
 //! - `#bigint`: Large integers represented as `{"#bigint": "123"}`
 //! - Tagged variants: `{"tag": "SomeTag", "value": {...}}`
 
-use aura_core::AuraError;
-use aura_consensus::core::{
-    ConsensusPhase, ConsensusState, ShareData, ShareProposal,
-};
 use aura_consensus::core::state::PureCommitFact;
+use aura_consensus::core::{ConsensusPhase, ConsensusState, ShareData, ShareProposal};
+use aura_core::AuraError;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -181,7 +179,7 @@ fn parse_set_strings(value: Option<&Value>) -> BTreeSet<String> {
 }
 
 /// Parse a Quint #map value
-fn parse_map<F, T>(value: Option<&Value>, parse_val: F) -> HashMap<String, T>
+pub fn parse_map<F, T>(value: Option<&Value>, parse_val: F) -> HashMap<String, T>
 where
     F: Fn(&Value) -> Option<T>,
 {

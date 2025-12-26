@@ -107,6 +107,9 @@ pub struct IoAppProps {
     /// Carol's invite code (for demo mode)
     #[cfg(feature = "development")]
     pub demo_carol_code: String,
+    /// Mobile device id (for demo MFA shortcuts)
+    #[cfg(feature = "development")]
+    pub demo_mobile_device_id: String,
     // Reactive update channel - receiver wrapped in Arc<Mutex<Option>> for take-once semantics
     /// UI update receiver for reactive updates from callbacks
     pub update_rx: Option<Arc<Mutex<Option<UiUpdateReceiver>>>>,
@@ -238,6 +241,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let demo_alice = props.demo_alice_code.clone();
     #[cfg(feature = "development")]
     let demo_carol = props.demo_carol_code.clone();
+    #[cfg(feature = "development")]
+    let demo_mobile_device_id = props.demo_mobile_device_id.clone();
     let tui_state = hooks.use_ref(move || {
         #[cfg(feature = "development")]
         {
@@ -249,6 +254,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Set demo mode codes for import modal shortcuts (on contacts screen)
             state.contacts.demo_alice_code = demo_alice.clone();
             state.contacts.demo_carol_code = demo_carol.clone();
+            state.settings.demo_mobile_device_id = demo_mobile_device_id.clone();
             state
         }
 
@@ -1729,6 +1735,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         modal_state.selected_indices = selected;
                                         modal_state.threshold_k = threshold_k;
 
+                                        if !new_state.settings.demo_mobile_device_id.is_empty() {
+                                            new_state.toast_info(
+                                                "Demo: press Ctrl+M to select the Mobile device for MFA.",
+                                            );
+                                        }
+
                                         new_state.modal_queue.enqueue(
                                             crate::tui::state_machine::QueuedModal::MfaSetup(modal_state),
                                         );
@@ -2388,6 +2400,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         demo_mode: ctx_arc.is_demo_mode(),
                         demo_alice_code: ctx_arc.demo_alice_code(),
                         demo_carol_code: ctx_arc.demo_carol_code(),
+                        demo_mobile_device_id: ctx_arc.demo_mobile_device_id(),
                         // Reactive update channel
                         update_rx: Some(update_rx_holder),
                         update_tx: Some(update_tx.clone()),

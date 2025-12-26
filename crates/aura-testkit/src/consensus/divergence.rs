@@ -28,8 +28,8 @@
 //! ╚══════════════════════════════════════════════════════════════════════╝
 //! ```
 
-use aura_consensus::core::{ConsensusState, ShareProposal};
 use aura_consensus::core::state::PureCommitFact;
+use aura_consensus::core::{ConsensusState, ShareProposal};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -397,27 +397,27 @@ impl<'a> DivergenceReport<'a> {
     pub fn for_instance(step_index: usize, diff: &'a InstanceDiff) -> String {
         let mut report = String::new();
 
-        report.push_str(&format!(
-            "\n╔══════════════════════════════════════════════════════════════════════╗\n"
-        ));
+        report.push_str(
+            "\n╔══════════════════════════════════════════════════════════════════════╗\n",
+        );
         report.push_str(&format!(
             "║ DIVERGENCE DETECTED at step {:<40} ║\n",
             step_index
         ));
-        report.push_str(&format!(
-            "╠══════════════════════════════════════════════════════════════════════╣\n"
-        ));
+        report.push_str(
+            "╠══════════════════════════════════════════════════════════════════════╣\n",
+        );
         report.push_str(&format!("║ Instance: {:<60} ║\n", diff.cid));
-        report.push_str(&format!(
-            "╠──────────────────────────────────────────────────────────────────────╣\n"
-        ));
+        report.push_str(
+            "╠──────────────────────────────────────────────────────────────────────╣\n",
+        );
         report.push_str(&format!(
             "║ {:<14} │ {:<21} │ {:<27} ║\n",
             "Field", "Expected", "Actual"
         ));
-        report.push_str(&format!(
-            "╠────────────────┼───────────────────────┼─────────────────────────────╣\n"
-        ));
+        report.push_str(
+            "╠────────────────┼───────────────────────┼─────────────────────────────╣\n",
+        );
 
         for fd in &diff.diffs {
             let field = if fd.field.len() > 14 {
@@ -444,9 +444,9 @@ impl<'a> DivergenceReport<'a> {
             ));
         }
 
-        report.push_str(&format!(
-            "╚══════════════════════════════════════════════════════════════════════╝\n"
-        ));
+        report.push_str(
+            "╚══════════════════════════════════════════════════════════════════════╝\n",
+        );
 
         report
     }
@@ -631,7 +631,7 @@ mod tests {
 
     #[test]
     fn test_divergence_report_format() {
-        let mut state1 = make_test_state();
+        let state1 = make_test_state();
         let mut state2 = make_test_state();
         state2.phase = ConsensusPhase::FallbackActive;
         state2.threshold = 3;
