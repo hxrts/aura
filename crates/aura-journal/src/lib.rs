@@ -119,7 +119,10 @@ pub use types::GuardianMetadata;
 pub use events::{AdminReplaced, MaintenanceEvent};
 
 // Extensibility infrastructure re-exports
-pub use extensibility::{parse_generic_fact, DomainFact, FactReducer, FactRegistry};
+pub use extensibility::{
+    decode_domain_fact, encode_domain_fact, parse_generic_fact, DomainFact, FactReducer,
+    FactRegistry,
+};
 
 // Social fact schema re-exports (Phase 2.3)
 pub use facts::{

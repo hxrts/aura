@@ -44,7 +44,7 @@ impl ChoreographicContext {
         key: &str,
         value: &T,
     ) -> Result<Self, AuraHandlerError> {
-        let serialized = bincode::serialize(value).map_err(|e| {
+        let serialized = aura_core::util::serialization::to_vec(value).map_err(|e| {
             AuraHandlerError::context_error(format!("Failed to serialize state: {}", e))
         })?;
 
@@ -66,7 +66,7 @@ impl ChoreographicContext {
     ) -> Result<Option<T>, AuraHandlerError> {
         match self.protocol_state.get(key) {
             Some(data) => {
-                let value = bincode::deserialize(data).map_err(|e| {
+                let value = aura_core::util::serialization::from_slice(data).map_err(|e| {
                     AuraHandlerError::context_error(format!("Failed to deserialize state: {}", e))
                 })?;
                 Ok(Some(value))

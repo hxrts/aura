@@ -48,7 +48,7 @@ pub struct DemoSignalCoordinator {
     sim_bridge: Arc<SimulatedBridge>,
 
     /// Channel to receive agent responses
-    response_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<(AuthorityId, AgentResponse)>>>,
+    response_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(AuthorityId, AgentResponse)>>>,
 
     /// Track last seen message count to detect new messages
     last_message_count: Arc<tokio::sync::Mutex<usize>>,
@@ -63,7 +63,7 @@ impl DemoSignalCoordinator {
         app_core: Arc<RwLock<AppCore>>,
         bob_authority: AuthorityId,
         sim_bridge: Arc<SimulatedBridge>,
-        response_rx: mpsc::UnboundedReceiver<(AuthorityId, AgentResponse)>,
+        response_rx: mpsc::Receiver<(AuthorityId, AgentResponse)>,
     ) -> Self {
         Self {
             app_core,

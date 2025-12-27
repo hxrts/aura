@@ -42,7 +42,7 @@
 //! let unified_msg = AuraMessage::Crypto(crypto_msg);
 //!
 //! // Serialize for transport
-//! let wire_bytes = bincode::serialize(&unified_msg)?;
+//! let wire_bytes = aura_core::util::serialization::to_vec(&unified_msg)?;
 //! ```
 
 // Domain-specific message modules

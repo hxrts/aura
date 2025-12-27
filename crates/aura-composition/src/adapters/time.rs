@@ -46,14 +46,14 @@ impl RegistrableHandler for TimeHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
                 })
             }
             "sleep_ms" => {
-                let millis: u64 = bincode::deserialize(parameters).map_err(|e| {
+                let millis: u64 = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -64,7 +64,7 @@ impl RegistrableHandler for TimeHandlerAdapter {
                 Ok(Vec::new()) // sleep returns void
             }
             "sleep_until" => {
-                let epoch: u64 = bincode::deserialize(parameters).map_err(|e| {
+                let epoch: u64 = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -76,7 +76,7 @@ impl RegistrableHandler for TimeHandlerAdapter {
             }
             "logical_advance" => {
                 let observed: Option<aura_core::time::VectorClock> =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -90,7 +90,7 @@ impl RegistrableHandler for TimeHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -102,7 +102,7 @@ impl RegistrableHandler for TimeHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -114,7 +114,7 @@ impl RegistrableHandler for TimeHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),

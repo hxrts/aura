@@ -40,7 +40,7 @@ impl RegistrableHandler for RandomHandlerAdapter {
 
         match operation {
             "random_bytes" => {
-                let len: usize = bincode::deserialize(parameters).map_err(|e| {
+                let len: usize = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -48,7 +48,7 @@ impl RegistrableHandler for RandomHandlerAdapter {
                     }
                 })?;
                 let result = self.handler.random_bytes(len).await;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -56,7 +56,7 @@ impl RegistrableHandler for RandomHandlerAdapter {
             }
             "random_bytes_32" => {
                 let result = self.handler.random_bytes_32().await;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -64,14 +64,14 @@ impl RegistrableHandler for RandomHandlerAdapter {
             }
             "random_u64" => {
                 let result = self.handler.random_u64().await;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
                 })
             }
             "random_range" => {
-                let (min, max): (u64, u64) = bincode::deserialize(parameters).map_err(|e| {
+                let (min, max): (u64, u64) = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -79,7 +79,7 @@ impl RegistrableHandler for RandomHandlerAdapter {
                     }
                 })?;
                 let result = self.handler.random_range(min, max).await;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -87,7 +87,7 @@ impl RegistrableHandler for RandomHandlerAdapter {
             }
             "random_uuid" => {
                 let result = self.handler.random_uuid().await;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),

@@ -98,6 +98,7 @@ mod runtime_bridge;
 
 // Journal fact registry helpers (public helper functions)
 pub mod fact_registry;
+pub mod fact_types;
 
 // Public API - authority-first design
 pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, AuthorityContext};

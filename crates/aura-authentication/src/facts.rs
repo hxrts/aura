@@ -28,6 +28,7 @@ use aura_core::identifiers::AuthorityId;
 use aura_core::{ContextId, DeviceId};
 use aura_journal::{DomainFact, FactReducer};
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
+use aura_macros::DomainFact;
 use aura_signature::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +36,6 @@ use crate::guards::RecoveryOperationType;
 
 /// Fact type identifier for authentication facts
 pub const AUTH_FACT_TYPE_ID: &str = "aura.authenticate.v1";
-pub const AUTH_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthFactKey {
@@ -51,7 +51,8 @@ pub struct AuthFactKey {
 ///
 /// These facts capture all state-changing events in the authentication system.
 /// They are designed to be immutable and append-only.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "aura.authenticate.v1", schema_version = 1, context_fn = "context_id")]
 pub enum AuthFact {
     /// An authentication challenge was generated
     ChallengeGenerated {
@@ -406,27 +407,6 @@ impl AuthFact {
 }
 
 // =============================================================================
-impl DomainFact for AuthFact {
-    fn type_id(&self) -> &'static str {
-        AUTH_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id()
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(self.type_id(), AUTH_FACT_SCHEMA_VERSION, self)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        aura_journal::decode_domain_fact(AUTH_FACT_TYPE_ID, AUTH_FACT_SCHEMA_VERSION, bytes)
-    }
-}
-
 // Fact Reducer
 // =============================================================================
 

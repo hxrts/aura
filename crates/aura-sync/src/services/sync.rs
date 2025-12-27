@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 use super::{HealthCheck, HealthStatus, Service, ServiceMetrics, ServiceState};
 use crate::core::{sync_session_error, MetricsCollector, SessionManager, SyncResult};
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
-use crate::protocols::{JournalSyncConfig, JournalSyncProtocol};
+use crate::protocols::{JournalSyncConfig, JournalSyncProtocol, SyncProtocolEffects};
 use aura_core::effects::{PhysicalTimeEffects, TimeError};
 use aura_core::{AuraError, DeviceId};
 
@@ -211,11 +211,7 @@ impl SyncService {
         now_instant: std::time::Instant,
     ) -> SyncResult<()>
     where
-        E: aura_core::effects::JournalEffects
-            + aura_core::effects::NetworkEffects
-            + aura_core::effects::PhysicalTimeEffects
-            + Send
-            + Sync,
+        E: SyncProtocolEffects,
     {
         if peers.is_empty() {
             return Ok(());
@@ -269,11 +265,7 @@ impl SyncService {
         now_instant: std::time::Instant,
     ) -> SyncResult<()>
     where
-        E: aura_core::effects::JournalEffects
-            + aura_core::effects::NetworkEffects
-            + aura_core::effects::PhysicalTimeEffects
-            + Send
-            + Sync,
+        E: SyncProtocolEffects,
     {
         // Implement peer synchronization using journal_sync
 
@@ -500,11 +492,7 @@ impl SyncService {
         peers: &[DeviceId],
     ) -> SyncResult<Vec<(DeviceId, usize)>>
     where
-        E: aura_core::effects::JournalEffects
-            + aura_core::effects::NetworkEffects
-            + aura_core::effects::PhysicalTimeEffects
-            + Send
-            + Sync,
+        E: SyncProtocolEffects,
     {
         let mut sync_results = Vec::new();
 

@@ -150,20 +150,14 @@ impl SingleSignerKeyPackage {
         }
     }
 
-    /// Serialize to bytes using bincode.
-    ///
-    /// # Panics
-    /// This should never panic as the type contains only fixed-size vectors.
-    #[allow(clippy::expect_used)] // Serialization of Vec<u8> fields cannot fail
-    pub fn to_bytes(&self) -> Vec<u8> {
-        // Use bincode for efficient binary serialization
-        bincode::serialize(self).expect("SingleSignerKeyPackage serialization should not fail")
+    /// Serialize to bytes using DAG-CBOR.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, crate::util::serialization::SerializationError> {
+        crate::util::serialization::to_vec(self)
     }
 
     /// Deserialize from bytes.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        bincode::deserialize(bytes)
-            .map_err(|e| format!("Failed to deserialize SingleSignerKeyPackage: {}", e))
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, crate::util::serialization::SerializationError> {
+        crate::util::serialization::from_slice(bytes)
     }
 }
 
@@ -224,20 +218,14 @@ impl SingleSignerPublicKeyPackage {
         &self.verifying_key
     }
 
-    /// Serialize to bytes using bincode.
-    ///
-    /// # Panics
-    /// This should never panic as the type contains only a Vec<u8> field.
-    #[allow(clippy::expect_used)] // Serialization of Vec<u8> cannot fail
-    pub fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(self)
-            .expect("SingleSignerPublicKeyPackage serialization should not fail")
+    /// Serialize to bytes using DAG-CBOR.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, crate::util::serialization::SerializationError> {
+        crate::util::serialization::to_vec(self)
     }
 
     /// Deserialize from bytes.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        bincode::deserialize(bytes)
-            .map_err(|e| format!("Failed to deserialize SingleSignerPublicKeyPackage: {}", e))
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, crate::util::serialization::SerializationError> {
+        crate::util::serialization::from_slice(bytes)
     }
 }
 
@@ -285,7 +273,7 @@ mod tests {
         let verifying_key = vec![2u8; 32];
         let pkg = SingleSignerKeyPackage::new(signing_key.clone(), verifying_key.clone());
 
-        let bytes = pkg.to_bytes();
+        let bytes = pkg.to_bytes().unwrap();
         let restored = SingleSignerKeyPackage::from_bytes(&bytes).unwrap();
 
         assert_eq!(restored.signing_key(), &signing_key[..]);
@@ -304,7 +292,7 @@ mod tests {
         let verifying_key = vec![4u8; 32];
         let pkg = SingleSignerPublicKeyPackage::new(verifying_key.clone());
 
-        let bytes = pkg.to_bytes();
+        let bytes = pkg.to_bytes().unwrap();
         let restored = SingleSignerPublicKeyPackage::from_bytes(&bytes).unwrap();
 
         assert_eq!(restored.verifying_key(), &verifying_key[..]);

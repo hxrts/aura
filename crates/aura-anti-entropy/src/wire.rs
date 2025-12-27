@@ -27,9 +27,9 @@ impl SyncWireMessage {
 }
 
 pub fn serialize_message(msg: &SyncWireMessage) -> Result<Vec<u8>, SyncError> {
-    bincode::serialize(msg).map_err(|e| SyncError::NetworkError(e.to_string()))
+    aura_core::util::serialization::to_vec(msg).map_err(|e| SyncError::NetworkError(e.to_string()))
 }
 
 pub fn deserialize_message(bytes: &[u8]) -> Result<SyncWireMessage, SyncError> {
-    bincode::deserialize(bytes).map_err(|e| SyncError::NetworkError(e.to_string()))
+    aura_core::util::serialization::from_slice(bytes).map_err(|e| SyncError::NetworkError(e.to_string()))
 }

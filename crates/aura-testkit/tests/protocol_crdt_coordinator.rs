@@ -232,7 +232,7 @@ async fn test_cv_sync_request_handling() -> AuraResult<()> {
     let request = CrdtSyncRequest {
         session_id,
         crdt_type: CrdtType::Convergent,
-        vector_clock: bincode::serialize(&VectorClock::new()).unwrap(),
+        vector_clock: aura_core::util::serialization::to_vec(&VectorClock::new()).unwrap(),
     };
 
     let response = coordinator.handle_sync_request(request).await?;
@@ -260,7 +260,7 @@ async fn test_cv_sync_response_handling() -> AuraResult<()> {
 
     // Create a response with a higher counter value
     let peer_state = TestCounter(50);
-    let state_bytes = bincode::serialize(&peer_state).unwrap();
+    let state_bytes = aura_core::util::serialization::to_vec(&peer_state).unwrap();
 
     let response = CrdtSyncResponse {
         session_id,

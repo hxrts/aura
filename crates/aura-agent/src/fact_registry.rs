@@ -78,6 +78,8 @@ pub fn build_fact_registry() -> FactRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fact_types::FACT_TYPE_IDS;
+    use aura_journal::validate_type_ids;
 
     #[test]
     fn registry_contains_domain_fact_types() {
@@ -93,5 +95,21 @@ mod tests {
         assert!(registry.is_registered(RECOVERY_FACT_TYPE_ID));
         assert!(registry.is_registered("moderation:block-mute"));
         assert!(registry.is_registered("moderation:block-unmute"));
+    }
+
+    #[test]
+    fn fact_type_ids_are_unique() {
+        validate_type_ids(FACT_TYPE_IDS).expect("fact type ids must be unique");
+    }
+
+    #[test]
+    fn registry_uses_central_fact_ids() {
+        let registry = build_fact_registry();
+        for registered in registry.registered_types() {
+            assert!(
+                FACT_TYPE_IDS.contains(&registered),
+                "registered type id missing from central list: {registered}"
+            );
+        }
     }
 }

@@ -34,12 +34,11 @@ use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
 };
+use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 /// Type identifier for social facts
 pub const SOCIAL_FACT_TYPE_ID: &str = "social";
-/// Schema version for social fact serialization
-pub const SOCIAL_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Key for indexing social facts in the journal
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +53,8 @@ pub struct SocialFactKey {
 ///
 /// These facts represent social-related state changes in the journal,
 /// including blocks, residents, stewards, and neighborhoods.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
+#[domain_fact(type_id = "social", schema_version = 1, context = "context_id")]
 pub enum SocialFact {
     /// Block created
     BlockCreated {
@@ -352,38 +352,6 @@ impl SocialFact {
                 uncertainty: None,
             },
         }
-    }
-}
-
-impl DomainFact for SocialFact {
-    fn type_id(&self) -> &'static str {
-        SOCIAL_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        match self {
-            SocialFact::BlockCreated { context_id, .. } => *context_id,
-            SocialFact::BlockDeleted { context_id, .. } => *context_id,
-            SocialFact::ResidentJoined { context_id, .. } => *context_id,
-            SocialFact::ResidentLeft { context_id, .. } => *context_id,
-            SocialFact::StewardGranted { context_id, .. } => *context_id,
-            SocialFact::StewardRevoked { context_id, .. } => *context_id,
-            SocialFact::StorageUpdated { context_id, .. } => *context_id,
-            SocialFact::NeighborhoodCreated { context_id, .. } => *context_id,
-            SocialFact::BlockJoinedNeighborhood { context_id, .. } => *context_id,
-            SocialFact::BlockLeftNeighborhood { context_id, .. } => *context_id,
-        }
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(self.type_id(), SOCIAL_FACT_SCHEMA_VERSION, self)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        aura_journal::decode_domain_fact(SOCIAL_FACT_TYPE_ID, SOCIAL_FACT_SCHEMA_VERSION, bytes)
     }
 }
 

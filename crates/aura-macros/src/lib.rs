@@ -20,6 +20,7 @@
 use proc_macro::TokenStream;
 
 mod choreography;
+mod domain_fact;
 mod effect_handlers;
 mod effect_system;
 mod error_types;
@@ -60,6 +61,19 @@ pub fn choreography(input: TokenStream) -> TokenStream {
         Ok(output) => output.into(),
         Err(err) => err.to_compile_error().into(),
     }
+}
+
+/// Derive macro for DomainFact implementations with canonical encoding.
+///
+/// Usage:
+/// ```ignore
+/// #[derive(DomainFact)]
+/// #[domain_fact(type_id = "chat", schema_version = 1, context = "context_id")]
+/// pub enum ChatFact { /* ... */ }
+/// ```
+#[proc_macro_derive(DomainFact, attributes(domain_fact))]
+pub fn derive_domain_fact(input: TokenStream) -> TokenStream {
+    domain_fact::derive_domain_fact_impl(input)
 }
 
 /// Generate effect handler implementations with mock and real variants

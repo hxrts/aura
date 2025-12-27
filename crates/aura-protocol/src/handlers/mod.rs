@@ -278,8 +278,8 @@ mod tests {
         }
 
         let params = TestParams { value: 42 };
-        let serialized = bincode::serialize(&params).unwrap();
-        let deserialized: TestParams = bincode::deserialize(&serialized).unwrap();
+        let serialized = aura_core::util::serialization::to_vec(&params).unwrap();
+        let deserialized: TestParams = aura_core::util::serialization::from_slice(&serialized).unwrap();
 
         assert_eq!(deserialized.value, 42);
     }

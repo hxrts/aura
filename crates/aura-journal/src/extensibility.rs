@@ -43,7 +43,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-pub use aura_core::facts::{decode_domain_fact, encode_domain_fact, FactEncoding, FactEnvelope};
+pub use aura_core::types::facts::{decode_domain_fact, encode_domain_fact, FactEncoding, FactEnvelope};
 
 /// Trait for domain-specific fact types
 ///
@@ -215,6 +215,20 @@ pub fn parse_generic_fact<F: DomainFact>(
         return None;
     }
     F::from_bytes(binding_data)
+}
+
+/// Validate a list of fact type IDs for duplicates.
+pub fn validate_type_ids(type_ids: &[&str]) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for type_id in type_ids {
+        if type_id.is_empty() {
+            return Err("fact type id cannot be empty".to_string());
+        }
+        if !seen.insert(*type_id) {
+            return Err(format!("duplicate fact type id: {type_id}"));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

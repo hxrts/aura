@@ -13,7 +13,6 @@ use aura_core::time::OrderTime;
 use aura_core::{hash, Authority, AuthorityId};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
-use bincode;
 use std::collections::BTreeSet;
 
 /// Authority-based journal sync configuration
@@ -209,7 +208,7 @@ impl AuthorityJournalSyncProtocol {
             .map_err(|e| aura_core::AuraError::storage(format!("load journal: {}", e)))?;
 
         if let Some(bytes) = maybe_bytes {
-            bincode::deserialize::<Journal>(&bytes)
+            aura_core::util::serialization::from_slice::<Journal>(&bytes)
                 .map_err(|e| aura_core::AuraError::serialization(format!("decode journal: {}", e)))
         } else {
             Ok(Journal::new(JournalNamespace::Authority(authority_id)))
@@ -229,7 +228,7 @@ impl AuthorityJournalSyncProtocol {
         let mut leaf_hashes: Vec<[u8; 32]> = facts
             .iter()
             .map(|fact| {
-                bincode::serialize(fact)
+                aura_core::util::serialization::to_vec(fact)
                     .map_err(|e| aura_core::AuraError::serialization(e.to_string()))
                     .map(|bytes| hash::hash(&bytes))
             })
@@ -350,7 +349,7 @@ impl AuthorityJournalSyncProtocol {
         journal: &Journal,
     ) -> SyncResult<()> {
         let key = Self::storage_key(authority_id);
-        let bytes = bincode::serialize(journal)
+        let bytes = aura_core::util::serialization::to_vec(journal)
             .map_err(|e| aura_core::AuraError::serialization(format!("encode journal: {}", e)))?;
         effects
             .store(&key, bytes)

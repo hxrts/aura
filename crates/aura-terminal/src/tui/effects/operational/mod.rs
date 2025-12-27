@@ -221,12 +221,7 @@ impl OperationalHandler {
             Ok(response) => Ok(response),
             Err(e) => {
                 let terr: TerminalError = e.into();
-                // Spawn emission task to avoid blocking
-                let operational = self.clone();
-                let terr_clone = terr.clone();
-                tokio::spawn(async move {
-                    operational.emit_error(terr_clone).await;
-                });
+                self.emit_error(terr.clone()).await;
                 Err(terr.to_string())
             }
         })

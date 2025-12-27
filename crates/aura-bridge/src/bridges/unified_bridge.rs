@@ -50,7 +50,7 @@ impl UnifiedAuraHandlerBridge {
         operation: &str,
         value: &T,
     ) -> Result<Vec<u8>, AuraHandlerError> {
-        bincode::serialize(value).map_err(|e| AuraHandlerError::EffectSerialization {
+        aura_core::util::serialization::to_vec(value).map_err(|e| AuraHandlerError::EffectSerialization {
             effect_type,
             operation: operation.to_string(),
             source: e.into(),
@@ -137,7 +137,7 @@ impl UnifiedAuraHandlerBridge {
     {
         // Serialize parameters
         let param_bytes =
-            bincode::serialize(&params).map_err(|e| AuraHandlerError::EffectSerialization {
+            aura_core::util::serialization::to_vec(&params).map_err(|e| AuraHandlerError::EffectSerialization {
                 effect_type,
                 operation: operation.to_string(),
                 source: e.into(),
@@ -149,7 +149,7 @@ impl UnifiedAuraHandlerBridge {
             .await?;
 
         // Deserialize the result
-        bincode::deserialize(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
+        aura_core::util::serialization::from_slice(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
             effect_type,
             operation: operation.to_string(),
             source: e.into(),
@@ -269,7 +269,7 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "send_to_peer" => {
-                let (peer_id, message): (uuid::Uuid, Vec<u8>) = bincode::deserialize(parameters)
+                let (peer_id, message): (uuid::Uuid, Vec<u8>) = aura_core::util::serialization::from_slice(parameters)
                     .map_err(|e| AuraHandlerError::ParameterDeserializationFailed {
                         source: e.into(),
                     })?;
@@ -283,7 +283,7 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Network, operation, &())
             }
             "broadcast" => {
-                let message: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
+                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
@@ -327,7 +327,7 @@ impl UnifiedAuraHandlerBridge {
         match operation {
             "store" => {
                 let (key, value): (String, Vec<u8>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                     })?;
 
@@ -340,7 +340,7 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Storage, operation, &())
             }
             "retrieve" => {
-                let key: String = bincode::deserialize(parameters).map_err(|e| {
+                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
@@ -353,7 +353,7 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Storage, operation, &result)
             }
             "remove" => {
-                let key: String = bincode::deserialize(parameters).map_err(|e| {
+                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
@@ -383,7 +383,7 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "hash" => {
-                let data: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
+                let data: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
@@ -391,7 +391,7 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Crypto, operation, &result)
             }
             "random_bytes" => {
-                let len: usize = bincode::deserialize(parameters).map_err(|e| {
+                let len: usize = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
@@ -408,7 +408,7 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Crypto, operation, &result)
             }
             "ed25519_sign" => {
-                let (message, private_key): (Vec<u8>, Vec<u8>) = bincode::deserialize(parameters)
+                let (message, private_key): (Vec<u8>, Vec<u8>) = aura_core::util::serialization::from_slice(parameters)
                     .map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
@@ -454,7 +454,7 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Time, operation, &result)
             }
             "sleep_ms" => {
-                let ms: u64 = bincode::deserialize(parameters).map_err(|e| {
+                let ms: u64 = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
@@ -481,7 +481,7 @@ impl UnifiedAuraHandlerBridge {
         match operation {
             "log_info" => {
                 let (message, fields): (String, Vec<(String, String)>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                     })?;
 
@@ -503,7 +503,7 @@ impl UnifiedAuraHandlerBridge {
             }
             "log_error" => {
                 let (message, fields): (String, Vec<(String, String)>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                     })?;
 
@@ -539,7 +539,7 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "random_bytes" => {
-                let len: usize = bincode::deserialize(parameters).map_err(|e| {
+                let len: usize = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
@@ -651,7 +651,7 @@ impl UnifiedAuraHandlerBridge {
         match operation {
             "send_to_role_bytes" => {
                 let (role, message): (ChoreographicRole, Vec<u8>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                     })?;
 
@@ -665,7 +665,7 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Choreographic, operation, &())
             }
             "broadcast_bytes" => {
-                let message: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
+                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
@@ -694,7 +694,7 @@ impl UnifiedAuraHandlerBridge {
         match operation {
             "log" => {
                 let (level, component, message): (String, String, String) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                     })?;
 
@@ -783,7 +783,7 @@ mod tests {
             "test".to_string(),
             "test message".to_string(),
         );
-        let param_bytes = bincode::serialize(&params).unwrap();
+        let param_bytes = aura_core::util::serialization::to_vec(&params).unwrap();
 
         let result = bridge
             .execute_effect(EffectType::System, "log", &param_bytes, &ctx)

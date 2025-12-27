@@ -18,7 +18,7 @@
 use aura_agent::fact_registry::build_fact_registry;
 use aura_agent::reactive::{Dynamic, ReactiveScheduler, ReactiveView, SchedulerConfig};
 use aura_journal::fact::Fact;
-use futures::future::yield_now;
+use tokio::task::yield_now;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,7 +45,7 @@ fn scheduler_with_registry(
 async fn test_map_no_intermediate_states() {
     // Test that map doesn't show intermediate states
     let source = Dynamic::new(0);
-    let doubled = source.map(|x| x * 2);
+    let doubled = source.map(|x| x * 2).await;
 
     // Record all observed values
     let observations = Arc::new(RwLock::new(Vec::new()));
@@ -83,12 +83,14 @@ async fn test_combine_consistent_snapshots() {
     let inconsistencies = Arc::new(AtomicUsize::new(0));
     let inc_clone = inconsistencies.clone();
 
-    let combined = a.combine(&b, move |x, y| {
+    let combined = a
+        .combine(&b, move |x, y| {
         if *x != *y {
             inc_clone.fetch_add(1, Ordering::SeqCst);
         }
         (*x, *y)
-    });
+    })
+        .await;
 
     // Subscribe to force evaluation
     let _rx = combined.subscribe();
@@ -112,9 +114,9 @@ async fn test_combine_consistent_snapshots() {
 async fn test_chain_propagation() {
     // Test that changes propagate correctly through a chain
     let source = Dynamic::new(1);
-    let doubled = source.map(|x| x * 2);
-    let plus_one = doubled.map(|x| x + 1);
-    let stringified = plus_one.map(|x| format!("value={}", x));
+    let doubled = source.map(|x| x * 2).await;
+    let plus_one = doubled.map(|x| x + 1).await;
+    let stringified = plus_one.map(|x| format!("value={}", x)).await;
 
     tokio::time::sleep(Duration::from_millis(20)).await;
 
@@ -172,9 +174,9 @@ async fn test_diamond_dependency_consistency() {
     // When 'a' changes, 'd' should see a consistent view of 'b' and 'c'
 
     let a = Dynamic::new(0);
-    let b = a.map(|x| x + 1); // b = a + 1
-    let c = a.map(|x| x * 2); // c = a * 2
-    let d = b.combine(&c, |x, y| (*x, *y)); // d = (b, c)
+    let b = a.map(|x| x + 1).await; // b = a + 1
+    let c = a.map(|x| x * 2).await; // c = a * 2
+    let d = b.combine(&c, |x, y| (*x, *y)).await; // d = (b, c)
 
     tokio::time::sleep(Duration::from_millis(20)).await;
 
@@ -203,7 +205,7 @@ async fn test_diamond_dependency_consistency() {
 async fn test_filter_preserves_consistency() {
     // Test that filter doesn't break consistency
     let source = Dynamic::new(0);
-    let positive_only = source.filter(|x| *x > 0);
+    let positive_only = source.filter(|x| *x > 0).await;
 
     tokio::time::sleep(Duration::from_millis(10)).await;
 
@@ -334,7 +336,7 @@ async fn test_scheduler_topological_update_order() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rapid_updates_consistency() {
     let source = Dynamic::new(0);
-    let derived = source.map(|x| x * 2);
+    let derived = source.map(|x| x * 2).await;
     // map() now synchronizes internally - spawned task is ready when map returns
 
     // Rapidly update source with occasional yields to allow propagation
@@ -363,7 +365,7 @@ async fn test_rapid_updates_consistency() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_concurrent_readers_consistency() {
     let source = Dynamic::new(0);
-    let derived = source.map(|x| x * 2);
+    let derived = source.map(|x| x * 2).await;
 
     let source_clone = source.clone();
     let derived_clone = derived.clone();

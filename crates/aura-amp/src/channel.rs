@@ -14,10 +14,11 @@ use aura_core::effects::amp::{
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{OrderTime, TimeStamp};
-use aura_journal::{decode_domain_fact, encode_domain_fact, DomainFact};
 use aura_journal::fact::{
     ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, RelationalFact,
 };
+use aura_journal::DomainFact;
+use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 use crate::{config::AmpRuntimeConfig, get_channel_state, AmpJournalEffects};
@@ -220,7 +221,8 @@ pub enum ChannelParticipantEvent {
 }
 
 /// Domain fact that records AMP channel membership events.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "amp-channel-membership", schema_version = 1, context = "context")]
 pub struct ChannelMembershipFact {
     #[serde(default = "channel_membership_schema_version")]
     schema_version: u16,
@@ -262,28 +264,6 @@ impl ChannelMembershipFact {
 
 fn channel_membership_schema_version() -> u16 {
     1
-}
-
-impl DomainFact for ChannelMembershipFact {
-    fn type_id(&self) -> &'static str {
-        "amp-channel-membership"
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_domain_fact(self.type_id(), channel_membership_schema_version(), self)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_domain_fact(
-            "amp-channel-membership",
-            channel_membership_schema_version(),
-            bytes,
-        )
-    }
 }
 
 fn map_err(e: aura_core::AuraError) -> AmpChannelError {

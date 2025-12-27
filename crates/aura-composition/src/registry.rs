@@ -54,6 +54,26 @@ impl HandlerContext {
         Uuid::from_bytes(op_bytes)
     }
 
+    fn deterministic_session_id(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> SessionId {
+        let mut seed = Vec::with_capacity(41);
+        seed.extend_from_slice(b"aura-session");
+        seed.extend_from_slice(&authority_id.to_bytes());
+        seed.extend_from_slice(&context_id.to_bytes());
+        match execution_mode {
+            ExecutionMode::Testing => seed.push(0),
+            ExecutionMode::Production => seed.push(1),
+            ExecutionMode::Simulation { seed: sim_seed } => {
+                seed.push(2);
+                seed.extend_from_slice(&sim_seed.to_le_bytes());
+            }
+        }
+        SessionId::new_from_entropy(hash::hash(&seed))
+    }
+
     // Registry helper
     /// Create a new handler context
     pub fn new(
@@ -66,7 +86,7 @@ impl HandlerContext {
             authority_id,
             context_id,
             execution_mode,
-            session_id: SessionId::new(),
+            session_id: Self::deterministic_session_id(authority_id, context_id, execution_mode),
             operation_id,
             metadata: HashMap::new(),
         }
@@ -661,7 +681,7 @@ mod tests {
         ) -> Result<Vec<u8>, HandlerError> {
             if self.effect_type == effect_type && self.operations.contains(&operation.to_string()) {
                 // Mock successful result
-                bincode::serialize(&serde_json::Value::String("mock_result".to_string())).map_err(
+                aura_core::util::serialization::to_vec(&serde_json::Value::String("mock_result".to_string())).map_err(
                     |e| HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -703,7 +723,7 @@ mod tests {
             if self.operations.contains(&operation.to_string()) {
                 // Mock successful operation - return serialized mock result
                 let mock_result = serde_json::Value::String("mock_result".to_string());
-                bincode::serialize(&mock_result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&mock_result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type: self.effect_type,
                     operation: operation.to_string(),
                     source: e.into(),

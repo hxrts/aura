@@ -293,7 +293,7 @@ impl TreeEffects for PersistentTreeHandler {
     }
 
     async fn propose_snapshot(&self, cut: Cut) -> Result<ProposalId, AuraError> {
-        let bytes = bincode::serialize(&cut)
+        let bytes = aura_core::util::serialization::to_vec(&cut)
             .map_err(|e| AuraError::internal(format!("serialize cut: {e}")))?;
         Ok(ProposalId(Hash32(hash::hash(&bytes))))
     }

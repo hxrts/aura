@@ -9,7 +9,8 @@
 use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::epochs::Epoch;
-use aura_core::{decode_domain_fact, encode_domain_fact, AccountId, Cap};
+use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
+use aura_core::{AccountId, Cap};
 use serde::{Deserialize, Serialize};
 
 /// Unique type identifier for verification facts
@@ -150,6 +151,10 @@ pub enum VerificationType {
 }
 
 impl VerifyFact {
+    fn version() -> SemanticVersion {
+        SemanticVersion::new(VERIFY_FACT_SCHEMA_VERSION, 0, 0)
+    }
+
     /// Get the authority ID associated with this fact, if applicable
     pub fn authority_id(&self) -> Option<AuthorityId> {
         match self {
@@ -194,12 +199,18 @@ impl VerifyFact {
 
     /// Encode this fact with a canonical envelope.
     pub fn to_bytes(&self) -> Vec<u8> {
-        encode_domain_fact(VERIFY_FACT_TYPE_ID, VERIFY_FACT_SCHEMA_VERSION, self)
+        let message = VersionedMessage::new(self.clone(), Self::version())
+            .with_metadata("type".to_string(), VERIFY_FACT_TYPE_ID.to_string());
+        to_vec(&message).unwrap_or_default()
     }
 
     /// Decode a fact from a canonical envelope.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_domain_fact(VERIFY_FACT_TYPE_ID, VERIFY_FACT_SCHEMA_VERSION, bytes)
+        let message: VersionedMessage<Self> = from_slice(bytes).ok()?;
+        if !message.version.is_compatible(&Self::version()) {
+            return None;
+        }
+        Some(message.payload)
     }
 
     /// Create a DeviceRegistered fact with millisecond timestamp (backward compatibility)

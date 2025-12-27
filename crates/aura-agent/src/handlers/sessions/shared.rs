@@ -220,6 +220,9 @@ pub fn session_type_suffix(session_type: &SessionType) -> &'static str {
         SessionType::KeyRotation => "rotation",
         SessionType::Coordination => "coord",
         SessionType::Backup => "backup",
+        SessionType::Invitation => "invitation",
+        SessionType::Rendezvous => "rendezvous",
+        SessionType::Sync => "sync",
         SessionType::Custom(_) => "custom",
     }
 }

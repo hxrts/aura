@@ -345,7 +345,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_single_receipt_verification() {
         let config = ReceiptVerificationConfig {
             verify_signatures: false, // Disable signature verification for mock tests
@@ -358,7 +358,7 @@ mod tests {
         assert!(protocol.verify_receipt(&receipt, &crypto).await.unwrap());
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_receipt_chain_verification() {
         let config = ReceiptVerificationConfig {
             verify_signatures: false, // Disable signature verification for mock tests
@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(result.chain_depth, 3);
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_chronological_ordering() {
         let config = ReceiptVerificationConfig {
             verify_signatures: false, // Disable signature verification for mock tests
@@ -402,7 +402,7 @@ mod tests {
         assert!(result.error.unwrap().contains("chronological"));
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_max_chain_depth() {
         let config = ReceiptVerificationConfig {
             max_chain_depth: 2,
@@ -424,7 +424,7 @@ mod tests {
         assert!(!result.valid);
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_create_receipt() {
         let protocol = ReceiptVerificationProtocol::default();
         let crypto = MockCryptoHandler::new();

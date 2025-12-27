@@ -389,7 +389,7 @@ impl RelationalContext {
         hasher.update(self.context_id.as_bytes());
 
         for fact in journal.facts.iter() {
-            let bytes = bincode::serialize(fact)
+            let bytes = aura_core::util::serialization::to_vec(fact)
                 .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
             hasher.update(&bytes);
         }
@@ -400,7 +400,7 @@ impl RelationalContext {
 
 impl RelationalContext {
     fn derive_order(fact: &RelationalFact) -> Result<OrderTime> {
-        let bytes = bincode::serialize(fact)
+        let bytes = aura_core::util::serialization::to_vec(fact)
             .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
         Ok(OrderTime(hash(&bytes)))
     }

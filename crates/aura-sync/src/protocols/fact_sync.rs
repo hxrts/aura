@@ -51,7 +51,6 @@ use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::BloomFilter;
 use aura_core::{hash, AuraError};
-use bincode;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -288,7 +287,7 @@ impl FactSyncProtocol {
         let all_facts = self.indexed_journal.all_facts().await?;
 
         if self.config.use_bloom_filter && !peer_bloom.is_empty() {
-            match bincode::deserialize::<BloomFilter>(peer_bloom) {
+            match aura_core::util::serialization::from_slice::<BloomFilter>(peer_bloom) {
                 Ok(filter) => {
                     let filtered: Vec<IndexedFact> = all_facts
                         .into_iter()
@@ -326,7 +325,7 @@ impl FactSyncProtocol {
     /// Get local Bloom filter for exchange with peer
     pub async fn local_bloom_filter(&self) -> Result<Vec<u8>, AuraError> {
         let filter = self.verifier.local_bloom_filter().await?;
-        bincode::serialize(&filter).map_err(|err| AuraError::serialization(err.to_string()))
+        aura_core::util::serialization::to_vec(&filter).map_err(|err| AuraError::serialization(err.to_string()))
     }
 
     /// Get protocol configuration
@@ -556,7 +555,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_sync_skipped_when_roots_match() {
         let root = [1u8; 32];
         let journal = Arc::new(MockIndexedJournal::new(root));
@@ -571,7 +570,7 @@ mod tests {
         assert!(facts_to_send.is_empty());
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_sync_with_different_roots() {
         let local_root = [1u8; 32];
         let remote_root = [2u8; 32];
@@ -596,7 +595,7 @@ mod tests {
         assert_eq!(facts_to_send.len(), 2); // All local facts
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_sync_with_verification_disabled() {
         let local_root = [1u8; 32];
         let remote_root = [2u8; 32];
@@ -620,7 +619,7 @@ mod tests {
         assert_eq!(result.facts_rejected, 0);
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_batch_size_limit() {
         let root = [1u8; 32];
         let remote_root = [2u8; 32];
@@ -645,7 +644,7 @@ mod tests {
         assert_eq!(facts_to_send.len(), 10); // Limited by batch size
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_bloom_filter_excludes_known_facts() {
         let local_root = [1u8; 32];
         let remote_root = [2u8; 32];
@@ -660,7 +659,7 @@ mod tests {
         // Peer already has fact 1
         let mut filter = BloomFilter::new(BloomConfig::for_sync(10)).unwrap();
         bloom_insert(&mut filter, &local_facts[0]);
-        let serialized = bincode::serialize(&filter).unwrap();
+        let serialized = aura_core::util::serialization::to_vec(&filter).unwrap();
 
         let (_, facts_to_send) = protocol
             .sync_with_peer(remote_root, &serialized, vec![])
@@ -671,7 +670,7 @@ mod tests {
         assert_eq!(facts_to_send[0].id, local_facts[1].id);
     }
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_config_presets() {
         let production = FactSyncConfig::production();
         assert!(production.verify_merkle);

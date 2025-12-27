@@ -61,7 +61,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
             "hkdf_derive" => {
                 // Parameters would be (ikm, salt, info, length)
                 let params: (Vec<u8>, Option<Vec<u8>>, Vec<u8>, usize) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -76,7 +76,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -84,7 +84,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
             }
             "derive_key" => {
                 let params: (Vec<u8>, KeyDerivationContext) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -98,7 +98,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -110,14 +110,14 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
                 })
             }
             "ed25519_sign" => {
-                let params: (Vec<u8>, Vec<u8>) = bincode::deserialize(parameters).map_err(|e| {
+                let params: (Vec<u8>, Vec<u8>) = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -131,14 +131,14 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
                 })
             }
             "ed25519_verify" => {
-                let params: (Vec<u8>, Vec<u8>, Vec<u8>) = bincode::deserialize(parameters)
+                let params: (Vec<u8>, Vec<u8>, Vec<u8>) = aura_core::util::serialization::from_slice(parameters)
                     .map_err(|e| HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -151,7 +151,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -164,7 +164,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                         operation: operation.to_string(),
                     }
                 })?;
-                let private_key: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
+                let private_key: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -177,7 +177,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -191,7 +191,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let (threshold, max_signers): (u16, u16) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -204,7 +204,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -218,7 +218,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (Vec<u8>, Vec<u8>, SigningMode) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -231,7 +231,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -245,7 +245,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (Vec<u8>, Vec<u8>, Vec<u8>, SigningMode) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -258,7 +258,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -272,7 +272,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let (threshold, max_signers): (u16, u16) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -285,7 +285,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -298,7 +298,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                         operation: operation.to_string(),
                     }
                 })?;
-                let key_package: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
+                let key_package: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -311,7 +311,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -325,7 +325,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (Vec<u8>, Vec<Vec<u8>>, Vec<u16>, Vec<u8>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -338,7 +338,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -352,7 +352,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (FrostSigningPackage, Vec<u8>, Vec<u8>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -365,7 +365,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -379,7 +379,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (FrostSigningPackage, Vec<Vec<u8>>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -392,7 +392,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -406,7 +406,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (Vec<u8>, Vec<u8>, Vec<u8>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -419,7 +419,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -433,7 +433,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -446,7 +446,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -460,7 +460,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -473,7 +473,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -487,7 +487,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -500,7 +500,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -514,7 +514,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -527,7 +527,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -541,7 +541,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     }
                 })?;
                 let params: (Vec<Vec<u8>>, u16, u16, u16) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -554,7 +554,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),

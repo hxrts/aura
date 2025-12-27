@@ -3,19 +3,13 @@
 use super::constants::*;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::PhysicalTime;
-use aura_journal::{decode_domain_fact, encode_domain_fact, DomainFact};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
-fn encode_moderation_fact<T: Serialize>(value: &T, type_id: &str) -> Vec<u8> {
-    encode_domain_fact(type_id, MODERATION_FACT_SCHEMA_VERSION, value)
-}
-
-fn decode_moderation_fact<T: DeserializeOwned>(type_id: &str, bytes: &[u8]) -> Option<T> {
-    decode_domain_fact(type_id, MODERATION_FACT_SCHEMA_VERSION, bytes)
-}
+use aura_journal::DomainFact;
+use aura_macros::DomainFact;
+use serde::{Deserialize, Serialize};
 
 /// Fact representing a block-wide mute or channel-specific mute.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "moderation:block-mute", schema_version = 1, context = "context_id")]
 pub struct BlockMuteFact {
     /// Context where the mute applies
     pub context_id: ContextId,
@@ -72,26 +66,9 @@ impl BlockMuteFact {
     }
 }
 
-impl DomainFact for BlockMuteFact {
-    fn type_id(&self) -> &'static str {
-        BLOCK_MUTE_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_moderation_fact(self, BLOCK_MUTE_FACT_TYPE_ID)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_moderation_fact(BLOCK_MUTE_FACT_TYPE_ID, bytes)
-    }
-}
-
 /// Fact representing the removal of a block mute.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "moderation:block-unmute", schema_version = 1, context = "context_id")]
 pub struct BlockUnmuteFact {
     /// Context where the unmute applies
     pub context_id: ContextId,
@@ -132,26 +109,9 @@ impl BlockUnmuteFact {
     }
 }
 
-impl DomainFact for BlockUnmuteFact {
-    fn type_id(&self) -> &'static str {
-        BLOCK_UNMUTE_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_moderation_fact(self, BLOCK_UNMUTE_FACT_TYPE_ID)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_moderation_fact(BLOCK_UNMUTE_FACT_TYPE_ID, bytes)
-    }
-}
-
 /// Fact representing a block-wide ban or channel-specific ban.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "moderation:block-ban", schema_version = 1, context = "context_id")]
 pub struct BlockBanFact {
     /// Context where the ban applies
     pub context_id: ContextId,
@@ -208,26 +168,9 @@ impl BlockBanFact {
     }
 }
 
-impl DomainFact for BlockBanFact {
-    fn type_id(&self) -> &'static str {
-        BLOCK_BAN_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_moderation_fact(self, BLOCK_BAN_FACT_TYPE_ID)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_moderation_fact(BLOCK_BAN_FACT_TYPE_ID, bytes)
-    }
-}
-
 /// Fact representing the removal of a block ban.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "moderation:block-unban", schema_version = 1, context = "context_id")]
 pub struct BlockUnbanFact {
     /// Context where the unban applies
     pub context_id: ContextId,
@@ -268,26 +211,9 @@ impl BlockUnbanFact {
     }
 }
 
-impl DomainFact for BlockUnbanFact {
-    fn type_id(&self) -> &'static str {
-        BLOCK_UNBAN_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_moderation_fact(self, BLOCK_UNBAN_FACT_TYPE_ID)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_moderation_fact(BLOCK_UNBAN_FACT_TYPE_ID, bytes)
-    }
-}
-
 /// Fact representing a kick from a channel (audit log entry).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "moderation:block-kick", schema_version = 1, context = "context_id")]
 pub struct BlockKickFact {
     /// Context where the kick occurred
     pub context_id: ContextId,
@@ -332,26 +258,9 @@ impl BlockKickFact {
     }
 }
 
-impl DomainFact for BlockKickFact {
-    fn type_id(&self) -> &'static str {
-        BLOCK_KICK_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_moderation_fact(self, BLOCK_KICK_FACT_TYPE_ID)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_moderation_fact(BLOCK_KICK_FACT_TYPE_ID, bytes)
-    }
-}
-
 /// Fact representing a pinned message in a block/channel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "moderation:block-pin", schema_version = 1, context = "context_id")]
 pub struct BlockPinFact {
     /// Context where the pin applies
     pub context_id: ContextId,
@@ -387,26 +296,9 @@ impl BlockPinFact {
     }
 }
 
-impl DomainFact for BlockPinFact {
-    fn type_id(&self) -> &'static str {
-        BLOCK_PIN_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_moderation_fact(self, BLOCK_PIN_FACT_TYPE_ID)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_moderation_fact(BLOCK_PIN_FACT_TYPE_ID, bytes)
-    }
-}
-
 /// Fact representing an unpinned message in a block/channel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "moderation:block-unpin", schema_version = 1, context = "context_id")]
 pub struct BlockUnpinFact {
     /// Context where the unpin applies
     pub context_id: ContextId,
@@ -442,26 +334,9 @@ impl BlockUnpinFact {
     }
 }
 
-impl DomainFact for BlockUnpinFact {
-    fn type_id(&self) -> &'static str {
-        BLOCK_UNPIN_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_moderation_fact(self, BLOCK_UNPIN_FACT_TYPE_ID)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_moderation_fact(BLOCK_UNPIN_FACT_TYPE_ID, bytes)
-    }
-}
-
 /// Fact representing granting steward (admin) privileges to a user.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "moderation:block-grant-steward", schema_version = 1, context = "context_id")]
 pub struct BlockGrantStewardFact {
     /// Block context where steward is being granted
     pub context_id: ContextId,
@@ -498,26 +373,9 @@ impl BlockGrantStewardFact {
     }
 }
 
-impl DomainFact for BlockGrantStewardFact {
-    fn type_id(&self) -> &'static str {
-        BLOCK_GRANT_STEWARD_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_moderation_fact(self, BLOCK_GRANT_STEWARD_FACT_TYPE_ID)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_moderation_fact(BLOCK_GRANT_STEWARD_FACT_TYPE_ID, bytes)
-    }
-}
-
 /// Fact representing revoking steward (admin) privileges from a user.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "moderation:block-revoke-steward", schema_version = 1, context = "context_id")]
 pub struct BlockRevokeStewardFact {
     /// Block context where steward is being revoked
     pub context_id: ContextId,
@@ -551,23 +409,5 @@ impl BlockRevokeStewardFact {
                 uncertainty: None,
             },
         }
-    }
-}
-
-impl DomainFact for BlockRevokeStewardFact {
-    fn type_id(&self) -> &'static str {
-        BLOCK_REVOKE_STEWARD_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        encode_moderation_fact(self, BLOCK_REVOKE_STEWARD_FACT_TYPE_ID)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_moderation_fact(BLOCK_REVOKE_STEWARD_FACT_TYPE_ID, bytes)
     }
 }

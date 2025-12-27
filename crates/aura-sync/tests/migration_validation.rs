@@ -157,7 +157,7 @@ fn test_error_context_preservation() {
 #[test]
 fn test_unified_message_patterns() {
     // Test session-scoped messages
-    let session_id = SessionId::new();
+    let session_id = SessionId::new_from_entropy([21u8; 32]);
     let payload = String::from("test data");
     let session_msg = SessionMessage::new(session_id, payload.clone());
 
@@ -729,7 +729,7 @@ fn test_backwards_compatibility_surface() {
         SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), test_time(1000000));
 
     // Basic message patterns
-    let _session_msg = SessionMessage::new(SessionId::new(), "test");
+    let _session_msg = SessionMessage::new(SessionId::new_from_entropy([22u8; 32]), "test");
     let _request_msg = RequestMessage::new(device(17), device(18), "ping", generate_test_uuid());
 
     // If this test compiles and runs, basic API compatibility is maintained

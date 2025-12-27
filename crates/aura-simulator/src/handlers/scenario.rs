@@ -784,13 +784,13 @@ impl SimulationScenarioHandler {
         }
     }
 
-    fn execute_frost_commitment_phase(
+    async fn execute_frost_commitment_phase(
         &self,
         participants: &[String],
         params: &HashMap<String, String>,
     ) -> Result<(), TestingError> {
         let (harness, config, authorities) = self.frost_setup(participants, params)?;
-        let result = run_sync(async {
+        let result = {
             let device_ctx = harness
                 .device_context(0)
                 .ok_or_else(|| AuraError::internal("missing device context"))?;
@@ -810,7 +810,7 @@ impl SimulationScenarioHandler {
             }
 
             Ok::<_, AuraError>(commitments)
-        });
+        };
 
         match result {
             Ok(commitments) => self.record_simple_event(
@@ -832,13 +832,13 @@ impl SimulationScenarioHandler {
         }
     }
 
-    fn execute_frost_signing_phase(
+    async fn execute_frost_signing_phase(
         &self,
         participants: &[String],
         params: &HashMap<String, String>,
     ) -> Result<(), TestingError> {
         let (harness, config, authorities) = self.frost_setup(participants, params)?;
-        let result = run_sync(async {
+        let result = {
             let device_ctx = harness
                 .device_context(0)
                 .ok_or_else(|| AuraError::internal("missing device context"))?;
@@ -887,7 +887,7 @@ impl SimulationScenarioHandler {
             }
 
             Ok::<_, AuraError>(partial_signatures.len())
-        });
+        };
 
         match result {
             Ok(count) => self.record_simple_event(
@@ -909,13 +909,13 @@ impl SimulationScenarioHandler {
         }
     }
 
-    fn execute_frost_commit_reveal(
+    async fn execute_frost_commit_reveal(
         &self,
         participants: &[String],
         params: &HashMap<String, String>,
     ) -> Result<(), TestingError> {
         // Execute the full pipeline and surface commit + reveal sequencing in a single path.
-        let result = self.execute_frost_threshold(participants, params);
+        let result = self.execute_frost_threshold(participants, params).await;
         if result.is_ok() {
             self.record_simple_event(
                 "run_choreography",
@@ -951,7 +951,7 @@ impl SimulationScenarioHandler {
         self.record_simple_event("run_choreography", data)
     }
 
-    fn execute_frost_threshold(
+    async fn execute_frost_threshold(
         &self,
         participants: &[String],
         params: &HashMap<String, String>,
@@ -962,8 +962,7 @@ impl SimulationScenarioHandler {
             .get("threshold")
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or_else(|| total.min(2));
-
-        let result = run_sync(async {
+        let result = {
             let config = ThresholdSigningConfig::new(threshold, total, 120);
             let authorities: Vec<AuthorityId> = (0..config.total_signers)
                 .enumerate()
@@ -1027,7 +1026,7 @@ impl SimulationScenarioHandler {
                 &key_material.public_key_package,
             )
             .await
-        });
+        };
 
         match result {
             Ok(sig) => self.record_simple_event(
@@ -1059,7 +1058,7 @@ impl SimulationScenarioHandler {
         }
     }
 
-    fn execute_dkg(
+    async fn execute_dkg(
         &self,
         participants: &[String],
         params: &HashMap<String, String>,
@@ -1070,8 +1069,7 @@ impl SimulationScenarioHandler {
             .get("threshold")
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or_else(|| total.min(2));
-
-        let result = run_sync(async {
+        let result = {
             let config = ThresholdSigningConfig::new(threshold, total, 120);
             let authorities: Vec<AuthorityId> = (0..config.total_signers)
                 .enumerate()
@@ -1083,7 +1081,7 @@ impl SimulationScenarioHandler {
                 .ok_or_else(|| AuraError::internal("missing device context"))?;
 
             FrostCrypto::generate_key_material(&authorities, &config, device_ctx).await
-        });
+        };
 
         match result {
             Ok(_material) => self.record_simple_event(
@@ -1170,9 +1168,9 @@ impl SimulationScenarioHandler {
         )
     }
 
-    fn execute_session_setup(&self, participants: &[String]) -> Result<(), TestingError> {
+    async fn execute_session_setup(&self, participants: &[String]) -> Result<(), TestingError> {
         let harness = self.harness_for_participants(participants);
-        let result = run_sync(async {
+        let result = {
             let session = harness
                 .create_coordinated_session("simulated")
                 .await
@@ -1186,7 +1184,7 @@ impl SimulationScenarioHandler {
                 .await
                 .map_err(|e| AuraError::internal(e.to_string()))?;
             Ok::<usize, AuraError>(status.participants.len())
-        });
+        };
 
         match result {
             Ok(count) => self.record_simple_event(

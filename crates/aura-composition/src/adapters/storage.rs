@@ -58,7 +58,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
 
         match operation {
             "store" => {
-                let params: (String, Vec<u8>) = bincode::deserialize(parameters).map_err(|e| {
+                let params: (String, Vec<u8>) = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -73,7 +73,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                 Ok(Vec::new()) // store returns void
             }
             "retrieve" => {
-                let key: String = bincode::deserialize(parameters).map_err(|e| {
+                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -85,14 +85,14 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
                 })
             }
             "remove" => {
-                let key: String = bincode::deserialize(parameters).map_err(|e| {
+                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -104,14 +104,14 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
                 })
             }
             "list_keys" => {
-                let prefix: Option<String> = bincode::deserialize(parameters).map_err(|e| {
+                let prefix: Option<String> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -125,7 +125,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -138,7 +138,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         operation: operation.to_string(),
                     }
                 })?;
-                let key: String = bincode::deserialize(parameters).map_err(|e| {
+                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -150,7 +150,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -164,7 +164,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                     }
                 })?;
                 let pairs: std::collections::HashMap<String, Vec<u8>> =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -185,7 +185,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         operation: operation.to_string(),
                     }
                 })?;
-                let keys: Vec<String> = bincode::deserialize(parameters).map_err(|e| {
+                let keys: Vec<String> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -197,7 +197,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -229,7 +229,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),

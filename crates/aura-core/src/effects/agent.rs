@@ -267,6 +267,9 @@ pub enum SessionType {
     ThresholdOperation,
     Coordination,
     Backup,
+    Invitation,
+    Rendezvous,
+    Sync,
     Custom(String),
 }
 

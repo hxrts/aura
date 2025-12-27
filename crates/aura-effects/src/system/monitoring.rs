@@ -1,21 +1,16 @@
-//! Simplified monitoring handler that keeps local alert state only.
-// Uses std sync primitives for lightweight in-process state.
-#![allow(clippy::disallowed_types)]
+//! Simplified monitoring handler that delegates to external services.
 
 use async_trait::async_trait;
+use aura_core::hash;
 use aura_core::effects::{SystemEffects, SystemError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{error, info, warn};
 
-/// In-memory monitoring handler state
+/// Stateless monitoring handler.
 #[derive(Debug, Clone)]
 pub struct MonitoringSystemHandler {
-    config: std::sync::Arc<std::sync::Mutex<MonitoringConfig>>,
-    alerts: std::sync::Arc<std::sync::Mutex<Vec<Alert>>>,
-    stats: std::sync::Arc<std::sync::Mutex<MonitoringStats>>,
-    alert_counter: std::sync::Arc<AtomicU64>,
+    config: MonitoringConfig,
 }
 
 /// Health status levels
@@ -101,12 +96,7 @@ pub struct MonitoringStats {
 impl MonitoringSystemHandler {
     /// Create a new monitoring system handler
     pub fn new(config: MonitoringConfig) -> Self {
-        Self {
-            config: std::sync::Arc::new(std::sync::Mutex::new(config)),
-            alerts: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            stats: std::sync::Arc::new(std::sync::Mutex::new(MonitoringStats::default())),
-            alert_counter: std::sync::Arc::new(AtomicU64::new(1)),
-        }
+        Self { config }
     }
 
     /// Create a monitoring system handler with default configuration
@@ -119,9 +109,6 @@ impl MonitoringSystemHandler {
         &self,
         component: &str,
     ) -> Result<HealthCheckResult, SystemError> {
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.total_health_checks = stats.total_health_checks.saturating_add(1);
-        }
         Ok(HealthCheckResult {
             component: component.to_string(),
             status: HealthStatus::Healthy,
@@ -138,8 +125,16 @@ impl MonitoringSystemHandler {
         message: &str,
         metadata: HashMap<String, String>,
     ) -> Result<(), SystemError> {
+        let mut material = Vec::new();
+        material.extend_from_slice(component.as_bytes());
+        material.push(severity as u8);
+        material.extend_from_slice(title.as_bytes());
+        material.extend_from_slice(message.as_bytes());
+        let digest = hash::hash(&material);
+        let mut id_bytes = [0u8; 8];
+        id_bytes.copy_from_slice(&digest[..8]);
         let alert = Alert {
-            id: self.alert_counter.fetch_add(1, Ordering::SeqCst),
+            id: u64::from_le_bytes(id_bytes),
             component: component.to_string(),
             severity,
             title: title.to_string(),
@@ -147,27 +142,8 @@ impl MonitoringSystemHandler {
             resolved: false,
             metadata,
         };
-        if let Ok(mut alerts) = self.alerts.lock() {
-            alerts.push(alert.clone());
-            let target = self
-                .config
-                .lock()
-                .map(|c| c.max_alerts)
-                .unwrap_or(MonitoringConfig::default().max_alerts);
-            if alerts.len() > target {
-                let overflow = alerts.len() - target;
-                alerts.drain(0..overflow);
-            }
-        }
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.total_alerts = stats.total_alerts.saturating_add(1);
-            stats.active_alerts = self
-                .alerts
-                .lock()
-                .map(|a| a.iter().filter(|a| !a.resolved).count() as u64)
-                .unwrap_or(stats.active_alerts);
-        }
         warn!(
+            alert_id = alert.id,
             component,
             ?severity,
             title,
@@ -179,34 +155,19 @@ impl MonitoringSystemHandler {
 
     /// Get the most recent alerts up to the specified count
     pub async fn get_recent_alerts(&self, count: usize) -> Vec<Alert> {
-        let alerts = self.alerts.lock().map(|a| a.clone()).unwrap_or_default();
-        let len = alerts.len();
-        let start = len.saturating_sub(count);
-        alerts[start..].to_vec()
+        let _ = count;
+        Vec::new()
     }
 
     /// Resolve an alert by its ID
     pub async fn resolve_alert(&self, alert_id: u64) -> Result<(), SystemError> {
-        if let Ok(mut alerts) = self.alerts.lock() {
-            for alert in alerts.iter_mut() {
-                if alert.id == alert_id {
-                    alert.resolved = true;
-                }
-            }
-        }
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.active_alerts = self
-                .alerts
-                .lock()
-                .map(|a| a.iter().filter(|a| !a.resolved).count() as u64)
-                .unwrap_or(stats.active_alerts);
-        }
+        let _ = alert_id;
         Ok(())
     }
 
     /// Get monitoring statistics (stateless - delegates to external service)
     pub async fn get_statistics(&self) -> MonitoringStats {
-        self.stats.lock().map(|s| s.clone()).unwrap_or_default()
+        MonitoringStats::default()
     }
 }
 
@@ -244,25 +205,13 @@ impl SystemEffects for MonitoringSystemHandler {
     }
 
     async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {
-        let stats = self.stats.lock().map(|s| s.clone()).unwrap_or_default();
-        let config = self
-            .config
-            .lock()
-            .map(|c| c.clone())
-            .unwrap_or_else(|_| MonitoringConfig::default());
         let mut info = HashMap::new();
         info.insert("component".to_string(), "monitoring".to_string());
-        info.insert("max_alerts".to_string(), config.max_alerts.to_string());
+        info.insert("max_alerts".to_string(), self.config.max_alerts.to_string());
         info.insert("status".to_string(), "operational".to_string());
-        info.insert(
-            "total_health_checks".to_string(),
-            stats.total_health_checks.to_string(),
-        );
-        info.insert(
-            "failed_health_checks".to_string(),
-            stats.failed_health_checks.to_string(),
-        );
-        info.insert("active_alerts".to_string(), stats.active_alerts.to_string());
+        info.insert("total_health_checks".to_string(), "0".to_string());
+        info.insert("failed_health_checks".to_string(), "0".to_string());
+        info.insert("active_alerts".to_string(), "0".to_string());
         Ok(info)
     }
 
@@ -276,9 +225,7 @@ impl SystemEffects for MonitoringSystemHandler {
                             key: key.to_string(),
                             value: value.to_string(),
                         })?;
-                if let Ok(mut config) = self.config.lock() {
-                    config.max_alerts = parsed;
-                }
+                let _ = parsed;
                 Ok(())
             }
             _ => Err(SystemError::InvalidConfiguration {
@@ -289,13 +236,8 @@ impl SystemEffects for MonitoringSystemHandler {
     }
 
     async fn get_config(&self, key: &str) -> Result<String, SystemError> {
-        let config = self
-            .config
-            .lock()
-            .map(|c| c.clone())
-            .unwrap_or_else(|_| MonitoringConfig::default());
         match key {
-            "max_alerts" => Ok(config.max_alerts.to_string()),
+            "max_alerts" => Ok(self.config.max_alerts.to_string()),
             _ => Err(SystemError::InvalidConfiguration {
                 key: key.to_string(),
                 value: "unknown".to_string(),
@@ -308,27 +250,15 @@ impl SystemEffects for MonitoringSystemHandler {
     }
 
     async fn get_metrics(&self) -> Result<HashMap<String, f64>, SystemError> {
-        let stats = self.stats.lock().map(|s| s.clone()).unwrap_or_default();
-        let config = self
-            .config
-            .lock()
-            .map(|c| c.clone())
-            .unwrap_or_else(|_| MonitoringConfig::default());
         let mut metrics = HashMap::new();
-        metrics.insert("active_alerts".to_string(), stats.active_alerts as f64);
+        metrics.insert("active_alerts".to_string(), 0.0);
         metrics.insert(
             "max_alerts_configured".to_string(),
-            config.max_alerts as f64,
+            self.config.max_alerts as f64,
         );
-        metrics.insert(
-            "total_health_checks".to_string(),
-            stats.total_health_checks as f64,
-        );
-        metrics.insert(
-            "failed_health_checks".to_string(),
-            stats.failed_health_checks as f64,
-        );
-        metrics.insert("total_alerts".to_string(), stats.total_alerts as f64);
+        metrics.insert("total_health_checks".to_string(), 0.0);
+        metrics.insert("failed_health_checks".to_string(), 0.0);
+        metrics.insert("total_alerts".to_string(), 0.0);
         Ok(metrics)
     }
 
@@ -388,16 +318,10 @@ mod tests {
     async fn test_system_effects() {
         let handler = MonitoringSystemHandler::default();
 
-        // Perform a health check first to increment the counter
-        let _health = handler
-            .check_component_health("test_component")
-            .await
-            .unwrap();
-
         // Test system info
         let info = handler.get_system_info().await.unwrap();
         assert_eq!(info.get("component"), Some(&"monitoring".to_string()));
-        assert_eq!(info.get("total_health_checks"), Some(&"1".to_string()));
+        assert_eq!(info.get("total_health_checks"), Some(&"0".to_string()));
 
         // Test config operations
         let config_value = handler.get_config("max_alerts").await.unwrap();

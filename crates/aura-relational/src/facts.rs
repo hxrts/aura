@@ -41,11 +41,11 @@ use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
 };
+use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 /// Type identifier for contact facts
 pub const CONTACT_FACT_TYPE_ID: &str = "contact";
-pub const CONTACT_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContactFactKey {
@@ -57,7 +57,8 @@ pub struct ContactFactKey {
 ///
 /// These facts represent contact-related state changes in the journal.
 /// They are stored as `RelationalFact::Generic` and reduced by `ContactFactReducer`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
+#[domain_fact(type_id = "contact", schema_version = 1, context = "context_id")]
 pub enum ContactFact {
     /// Contact added to authority's contact list
     Added {
@@ -185,31 +186,6 @@ impl ContactFact {
     }
 }
 
-impl DomainFact for ContactFact {
-    fn type_id(&self) -> &'static str {
-        CONTACT_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        match self {
-            ContactFact::Added { context_id, .. } => *context_id,
-            ContactFact::Removed { context_id, .. } => *context_id,
-            ContactFact::Renamed { context_id, .. } => *context_id,
-        }
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(self.type_id(), CONTACT_FACT_SCHEMA_VERSION, self)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        aura_journal::decode_domain_fact(CONTACT_FACT_TYPE_ID, CONTACT_FACT_SCHEMA_VERSION, bytes)
-    }
-}
-
 impl ContactFact {
     pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
         self.context_id() == context_id
@@ -276,10 +252,10 @@ impl FactReducer for ContactFactReducer {
 ///
 /// These facts store the full `GuardianBinding` payload as `RelationalFact::Generic`.
 pub const GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID: &str = "guardian_binding_details";
-pub const GUARDIAN_BINDING_DETAILS_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Stored guardian binding details for a relational context.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
+#[domain_fact(type_id = "guardian_binding_details", schema_version = 1, context = "context_id")]
 pub struct GuardianBindingDetailsFact {
     pub context_id: ContextId,
     pub account_id: AuthorityId,
@@ -307,35 +283,6 @@ impl GuardianBindingDetailsFact {
     }
 }
 
-impl DomainFact for GuardianBindingDetailsFact {
-    fn type_id(&self) -> &'static str {
-        GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(
-            self.type_id(),
-            GUARDIAN_BINDING_DETAILS_FACT_SCHEMA_VERSION,
-            self,
-        )
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        aura_journal::decode_domain_fact(
-            GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
-            GUARDIAN_BINDING_DETAILS_FACT_SCHEMA_VERSION,
-            bytes,
-        )
-    }
-}
-
 pub struct GuardianBindingDetailsFactReducer;
 
 impl FactReducer for GuardianBindingDetailsFactReducer {
@@ -355,7 +302,7 @@ impl FactReducer for GuardianBindingDetailsFactReducer {
 
         let fact = aura_journal::decode_domain_fact::<GuardianBindingDetailsFact>(
             GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
-            GUARDIAN_BINDING_DETAILS_FACT_SCHEMA_VERSION,
+            1,
             binding_data,
         )?;
         if !fact.validate_for_reduction(context_id) {
@@ -374,10 +321,10 @@ impl FactReducer for GuardianBindingDetailsFactReducer {
 ///
 /// These facts store the full `RecoveryGrant` payload as `RelationalFact::Generic`.
 pub const RECOVERY_GRANT_DETAILS_FACT_TYPE_ID: &str = "recovery_grant_details";
-pub const RECOVERY_GRANT_DETAILS_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Stored recovery grant details for a relational context.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
+#[domain_fact(type_id = "recovery_grant_details", schema_version = 1, context = "context_id")]
 pub struct RecoveryGrantDetailsFact {
     pub context_id: ContextId,
     pub account_id: AuthorityId,
@@ -402,35 +349,6 @@ impl RecoveryGrantDetailsFact {
     }
 }
 
-impl DomainFact for RecoveryGrantDetailsFact {
-    fn type_id(&self) -> &'static str {
-        RECOVERY_GRANT_DETAILS_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(
-            self.type_id(),
-            RECOVERY_GRANT_DETAILS_FACT_SCHEMA_VERSION,
-            self,
-        )
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        aura_journal::decode_domain_fact(
-            RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
-            RECOVERY_GRANT_DETAILS_FACT_SCHEMA_VERSION,
-            bytes,
-        )
-    }
-}
-
 pub struct RecoveryGrantDetailsFactReducer;
 
 impl FactReducer for RecoveryGrantDetailsFactReducer {
@@ -450,7 +368,7 @@ impl FactReducer for RecoveryGrantDetailsFactReducer {
 
         let fact = aura_journal::decode_domain_fact::<RecoveryGrantDetailsFact>(
             RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
-            RECOVERY_GRANT_DETAILS_FACT_SCHEMA_VERSION,
+            1,
             binding_data,
         )?;
         if !fact.validate_for_reduction(context_id) {

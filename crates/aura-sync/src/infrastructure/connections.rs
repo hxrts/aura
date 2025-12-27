@@ -334,12 +334,25 @@ impl ConnectionPool {
         }
     }
 
+    fn derive_session_id(&self, peer_id: DeviceId, now: u64) -> SessionId {
+        let mut material = Vec::with_capacity(41);
+        material.extend_from_slice(b"aura-sync-session");
+        material.extend_from_slice(
+            &peer_id
+                .to_bytes()
+                .unwrap_or([0u8; 32]),
+        );
+        material.extend_from_slice(&now.to_le_bytes());
+        material.extend_from_slice(&self.total_connections.to_le_bytes());
+        SessionId::new_from_entropy(hash::hash(&material))
+    }
+
     /// Acquire a connection to a peer
     ///
     /// Tries to reuse an idle connection first, otherwise creates a new one.
     /// Returns error if pool limits are exceeded or timeout occurs.
     pub async fn acquire(&mut self, peer_id: DeviceId, now: u64) -> SyncResult<ConnectionHandle> {
-        let session_id = SessionId::new();
+        let session_id = self.derive_session_id(peer_id, now);
 
         if let Some(connections) = self.connections.get_mut(&peer_id) {
             if let Some(idle_conn) = connections.iter_mut().find(|c| c.is_idle() && c.healthy) {

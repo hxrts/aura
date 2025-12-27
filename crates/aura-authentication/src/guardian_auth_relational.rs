@@ -91,7 +91,7 @@ pub async fn authenticate_guardian<T: aura_core::effects::PhysicalTimeEffects>(
         .ok_or_else(|| AuraError::not_found("Guardian binding not found"))?;
 
     // Sign the operation
-    let operation_bytes = bincode::serialize(&request.operation)
+    let operation_bytes = aura_core::util::serialization::to_vec(&request.operation)
         .map_err(|e| AuraError::serialization(e.to_string()))?;
 
     let signature = guardian_authority.sign_operation(&operation_bytes).await?;
@@ -165,7 +165,7 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
     }
 
     // Serialize the operation and verify the guardian's signature
-    let operation_bytes = bincode::serialize(&request.operation)
+    let operation_bytes = aura_core::util::serialization::to_vec(&request.operation)
         .map_err(|e| AuraError::serialization(format!("Failed to serialize operation: {}", e)))?;
 
     // Ensure signature length is valid
@@ -227,7 +227,7 @@ fn verify_consensus_proof(
     }
 
     // Check 4: Verify prestate hash matches binding by hashing the binding payload
-    let binding_bytes = match bincode::serialize(binding) {
+    let binding_bytes = match aura_core::util::serialization::to_vec(binding) {
         Ok(bytes) => bytes,
         Err(_) => return false,
     };

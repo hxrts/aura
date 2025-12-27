@@ -25,9 +25,9 @@ impl AmpMessage {
 }
 
 pub fn serialize_message(msg: &AmpMessage) -> Result<Vec<u8>, AuraError> {
-    bincode::serialize(msg).map_err(|e| AuraError::serialization(e.to_string()))
+    aura_core::util::serialization::to_vec(msg).map_err(|e| AuraError::serialization(e.to_string()))
 }
 
 pub fn deserialize_message(bytes: &[u8]) -> Result<AmpMessage, AuraError> {
-    bincode::deserialize(bytes).map_err(|e| AuraError::serialization(e.to_string()))
+    aura_core::util::serialization::from_slice(bytes).map_err(|e| AuraError::serialization(e.to_string()))
 }

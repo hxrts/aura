@@ -169,7 +169,7 @@ impl HandlerUtils {
     {
         // Serialize parameters
         let param_bytes =
-            bincode::serialize(&parameters).map_err(|e| AuraHandlerError::EffectSerialization {
+            aura_core::util::serialization::to_vec(&parameters).map_err(|e| AuraHandlerError::EffectSerialization {
                 effect_type,
                 operation: operation.to_string(),
                 source: e.into(),
@@ -181,7 +181,7 @@ impl HandlerUtils {
             .await?;
 
         // Deserialize the result
-        bincode::deserialize(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
+        aura_core::util::serialization::from_slice(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
             effect_type,
             operation: operation.to_string(),
             source: e.into(),

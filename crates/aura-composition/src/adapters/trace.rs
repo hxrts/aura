@@ -40,7 +40,7 @@ impl RegistrableHandler for TraceHandlerAdapter {
 
         match operation {
             "trace_event" => {
-                let event: TraceEvent = bincode::deserialize(parameters).map_err(|e| {
+                let event: TraceEvent = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -51,7 +51,7 @@ impl RegistrableHandler for TraceHandlerAdapter {
                 Ok(Vec::new())
             }
             "trace_span" => {
-                let event: TraceEvent = bincode::deserialize(parameters).map_err(|e| {
+                let event: TraceEvent = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -59,14 +59,14 @@ impl RegistrableHandler for TraceHandlerAdapter {
                     }
                 })?;
                 let span = self.handler.trace_span(event).await;
-                bincode::serialize(&span).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&span).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
                 })
             }
             "trace_span_end" => {
-                let span: TraceSpanId = bincode::deserialize(parameters).map_err(|e| {
+                let span: TraceSpanId = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),

@@ -9,7 +9,7 @@
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::epochs::Epoch;
-use aura_core::{decode_domain_fact, encode_domain_fact};
+use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use serde::{Deserialize, Serialize};
 
 /// Unique type identifier for WoT facts
@@ -121,6 +121,10 @@ pub enum WotFact {
 }
 
 impl WotFact {
+    fn version() -> SemanticVersion {
+        SemanticVersion::new(WOT_FACT_SCHEMA_VERSION, 0, 0)
+    }
+
     /// Get the primary authority ID associated with this fact
     pub fn authority_id(&self) -> AuthorityId {
         match self {
@@ -184,12 +188,18 @@ impl WotFact {
 
     /// Encode this fact with a canonical envelope.
     pub fn to_bytes(&self) -> Vec<u8> {
-        encode_domain_fact(WOT_FACT_TYPE_ID, WOT_FACT_SCHEMA_VERSION, self)
+        let message = VersionedMessage::new(self.clone(), Self::version())
+            .with_metadata("type".to_string(), WOT_FACT_TYPE_ID.to_string());
+        to_vec(&message).unwrap_or_default()
     }
 
     /// Decode a fact from a canonical envelope.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_domain_fact(WOT_FACT_TYPE_ID, WOT_FACT_SCHEMA_VERSION, bytes)
+        let message: VersionedMessage<Self> = from_slice(bytes).ok()?;
+        if !message.version.is_compatible(&Self::version()) {
+            return None;
+        }
+        Some(message.payload)
     }
 }
 

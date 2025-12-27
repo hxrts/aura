@@ -581,6 +581,9 @@ check-arch-completeness:
 check-arch-todos:
     scripts/check-arch.sh --todos || true
 
+check-arch-concurrency:
+    scripts/check-arch.sh --concurrency || true
+
 # Run CI checks locally (dry-run of GitHub CI workflow)
 ci-dry-run:
     #!/usr/bin/env bash

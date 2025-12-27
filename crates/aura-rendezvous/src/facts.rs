@@ -4,8 +4,10 @@
 //! These facts are stored in context journals and propagated via `aura-sync`.
 
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_journal::extensibility::{DomainFact, FactReducer};
+use aura_journal::extensibility::FactReducer;
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
+use aura_journal::DomainFact;
+use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -22,7 +24,6 @@ fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
 
 /// Type identifier for rendezvous facts
 pub const RENDEZVOUS_FACT_TYPE_ID: &str = "rendezvous";
-pub const RENDEZVOUS_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RendezvousFactKey {
@@ -31,7 +32,8 @@ pub struct RendezvousFactKey {
 }
 
 /// Rendezvous domain facts stored in context journals
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(type_id = "rendezvous", schema_version = 1, context_fn = "context_id_for_fact")]
 pub enum RendezvousFact {
     /// Transport descriptor advertisement
     Descriptor(RendezvousDescriptor),
@@ -140,12 +142,8 @@ pub enum TransportHint {
     TcpDirect { addr: String },
 }
 
-impl DomainFact for RendezvousFact {
-    fn type_id(&self) -> &'static str {
-        RENDEZVOUS_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
+impl RendezvousFact {
+    pub fn context_id_for_fact(&self) -> ContextId {
         match self {
             RendezvousFact::Descriptor(d) => d.context_id,
             RendezvousFact::ChannelEstablished { .. } => {
@@ -160,20 +158,6 @@ impl DomainFact for RendezvousFact {
         }
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(self.type_id(), RENDEZVOUS_FACT_SCHEMA_VERSION, self)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        aura_journal::decode_domain_fact(
-            RENDEZVOUS_FACT_TYPE_ID,
-            RENDEZVOUS_FACT_SCHEMA_VERSION,
-            bytes,
-        )
-    }
-}
-
-impl RendezvousFact {
     /// Get authority bindings for this fact (for journal indexing)
     pub fn authority_bindings(&self) -> Vec<[u8; 32]> {
         match self {

@@ -438,10 +438,10 @@ impl PartialOrd for Fact {
 
 impl Ord for Fact {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // For total order, use serialization-based comparison
+        // For total order, use DAG-CBOR serialization-based comparison
         // This ensures deterministic ordering for sets/maps
-        let self_bytes = bincode::serialize(self).unwrap_or_default();
-        let other_bytes = bincode::serialize(other).unwrap_or_default();
+        let self_bytes = crate::util::serialization::to_vec(self).unwrap_or_default();
+        let other_bytes = crate::util::serialization::to_vec(other).unwrap_or_default();
         self_bytes.cmp(&other_bytes)
     }
 }

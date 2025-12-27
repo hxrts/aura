@@ -9,6 +9,7 @@ use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects};
+use aura_core::hash;
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use aura_macros::choreography;
 use aura_protocol::effects::{ChoreographicRole, EffectApiEffects};
@@ -583,10 +584,14 @@ impl SessionOperations {
         let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
             match uuid::Uuid::parse_str(uuid_str) {
                 Ok(uuid) => aura_core::identifiers::SessionId::from_uuid(uuid),
-                Err(_) => aura_core::identifiers::SessionId::new(),
+                Err(_) => aura_core::identifiers::SessionId::new_from_entropy(hash::hash(
+                    session_id.as_bytes(),
+                )),
             }
         } else {
-            aura_core::identifiers::SessionId::new()
+            aura_core::identifiers::SessionId::new_from_entropy(hash::hash(
+                session_id.as_bytes(),
+            ))
         };
 
         // Implement session status lookup via effects system
@@ -628,12 +633,31 @@ impl SessionOperations {
     async fn create_session_via_effects(
         &self,
         _effects: &AuraEffectSystem,
-        _session_type: &SessionType,
+        session_type: &SessionType,
     ) -> AgentResult<String> {
         use aura_core::identifiers::SessionId;
 
-        // Generate session ID through effects system
-        let session_id = SessionId::new();
+        let current_time = self.effects.current_timestamp().await.unwrap_or(0);
+        let device_id = self.device_id();
+        let mut material = Vec::with_capacity(64);
+        material.extend_from_slice(b"aura-session");
+        material.extend_from_slice(device_id.0.as_bytes());
+        material.extend_from_slice(&current_time.to_le_bytes());
+        match session_type {
+            SessionType::Coordination => material.push(0),
+            SessionType::ThresholdOperation => material.push(1),
+            SessionType::Recovery => material.push(2),
+            SessionType::KeyRotation => material.push(3),
+            SessionType::Invitation => material.push(4),
+            SessionType::Rendezvous => material.push(5),
+            SessionType::Sync => material.push(6),
+            SessionType::Backup => material.push(8),
+            SessionType::Custom(label) => {
+                material.push(7);
+                material.extend_from_slice(label.as_bytes());
+            }
+        }
+        let session_id = SessionId::new_from_entropy(hash::hash(&material));
         let session_id_string = format!("session-{}", session_id.uuid().simple());
 
         // Session created successfully (logging removed for simplicity)

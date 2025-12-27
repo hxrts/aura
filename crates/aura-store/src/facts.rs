@@ -11,7 +11,8 @@
 
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
-use aura_core::{decode_domain_fact, encode_domain_fact, ChunkId, ContentId, ContextId};
+use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
+use aura_core::{ChunkId, ContentId, ContextId};
 use serde::{Deserialize, Serialize};
 
 /// Unique type ID for storage facts in the journal system
@@ -135,6 +136,10 @@ pub enum StorageFact {
 }
 
 impl StorageFact {
+    fn version() -> SemanticVersion {
+        SemanticVersion::new(STORAGE_FACT_SCHEMA_VERSION, 0, 0)
+    }
+
     /// Get the authority associated with this fact
     pub fn authority_id(&self) -> AuthorityId {
         match self {
@@ -179,12 +184,18 @@ impl StorageFact {
 
     /// Encode this fact with a canonical envelope.
     pub fn to_bytes(&self) -> Vec<u8> {
-        encode_domain_fact(STORAGE_FACT_TYPE_ID, STORAGE_FACT_SCHEMA_VERSION, self)
+        let message = VersionedMessage::new(self.clone(), Self::version())
+            .with_metadata("type".to_string(), STORAGE_FACT_TYPE_ID.to_string());
+        to_vec(&message).unwrap_or_default()
     }
 
     /// Decode a fact from a canonical envelope.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_domain_fact(STORAGE_FACT_TYPE_ID, STORAGE_FACT_SCHEMA_VERSION, bytes)
+        let message: VersionedMessage<Self> = from_slice(bytes).ok()?;
+        if !message.version.is_compatible(&Self::version()) {
+            return None;
+        }
+        Some(message.payload)
     }
 }
 

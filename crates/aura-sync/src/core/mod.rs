@@ -22,10 +22,10 @@ pub use config::{
 pub use errors::{
     sync_authorization_error, sync_biscuit_authorization_error, sync_biscuit_guard_error,
     sync_config_error, sync_consistency_error, sync_network_error, sync_peer_error,
-    sync_protocol_error, sync_protocol_with_peer, sync_resource_exhausted,
-    sync_resource_with_limit, sync_serialization_error, sync_session_error, sync_timeout_error,
-    sync_timeout_with_peer, sync_validation_error, sync_validation_field_error, SyncError,
-    SyncResult,
+    sync_protocol_error, sync_protocol_phase_error, sync_protocol_phase_with_peer,
+    sync_protocol_with_peer, sync_resource_exhausted, sync_resource_with_limit,
+    sync_serialization_error, sync_session_error, sync_timeout_error, sync_timeout_with_peer,
+    sync_validation_error, sync_validation_field_error, SyncError, SyncPhase, SyncResult,
 };
 pub use metrics::{MetricsCollector, SyncMetrics};
 pub use session::{

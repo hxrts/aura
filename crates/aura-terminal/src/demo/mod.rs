@@ -168,7 +168,7 @@ pub struct SimulatedAgent {
     state: AgentState,
 
     /// Event sender for outgoing responses
-    response_tx: Option<mpsc::UnboundedSender<(AuthorityId, AgentResponse)>>,
+    response_tx: Option<mpsc::Sender<(AuthorityId, AgentResponse)>>,
 }
 
 /// Configuration for agent behavior
@@ -315,7 +315,7 @@ impl SimulatedAgent {
     /// Set the response channel for outgoing events
     pub fn set_response_channel(
         &mut self,
-        tx: mpsc::UnboundedSender<(AuthorityId, AgentResponse)>,
+        tx: mpsc::Sender<(AuthorityId, AgentResponse)>,
     ) {
         self.response_tx = Some(tx);
     }
@@ -481,7 +481,7 @@ impl SimulatedAgent {
         // if a coordinator is listening for agent responses via channel, forward them.
         if let Some(tx) = &self.response_tx {
             for response in &responses {
-                let _ = tx.send((self.authority_id, response.clone()));
+                let _ = tx.try_send((self.authority_id, response.clone()));
             }
         }
 
@@ -538,7 +538,7 @@ impl SimulatedAgent {
         // Send responses through channel if available
         if let Some(tx) = &self.response_tx {
             for response in &responses {
-                let _ = tx.send((self.authority_id, response.clone()));
+                let _ = tx.try_send((self.authority_id, response.clone()));
             }
         }
 
@@ -926,7 +926,7 @@ pub struct SimulatedBridge {
     agent_event_tx: broadcast::Sender<AgentEvent>,
 
     /// Channel to receive responses from agents
-    response_rx: Arc<Mutex<mpsc::UnboundedReceiver<(AuthorityId, AgentResponse)>>>,
+    response_rx: Arc<Mutex<mpsc::Receiver<(AuthorityId, AgentResponse)>>>,
 
     /// Channel to emit events to the TUI
     tui_event_tx: broadcast::Sender<AuraEvent>,
@@ -983,9 +983,9 @@ impl SimulatedBridge {
     pub fn new(
         bob_authority: AuthorityId,
         amp: Option<Arc<dyn aura_core::effects::amp::AmpChannelEffects + Send + Sync>>,
-    ) -> (Self, mpsc::UnboundedSender<(AuthorityId, AgentResponse)>) {
+    ) -> (Self, mpsc::Sender<(AuthorityId, AgentResponse)>) {
         let (agent_event_tx, _) = broadcast::channel(100);
-        let (response_tx, response_rx) = mpsc::unbounded_channel();
+        let (response_tx, response_rx) = mpsc::channel(256);
         let (tui_event_tx, _) = broadcast::channel(100);
 
         let bridge = Self {
@@ -1204,13 +1204,13 @@ impl SimulatedBridge {
     /// Can only be called once - returns None after first call.
     pub async fn take_response_receiver(
         &self,
-    ) -> Option<mpsc::UnboundedReceiver<(AuthorityId, AgentResponse)>> {
+    ) -> Option<mpsc::Receiver<(AuthorityId, AgentResponse)>> {
         // We need to swap out the receiver with a dummy one
         // This is a one-time operation
         let mut rx_guard = self.response_rx.lock().await;
 
         // Create a new dummy channel just to get a receiver
-        let (_, dummy_rx) = mpsc::unbounded_channel();
+        let (_, dummy_rx) = mpsc::channel(1);
 
         // Swap the receivers
         Some(std::mem::replace(&mut *rx_guard, dummy_rx))

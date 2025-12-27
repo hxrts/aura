@@ -301,7 +301,7 @@ where
                     // Deserialize outside the borrow scope to avoid borrowing conflicts
                     let peer_state: CvS = {
                         let bytes = &state_bytes;
-                        bincode::deserialize(bytes).map_err(|e| {
+                        aura_core::util::serialization::from_slice(bytes).map_err(|e| {
                             CrdtCoordinatorError::Deserialization(format!(
                                 "Failed to deserialize state: {}",
                                 e
@@ -321,13 +321,13 @@ where
                     let mut ops_with_ctx = Vec::new();
                     for crdt_op in operations {
                         let op: Op =
-                            bincode::deserialize(&crdt_op.operation_data).map_err(|e| {
+                            aura_core::util::serialization::from_slice(&crdt_op.operation_data).map_err(|e| {
                                 CrdtCoordinatorError::Deserialization(format!(
                                     "Failed to deserialize operation: {}",
                                     e
                                 ))
                             })?;
-                        let ctx: CausalContext = bincode::deserialize(&crdt_op.causal_context)
+                        let ctx: CausalContext = aura_core::util::serialization::from_slice(&crdt_op.causal_context)
                             .map_err(|e| {
                                 CrdtCoordinatorError::Deserialization(format!(
                                     "Failed to deserialize causal context: {}",
@@ -353,7 +353,7 @@ where
                     let mut deltas = Vec::new();
                     for delta_bytes in delta_bytes_vec {
                         let delta: DeltaS::Delta =
-                            bincode::deserialize(&delta_bytes).map_err(|e| {
+                            aura_core::util::serialization::from_slice(&delta_bytes).map_err(|e| {
                                 CrdtCoordinatorError::Deserialization(format!(
                                     "Failed to deserialize delta: {}",
                                     e
@@ -378,7 +378,7 @@ where
                     // Deserialize outside the borrow scope to avoid borrowing conflicts
                     let peer_state: MvS = {
                         let bytes = &constraint_bytes;
-                        bincode::deserialize(bytes).map_err(|e| {
+                        aura_core::util::serialization::from_slice(bytes).map_err(|e| {
                             CrdtCoordinatorError::Deserialization(format!(
                                 "Failed to deserialize state: {}",
                                 e
@@ -465,7 +465,7 @@ where
     // === Serialization Helpers ===
 
     fn serialize_state<T: Serialize>(&self, state: &T) -> Result<Vec<u8>, CrdtCoordinatorError> {
-        bincode::serialize(state).map_err(|e| {
+        aura_core::util::serialization::to_vec(state).map_err(|e| {
             CrdtCoordinatorError::Serialization(format!("Failed to serialize state: {}", e))
         })
     }
@@ -475,19 +475,19 @@ where
         &self,
         bytes: &[u8],
     ) -> Result<T, CrdtCoordinatorError> {
-        bincode::deserialize(bytes).map_err(|e| {
+        aura_core::util::serialization::from_slice(bytes).map_err(|e| {
             CrdtCoordinatorError::Deserialization(format!("Failed to deserialize state: {}", e))
         })
     }
 
     fn serialize_vector_clock(&self, clock: &VectorClock) -> Result<Vec<u8>, CrdtCoordinatorError> {
-        bincode::serialize(clock).map_err(|e| {
+        aura_core::util::serialization::to_vec(clock).map_err(|e| {
             CrdtCoordinatorError::Serialization(format!("Failed to serialize vector clock: {}", e))
         })
     }
 
     fn deserialize_vector_clock(&self, bytes: &[u8]) -> Result<VectorClock, CrdtCoordinatorError> {
-        bincode::deserialize(bytes).map_err(|e| {
+        aura_core::util::serialization::from_slice(bytes).map_err(|e| {
             CrdtCoordinatorError::Deserialization(format!(
                 "Failed to deserialize vector clock: {}",
                 e
@@ -497,7 +497,7 @@ where
 
     #[allow(dead_code)]
     fn deserialize_operation(&self, bytes: &[u8]) -> Result<Op, CrdtCoordinatorError> {
-        bincode::deserialize(bytes).map_err(|e| {
+        aura_core::util::serialization::from_slice(bytes).map_err(|e| {
             CrdtCoordinatorError::Deserialization(format!("Failed to deserialize operation: {}", e))
         })
     }
@@ -507,7 +507,7 @@ where
         &self,
         bytes: &[u8],
     ) -> Result<CausalContext, CrdtCoordinatorError> {
-        bincode::deserialize(bytes).map_err(|e| {
+        aura_core::util::serialization::from_slice(bytes).map_err(|e| {
             CrdtCoordinatorError::Deserialization(format!(
                 "Failed to deserialize causal context: {}",
                 e
@@ -517,7 +517,7 @@ where
 
     #[allow(dead_code)]
     fn deserialize_delta(&self, bytes: &[u8]) -> Result<DeltaS::Delta, CrdtCoordinatorError> {
-        bincode::deserialize(bytes).map_err(|e| {
+        aura_core::util::serialization::from_slice(bytes).map_err(|e| {
             CrdtCoordinatorError::Deserialization(format!("Failed to deserialize delta: {}", e))
         })
     }

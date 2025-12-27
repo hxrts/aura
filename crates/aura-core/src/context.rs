@@ -33,6 +33,26 @@ pub struct ContextSnapshot {
     execution_mode: ExecutionMode,
 }
 
+fn derive_session_id(
+    authority_id: AuthorityId,
+    context_id: ContextId,
+    execution_mode: ExecutionMode,
+) -> SessionId {
+    let mut material = Vec::with_capacity(1 + 32 + 32 + 9);
+    material.extend_from_slice(b"aura-session");
+    material.extend_from_slice(&authority_id.to_bytes());
+    material.extend_from_slice(&context_id.to_bytes());
+    match execution_mode {
+        ExecutionMode::Testing => material.push(0),
+        ExecutionMode::Production => material.push(1),
+        ExecutionMode::Simulation { seed } => {
+            material.push(2);
+            material.extend_from_slice(&seed.to_le_bytes());
+        }
+    }
+    SessionId::new_from_entropy(hash(&material))
+}
+
 impl EffectContext {
     /// Create a new context for an operation scoped to a specific authority and context.
     ///
@@ -45,7 +65,7 @@ impl EffectContext {
         Self {
             authority_id,
             context_id,
-            session_id: SessionId::new(),
+            session_id: derive_session_id(authority_id, context_id, execution_mode),
             execution_mode,
             metadata: HashMap::new(),
         }
@@ -112,7 +132,7 @@ impl EffectContext {
         Self {
             authority_id: self.authority_id,
             context_id,
-            session_id: SessionId::new(),
+            session_id: derive_session_id(self.authority_id, context_id, self.execution_mode),
             execution_mode: self.execution_mode,
             metadata: self.metadata.clone(),
         }
@@ -129,7 +149,7 @@ impl ContextSnapshot {
         Self {
             authority_id,
             context_id,
-            session_id: SessionId::new(),
+            session_id: derive_session_id(authority_id, context_id, execution_mode),
             execution_mode,
         }
     }

@@ -55,11 +55,11 @@ use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
 };
+use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 /// Type identifier for recovery facts
 pub const RECOVERY_FACT_TYPE_ID: &str = "recovery";
-pub const RECOVERY_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryFactKey {
@@ -74,7 +74,8 @@ pub struct RecoveryFactKey {
 ///
 /// **Note**: Core binding facts (`GuardianBinding`, `RecoveryGrant`) are protocol-level
 /// facts in `aura-journal`. This enum tracks operational lifecycle only.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
+#[domain_fact(type_id = "recovery", schema_version = 1, context_fn = "get_context_id")]
 pub enum RecoveryFact {
     // ========================================================================
     // Guardian Setup Lifecycle
@@ -763,27 +764,6 @@ impl RecoveryFact {
                 uncertainty: None,
             },
         }
-    }
-}
-
-impl DomainFact for RecoveryFact {
-    fn type_id(&self) -> &'static str {
-        RECOVERY_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.get_context_id()
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(self.type_id(), RECOVERY_FACT_SCHEMA_VERSION, self)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        aura_journal::decode_domain_fact(RECOVERY_FACT_TYPE_ID, RECOVERY_FACT_SCHEMA_VERSION, bytes)
     }
 }
 

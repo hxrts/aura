@@ -18,8 +18,8 @@ use tokio::sync::{broadcast, RwLock};
 /// ## Example
 /// ```ignore
 /// let count = Dynamic::new(0);
-/// let doubled = count.map(|x| x * 2);
-/// let is_positive = count.map(|x| x > 0);
+    /// let doubled = count.map(|x| x * 2).await;
+    /// let is_positive = count.map(|x| x > 0).await;
 /// ```
 pub struct Dynamic<T: Clone + Send + Sync + 'static> {
     state: Arc<RwLock<T>>,
@@ -78,23 +78,20 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     /// ## Example
     /// ```ignore
     /// let count = Dynamic::new(5);
-    /// let doubled = count.map(|x| x * 2);  // Always contains count * 2
+    /// let doubled = count.map(|x| x * 2).await;  // Always contains count * 2
     /// ```
-    pub fn map<U, F>(&self, f: F) -> Dynamic<U>
+    pub async fn map<U, F>(&self, f: F) -> Dynamic<U>
     where
         F: Fn(&T) -> U + Send + Sync + 'static,
         U: Clone + Send + Sync + 'static,
     {
-        let mapped = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let initial = self.get().await;
-                Dynamic::new(f(&initial))
-            })
-        });
+        let initial = self.get().await;
+        let mapped = Dynamic::new(f(&initial));
 
         // Subscribe BEFORE spawning to ensure we don't miss any updates
         let mut rx = self.subscribe();
         let mapped_clone = mapped.clone();
+        let state = self.state.clone();
         let f = Arc::new(f);
 
         // Use a oneshot channel to signal when the task is ready
@@ -111,8 +108,10 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                         mapped_clone.set(transformed).await;
                     }
                     Err(RecvError::Lagged(_)) => {
-                        // Skip lagged messages but keep listening for the latest value.
-                        continue;
+                        // Re-sync from the latest state on lag to avoid stale values.
+                        let latest = state.read().await.clone();
+                        let transformed = f(&latest);
+                        mapped_clone.set(transformed).await;
                     }
                     Err(RecvError::Closed) => break,
                 }
@@ -120,11 +119,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         });
 
         // Wait for the spawned task to signal ready - ensures deterministic behavior
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let _ = ready_rx.await;
-            })
-        });
+        let _ = ready_rx.await;
 
         mapped
     }
@@ -138,21 +133,17 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     /// ```ignore
     /// let first = Dynamic::new("Hello");
     /// let second = Dynamic::new("World");
-    /// let combined = first.combine(&second, |a, b| format!("{} {}", a, b));
+    /// let combined = first.combine(&second, |a, b| format!("{} {}", a, b)).await;
     /// ```
-    pub fn combine<U, V, F>(&self, other: &Dynamic<U>, f: F) -> Dynamic<V>
+    pub async fn combine<U, V, F>(&self, other: &Dynamic<U>, f: F) -> Dynamic<V>
     where
         U: Clone + Send + Sync + 'static,
         V: Clone + Send + Sync + 'static,
         F: Fn(&T, &U) -> V + Send + Sync + 'static,
     {
-        let combined = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let a = self.get().await;
-                let b = other.get().await;
-                Dynamic::new(f(&a, &b))
-            })
-        });
+        let a = self.get().await;
+        let b = other.get().await;
+        let combined = Dynamic::new(f(&a, &b));
 
         let mut rx_self = self.subscribe();
         let mut rx_other = other.subscribe();
@@ -164,19 +155,28 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    Ok(_) = rx_self.recv() => {
-                        let a = self_state.read().await.clone();
-                        let b = other_state.read().await.clone();
-                        let result = f(&a, &b);
-                        combined_clone.set(result).await;
+                    res = rx_self.recv() => {
+                        match res {
+                            Ok(_) | Err(RecvError::Lagged(_)) => {
+                                let a = self_state.read().await.clone();
+                                let b = other_state.read().await.clone();
+                                let result = f(&a, &b);
+                                combined_clone.set(result).await;
+                            }
+                            Err(RecvError::Closed) => break,
+                        }
                     }
-                    Ok(_) = rx_other.recv() => {
-                        let a = self_state.read().await.clone();
-                        let b = other_state.read().await.clone();
-                        let result = f(&a, &b);
-                        combined_clone.set(result).await;
+                    res = rx_other.recv() => {
+                        match res {
+                            Ok(_) | Err(RecvError::Lagged(_)) => {
+                                let a = self_state.read().await.clone();
+                                let b = other_state.read().await.clone();
+                                let result = f(&a, &b);
+                                combined_clone.set(result).await;
+                            }
+                            Err(RecvError::Closed) => break,
+                        }
                     }
-                    else => break,
                 }
             }
         });
@@ -192,29 +192,36 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     /// ## Example
     /// ```ignore
     /// let numbers = Dynamic::new(5);
-    /// let positive_only = numbers.filter(|x| x > 0);
+    /// let positive_only = numbers.filter(|x| x > 0).await;
     /// ```
-    pub fn filter<F>(&self, predicate: F) -> Dynamic<T>
+    pub async fn filter<F>(&self, predicate: F) -> Dynamic<T>
     where
         F: Fn(&T) -> bool + Send + Sync + 'static,
     {
-        let filtered = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let initial = self.get().await;
-                Dynamic::new(initial)
-            })
-        });
+        let initial = self.get().await;
+        let filtered = Dynamic::new(initial);
 
         let mut rx = self.subscribe();
         let filtered_clone = filtered.clone();
+        let state = self.state.clone();
         let predicate = Arc::new(predicate);
 
         tokio::spawn(async move {
-            while let Ok(value) = rx.recv().await {
-                if predicate(&value) {
-                    filtered_clone.set(value).await;
+            loop {
+                match rx.recv().await {
+                    Ok(value) => {
+                        if predicate(&value) {
+                            filtered_clone.set(value).await;
+                        }
+                    }
+                    Err(RecvError::Lagged(_)) => {
+                        let latest = state.read().await.clone();
+                        if predicate(&latest) {
+                            filtered_clone.set(latest).await;
+                        }
+                    }
+                    Err(RecvError::Closed) => break,
                 }
-                // If predicate fails, don't update (retain previous value)
             }
         });
 
@@ -239,13 +246,25 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let folded = Dynamic::new(init);
         let mut rx = self.subscribe();
         let folded_clone = folded.clone();
+        let state = self.state.clone();
         let f = Arc::new(f);
 
         tokio::spawn(async move {
-            while let Ok(value) = rx.recv().await {
-                let acc = folded_clone.get().await;
-                let new_acc = f(acc, &value);
-                folded_clone.set(new_acc).await;
+            loop {
+                match rx.recv().await {
+                    Ok(value) => {
+                        let acc = folded_clone.get().await;
+                        let new_acc = f(acc, &value);
+                        folded_clone.set(new_acc).await;
+                    }
+                    Err(RecvError::Lagged(_)) => {
+                        let latest = state.read().await.clone();
+                        let acc = folded_clone.get().await;
+                        let new_acc = f(acc, &latest);
+                        folded_clone.set(new_acc).await;
+                    }
+                    Err(RecvError::Closed) => break,
+                }
             }
         });
 
@@ -311,7 +330,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_map_combinator() {
         let source = Dynamic::new(5);
-        let doubled = source.map(|x| x * 2);
+        let doubled = source.map(|x| x * 2).await;
 
         // Wait for initial value to propagate
         sleep(Duration::from_millis(10)).await;
@@ -329,7 +348,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_map_string_transformation() {
         let source = Dynamic::new("hello");
-        let upper = source.map(|s| s.to_uppercase());
+        let upper = source.map(|s| s.to_uppercase()).await;
 
         sleep(Duration::from_millis(10)).await;
         assert_eq!(upper.get().await, "HELLO");
@@ -343,7 +362,7 @@ mod tests {
     async fn test_combine_combinator() {
         let first = Dynamic::new(3);
         let second = Dynamic::new(4);
-        let sum = first.combine(&second, |a, b| a + b);
+        let sum = first.combine(&second, |a, b| a + b).await;
 
         sleep(Duration::from_millis(10)).await;
         assert_eq!(sum.get().await, 7);
@@ -361,7 +380,9 @@ mod tests {
     async fn test_combine_strings() {
         let first = Dynamic::new("Hello");
         let second = Dynamic::new("World");
-        let combined = first.combine(&second, |a, b| format!("{} {}", a, b));
+        let combined = first
+            .combine(&second, |a, b| format!("{} {}", a, b))
+            .await;
 
         sleep(Duration::from_millis(10)).await;
         assert_eq!(combined.get().await, "Hello World");
@@ -374,7 +395,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_filter_combinator() {
         let source = Dynamic::new(5);
-        let positive_only = source.filter(|x| *x > 0);
+        let positive_only = source.filter(|x| *x > 0).await;
 
         sleep(Duration::from_millis(10)).await;
         assert_eq!(positive_only.get().await, 5);
@@ -418,8 +439,8 @@ mod tests {
     async fn test_composition_chain() {
         // Compose multiple combinators
         let source = Dynamic::new(2);
-        let doubled = source.map(|x| x * 2);
-        let squared = doubled.map(|x| x * x);
+        let doubled = source.map(|x| x * 2).await;
+        let squared = doubled.map(|x| x * x).await;
 
         sleep(Duration::from_millis(20)).await;
         assert_eq!(squared.get().await, 16); // (2 * 2)^2 = 16
@@ -447,8 +468,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_map_and_filter_composition() {
         let source = Dynamic::new(1);
-        let doubled = source.map(|x| x * 2);
-        let even_only = doubled.filter(|x| x % 2 == 0);
+        let doubled = source.map(|x| x * 2).await;
+        let even_only = doubled.filter(|x| x % 2 == 0).await;
 
         sleep(Duration::from_millis(20)).await;
         assert_eq!(even_only.get().await, 2);

@@ -54,6 +54,27 @@ pub mod snapshots;
 pub mod authority_journal_sync;
 pub mod namespaced_sync;
 
+use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
+
+pub trait SyncJournalEffects: JournalEffects + Send + Sync {}
+
+impl<T> SyncJournalEffects for T where T: JournalEffects + Send + Sync {}
+
+pub trait SyncProtocolEffects: SyncJournalEffects + NetworkEffects + PhysicalTimeEffects {}
+
+impl<T> SyncProtocolEffects for T where T: SyncJournalEffects + NetworkEffects + PhysicalTimeEffects {}
+
+pub trait SyncCoreJournalEffects: JournalEffects + Send + Sync {}
+
+impl<T> SyncCoreJournalEffects for T where T: JournalEffects + Send + Sync {}
+
+pub trait SyncCoreProtocolEffects: SyncCoreJournalEffects + NetworkEffects + PhysicalTimeEffects {}
+
+impl<T> SyncCoreProtocolEffects for T where
+    T: SyncCoreJournalEffects + NetworkEffects + PhysicalTimeEffects
+{
+}
+
 // Re-export key types for convenience
 pub use anti_entropy::{
     AntiEntropyConfig, AntiEntropyProtocol, AntiEntropyRequest, AntiEntropyResult, DigestStatus,

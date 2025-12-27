@@ -10,7 +10,7 @@
 use async_trait::async_trait;
 use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
 use aura_core::time::PhysicalTime;
-use futures::future::yield_now;
+use tokio::task::yield_now;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 

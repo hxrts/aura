@@ -39,6 +39,7 @@ use crate::tui::context::{
 };
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
+use crate::tui::tasks::UiTaskRegistry;
 
 use crate::tui::hooks::{
     BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
@@ -190,6 +191,7 @@ impl IoContextBuilder {
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
         let current_context = Arc::new(RwLock::new(None));
         let channel_modes = Arc::new(RwLock::new(HashMap::new()));
+        let tasks = Arc::new(UiTaskRegistry::new());
 
         let dispatch = DispatchHelper::new(
             operational.clone(),
@@ -219,6 +221,7 @@ impl IoContextBuilder {
             invited_lan_peers,
             current_context,
             channel_modes,
+            tasks,
         })
     }
 }
@@ -251,6 +254,7 @@ pub struct IoContext {
     invited_lan_peers: Arc<RwLock<HashSet<String>>>,
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
+    tasks: Arc<UiTaskRegistry>,
 }
 
 /// Lightweight TUI-facing result of starting device enrollment.
@@ -280,6 +284,10 @@ impl IoContext {
     /// ```
     pub fn builder() -> IoContextBuilder {
         IoContextBuilder::new()
+    }
+
+    pub fn tasks(&self) -> Arc<UiTaskRegistry> {
+        self.tasks.clone()
     }
 
     /// Create a new IoContext with the given parameters.

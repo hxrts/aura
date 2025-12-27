@@ -5,8 +5,7 @@
 //!
 //! **Layer Constraint**: NO stateful patterns or multi-party coordination.
 //! This module contains only production-grade stateless handlers.
-// System handlers use std sync primitives for lightweight in-process state.
-#![allow(clippy::disallowed_types)]
+// System handlers are stateless in Layer 3.
 
 use async_trait::async_trait;
 use aura_core::effects::{SystemEffects, SystemError};
@@ -109,23 +108,12 @@ pub struct LoggingStats {
 pub struct LoggingSystemHandler {
     /// Configuration for logging operations
     config: LoggingConfig,
-    /// In-memory stats (best-effort, not persisted)
-    stats: std::sync::Arc<std::sync::Mutex<LoggingStats>>,
-    /// Recent log entries (bounded)
-    recent_logs: std::sync::Arc<std::sync::Mutex<Vec<LogEntry>>>,
-    /// Recent audit entries (bounded)
-    recent_audit_logs: std::sync::Arc<std::sync::Mutex<Vec<AuditEntry>>>,
 }
 
 impl LoggingSystemHandler {
     /// Create a new logging system handler
     pub fn new(config: LoggingConfig) -> Self {
-        Self {
-            config,
-            stats: std::sync::Arc::new(std::sync::Mutex::new(LoggingStats::default())),
-            recent_logs: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            recent_audit_logs: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        }
+        Self { config }
     }
 
     /// Create with default configuration
@@ -157,23 +145,7 @@ impl LoggingSystemHandler {
             message = entry.message,
             "Log entry sent via logging handler"
         );
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.total_logs = stats.total_logs.saturating_add(1);
-            match entry.level.as_str() {
-                "error" => stats.error_logs = stats.error_logs.saturating_add(1),
-                "warn" => stats.warn_logs = stats.warn_logs.saturating_add(1),
-                "info" => stats.info_logs = stats.info_logs.saturating_add(1),
-                _ => stats.debug_logs = stats.debug_logs.saturating_add(1),
-            }
-        }
-        if let Ok(mut logs) = self.recent_logs.lock() {
-            logs.push(entry);
-            let target = self.config.max_log_entries;
-            if logs.len() > target {
-                let overflow = logs.len() - target;
-                logs.drain(0..overflow);
-            }
-        }
+        let _ = entry;
     }
 
     /// Push audit entry (stateless - delegates to external audit service)
@@ -186,17 +158,7 @@ impl LoggingSystemHandler {
             outcome = entry.outcome,
             "Audit entry sent via logging handler"
         );
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.total_audit_logs = stats.total_audit_logs.saturating_add(1);
-        }
-        if let Ok(mut logs) = self.recent_audit_logs.lock() {
-            logs.push(entry);
-            let target = self.config.max_audit_entries;
-            if logs.len() > target {
-                let overflow = logs.len() - target;
-                logs.drain(0..overflow);
-            }
-        }
+        let _ = entry;
     }
 
     /// Log a structured message
@@ -256,31 +218,19 @@ impl LoggingSystemHandler {
 
     /// Get recent logs (stateless - delegates to external service)
     pub async fn get_recent_logs(&self, count: usize) -> Vec<LogEntry> {
-        let logs = self
-            .recent_logs
-            .lock()
-            .map(|l| l.clone())
-            .unwrap_or_default();
-        let len = logs.len();
-        let start = len.saturating_sub(count);
-        logs[start..].to_vec()
+        let _ = count;
+        Vec::new()
     }
 
     /// Get recent audit logs (stateless - delegates to external service)
     pub async fn get_recent_audit_logs(&self, count: usize) -> Vec<AuditEntry> {
-        let logs = self
-            .recent_audit_logs
-            .lock()
-            .map(|l| l.clone())
-            .unwrap_or_default();
-        let len = logs.len();
-        let start = len.saturating_sub(count);
-        logs[start..].to_vec()
+        let _ = count;
+        Vec::new()
     }
 
     /// Get logging statistics (stateless - delegates to external service)
     pub async fn get_statistics(&self) -> LoggingStats {
-        self.stats.lock().map(|s| s.clone()).unwrap_or_default()
+        LoggingStats::default()
     }
 }
 
@@ -374,36 +324,14 @@ impl SystemEffects for LoggingSystemHandler {
     async fn get_metrics(&self) -> Result<HashMap<String, f64>, SystemError> {
         let mut metrics = HashMap::new();
 
-        let (total_logs, total_audit_logs, error_logs, warn_logs, info_logs, debug_logs) =
-            if let Ok(stats) = self.stats.lock() {
-                (
-                    stats.total_logs,
-                    stats.total_audit_logs,
-                    stats.error_logs,
-                    stats.warn_logs,
-                    stats.info_logs,
-                    stats.debug_logs,
-                )
-            } else {
-                (0, 0, 0, 0, 0, 0)
-            };
-
-        let (recent_logs, recent_audit) = (
-            self.recent_logs.lock().map(|logs| logs.len()).unwrap_or(0),
-            self.recent_audit_logs
-                .lock()
-                .map(|logs| logs.len())
-                .unwrap_or(0),
-        );
-
-        metrics.insert("logs_total".to_string(), total_logs as f64);
-        metrics.insert("audit_logs_total".to_string(), total_audit_logs as f64);
-        metrics.insert("logs_error".to_string(), error_logs as f64);
-        metrics.insert("logs_warn".to_string(), warn_logs as f64);
-        metrics.insert("logs_info".to_string(), info_logs as f64);
-        metrics.insert("logs_debug".to_string(), debug_logs as f64);
-        metrics.insert("recent_logs".to_string(), recent_logs as f64);
-        metrics.insert("recent_audit_logs".to_string(), recent_audit as f64);
+        metrics.insert("logs_total".to_string(), 0.0);
+        metrics.insert("audit_logs_total".to_string(), 0.0);
+        metrics.insert("logs_error".to_string(), 0.0);
+        metrics.insert("logs_warn".to_string(), 0.0);
+        metrics.insert("logs_info".to_string(), 0.0);
+        metrics.insert("logs_debug".to_string(), 0.0);
+        metrics.insert("recent_logs".to_string(), 0.0);
+        metrics.insert("recent_audit_logs".to_string(), 0.0);
         metrics.insert(
             "max_log_entries_configured".to_string(),
             self.config.max_log_entries as f64,

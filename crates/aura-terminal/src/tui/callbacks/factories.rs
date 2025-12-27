@@ -6,6 +6,7 @@
 //!
 //! This eliminates the ~800 lines of callback creation in `run_app_with_context`.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use crate::tui::commands::{parse_command, IrcCommand};
@@ -18,6 +19,13 @@ use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use aura_core::identifiers::ChannelId;
 
 use super::types::*;
+
+fn spawn_ctx<F>(ctx: &Arc<IoContext>, fut: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    ctx.tasks().spawn(fut);
+}
 
 // =============================================================================
 // Chat Callbacks
@@ -44,7 +52,7 @@ impl ChatCallbacks {
         Self {
             on_send: Self::make_send(ctx.clone(), tx.clone()),
             on_retry_message: Self::make_retry_message(ctx.clone(), tx.clone()),
-            on_channel_select: Self::make_channel_select(app_core, tx.clone()),
+            on_channel_select: Self::make_channel_select(ctx.clone(), app_core, tx.clone()),
             on_create_channel: Self::make_create_channel(ctx.clone(), tx.clone()),
             on_set_topic: Self::make_set_topic(ctx.clone(), tx.clone()),
             on_close_channel: Self::make_close_channel(ctx, tx),
@@ -57,13 +65,13 @@ impl ChatCallbacks {
             let channel_id_clone = channel_id.clone();
             let content_clone = content.clone();
 
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 let trimmed = content_clone.trim_start();
                 if trimmed.starts_with("/") {
                     // IRC-style command path
                     match parse_command(trimmed) {
                         Ok(IrcCommand::Help { .. }) => {
-                            let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                                 "help",
                                 "Use ? for TUI help. Supported slash commands: /msg /me /nick /who /whois /join /leave /topic /invite /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode",
                             )));
@@ -77,7 +85,7 @@ impl ChatCallbacks {
                             let effect = match dispatcher.dispatch(irc) {
                                 Ok(cmd) => cmd,
                                 Err(e) => {
-                                    let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                         "command",
                                         e.to_string(),
                                     )));
@@ -99,12 +107,12 @@ impl ChatCallbacks {
                                             } else {
                                                 list.join(", ")
                                             };
-                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                            let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::info("participants", msg),
                                             ));
                                         }
                                         Err(e) => {
-                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                            let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::error("participants", e.to_string()),
                                             ));
                                         }
@@ -127,12 +135,12 @@ impl ChatCallbacks {
                                                 id.chars().take(8).collect::<String>() + "..."
                                             };
                                             let msg = format!("User: {} ({})", name, id);
-                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                            let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::info("whois", msg),
                                             ));
                                         }
                                         Err(e) => {
-                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                            let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::error("whois", e.to_string()),
                                             ));
                                         }
@@ -145,7 +153,7 @@ impl ChatCallbacks {
                             return;
                         }
                         Err(e) => {
-                            let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                 "command",
                                 e.to_string(),
                             )));
@@ -162,7 +170,7 @@ impl ChatCallbacks {
 
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::MessageSent {
+                        let _ = tx.try_send(UiUpdate::MessageSent {
                             channel: channel_id_clone,
                             content: content_clone,
                         });
@@ -186,10 +194,10 @@ impl ChatCallbacks {
                     channel,
                     content,
                 };
-                tokio::spawn(async move {
+                spawn_ctx(&ctx, async move {
                     match ctx.dispatch(cmd).await {
                         Ok(_) => {
-                            let _ = tx.send(UiUpdate::MessageRetried { message_id: msg_id });
+                            let _ = tx.try_send(UiUpdate::MessageRetried { message_id: msg_id });
                         }
                         Err(_e) => {
                             // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -201,19 +209,21 @@ impl ChatCallbacks {
     }
 
     fn make_channel_select(
+        ctx: Arc<IoContext>,
         app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
         tx: UiUpdateSender,
     ) -> ChannelSelectCallback {
         Arc::new(move |channel_id: String| {
+            let ctx = ctx.clone();
             let app_core = app_core.clone();
             let tx = tx.clone();
             let channel_id_clone = channel_id.clone();
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 // Parse channel_id string to ChannelId
                 let channel_id_typed = channel_id.parse::<ChannelId>().ok();
                 let core = app_core.read().await;
                 core.views().select_channel(channel_id_typed);
-                let _ = tx.send(UiUpdate::ChannelSelected(channel_id_clone));
+                let _ = tx.try_send(UiUpdate::ChannelSelected(channel_id_clone));
             });
         })
     }
@@ -230,10 +240,10 @@ impl ChatCallbacks {
                     members,
                     threshold_k,
                 };
-                tokio::spawn(async move {
+                spawn_ctx(&ctx, async move {
                     match ctx.dispatch(cmd).await {
                         Ok(_) => {
-                            let _ = tx.send(UiUpdate::ChannelCreated(channel_name));
+                            let _ = tx.try_send(UiUpdate::ChannelCreated(channel_name));
                         }
                         Err(_e) => {
                             // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -254,10 +264,10 @@ impl ChatCallbacks {
                 channel: channel_id,
                 text: topic,
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::TopicSet {
+                        let _ = tx.try_send(UiUpdate::TopicSet {
                             channel: ch,
                             topic: t,
                         });
@@ -277,7 +287,7 @@ impl ChatCallbacks {
             let cmd = EffectCommand::CloseChannel {
                 channel: channel_id,
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 let _ = ctx.dispatch(cmd).await;
             });
         })
@@ -319,10 +329,10 @@ impl ContactsCallbacks {
                 contact_id,
                 nickname: new_nickname,
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::NicknameUpdated {
+                        let _ = tx.try_send(UiUpdate::NicknameUpdated {
                             contact_id: contact_id_clone,
                             nickname: nickname_clone,
                         });
@@ -341,10 +351,10 @@ impl ContactsCallbacks {
             let tx = tx.clone();
             let contact_id_clone = contact_id.clone();
             let cmd = EffectCommand::StartDirectChat { contact_id };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::ChatStarted {
+                        let _ = tx.try_send(UiUpdate::ChatStarted {
                             contact_id: contact_id_clone,
                         });
                     }
@@ -362,10 +372,10 @@ impl ContactsCallbacks {
             let tx = tx.clone();
             let code_clone = code.clone();
             let cmd = EffectCommand::ImportInvitation { code };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::InvitationImported {
+                        let _ = tx.try_send(UiUpdate::InvitationImported {
                             invitation_code: code_clone,
                         });
                     }
@@ -382,7 +392,7 @@ impl ContactsCallbacks {
             let ctx = ctx.clone();
             let _tx = tx.clone();
             let cmd = EffectCommand::RemoveContact { contact_id };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 let _ = ctx.dispatch(cmd).await;
             });
         })
@@ -400,11 +410,11 @@ impl ContactsCallbacks {
                 authority_id,
                 address,
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         ctx.mark_peer_invited(&authority_id_clone).await;
-                        let _ = tx.send(UiUpdate::LanPeerInvited {
+                        let _ = tx.try_send(UiUpdate::LanPeerInvited {
                             peer_id: authority_id_clone,
                         });
                     }
@@ -450,10 +460,10 @@ impl InvitationsCallbacks {
             let tx = tx.clone();
             let inv_id = invitation_id.clone();
             let cmd = EffectCommand::AcceptInvitation { invitation_id };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::InvitationAccepted {
+                        let _ = tx.try_send(UiUpdate::InvitationAccepted {
                             invitation_id: inv_id,
                         });
                     }
@@ -471,10 +481,10 @@ impl InvitationsCallbacks {
             let tx = tx.clone();
             let inv_id = invitation_id.clone();
             let cmd = EffectCommand::DeclineInvitation { invitation_id };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::InvitationDeclined {
+                        let _ = tx.try_send(UiUpdate::InvitationDeclined {
                             invitation_id: inv_id,
                         });
                     }
@@ -491,7 +501,7 @@ impl InvitationsCallbacks {
             let ctx = ctx.clone();
             let _tx = tx.clone();
             let cmd = EffectCommand::CancelInvitation { invitation_id };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 let _ = ctx.dispatch(cmd).await;
             });
         })
@@ -505,13 +515,13 @@ impl InvitationsCallbacks {
                   ttl_secs: Option<u64>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
-                tokio::spawn(async move {
+                spawn_ctx(&ctx, async move {
                     match ctx
                         .create_invitation_code(&receiver_id, &invitation_type, message, ttl_secs)
                         .await
                     {
                         Ok(code) => {
-                            let _ = tx.send(UiUpdate::InvitationExported { code });
+                            let _ = tx.try_send(UiUpdate::InvitationExported { code });
                         }
                         Err(_e) => {}
                     }
@@ -524,10 +534,10 @@ impl InvitationsCallbacks {
         Arc::new(move |invitation_id: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.export_invitation_code(&invitation_id).await {
                     Ok(code) => {
-                        let _ = tx.send(UiUpdate::InvitationExported { code });
+                        let _ = tx.try_send(UiUpdate::InvitationExported { code });
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -543,10 +553,10 @@ impl InvitationsCallbacks {
             let tx = tx.clone();
             let code_clone = code.clone();
             let cmd = EffectCommand::ImportInvitation { code };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::InvitationImported {
+                        let _ = tx.try_send(UiUpdate::InvitationImported {
                             invitation_code: code_clone,
                         });
                     }
@@ -587,10 +597,10 @@ impl RecoveryCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let cmd = EffectCommand::StartRecovery;
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::RecoveryStarted);
+                        let _ = tx.try_send(UiUpdate::RecoveryStarted);
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -605,10 +615,10 @@ impl RecoveryCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let cmd = EffectCommand::InviteGuardian { contact_id: None };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::GuardianAdded {
+                        let _ = tx.try_send(UiUpdate::GuardianAdded {
                             contact_id: "unknown".to_string(),
                         });
                     }
@@ -628,10 +638,10 @@ impl RecoveryCallbacks {
             let cmd = EffectCommand::InviteGuardian {
                 contact_id: Some(contact_id),
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::GuardianSelected {
+                        let _ = tx.try_send(UiUpdate::GuardianSelected {
                             contact_id: contact_id_clone,
                         });
                     }
@@ -651,10 +661,10 @@ impl RecoveryCallbacks {
             let cmd = EffectCommand::SubmitGuardianApproval {
                 guardian_id: request_id,
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::ApprovalSubmitted {
+                        let _ = tx.try_send(UiUpdate::ApprovalSubmitted {
                             request_id: request_id_clone,
                         });
                     }
@@ -704,10 +714,10 @@ impl SettingsCallbacks {
             let cmd = EffectCommand::UpdateMfaPolicy {
                 require_mfa: policy.requires_mfa(),
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::MfaPolicyChanged(policy));
+                        let _ = tx.try_send(UiUpdate::MfaPolicyChanged(policy));
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -726,10 +736,10 @@ impl SettingsCallbacks {
             let tx = tx.clone();
             let name_clone = name.clone();
             let cmd = EffectCommand::UpdateNickname { name: name.clone() };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::DisplayNameChanged(name_clone));
+                        let _ = tx.try_send(UiUpdate::DisplayNameChanged(name_clone));
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -747,10 +757,10 @@ impl SettingsCallbacks {
                 threshold_k,
                 threshold_n,
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::ThresholdChanged {
+                        let _ = tx.try_send(UiUpdate::ThresholdChanged {
                             k: threshold_k,
                             n: threshold_n,
                         });
@@ -767,7 +777,7 @@ impl SettingsCallbacks {
         Arc::new(move |device_name: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 let start = match ctx.start_device_enrollment(&device_name).await {
                     Ok(start) => start,
                     Err(_e) => {
@@ -776,7 +786,7 @@ impl SettingsCallbacks {
                     }
                 };
 
-                let _ = tx.send(UiUpdate::DeviceEnrollmentStarted {
+                let _ = tx.try_send(UiUpdate::DeviceEnrollmentStarted {
                     ceremony_id: start.ceremony_id.clone(),
                     device_name: device_name.clone(),
                     enrollment_code: start.enrollment_code.clone(),
@@ -792,7 +802,7 @@ impl SettingsCallbacks {
                     )
                     .await
                 {
-                    let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
+                    let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
                         ceremony_id: status.ceremony_id.clone(),
                         kind: status.kind,
                         accepted_count: status.accepted_count,
@@ -809,13 +819,13 @@ impl SettingsCallbacks {
                 let app = ctx.app_core_raw().clone();
                 let tx_monitor = tx.clone();
                 let ceremony_id = start.ceremony_id.clone();
-                tokio::spawn(async move {
+                spawn_ctx(&ctx, async move {
                     let _ = aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
                         &app,
                         ceremony_id,
                         tokio::time::Duration::from_millis(500),
                         |status| {
-                            let _ = tx_monitor.send(UiUpdate::KeyRotationCeremonyStatus {
+                            let _ = tx_monitor.try_send(UiUpdate::KeyRotationCeremonyStatus {
                                 ceremony_id: status.ceremony_id.clone(),
                                 kind: status.kind,
                                 accepted_count: status.accepted_count,
@@ -842,7 +852,7 @@ impl SettingsCallbacks {
             let tx = tx.clone();
             let device_id_clone = device_id.clone();
 
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 let ceremony_id = match ctx.start_device_removal(&device_id_clone).await {
                     Ok(id) => id,
                     Err(_e) => {
@@ -851,7 +861,7 @@ impl SettingsCallbacks {
                     }
                 };
 
-                let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                     "device-removal-started",
                     "Device removal started",
                 )));
@@ -859,7 +869,7 @@ impl SettingsCallbacks {
                 // Best-effort: monitor completion and toast success/failure.
                 let app = ctx.app_core_raw().clone();
                 let tx_monitor = tx.clone();
-                tokio::spawn(async move {
+                spawn_ctx(&ctx, async move {
                     match aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
                         &app,
                         ceremony_id,
@@ -870,7 +880,7 @@ impl SettingsCallbacks {
                     .await
                     {
                         Ok(status) if status.is_complete => {
-                            let _ = tx_monitor.send(UiUpdate::ToastAdded(ToastMessage::success(
+                            let _ = tx_monitor.try_send(UiUpdate::ToastAdded(ToastMessage::success(
                                 "device-removal-complete",
                                 "Device removal complete",
                             )));
@@ -879,7 +889,7 @@ impl SettingsCallbacks {
                             let msg = status
                                 .error_message
                                 .unwrap_or_else(|| "Device removal failed".to_string());
-                            let _ = tx_monitor.send(UiUpdate::ToastAdded(ToastMessage::error(
+                            let _ = tx_monitor.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                 "device-removal-failed",
                                 msg,
                             )));
@@ -902,16 +912,16 @@ impl SettingsCallbacks {
         Arc::new(move |code: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.import_invitation_on_mobile(&code).await {
                     Ok(()) => {
-                        let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::success(
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
                             "devices",
                             "Mobile device accepted enrollment",
                         )));
                     }
                     Err(e) => {
-                        let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                             "devices",
                             e,
                         )));
@@ -953,7 +963,7 @@ impl BlockCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let content_clone = content.clone();
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 let block_id = {
                     use aura_app::signal_defs::{BLOCKS_SIGNAL, BLOCK_SIGNAL};
                     use aura_core::effects::reactive::ReactiveEffects;
@@ -981,7 +991,7 @@ impl BlockCallbacks {
                 if trimmed.starts_with("/") {
                     match parse_command(trimmed) {
                         Ok(IrcCommand::Help { .. }) => {
-                            let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                                 "help",
                                 "Use ? for TUI help. Supported slash commands: /msg /me /nick /who /whois /join /leave /topic /invite /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode",
                             )));
@@ -995,7 +1005,7 @@ impl BlockCallbacks {
                             let effect = match dispatcher.dispatch(irc) {
                                 Ok(cmd) => cmd,
                                 Err(e) => {
-                                    let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                         "command",
                                         e.to_string(),
                                     )));
@@ -1017,12 +1027,12 @@ impl BlockCallbacks {
                                             } else {
                                                 list.join(", ")
                                             };
-                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                            let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::info("participants", msg),
                                             ));
                                         }
                                         Err(e) => {
-                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                            let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::error("participants", e.to_string()),
                                             ));
                                         }
@@ -1045,12 +1055,12 @@ impl BlockCallbacks {
                                                 id.chars().take(8).collect::<String>() + "..."
                                             };
                                             let msg = format!("User: {} ({})", name, id);
-                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                            let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::info("whois", msg),
                                             ));
                                         }
                                         Err(e) => {
-                                            let _ = tx.send(UiUpdate::ToastAdded(
+                                            let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::error("whois", e.to_string()),
                                             ));
                                         }
@@ -1063,7 +1073,7 @@ impl BlockCallbacks {
                             return;
                         }
                         Err(e) => {
-                            let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                 "command",
                                 e.to_string(),
                             )));
@@ -1079,7 +1089,7 @@ impl BlockCallbacks {
 
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::BlockMessageSent {
+                        let _ = tx.try_send(UiUpdate::BlockMessageSent {
                             block_id: block_id_clone,
                             content: content_clone,
                         });
@@ -1134,10 +1144,10 @@ impl NeighborhoodCallbacks {
                 block_id,
                 depth: depth_str,
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::BlockEntered {
+                        let _ = tx.try_send(UiUpdate::BlockEntered {
                             block_id: block_id_clone,
                         });
                     }
@@ -1158,10 +1168,10 @@ impl NeighborhoodCallbacks {
                 block_id: "home".to_string(),
                 depth: "Interior".to_string(),
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::NavigatedHome);
+                        let _ = tx.try_send(UiUpdate::NavigatedHome);
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1180,10 +1190,10 @@ impl NeighborhoodCallbacks {
                 block_id: "current".to_string(),
                 depth: "Street".to_string(),
             };
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.send(UiUpdate::NavigatedToStreet);
+                        let _ = tx.try_send(UiUpdate::NavigatedToStreet);
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1215,7 +1225,7 @@ impl AppCallbacks {
         Arc::new(move |display_name: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            tokio::spawn(async move {
+            spawn_ctx(&ctx, async move {
                 // Create the account file via async storage effects.
                 match ctx.create_account(&display_name).await {
                     Ok(()) => {
@@ -1227,7 +1237,7 @@ impl AppCallbacks {
                             })
                             .await;
 
-                        let _ = tx.send(UiUpdate::DisplayNameChanged(display_name.clone()));
+                        let _ = tx.try_send(UiUpdate::DisplayNameChanged(display_name.clone()));
 
                         // Then dispatch the intent to create a journal fact.
                         let cmd = EffectCommand::CreateAccount {
@@ -1236,17 +1246,17 @@ impl AppCallbacks {
 
                         match ctx.dispatch(cmd).await {
                             Ok(_) => {
-                                let _ = tx.send(UiUpdate::AccountCreated);
+                                let _ = tx.try_send(UiUpdate::AccountCreated);
                             }
                             Err(e) => {
                                 // Non-fatal: file was created, journal fact is optional.
                                 tracing::warn!("Journal fact creation failed: {}", e);
-                                let _ = tx.send(UiUpdate::AccountCreated);
+                                let _ = tx.try_send(UiUpdate::AccountCreated);
                             }
                         }
                     }
                     Err(e) => {
-                        let _ = tx.send(UiUpdate::OperationFailed {
+                        let _ = tx.try_send(UiUpdate::OperationFailed {
                             operation: "CreateAccount".to_string(),
                             error: e.to_string(),
                         });

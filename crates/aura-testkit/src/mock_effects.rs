@@ -453,8 +453,8 @@ impl CryptoExtendedEffects for MockEffects {
             let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key.clone());
             let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
             Ok(SigningKeyGenResult {
-                key_packages: vec![key_package.to_bytes()],
-                public_key_package: public_package.to_bytes(),
+                key_packages: vec![key_package.to_bytes().map_err(|e| aura_core::effects::crypto::CryptoError::invalid(format!("key package serialization: {}", e)))?],
+                public_key_package: public_package.to_bytes().map_err(|e| aura_core::effects::crypto::CryptoError::invalid(format!("public package serialization: {}", e)))?,
                 mode: SigningMode::SingleSigner,
             })
         } else if threshold >= 2 {

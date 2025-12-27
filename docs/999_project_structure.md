@@ -1174,6 +1174,76 @@ The `just check-arch` command validates these principles by:
 
 Run before every commit to maintain architectural compliance and simulation determinism.
 
+## Serialization Policy
+
+Aura uses **DAG-CBOR** as the canonical serialization format for:
+- **Wire protocols**: Network messages between peers
+- **Facts**: CRDT state, journal entries, attestations
+- **Cryptographic commitments**: Content-addressable hashes (determinism required)
+
+### Canonical Module
+
+All serialization should use `aura_core::util::serialization`:
+
+```rust
+use aura_core::util::serialization::{to_vec, from_slice, hash_canonical};
+use aura_core::util::serialization::{VersionedMessage, SemanticVersion};
+
+// Serialize to DAG-CBOR
+let bytes = to_vec(&value)?;
+
+// Deserialize from DAG-CBOR
+let value: MyType = from_slice(&bytes)?;
+
+// Content-addressable hash (deterministic)
+let hash = hash_canonical(&value)?;
+```
+
+### Why DAG-CBOR?
+
+1. **Deterministic canonical encoding**: Required for FROST threshold signatures where all parties must produce identical bytes
+2. **Content-addressable**: IPLD compatibility for content hashing and Merkle trees
+3. **Forward/backward compatible**: Semantic versioning support via `VersionedMessage<T>`
+4. **Efficient binary encoding**: Better than JSON, comparable to bincode
+
+### Allowed Alternatives
+
+| Format | Use Case | Example |
+|--------|----------|---------|
+| `serde_json` | User-facing config files | `.aura/config.json` |
+| `serde_json` | Debug output and logging | `tracing` spans |
+| `serde_json` | Dynamic metadata | `HashMap<String, Value>` |
+
+### Versioned Facts Pattern
+
+All fact types should use the versioned serialization pattern:
+
+```rust
+use aura_core::util::serialization::{to_vec, from_slice, SerializationError};
+
+const CURRENT_VERSION: u32 = 1;
+
+impl MyFact {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, SerializationError> {
+        to_vec(self)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
+        // Try DAG-CBOR first, fall back to JSON for compatibility
+        from_slice(bytes).or_else(|_| {
+            serde_json::from_slice(bytes)
+                .map_err(|e| SerializationError::Deserialization(e.to_string()))
+        })
+    }
+}
+```
+
+### Enforcement
+
+The `just check-arch --serialization` command validates:
+- Wire protocol files use canonical serialization
+- Facts files use versioned serialization
+
 ## Task-Oriented Crate Selection
 
 ### "I'm implementing..."

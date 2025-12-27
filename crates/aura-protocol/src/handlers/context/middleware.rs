@@ -87,7 +87,7 @@ impl MiddlewareContext {
         key: &str,
         value: &T,
     ) -> Result<Self, AuraHandlerError> {
-        let serialized = bincode::serialize(value).map_err(|e| {
+        let serialized = aura_core::util::serialization::to_vec(value).map_err(|e| {
             AuraHandlerError::context_error(format!("Failed to serialize custom data: {}", e))
         })?;
 
@@ -109,7 +109,7 @@ impl MiddlewareContext {
     ) -> Result<Option<T>, AuraHandlerError> {
         match self.custom_data.get(key) {
             Some(data) => {
-                let value = bincode::deserialize(data).map_err(|e| {
+                let value = aura_core::util::serialization::from_slice(data).map_err(|e| {
                     AuraHandlerError::context_error(format!(
                         "Failed to deserialize custom data: {}",
                         e

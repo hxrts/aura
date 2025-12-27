@@ -186,7 +186,7 @@ fn test_identifier_uniqueness() {
     let account2 = AccountId::new_from_entropy([2u8; 32]);
     assert_ne!(account1, account2);
 
-    let session1 = SessionId::new();
+    let session1 = SessionId::new_from_entropy([11u8; 32]);
     let session2 = SessionId::from_uuid(Uuid::from_bytes([3u8; 16]));
     assert_ne!(session1, session2);
 

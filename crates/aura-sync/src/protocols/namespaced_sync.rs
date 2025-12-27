@@ -585,7 +585,7 @@ impl NamespacedAntiEntropy {
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    #[aura_macros::aura_test]
     async fn test_namespace_sync_creation() {
         let authority_id = AuthorityId::new_from_entropy([2u8; 32]);
         let namespace = JournalNamespace::Authority(authority_id);

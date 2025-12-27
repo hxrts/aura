@@ -304,7 +304,7 @@ async fn test_handler_determinism() {
 
     // Test deterministic random generation (if supported)
     let random_params = 32usize;
-    let params_bytes = bincode::serialize(&random_params).unwrap();
+    let params_bytes = aura_core::util::serialization::to_vec(&random_params).unwrap();
 
     let result1 = handler1
         .execute_effect(EffectType::Random, "random_bytes", &params_bytes, &ctx1)

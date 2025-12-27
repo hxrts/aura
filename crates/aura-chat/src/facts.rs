@@ -41,13 +41,11 @@ use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
 };
+use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 /// Type identifier for chat facts
 pub const CHAT_FACT_TYPE_ID: &str = "chat";
-/// Schema version for chat fact serialization
-pub const CHAT_FACT_SCHEMA_VERSION: u16 = 1;
-
 /// Key for indexing chat facts in the journal
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatFactKey {
@@ -61,7 +59,8 @@ pub struct ChatFactKey {
 ///
 /// These facts represent chat-related state changes in the journal.
 /// They are stored as `RelationalFact::Generic` and reduced by `ChatFactReducer`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
+#[domain_fact(type_id = "chat", schema_version = 1, context = "context_id")]
 pub enum ChatFact {
     /// Channel created in a relational context
     ChannelCreated {
@@ -482,36 +481,6 @@ impl ChatFact {
     }
 }
 
-impl DomainFact for ChatFact {
-    fn type_id(&self) -> &'static str {
-        CHAT_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        match self {
-            ChatFact::ChannelCreated { context_id, .. } => *context_id,
-            ChatFact::ChannelClosed { context_id, .. } => *context_id,
-            ChatFact::ChannelUpdated { context_id, .. } => *context_id,
-            ChatFact::MessageSentSealed { context_id, .. } => *context_id,
-            ChatFact::MessageRead { context_id, .. } => *context_id,
-            ChatFact::MessageDelivered { context_id, .. } => *context_id,
-            ChatFact::DeliveryAcknowledged { context_id, .. } => *context_id,
-            ChatFact::MessageEdited { context_id, .. } => *context_id,
-            ChatFact::MessageDeleted { context_id, .. } => *context_id,
-        }
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(self.type_id(), CHAT_FACT_SCHEMA_VERSION, self)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        aura_journal::decode_domain_fact(CHAT_FACT_TYPE_ID, CHAT_FACT_SCHEMA_VERSION, bytes)
-    }
-}
 
 /// Reducer for chat facts
 ///

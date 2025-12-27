@@ -18,6 +18,7 @@ use aura_rendezvous::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::watch;
 use tokio::sync::RwLock;
 
 use super::lan_discovery::LanDiscoveryService;
@@ -151,6 +152,9 @@ pub struct RendezvousManager {
     /// Background cleanup task handle
     cleanup_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
+    /// Shutdown signal for background tasks
+    shutdown_tx: watch::Sender<bool>,
+
     /// LAN discovery service (if enabled)
     lan_discovery: Arc<RwLock<Option<LanDiscoveryService>>>,
 
@@ -167,12 +171,14 @@ pub struct RendezvousManager {
 impl RendezvousManager {
     /// Create a new rendezvous manager
     pub fn new(authority_id: AuthorityId, config: RendezvousManagerConfig) -> Self {
+        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
         Self {
             service: Arc::new(RwLock::new(None)),
             config,
             state: Arc::new(RwLock::new(RendezvousManagerState::Stopped)),
             authority_id,
             cleanup_task: Arc::new(RwLock::new(None)),
+            shutdown_tx,
             lan_discovery: Arc::new(RwLock::new(None)),
             lan_tasks: Arc::new(RwLock::new(None)),
             lan_discovered_peers: Arc::new(RwLock::new(HashMap::new())),
@@ -202,6 +208,7 @@ impl RendezvousManager {
             return Ok(()); // Already running
         }
 
+        let _ = self.shutdown_tx.send(false);
         *self.state.write().await = RendezvousManagerState::Starting;
 
         // Create rendezvous config from manager config
@@ -245,13 +252,14 @@ impl RendezvousManager {
         }
 
         *self.state.write().await = RendezvousManagerState::Stopping;
+        let _ = self.shutdown_tx.send(true);
 
         // Stop LAN discovery
         self.stop_lan_discovery().await;
 
         // Cancel cleanup task if running
         if let Some(handle) = self.cleanup_task.write().await.take() {
-            handle.abort();
+            let _ = handle.await;
         }
 
         *self.service.write().await = None;
@@ -267,24 +275,32 @@ impl RendezvousManager {
         let state = self.state.clone();
         let descriptor_cache = self.descriptor_cache.clone();
         let clock = PhysicalTimeHandler::new();
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
 
         let handle = tokio::spawn(async move {
             let mut ticker = tokio::time::interval(interval);
             let clock = clock;
             loop {
-                ticker.tick().await;
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            break;
+                        }
+                    }
+                    _ = ticker.tick() => {
+                        // Check if still running
+                        if *state.read().await != RendezvousManagerState::Running {
+                            break;
+                        }
 
-                // Check if still running
-                if *state.read().await != RendezvousManagerState::Running {
-                    break;
+                        // Perform cleanup
+                        let now_ms = clock.physical_time_now_ms();
+                        descriptor_cache
+                            .write()
+                            .await
+                            .retain(|_, descriptor| descriptor.is_valid(now_ms));
+                    }
                 }
-
-                // Perform cleanup
-                let now_ms = clock.physical_time_now_ms();
-                descriptor_cache
-                    .write()
-                    .await
-                    .retain(|_, descriptor| descriptor.is_valid(now_ms));
             }
         });
 

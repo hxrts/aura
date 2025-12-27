@@ -424,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_session_message() {
-        let session_id = SessionId::new();
+        let session_id = SessionId::new_from_entropy([7u8; 32]);
         let msg = SessionMessage::new(session_id, "test data".to_string());
 
         assert_eq!(msg.session_id, session_id);

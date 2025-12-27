@@ -340,7 +340,7 @@ impl AuraEffectSystem {
             };
 
             let key = Self::typed_fact_storage_key(self.authority_id, &order);
-            let bytes = bincode::serialize(&fact)
+            let bytes = aura_core::util::serialization::to_vec(&fact)
                 .map_err(|e| AuraError::internal(format!("serialize fact: {e}")))?;
             self.store(&key, bytes)
                 .await
@@ -395,7 +395,7 @@ impl AuraEffectSystem {
                 continue;
             };
 
-            let fact: TypedFact = bincode::deserialize(&bytes)
+            let fact: TypedFact = aura_core::util::serialization::from_slice(&bytes)
                 .map_err(|e| AuraError::internal(format!("deserialize fact: {e}")))?;
             facts.push(fact);
         }

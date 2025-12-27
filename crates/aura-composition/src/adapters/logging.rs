@@ -34,7 +34,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
         match operation {
             "log" => {
                 let (level, component, message): (String, String, String) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -55,7 +55,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                     String,
                     String,
                     std::collections::HashMap<String, String>,
-                ) = bincode::deserialize(parameters).map_err(|e| {
+                ) = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -76,7 +76,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -88,7 +88,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -96,7 +96,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
             }
             "set_config" => {
                 let (key, value): (String, String) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -111,7 +111,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                 Ok(Vec::new())
             }
             "get_config" => {
-                let key: String = bincode::deserialize(parameters).map_err(|e| {
+                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -123,7 +123,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&value).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&value).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -135,14 +135,14 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
                 })
             }
             "restart_component" => {
-                let component: String = bincode::deserialize(parameters).map_err(|e| {
+                let component: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),

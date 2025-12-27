@@ -392,7 +392,7 @@ impl Journal {
             fact_journal: self.fact_journal.clone(),
         };
 
-        let serialized = bincode::serialize(&journal_state)
+        let serialized = aura_core::util::serialization::to_vec(&journal_state)
             .map_err(|e| AuraError::internal(format!("Failed to serialize journal: {}", e)))?;
 
         // Persist to storage
@@ -428,9 +428,10 @@ impl Journal {
 
         match storage.retrieve(&storage_key).await {
             Ok(Some(data)) => {
-                let state: JournalPersistState = bincode::deserialize(&data).map_err(|e| {
-                    AuraError::internal(format!("Failed to deserialize journal: {}", e))
-                })?;
+                let state: JournalPersistState =
+                    aura_core::util::serialization::from_slice(&data).map_err(|e| {
+                        AuraError::internal(format!("Failed to deserialize journal: {}", e))
+                    })?;
 
                 Ok(Some(Self {
                     account_state: state.account_state,

@@ -118,30 +118,19 @@ impl Drop for TimeGuard {
 pub mod assertions {
     use super::*;
     use aura_core::{AuraError, AuraResult};
-    use futures::{future::Fuse, FutureExt};
+    use tokio::time::timeout;
 
     /// Assert that an operation completes within a duration
     pub async fn assert_completes_within<F, T>(duration: Duration, future: F) -> AuraResult<T>
     where
         F: std::future::Future<Output = AuraResult<T>>,
     {
-        let deadline = std::time::Instant::now() + duration;
-        futures::pin_mut!(future);
-        let mut fut: Fuse<_> = future.fuse();
-
-        loop {
-            if let Some(res) = futures::future::poll_immediate(&mut fut).await {
-                return res;
-            }
-
-            if std::time::Instant::now() >= deadline {
-                return Err(AuraError::invalid(format!(
-                    "Operation did not complete within {:?}",
-                    duration
-                )));
-            }
-
-            futures::future::yield_now().await;
+        match timeout(duration, future).await {
+            Ok(res) => res,
+            Err(_) => Err(AuraError::invalid(format!(
+                "Operation did not complete within {:?}",
+                duration
+            ))),
         }
     }
 

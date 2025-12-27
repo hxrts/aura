@@ -192,11 +192,12 @@ impl<C: CryptoEffects> AuthorizationEffects for WotAuthorizationHandler<C> {
         let delegated_cap = source_capabilities.meet(requested_capabilities);
 
         // 3. Cryptographic guard: ensure delegated caps hash to a non-zero value to prevent empty delegation
-        let delegated_bytes = bincode::serialize(&delegated_cap).map_err(|e| {
-            AuthorizationError::InvalidCapabilities {
-                reason: format!("failed to serialize delegated cap: {}", e),
-            }
-        })?;
+        let delegated_bytes =
+            aura_core::util::serialization::to_vec(&delegated_cap).map_err(|e| {
+                AuthorizationError::InvalidCapabilities {
+                    reason: format!("failed to serialize delegated cap: {}", e),
+                }
+            })?;
         let zero = vec![0u8; delegated_bytes.len().max(1)];
         if self.crypto.constant_time_eq(&delegated_bytes, &zero) {
             return Err(AuthorizationError::InvalidCapabilities {

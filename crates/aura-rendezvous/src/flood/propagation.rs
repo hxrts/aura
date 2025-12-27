@@ -229,7 +229,7 @@ where
             .ok_or(FloodError::ForwardBudgetExhausted)?;
 
         let serialized =
-            bincode::serialize(&forwarded).map_err(|e| FloodError::NetworkError(e.to_string()))?;
+            aura_core::util::serialization::to_vec(&forwarded).map_err(|e| FloodError::NetworkError(e.to_string()))?;
 
         // Send to each target (using AuthorityId's inner UUID)
         for target in targets {
@@ -281,7 +281,7 @@ where
         );
 
         let serialized =
-            bincode::serialize(&packet).map_err(|e| FloodError::NetworkError(e.to_string()))?;
+            aura_core::util::serialization::to_vec(&packet).map_err(|e| FloodError::NetworkError(e.to_string()))?;
 
         // Send to each target (using AuthorityId's inner UUID)
         for target in targets {

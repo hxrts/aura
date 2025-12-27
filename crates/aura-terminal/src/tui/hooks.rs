@@ -67,6 +67,7 @@ use aura_core::effects::reactive::{ReactiveEffects, ReactiveError, Signal};
 use aura_app::ReactiveHandler;
 
 use crate::tui::context::{InitializedAppCore, IoContext};
+use crate::tui::tasks::UiTaskRegistry;
 
 // =============================================================================
 // AppCore Context for iocraft
@@ -167,6 +168,10 @@ impl AppCoreContext {
 
     pub async fn add_info_toast(&self, id: impl Into<String>, message: impl Into<String>) {
         self.io_context.add_info_toast(id, message).await;
+    }
+
+    pub fn tasks(&self) -> Arc<UiTaskRegistry> {
+        self.io_context.tasks()
     }
 }
 

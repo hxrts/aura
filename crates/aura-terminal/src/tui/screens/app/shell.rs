@@ -612,7 +612,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
                                                 let app_core = app_core.raw().clone();
-                                                tokio::spawn(async move {
+                                                let tasks = app_ctx.tasks();
+                                                tasks.spawn(async move {
                                                     let _ = refresh_settings_from_runtime(&app_core).await;
                                                 });
                                             }
@@ -702,7 +703,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         | aura_app::runtime_bridge::CeremonyKind::DeviceRotation
                                                 ) {
                                                     let app_core = app_core.raw().clone();
-                                                    tokio::spawn(async move {
+                                                    let tasks = app_ctx.tasks();
+                                                    tasks.spawn(async move {
                                                         let _ = refresh_settings_from_runtime(&app_core).await;
                                                     });
                                                 }
@@ -787,7 +789,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 && (is_complete || has_failed)
                             {
                                 let app_core = app_core.raw().clone();
-                                tokio::spawn(async move {
+                                let tasks = app_ctx.tasks();
+                                tasks.spawn(async move {
                                     let _ = refresh_settings_from_runtime(&app_core).await;
                                 });
                                 if is_complete {
@@ -1810,7 +1813,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             Err(e) => {
                                                 tracing::error!("Invalid threshold for guardian ceremony: {}", e);
                                                 if let Some(tx) = update_tx_for_ceremony.clone() {
-                                                    let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                                         "guardian-ceremony-failed",
                                                         format!("Invalid threshold: {}", e),
                                                     )));
@@ -1822,7 +1825,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
-                                        tokio::spawn(async move {
+                                        let tasks = app_ctx.tasks();
+                                        tasks.spawn(async move {
                                             let app = app_core.raw();
 
                                             match start_guardian_ceremony(app, threshold, n, ids.clone())
@@ -1838,7 +1842,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     );
 
                                                     if let Some(tx) = update_tx.clone() {
-                                                        let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                                                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                                                             "guardian-ceremony-started",
                                                             format!(
                                                                 "Guardian ceremony started! Waiting for {}-of-{} guardians to respond",
@@ -1848,7 +1852,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                         // Prime the modal with an initial status update so `ceremony_id` is
                                                         // available immediately for UI cancel.
-                                                        let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
+                                                        let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
                                                             ceremony_id: ceremony_id.clone(),
                                                             kind: aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
                                                             accepted_count: 0,
@@ -1865,14 +1869,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     // Spawn a task to monitor ceremony progress.
                                                     let app_core_monitor = app.clone();
                                                     let update_tx_monitor = update_tx.clone();
-                                                    tokio::spawn(async move {
+                                                    let tasks = app_ctx.tasks();
+                                                    tasks.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
                                                             ceremony_id.clone(),
                                                             tokio::time::Duration::from_millis(500),
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
-                                                                    let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
+                                                                    let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
                                                                         ceremony_id: status.ceremony_id.clone(),
                                                                         kind: status.kind,
                                                                         accepted_count: status.accepted_count,
@@ -1898,7 +1903,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     );
 
                                                     if let Some(tx) = update_tx {
-                                                        let _ = tx.send(UiUpdate::operation_failed(
+                                                        let _ = tx.try_send(UiUpdate::operation_failed(
                                                             "Guardian ceremony",
                                                             e.to_string(),
                                                         ));
@@ -1924,7 +1929,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             Err(e) => {
                                                 tracing::error!("Invalid threshold for multifactor ceremony: {}", e);
                                                 if let Some(tx) = update_tx_for_ceremony.clone() {
-                                                    let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::error(
+                                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                                         "mfa-ceremony-failed",
                                                         format!("Invalid threshold: {}", e),
                                                     )));
@@ -1936,7 +1941,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
-                                        tokio::spawn(async move {
+                                        let tasks = app_ctx.tasks();
+                                        tasks.spawn(async move {
                                             let app = app_core.raw();
 
                                             match start_device_threshold_ceremony(
@@ -1957,7 +1963,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     );
 
                                                     if let Some(tx) = update_tx.clone() {
-                                                        let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                                                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                                                             "mfa-ceremony-started",
                                                             format!(
                                                                 "Multifactor ceremony started ({}-of-{})",
@@ -1967,7 +1973,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     }
 
                                                     if let Some(tx) = update_tx.clone() {
-                                                        let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
+                                                        let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
                                                             ceremony_id: ceremony_id.clone(),
                                                             kind: aura_app::runtime_bridge::CeremonyKind::DeviceRotation,
                                                             accepted_count: 0,
@@ -1983,14 +1989,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                     let app_core_monitor = app.clone();
                                                     let update_tx_monitor = update_tx.clone();
-                                                    tokio::spawn(async move {
+                                                    let tasks = app_ctx.tasks();
+                                                    tasks.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
                                                             ceremony_id.clone(),
                                                             tokio::time::Duration::from_millis(500),
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
-                                                                    let _ = tx.send(UiUpdate::KeyRotationCeremonyStatus {
+                                                                    let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
                                                                         ceremony_id: status.ceremony_id.clone(),
                                                                         kind: status.kind,
                                                                         accepted_count: status.accepted_count,
@@ -2016,7 +2023,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     );
 
                                                     if let Some(tx) = update_tx {
-                                                        let _ = tx.send(UiUpdate::operation_failed(
+                                                        let _ = tx.try_send(UiUpdate::operation_failed(
                                                             "Multifactor ceremony",
                                                             e.to_string(),
                                                         ));
@@ -2031,7 +2038,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
-                                        tokio::spawn(async move {
+                                        let tasks = app_ctx.tasks();
+                                        tasks.spawn(async move {
                                             let app = app_core.raw();
 
                                             if let Err(e) =
@@ -2039,7 +2047,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             {
                                                 tracing::error!("Failed to cancel guardian ceremony: {}", e);
                                                 if let Some(tx) = update_tx.clone() {
-                                                    let _ = tx.send(UiUpdate::operation_failed(
+                                                    let _ = tx.try_send(UiUpdate::operation_failed(
                                                         "Cancel guardian ceremony",
                                                         e.to_string(),
                                                     ));
@@ -2048,7 +2056,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             }
 
                                             if let Some(tx) = update_tx {
-                                                let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                                                let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                                                     "guardian-ceremony-canceled",
                                                     "Guardian ceremony canceled",
                                                 )));
@@ -2061,7 +2069,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
-                                        tokio::spawn(async move {
+                                        let tasks = app_ctx.tasks();
+                                        tasks.spawn(async move {
                                             let app = app_core.raw();
 
                                             if let Err(e) =
@@ -2069,7 +2078,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             {
                                                 tracing::error!("Failed to cancel ceremony: {}", e);
                                                 if let Some(tx) = update_tx.clone() {
-                                                    let _ = tx.send(UiUpdate::operation_failed(
+                                                    let _ = tx.try_send(UiUpdate::operation_failed(
                                                         "Cancel ceremony",
                                                         e.to_string(),
                                                     ));
@@ -2078,7 +2087,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             }
 
                                             if let Some(tx) = update_tx {
-                                                let _ = tx.send(UiUpdate::ToastAdded(ToastMessage::info(
+                                                let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                                                     "ceremony-canceled",
                                                     "Ceremony canceled",
                                                 )));

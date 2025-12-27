@@ -889,7 +889,7 @@ impl AntiEntropyProtocol {
                     format!("Failed to fingerprint applied op: {}", e),
                 )
             })?;
-            let serialized = bincode::serialize(op).map_err(|e| {
+            let serialized = aura_core::util::serialization::to_vec(op).map_err(|e| {
                 sync_serialization_error(
                     "op_serialize",
                     format!("Failed to serialize applied op: {}", e),
@@ -1134,8 +1134,8 @@ impl Default for AntiEntropyProtocol {
 // =============================================================================
 
 fn hash_serialized<T: Serialize>(value: &T) -> AuraResult<[u8; 32]> {
-    let bytes =
-        bincode::serialize(value).map_err(|err| AuraError::serialization(err.to_string()))?;
+    let bytes = aura_core::util::serialization::to_vec(value)
+        .map_err(|err| AuraError::serialization(err.to_string()))?;
     Ok(hash::hash(&bytes))
 }
 

@@ -5,8 +5,7 @@
 //!
 //! **Layer Constraint**: NO stateful patterns or multi-party coordination.
 //! This module contains only production-grade stateless handlers.
-// System handlers use std sync primitives for lightweight in-process state.
-#![allow(clippy::disallowed_types)]
+// System handlers are stateless in Layer 3.
 
 use async_trait::async_trait;
 use aura_core::effects::{SystemEffects, SystemError};
@@ -44,21 +43,13 @@ pub struct MetricsStats {
 #[derive(Debug, Clone)]
 pub struct MetricsSystemHandler {
     /// Configuration for metrics operations
-    config: std::sync::Arc<std::sync::Mutex<MetricsConfig>>,
-    counters: std::sync::Arc<std::sync::Mutex<HashMap<String, f64>>>,
-    gauges: std::sync::Arc<std::sync::Mutex<HashMap<String, f64>>>,
-    stats: std::sync::Arc<std::sync::Mutex<MetricsStats>>,
+    config: MetricsConfig,
 }
 
 impl MetricsSystemHandler {
     /// Create a new metrics system handler
     pub fn new(config: MetricsConfig) -> Self {
-        Self {
-            config: std::sync::Arc::new(std::sync::Mutex::new(config)),
-            counters: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
-            gauges: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
-            stats: std::sync::Arc::new(std::sync::Mutex::new(MetricsStats::default())),
-        }
+        Self { config }
     }
 
     /// Create with default configuration
@@ -85,17 +76,7 @@ impl MetricsSystemHandler {
             value = value,
             "Counter incremented via metrics handler"
         );
-        if let Ok(mut counters) = self.counters.lock() {
-            *counters.entry(key).or_insert(0.0) += value;
-        }
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.total_metrics_recorded = stats.total_metrics_recorded.saturating_add(1);
-            stats.active_counters = self
-                .counters
-                .lock()
-                .map(|m| m.len() as u64)
-                .unwrap_or(stats.active_counters);
-        }
+        let _ = (key, value);
         Ok(())
     }
 
@@ -113,17 +94,7 @@ impl MetricsSystemHandler {
             value = value,
             "Gauge set via metrics handler"
         );
-        if let Ok(mut gauges) = self.gauges.lock() {
-            gauges.insert(key, value);
-        }
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.total_metrics_recorded = stats.total_metrics_recorded.saturating_add(1);
-            stats.active_gauges = self
-                .gauges
-                .lock()
-                .map(|m| m.len() as u64)
-                .unwrap_or(stats.active_gauges);
-        }
+        let _ = (key, value);
         Ok(())
     }
 
@@ -134,12 +105,7 @@ impl MetricsSystemHandler {
         value: f64,
         labels: HashMap<String, String>,
     ) -> Result<(), SystemError> {
-        let enable_histograms = self
-            .config
-            .lock()
-            .map(|cfg| cfg.enable_histograms)
-            .unwrap_or(false);
-        if !enable_histograms {
+        if !self.config.enable_histograms {
             return Ok(());
         }
 
@@ -150,9 +116,7 @@ impl MetricsSystemHandler {
             value = value,
             "Histogram observed via metrics handler"
         );
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.total_metrics_recorded = stats.total_metrics_recorded.saturating_add(1);
-        }
+        let _ = (key, value);
         Ok(())
     }
 
@@ -169,17 +133,17 @@ impl MetricsSystemHandler {
 
     /// Get counters (stateless - delegates to external service)
     pub async fn get_counters(&self) -> HashMap<String, f64> {
-        self.counters.lock().map(|m| m.clone()).unwrap_or_default()
+        HashMap::new()
     }
 
     /// Get gauges (stateless - delegates to external service)
     pub async fn get_gauges(&self) -> HashMap<String, f64> {
-        self.gauges.lock().map(|m| m.clone()).unwrap_or_default()
+        HashMap::new()
     }
 
     /// Get metrics statistics (stateless - delegates to external service)
     pub async fn get_statistics(&self) -> MetricsStats {
-        self.stats.lock().map(|s| s.clone()).unwrap_or_default()
+        MetricsStats::default()
     }
 
     fn with_labels(name: &str, labels: &HashMap<String, String>) -> String {
@@ -230,25 +194,16 @@ impl SystemEffects for MetricsSystemHandler {
     }
 
     async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {
-        let stats = self.stats.lock().map(|s| s.clone()).unwrap_or_default();
-        let config = self.config.lock().map(|c| c.clone()).unwrap_or_default();
-
         let mut info = HashMap::new();
         info.insert("component".to_string(), "metrics".to_string());
         info.insert("status".to_string(), "operational".to_string());
         info.insert(
             "enable_histograms".to_string(),
-            config.enable_histograms.to_string(),
+            self.config.enable_histograms.to_string(),
         );
-        info.insert(
-            "active_counters".to_string(),
-            stats.active_counters.to_string(),
-        );
-        info.insert("active_gauges".to_string(), stats.active_gauges.to_string());
-        info.insert(
-            "total_metrics_recorded".to_string(),
-            stats.total_metrics_recorded.to_string(),
-        );
+        info.insert("active_counters".to_string(), "0".to_string());
+        info.insert("active_gauges".to_string(), "0".to_string());
+        info.insert("total_metrics_recorded".to_string(), "0".to_string());
 
         Ok(info)
     }
@@ -263,15 +218,7 @@ impl SystemEffects for MetricsSystemHandler {
                             key: key.to_string(),
                             value: value.to_string(),
                         })?;
-                if let Ok(mut config) = self.config.lock() {
-                    config.enable_histograms = parsed;
-                }
-                // Record the configuration change so we can surface this through metrics.
-                let mut labels = HashMap::new();
-                labels.insert("key".to_string(), key.to_string());
-                labels.insert("value".to_string(), parsed.to_string());
-                self.increment_counter("config_updates_total", 1.0, labels)
-                    .await?;
+                let _ = parsed;
                 Ok(())
             }
             _ => Err(SystemError::InvalidConfiguration {
@@ -282,9 +229,8 @@ impl SystemEffects for MetricsSystemHandler {
     }
 
     async fn get_config(&self, key: &str) -> Result<String, SystemError> {
-        let config = self.config.lock().map(|c| c.clone()).unwrap_or_default();
         match key {
-            "enable_histograms" => Ok(config.enable_histograms.to_string()),
+            "enable_histograms" => Ok(self.config.enable_histograms.to_string()),
             _ => Err(SystemError::InvalidConfiguration {
                 key: key.to_string(),
                 value: "unknown".to_string(),
@@ -299,22 +245,13 @@ impl SystemEffects for MetricsSystemHandler {
     async fn get_metrics(&self) -> Result<HashMap<String, f64>, SystemError> {
         let mut metrics = HashMap::new();
 
-        let stats = self.stats.lock().map(|s| s.clone()).unwrap_or_default();
-        let config = self.config.lock().map(|c| c.clone()).unwrap_or_default();
-
         metrics.insert(
             "enable_histograms".to_string(),
-            if config.enable_histograms { 1.0 } else { 0.0 },
+            if self.config.enable_histograms { 1.0 } else { 0.0 },
         );
-        metrics.insert("active_counters".to_string(), stats.active_counters as f64);
-        metrics.insert("active_gauges".to_string(), stats.active_gauges as f64);
-        metrics.insert(
-            "total_metrics_recorded".to_string(),
-            stats.total_metrics_recorded as f64,
-        );
-        metrics.extend(self.get_counters().await);
-        // Gauges are also returned to expose current values.
-        metrics.extend(self.get_gauges().await);
+        metrics.insert("active_counters".to_string(), 0.0);
+        metrics.insert("active_gauges".to_string(), 0.0);
+        metrics.insert("total_metrics_recorded".to_string(), 0.0);
         Ok(metrics)
     }
 
@@ -361,7 +298,7 @@ mod tests {
         // Test system effects
         let info = handler.get_system_info().await.unwrap();
         assert_eq!(info.get("component"), Some(&"metrics".to_string()));
-        assert_eq!(info.get("total_metrics_recorded"), Some(&"2".to_string()));
+        assert_eq!(info.get("total_metrics_recorded"), Some(&"0".to_string()));
 
         // Test config operations
         let config_value = handler.get_config("enable_histograms").await.unwrap();

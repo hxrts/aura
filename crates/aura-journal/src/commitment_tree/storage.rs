@@ -17,33 +17,35 @@ pub fn op_key(op_hash: [u8; 32]) -> String {
     format!("{}{}", TREE_OPS_PREFIX, hex::encode(op_hash))
 }
 
-/// Serialize an attested operation for storage.
+/// Serialize an attested operation for storage using DAG-CBOR.
 pub fn serialize_op(op: &AttestedOp) -> Result<Vec<u8>, AuraError> {
-    bincode::serialize(op)
+    aura_core::util::serialization::to_vec(op)
         .map_err(|e| AuraError::internal(format!("Failed to serialize tree op: {e}")))
 }
 
 /// Deserialize an attested operation from storage bytes.
 pub fn deserialize_op(bytes: &[u8]) -> Result<AttestedOp, AuraError> {
-    bincode::deserialize(bytes)
+    aura_core::util::serialization::from_slice(bytes)
         .map_err(|e| AuraError::internal(format!("Failed to deserialize tree op: {e}")))
 }
 
-/// Serialize an ordered list of operation hashes for storage.
+/// Serialize an ordered list of operation hashes for storage using DAG-CBOR.
 pub fn serialize_op_index(hashes: &[[u8; 32]]) -> Result<Vec<u8>, AuraError> {
-    bincode::serialize(hashes)
+    // Convert slice to Vec for serialization (DAG-CBOR requires Sized)
+    let hashes_vec: Vec<[u8; 32]> = hashes.to_vec();
+    aura_core::util::serialization::to_vec(&hashes_vec)
         .map_err(|e| AuraError::internal(format!("Failed to serialize ops index: {e}")))
 }
 
 /// Deserialize an ordered list of operation hashes from storage bytes.
 pub fn deserialize_op_index(bytes: &[u8]) -> Result<Vec<[u8; 32]>, AuraError> {
-    bincode::deserialize(bytes)
+    aura_core::util::serialization::from_slice(bytes)
         .map_err(|e| AuraError::internal(format!("Failed to deserialize ops index: {e}")))
 }
 
 /// Compute hash for an operation (for deduplication and CID).
 pub fn op_hash(op: &AttestedOp) -> Result<[u8; 32], AuraError> {
-    let bytes = bincode::serialize(op)
+    let bytes = aura_core::util::serialization::to_vec(op)
         .map_err(|e| AuraError::internal(format!("hash serialize attested op: {e}")))?;
     Ok(hash::hash(&bytes))
 }

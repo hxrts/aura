@@ -23,7 +23,7 @@
 //! // In callback:
 //! let tx = update_tx.clone();
 //! tokio::spawn(async move {
-//!     let _ = tx.send(UiUpdate::DisplayNameChanged(name));
+//!     let _ = tx.try_send(UiUpdate::DisplayNameChanged(name));
 //! });
 //!
 //! // In component:
@@ -45,14 +45,14 @@ use crate::tui::components::ToastMessage;
 use crate::tui::types::{Device, MfaPolicy};
 
 /// Channel sender type for UI updates
-pub type UiUpdateSender = tokio::sync::mpsc::UnboundedSender<UiUpdate>;
+pub type UiUpdateSender = tokio::sync::mpsc::Sender<UiUpdate>;
 
 /// Channel receiver type for UI updates
-pub type UiUpdateReceiver = tokio::sync::mpsc::UnboundedReceiver<UiUpdate>;
+pub type UiUpdateReceiver = tokio::sync::mpsc::Receiver<UiUpdate>;
 
 /// Create a new UI update channel pair
 pub fn ui_update_channel() -> (UiUpdateSender, UiUpdateReceiver) {
-    tokio::sync::mpsc::unbounded_channel()
+    tokio::sync::mpsc::channel(1024)
 }
 
 /// All UI updates flow through this enum.
@@ -378,9 +378,9 @@ mod tests {
     fn test_ui_update_channel() {
         let (tx, mut rx) = ui_update_channel();
 
-        tx.send(UiUpdate::DisplayNameChanged("Alice".to_string()))
+        tx.try_send(UiUpdate::DisplayNameChanged("Alice".to_string()))
             .unwrap();
-        tx.send(UiUpdate::MfaPolicyChanged(MfaPolicy::AlwaysRequired))
+        tx.try_send(UiUpdate::MfaPolicyChanged(MfaPolicy::AlwaysRequired))
             .unwrap();
 
         let update1 = rx.try_recv().unwrap();

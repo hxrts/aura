@@ -33,7 +33,7 @@ impl BloomDigest {
         let mut cids = BTreeSet::new();
 
         for op in oplog.list_ops().iter() {
-            let bytes = bincode::serialize(op)
+            let bytes = aura_core::util::serialization::to_vec(op)
                 .map_err(|e| SyncError::VerificationFailed(e.to_string()))?;
             cids.insert(Hash32::from(aura_core::hash::hash(&bytes)));
         }

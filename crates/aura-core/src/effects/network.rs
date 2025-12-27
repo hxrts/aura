@@ -1,7 +1,7 @@
 //! Network effects trait definitions
 //!
 //! This module defines the trait interfaces for network communication operations.
-//! Implementations are provided by aura-protocol handlers using aura-transport.
+//! Implementations are provided by aura-agent handlers using aura-transport.
 //!
 //! # Effect Classification
 //!
@@ -162,7 +162,7 @@ pub enum PeerEvent {
 /// Core network effects interface for communication operations.
 ///
 /// This trait defines network operations for the Aura effects system.
-/// Implementations are provided in aura-protocol handlers using aura-transport.
+/// Implementations are provided in aura-agent handlers using aura-transport.
 /// Different implementations exist for:
 /// - Production: Real network communication
 /// - Testing: Mock network with controllable message delivery

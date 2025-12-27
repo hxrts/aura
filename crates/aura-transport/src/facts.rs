@@ -5,7 +5,7 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
-use aura_core::{decode_domain_fact, encode_domain_fact};
+use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::context_transport::TransportProtocol;
@@ -137,6 +137,10 @@ pub enum TransportFact {
 }
 
 impl TransportFact {
+    fn version() -> SemanticVersion {
+        SemanticVersion::new(TRANSPORT_FACT_SCHEMA_VERSION, 0, 0)
+    }
+
     /// Get the context ID for this fact
     pub fn context_id(&self) -> ContextId {
         match self {
@@ -343,12 +347,18 @@ impl TransportFact {
 
     /// Encode this fact with a canonical envelope.
     pub fn to_bytes(&self) -> Vec<u8> {
-        encode_domain_fact(TRANSPORT_FACT_TYPE_ID, TRANSPORT_FACT_SCHEMA_VERSION, self)
+        let message = VersionedMessage::new(self.clone(), Self::version())
+            .with_metadata("type".to_string(), TRANSPORT_FACT_TYPE_ID.to_string());
+        to_vec(&message).unwrap_or_default()
     }
 
     /// Decode a fact from a canonical envelope.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        decode_domain_fact(TRANSPORT_FACT_TYPE_ID, TRANSPORT_FACT_SCHEMA_VERSION, bytes)
+        let message: VersionedMessage<Self> = from_slice(bytes).ok()?;
+        if !message.version.is_compatible(&Self::version()) {
+            return None;
+        }
+        Some(message.payload)
     }
 }
 

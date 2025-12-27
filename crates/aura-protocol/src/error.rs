@@ -35,7 +35,7 @@ pub enum ProtocolError {
 
     /// Serialization failure for protocol messages.
     #[error("Serialization failed: {0}")]
-    Serialization(#[from] bincode::Error),
+    Serialization(#[from] aura_core::util::serialization::SerializationError),
 
     /// Catch-all error for unexpected cases.
     #[error("Other error: {0}")]

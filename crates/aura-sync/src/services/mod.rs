@@ -34,7 +34,7 @@
 //! use aura_sync::services::{SyncService, SyncServiceConfig};
 //! use aura_core::effects::{JournalEffects, NetworkEffects};
 //!
-//! async fn run_sync_service<E>(effects: E) -> Result<(), Box<dyn std::error::Error>>
+//! async fn run_service<E>(effects: E) -> Result<(), Box<dyn std::error::Error>>
 //! where
 //!     E: JournalEffects + NetworkEffects,
 //! {

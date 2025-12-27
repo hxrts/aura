@@ -146,10 +146,12 @@ pub fn use_contacts_subscription(
     // Create the shared contacts holder - use_ref ensures it persists across renders.
     let shared_contacts_ref = hooks.use_ref(SharedContacts::new);
     let shared_contacts: SharedContacts = shared_contacts_ref.read().clone();
+    let tasks = app_ctx.tasks();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
+        let tasks = tasks.clone();
         async move {
             // CONNECTION_STATUS_SIGNAL depends on the current contacts list (peer count = online contacts).
             // Ensure the footer updates when CONTACTS_SIGNAL changes by refreshing the derived status.
@@ -167,7 +169,7 @@ pub fn use_contacts_subscription(
 
                 // Send contact count update for keyboard navigation
                 if let Some(ref tx) = update_tx {
-                    let _ = tx.send(UiUpdate::ContactCountChanged(new_count));
+                    let _ = tx.try_send(UiUpdate::ContactCountChanged(new_count));
                 }
 
                 // Avoid spawning an unbounded number of refresh tasks if contacts update rapidly.
@@ -177,7 +179,7 @@ pub fn use_contacts_subscription(
 
                 let app_core_for_refresh = app_core_for_refresh.clone();
                 let refresh_in_flight = refresh_in_flight.clone();
-                tokio::spawn(async move {
+                tasks.spawn(async move {
                     let _ =
                         aura_app::workflows::system::refresh_account(app_core_for_refresh.raw())
                             .await;
@@ -427,7 +429,7 @@ pub fn use_notifications_subscription(
                       recovery: &Arc<AtomicUsize>| {
         if let Some(ref tx) = tx {
             let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
-            let _ = tx.send(UiUpdate::NotificationsCountChanged(total));
+            let _ = tx.try_send(UiUpdate::NotificationsCountChanged(total));
         }
     };
 

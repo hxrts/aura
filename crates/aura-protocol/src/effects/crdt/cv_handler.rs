@@ -76,7 +76,7 @@
 //!     handler: &mut CvHandler<S>,
 //!     peers: Vec<DeviceId>,
 //! ) -> Result<(), Box<dyn std::error::Error>> {
-//!     let session_id = SessionId::new();
+//!     let session_id = SessionId::new_from_entropy([0u8; 32]);
 //!
 //!     // Execute anti-entropy protocol
 //!     execution::execute_cv_sync(handler, peers, session_id).await?;

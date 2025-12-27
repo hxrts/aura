@@ -149,7 +149,7 @@ where
 
             // Request from peer
             let request = RetrieveRequest { hash: *hash };
-            let serialized = bincode::serialize(&request)
+            let serialized = aura_core::util::serialization::to_vec(&request)
                 .map_err(|e| AvailabilityError::NetworkError(e.to_string()))?;
 
             match self.network.send_to_peer(peer.uuid(), serialized).await {
@@ -157,7 +157,7 @@ where
                     // Wait for response (simplified - real impl would use request/response)
                     match self.network.receive_from(peer.uuid()).await {
                         Ok(response) => {
-                            if let Ok(data) = bincode::deserialize::<RetrieveResponse>(&response) {
+                            if let Ok(data) = aura_core::util::serialization::from_slice::<RetrieveResponse>(&response) {
                                 if let Some(content) = data.content {
                                     // Verify hash
                                     let computed = Hash32::from_bytes(&content);

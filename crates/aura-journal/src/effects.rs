@@ -3,7 +3,7 @@ use crate::extensibility::FactRegistry;
 use async_trait::async_trait;
 use aura_core::effects::{BiscuitAuthorizationEffects, FlowBudgetEffects};
 use aura_core::effects::{CryptoEffects, JournalEffects, StorageEffects};
-use aura_core::flow::FlowBudget;
+use aura_core::flow::{FlowBudget, Receipt};
 use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
 use aura_core::{
     hash::hash,
@@ -12,7 +12,6 @@ use aura_core::{
     AuraError, FactValue, Journal,
 };
 // Flow budget handling moved to effects system
-use bincode;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
@@ -226,7 +225,8 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects, F: Flo
                 let mut message = Vec::new();
                 message.extend_from_slice(envelope_id);
                 // Convert timestamp to a deterministic binary representation for signing
-                let ts_bytes = bincode::serialize(timestamp).unwrap_or_else(|_| Vec::new());
+                let ts_bytes = aura_core::util::serialization::to_vec(timestamp)
+                    .unwrap_or_else(|_| Vec::new());
                 message.extend_from_slice(&ts_bytes);
                 let verified = self
                     .crypto
@@ -365,16 +365,21 @@ impl<
     ) -> Result<FlowBudget, AuraError> {
         if let Some(flow_budget) = &self.flow_budget {
             // Use the FlowBudgetEffects charge_flow method and convert receipt to budget
+            let current = self.get_flow_budget(context, peer).await?;
             let receipt = flow_budget.charge_flow(context, peer, cost).await?;
-            Ok(FlowBudget {
-                limit: 0, // No limit tracking in this implementation
-                spent: receipt.nonce,
-                epoch: receipt.epoch,
-            })
+            Ok(budget_after_charge(current, &receipt))
         } else {
             // Default behavior: return current budget without charging
             self.get_flow_budget(context, peer).await
         }
+    }
+}
+
+fn budget_after_charge(current: FlowBudget, receipt: &Receipt) -> FlowBudget {
+    FlowBudget {
+        limit: current.limit,
+        spent: current.spent.saturating_add(receipt.cost as u64),
+        epoch: receipt.epoch,
     }
 }
 

@@ -5,8 +5,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 /// Encoding used inside a fact envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FactEncoding {
-    /// Binary encoding (bincode).
-    Bincode,
+    /// DAG-CBOR encoding (canonical, deterministic).
+    DagCbor,
     /// JSON encoding (primarily for debugging).
     Json,
 }
@@ -30,15 +30,16 @@ pub fn encode_domain_fact<T: Serialize>(
     schema_version: u16,
     value: &T,
 ) -> Vec<u8> {
-    let payload =
-        bincode::serialize(value).expect("DomainFact payload must serialize with bincode");
+    let payload = crate::util::serialization::to_vec(value)
+        .expect("DomainFact payload must serialize with DAG-CBOR");
     let envelope = FactEnvelope {
         type_id: type_id.to_string(),
         schema_version,
-        encoding: FactEncoding::Bincode,
+        encoding: FactEncoding::DagCbor,
         payload,
     };
-    bincode::serialize(&envelope).expect("DomainFact envelope must serialize with bincode")
+    crate::util::serialization::to_vec(&envelope)
+        .expect("DomainFact envelope must serialize with DAG-CBOR")
 }
 
 /// Decode a domain fact payload from a canonical envelope.
@@ -47,7 +48,7 @@ pub fn decode_domain_fact<T: DeserializeOwned>(
     expected_schema_version: u16,
     bytes: &[u8],
 ) -> Option<T> {
-    let envelope: FactEnvelope = bincode::deserialize(bytes).ok()?;
+    let envelope: FactEnvelope = crate::util::serialization::from_slice(bytes).ok()?;
     if envelope.type_id != expected_type_id {
         return None;
     }
@@ -55,7 +56,7 @@ pub fn decode_domain_fact<T: DeserializeOwned>(
         return None;
     }
     match envelope.encoding {
-        FactEncoding::Bincode => bincode::deserialize(&envelope.payload).ok(),
+        FactEncoding::DagCbor => crate::util::serialization::from_slice(&envelope.payload).ok(),
         FactEncoding::Json => serde_json::from_slice(&envelope.payload).ok(),
     }
 }

@@ -234,6 +234,72 @@ pub fn sync_consistency_error(
     ))
 }
 
+/// Phases of synchronization protocol execution
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncPhase {
+    /// Loading local journal state
+    LoadLocalState,
+    /// Computing digest for comparison
+    ComputeDigest,
+    /// Exchanging digests with peer
+    DigestExchange,
+    /// Planning which operations to request
+    PlanRequest,
+    /// Receiving operations from peer
+    ReceiveOperations,
+    /// Merging received operations into journal
+    MergeJournal,
+    /// Persisting merged journal to storage
+    PersistJournal,
+    /// Executing anti-entropy sub-protocol
+    ExecuteAntiEntropy,
+}
+
+impl std::fmt::Display for SyncPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SyncPhase::LoadLocalState => write!(f, "LoadLocalState"),
+            SyncPhase::ComputeDigest => write!(f, "ComputeDigest"),
+            SyncPhase::DigestExchange => write!(f, "DigestExchange"),
+            SyncPhase::PlanRequest => write!(f, "PlanRequest"),
+            SyncPhase::ReceiveOperations => write!(f, "ReceiveOperations"),
+            SyncPhase::MergeJournal => write!(f, "MergeJournal"),
+            SyncPhase::PersistJournal => write!(f, "PersistJournal"),
+            SyncPhase::ExecuteAntiEntropy => write!(f, "ExecuteAntiEntropy"),
+        }
+    }
+}
+
+/// Create a protocol error with phase context (maps to Internal).
+pub fn sync_protocol_phase_error(
+    protocol: impl Into<String>,
+    phase: SyncPhase,
+    message: impl Into<String>,
+) -> AuraError {
+    AuraError::internal(format!(
+        "Protocol error in {} during {}: {}",
+        protocol.into(),
+        phase,
+        message.into()
+    ))
+}
+
+/// Create a protocol error with phase and peer context (maps to Internal).
+pub fn sync_protocol_phase_with_peer(
+    protocol: impl Into<String>,
+    phase: SyncPhase,
+    message: impl Into<String>,
+    peer: DeviceId,
+) -> AuraError {
+    AuraError::internal(format!(
+        "Protocol error in {} during {} with peer {}: {}",
+        protocol.into(),
+        phase,
+        peer,
+        message.into()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

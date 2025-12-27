@@ -42,11 +42,11 @@ use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
 };
+use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 /// Type identifier for invitation facts
 pub const INVITATION_FACT_TYPE_ID: &str = "invitation";
-pub const INVITATION_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvitationFactKey {
@@ -58,7 +58,8 @@ pub struct InvitationFactKey {
 ///
 /// These facts represent invitation-related state changes in the journal.
 /// They are stored as `RelationalFact::Generic` and reduced by `InvitationFactReducer`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
+#[domain_fact(type_id = "invitation", schema_version = 1, context_fn = "context_id_or_default")]
 pub enum InvitationFact {
     /// Invitation sent from one authority to another
     Sent {
@@ -189,6 +190,12 @@ impl InvitationFact {
             | InvitationFact::CeremonyCommitted { .. }
             | InvitationFact::CeremonyAborted { .. } => None,
         }
+    }
+
+    /// Context ID with a default sentinel for non-context facts.
+    pub fn context_id_or_default(&self) -> ContextId {
+        self.context_id_opt()
+            .unwrap_or_else(|| ContextId::new_from_entropy([0u8; 32]))
     }
 
     /// Validate that this fact can be reduced under the provided context.
@@ -327,32 +334,6 @@ impl InvitationFact {
                 uncertainty: None,
             },
         }
-    }
-}
-
-impl DomainFact for InvitationFact {
-    fn type_id(&self) -> &'static str {
-        INVITATION_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        self.context_id_opt()
-            .unwrap_or_else(|| ContextId::new_from_entropy([0u8; 32]))
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(self.type_id(), INVITATION_FACT_SCHEMA_VERSION, self)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        aura_journal::decode_domain_fact(
-            INVITATION_FACT_TYPE_ID,
-            INVITATION_FACT_SCHEMA_VERSION,
-            bytes,
-        )
     }
 }
 

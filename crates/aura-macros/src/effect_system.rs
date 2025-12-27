@@ -135,7 +135,7 @@ pub fn aura_effect_implementations_impl(input: TokenStream) -> TokenStream {
         fn serialize_effect_params<T: Serialize>(
             param: &T,
         ) -> Result<Vec<u8>, AuraError> {
-            bincode::serialize(param).map_err(|e| {
+            aura_core::util::serialization::to_vec(param).map_err(|e| {
                 AuraError::internal(format!("Failed to serialize effect parameters: {}", e))
             })
         }
@@ -144,7 +144,7 @@ pub fn aura_effect_implementations_impl(input: TokenStream) -> TokenStream {
         fn deserialize_effect_result<T: DeserializeOwned>(
             bytes: &[u8],
         ) -> Result<T, AuraError> {
-            bincode::deserialize(bytes).map_err(|e| {
+            aura_core::util::serialization::from_slice(bytes).map_err(|e| {
                 AuraError::internal(format!("Failed to deserialize effect result: {}", e))
             })
         }

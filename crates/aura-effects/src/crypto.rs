@@ -381,8 +381,8 @@ impl CryptoExtendedEffects for RealCryptoHandler {
             let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
 
             Ok(SigningKeyGenResult {
-                key_packages: vec![key_package.to_bytes()],
-                public_key_package: public_package.to_bytes(),
+                key_packages: vec![key_package.to_bytes().map_err(|e| CryptoError::invalid(format!("key package serialization: {}", e)))?],
+                public_key_package: public_package.to_bytes().map_err(|e| CryptoError::invalid(format!("public package serialization: {}", e)))?,
                 mode: SigningMode::SingleSigner,
             })
         } else if threshold >= 2 {
@@ -609,8 +609,8 @@ impl CryptoExtendedEffects for RealCryptoHandler {
             .serialize()
             .map_err(|e| CryptoError::invalid(format!("Failed to serialize commitments: {}", e)))?;
 
-        // Use bincode for the outer tuple since it's our internal format
-        bincode::serialize(&(nonces_bytes, commitments_bytes)).map_err(|e| {
+        // Use DAG-CBOR for the outer tuple since it's our internal format
+        aura_core::util::serialization::to_vec(&(nonces_bytes, commitments_bytes)).map_err(|e| {
             CryptoError::invalid(format!("Failed to serialize FROST signing bundle: {}", e))
         })
     }
@@ -652,9 +652,9 @@ impl CryptoExtendedEffects for RealCryptoHandler {
                 )));
             }
 
-            // First deserialize the outer tuple (nonces_bytes, commitments_bytes) using bincode
+            // First deserialize the outer tuple (nonces_bytes, commitments_bytes) using DAG-CBOR
             let (_nonces_bytes, commitments_bytes): (Vec<u8>, Vec<u8>) =
-                bincode::deserialize(nonce_bytes).map_err(|e| {
+                aura_core::util::serialization::from_slice(nonce_bytes).map_err(|e| {
                     CryptoError::invalid(format!(
                         "Invalid signing nonces bundle for participant {}: {}",
                         participant_id, e
@@ -711,9 +711,10 @@ impl CryptoExtendedEffects for RealCryptoHandler {
             frost::keys::KeyPackage::deserialize(&key_share_buf)
                 .map_err(|e| CryptoError::invalid(format!("Invalid key share: {}", e)))?;
 
-        // Outer tuple uses bincode, inner nonces use FROST's native method
-        let (signing_nonces_bytes, _): (Vec<u8>, Vec<u8>) = bincode::deserialize(&nonce_buf)
-            .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {}", e)))?;
+        // Outer tuple uses DAG-CBOR, inner nonces use FROST's native method
+        let (signing_nonces_bytes, _): (Vec<u8>, Vec<u8>) =
+            aura_core::util::serialization::from_slice(&nonce_buf)
+                .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {}", e)))?;
 
         let signing_nonces: frost::round1::SigningNonces =
             frost::round1::SigningNonces::deserialize(&signing_nonces_bytes).map_err(|e| {

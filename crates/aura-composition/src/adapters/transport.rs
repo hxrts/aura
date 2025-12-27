@@ -59,7 +59,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
         match operation {
             "send_to_peer" => {
                 let params: (uuid::Uuid, Vec<u8>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -75,7 +75,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 Ok(Vec::new()) // send returns void
             }
             "broadcast" => {
-                let message: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
+                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -95,7 +95,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&received).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&received).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -108,7 +108,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         operation: operation.to_string(),
                     }
                 })?;
-                let peer_id: uuid::Uuid = bincode::deserialize(parameters).map_err(|e| {
+                let peer_id: uuid::Uuid = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -121,7 +121,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                bincode::serialize(&received).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&received).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -135,7 +135,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                     }
                 })?;
                 let peers = handler.connected_peers().await;
-                bincode::serialize(&peers).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&peers).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -148,7 +148,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         operation: operation.to_string(),
                     }
                 })?;
-                let peer_id: uuid::Uuid = bincode::deserialize(parameters).map_err(|e| {
+                let peer_id: uuid::Uuid = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -156,7 +156,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                     }
                 })?;
                 let result = handler.is_peer_connected(peer_id).await;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -172,7 +172,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         operation: operation.to_string(),
                     }
                 })?;
-                let address: String = bincode::deserialize(parameters).map_err(|e| {
+                let address: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
@@ -184,7 +184,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                bincode::serialize(&connection_id).map_err(|e| HandlerError::EffectSerialization {
+                aura_core::util::serialization::to_vec(&connection_id).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
                     source: Box::new(e),
@@ -198,7 +198,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                     }
                 })?;
                 let (connection_id, data): (String, Vec<u8>) =
-                    bincode::deserialize(parameters).map_err(|e| {
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,
                             operation: operation.to_string(),
@@ -219,7 +219,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         operation: operation.to_string(),
                     }
                 })?;
-                let connection_id: String = bincode::deserialize(parameters).map_err(|e| {
+                let connection_id: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),

@@ -20,6 +20,7 @@ aura-core = { path = "../aura-core" }
 
 # Layer 2 - Domain crates (aura-social builds ON these)
 aura-journal = { path = "../aura-journal" }
+aura-macros = { path = "../aura-macros" }
 
 # External
 async-trait = { workspace = true }

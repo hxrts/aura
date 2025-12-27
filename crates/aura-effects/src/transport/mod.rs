@@ -12,7 +12,7 @@
 //!
 //! **Layer Constraint** (per docs/106_effect_system_and_runtime.md):
 //! NO choreography or multi-party coordination here. Multi-party transport logic
-//! (routing, retry, connection management) belongs in aura-protocol/transport (Layer 4).
+//! (routing, retry, connection management) belongs in aura-agent/transport (Layer 6).
 //! These implement pure infrastructure effects only.
 
 // REMOVED: pub mod coordination; // Moved to aura-protocol (Layer 4)

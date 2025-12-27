@@ -10,11 +10,11 @@ use aura_core::relational::GuardianParameters;
 use aura_core::{hash, AuthorityId, Hash32, TimeStamp};
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
 use aura_journal::{DomainFact, FactReducer};
+use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 /// Type identifier for guardian request facts.
 pub const GUARDIAN_REQUEST_FACT_TYPE_ID: &str = "guardian_request";
-pub const GUARDIAN_REQUEST_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuardianRequestFactKey {
@@ -34,7 +34,8 @@ pub struct GuardianRequestPayload {
 }
 
 /// Guardian request lifecycle fact.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
+#[domain_fact(type_id = "guardian_request", schema_version = 1, context = "context_id")]
 pub enum GuardianRequestFact {
     Requested {
         context_id: ContextId,
@@ -74,38 +75,6 @@ impl GuardianRequestFact {
             sub_type,
             data: hash::hash(&self.to_bytes()).to_vec(),
         }
-    }
-}
-
-impl DomainFact for GuardianRequestFact {
-    fn type_id(&self) -> &'static str {
-        GUARDIAN_REQUEST_FACT_TYPE_ID
-    }
-
-    fn context_id(&self) -> ContextId {
-        match self {
-            GuardianRequestFact::Requested { context_id, .. } => *context_id,
-            GuardianRequestFact::Cancelled { context_id, .. } => *context_id,
-        }
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        aura_journal::encode_domain_fact(
-            self.type_id(),
-            GUARDIAN_REQUEST_FACT_SCHEMA_VERSION,
-            self,
-        )
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        aura_journal::decode_domain_fact(
-            GUARDIAN_REQUEST_FACT_TYPE_ID,
-            GUARDIAN_REQUEST_FACT_SCHEMA_VERSION,
-            bytes,
-        )
     }
 }
 

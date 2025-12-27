@@ -20,7 +20,9 @@ Options (run all when none given):
   --todos          Incomplete code markers
   --registration   Handler composition vs direct instantiation
   --crypto         Crypto library usage boundaries (ed25519_dalek, OsRng, getrandom)
+  --concurrency    Concurrency hygiene (block_in_place, unbounded channels)
   --reactive       TUI reactive data model (signals as source of truth, no domain data in props)
+  --serialization  Serialization format enforcement (DAG-CBOR canonical, no bincode)
   --layer N[,M...] Filter output to specific layer numbers (1-8); repeatable
   --quick          Run fast checks only (skip todos, placeholders)
   -v, --verbose    Show more detail (allowlisted paths, etc.)
@@ -37,7 +39,9 @@ RUN_INVARIANTS=false
 RUN_TODOS=false
 RUN_REG=false
 RUN_CRYPTO=false
+RUN_CONCURRENCY=false
 RUN_REACTIVE=false
+RUN_SERIALIZATION=false
 RUN_QUICK=false
 VERBOSE=false
 LAYER_FILTERS=()
@@ -52,7 +56,9 @@ while [[ $# -gt 0 ]]; do
     --todos) RUN_ALL=false; RUN_TODOS=true ;;
     --registration) RUN_ALL=false; RUN_REG=true ;;
     --crypto) RUN_ALL=false; RUN_CRYPTO=true ;;
+    --concurrency) RUN_ALL=false; RUN_CONCURRENCY=true ;;
     --reactive) RUN_ALL=false; RUN_REACTIVE=true ;;
+    --serialization) RUN_ALL=false; RUN_SERIALIZATION=true ;;
     --layer)
       if [[ -z "${2-}" ]]; then
         echo "--layer requires a layer number (1-8)"; exit 1
@@ -80,7 +86,9 @@ if [ "$RUN_QUICK" = true ] && [ "$RUN_ALL" = true ]; then
   RUN_INVARIANTS=true
   RUN_REG=true
   RUN_CRYPTO=true
+  RUN_CONCURRENCY=true
   RUN_REACTIVE=true
+  RUN_SERIALIZATION=true
   RUN_TODOS=false  # Skip todos in quick mode
   RUN_ALL=false
 fi
@@ -507,6 +515,18 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "benches/" || true)
   emit_hits "Direct sleeps detected (should be effect-injected/simulator-controlled)" "$filtered_sleep"
 
+  section "Sync protocol runtime neutrality — no tokio/async-std in aura-sync protocols"
+  sync_protocol_runtime=$(rg --no-heading -n "tokio::|async_std::" crates/aura-sync/src/protocols -g "*.rs" || true)
+  filtered_sync_protocol_runtime=$(echo "$sync_protocol_runtime" \
+    | grep -v "///" \
+    | grep -v "//!" \
+    | grep -v "//" || true)
+  if [ -n "$filtered_sync_protocol_runtime" ]; then
+    emit_hits "Runtime-specific usage in aura-sync protocols (replace with effect-injected abstractions)" "$filtered_sync_protocol_runtime"
+  else
+    info "aura-sync protocols: no runtime-specific usage"
+  fi
+
   section "Simulation control surfaces — inject randomness/IO/spawn via effects so simulator can control (docs/806_simulation_guide.md, .claude/skills/patterns/SKILL.md)"
   sim_patterns="rand::random|rand::thread_rng|rand::rngs::OsRng|RngCore::fill_bytes|std::io::stdin|read_line\\(|std::thread::spawn"
   sim_hits=$(rg --no-heading "$sim_patterns" crates -g "*.rs" || true)
@@ -767,6 +787,20 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_CRYPTO" = true ]; then
   fi
 fi
 
+if [ "$RUN_ALL" = true ] || [ "$RUN_CONCURRENCY" = true ]; then
+  section "Concurrency hygiene — avoid block_in_place/block_on and unbounded channels in production code"
+
+  # Flag blocking bridges in async code.
+  block_bridge_hits=$(rg --no-heading "tokio::task::block_in_place|Handle::current\\(\\)\\.block_on" crates -g "*.rs" || true)
+  filtered_block_bridge=$(filter_common_allowlist "$block_bridge_hits")
+  emit_hits "Blocking async bridge (block_in_place / block_on) found" "$filtered_block_bridge"
+
+  # Flag unbounded channels (prefer bounded or coalescing queues).
+  unbounded_hits=$(rg --no-heading "mpsc::unbounded_channel\\(|async_channel::unbounded\\(|mpsc::unbounded\\(" crates -g "*.rs" || true)
+  filtered_unbounded=$(filter_common_allowlist "$unbounded_hits")
+  emit_hits "Unbounded channel usage (prefer bounded/coalescing)" "$filtered_unbounded"
+fi
+
 if [ "$RUN_ALL" = true ] || [ "$RUN_REACTIVE" = true ]; then
   section "Reactive data model — signals are source of truth; no domain data in props; components subscribe to signals (docs/115_cli_tui.md)"
 
@@ -827,6 +861,81 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_REACTIVE" = true ]; then
 
   verbose "Reactive pattern: Props should only contain view state (focus, selection), callbacks, and configuration"
   verbose "Domain data (contacts, messages, guardians, etc.) should come from signal subscriptions"
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_SERIALIZATION" = true ]; then
+  section "Serialization — use DAG-CBOR (aura_core::util::serialization) for all wire protocols and facts; no bincode anywhere"
+
+  # Check for bincode usage - no allowlist, bincode should not be used anywhere
+  bincode_hits=$(rg --no-heading "bincode::" crates -g "*.rs" || true)
+  filtered_bincode=$(echo "$bincode_hits" \
+    | grep -v "/examples/" \
+    | grep -v "benches/" || true)
+
+  if [ -n "$filtered_bincode" ]; then
+    emit_hits "bincode usage (migrate to aura_core::util::serialization)" "$filtered_bincode"
+    echo -e "    ${YELLOW}Migration:${NC} bincode::serialize → to_vec, bincode::deserialize → from_slice"
+    echo -e "    ${YELLOW}Canonical import:${NC} use aura_core::util::serialization::{to_vec, from_slice, hash_canonical};"
+    echo -e "    ${YELLOW}Ref:${NC} work/024.md (serialization migration)"
+  else
+    info "bincode usage: none outside testkit"
+  fi
+
+  # Check that wire protocol files use canonical serialization
+  # Wire protocol files (wire.rs, protocol messages) should use DAG-CBOR
+  wire_files=$(find crates -type f \( -name "wire.rs" -o -name "*_wire.rs" \) 2>/dev/null || true)
+  non_canonical_wire=""
+  for wire_file in $wire_files; do
+    # Check if file uses canonical serialization or has no serialization at all
+    if grep -q "serde_json::to_vec\|serde_json::from_slice\|bincode::" "$wire_file" 2>/dev/null; then
+      if ! grep -q "aura_core::util::serialization\|crate::util::serialization" "$wire_file" 2>/dev/null; then
+        non_canonical_wire="${non_canonical_wire}${wire_file}"$'\n'
+      fi
+    fi
+  done
+  if [ -n "$non_canonical_wire" ]; then
+    emit_hits "Wire protocol without canonical DAG-CBOR serialization" "$non_canonical_wire"
+  else
+    info "Wire protocols: using canonical serialization"
+  fi
+
+  # Check facts.rs files for proper versioned serialization
+  facts_files=$(find crates -path "*/src/facts.rs" -type f 2>/dev/null | grep -v aura-core || true)
+  non_versioned_facts=""
+  for facts_file in $facts_files; do
+    # Facts files should have VersionedMessage or use canonical serialization
+    if grep -q "Serialize\|Deserialize" "$facts_file" 2>/dev/null; then
+      if ! grep -qE "aura_core::util::serialization|Versioned.*Fact|from_slice|to_vec" "$facts_file" 2>/dev/null; then
+        non_versioned_facts="${non_versioned_facts}${facts_file}"$'\n'
+      fi
+    fi
+  done
+  if [ -n "$non_versioned_facts" ]; then
+    emit_hits "Facts file without versioned DAG-CBOR serialization" "$non_versioned_facts"
+  else
+    info "Facts files: using versioned serialization"
+  fi
+
+  verbose "Canonical serialization: aura_core::util::serialization::{to_vec, from_slice, hash_canonical}"
+  verbose "Allowed alternatives: serde_json for debug output, config files, dynamic metadata"
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
+  section "Identifier invariants — deterministic SessionId::new() is test-only"
+
+  session_id_hits=$(rg --no-heading "SessionId::new\\(" crates -g "*.rs" || true)
+  filtered_session_id=$(echo "$session_id_hits" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" \
+    | grep -v "/examples/" \
+    | grep -v "cfg(test)" \
+    | grep -v "cfg\\(test\\)" || true)
+
+  if [ -n "$filtered_session_id" ]; then
+    emit_hits "SessionId::new() used outside tests (use SessionId::new_from_entropy / RandomEffects)" "$filtered_session_id"
+  else
+    info "SessionId::new(): none outside tests"
+  fi
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then

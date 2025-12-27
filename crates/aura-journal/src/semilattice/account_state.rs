@@ -113,14 +113,16 @@ impl AccountState {
 
     // Serialization/Persistence
 
-    /// Convert to bytes for storage
-    pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
+    /// Convert to bytes for storage using DAG-CBOR
+    pub fn to_bytes(&self) -> Result<Vec<u8>, aura_core::util::serialization::SerializationError> {
+        aura_core::util::serialization::to_vec(self)
     }
 
     /// Load from bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::Error> {
-        bincode::deserialize(bytes)
+    pub fn from_bytes(
+        bytes: &[u8],
+    ) -> Result<Self, aura_core::util::serialization::SerializationError> {
+        aura_core::util::serialization::from_slice(bytes)
     }
 }
 

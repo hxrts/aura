@@ -60,7 +60,7 @@ pub struct IocraftTerminalAdapter {
     /// Event queue for headless operation
     event_queue: Mutex<VecDeque<TerminalEvent>>,
     /// Channel for receiving events from external source (async-aware)
-    event_receiver: tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<TerminalEvent>>>,
+    event_receiver: tokio::sync::Mutex<Option<mpsc::Receiver<TerminalEvent>>>,
     /// Captured frames for testing
     frames: Mutex<Vec<TerminalFrame>>,
     /// Terminal size
@@ -99,7 +99,7 @@ impl IocraftTerminalAdapter {
     }
 
     /// Create an adapter with an event channel (for receiving external events).
-    pub fn with_channel(receiver: mpsc::UnboundedReceiver<TerminalEvent>) -> Self {
+    pub fn with_channel(receiver: mpsc::Receiver<TerminalEvent>) -> Self {
         Self {
             event_queue: Mutex::new(VecDeque::new()),
             event_receiver: tokio::sync::Mutex::new(Some(receiver)),
@@ -299,13 +299,13 @@ fn convert_modifiers(modifiers: KeyModifiers) -> aura_core::effects::terminal::M
 ///
 /// This allows running the state machine alongside iocraft's rendering.
 pub struct EventBridge {
-    sender: mpsc::UnboundedSender<TerminalEvent>,
+    sender: mpsc::Sender<TerminalEvent>,
 }
 
 impl EventBridge {
     /// Create a new event bridge and return the adapter it connects to.
     pub fn new() -> (Self, IocraftTerminalAdapter) {
-        let (sender, receiver) = mpsc::unbounded_channel();
+        let (sender, receiver) = mpsc::channel(1024);
         let adapter = IocraftTerminalAdapter::with_channel(receiver);
         (Self { sender }, adapter)
     }
@@ -313,19 +313,19 @@ impl EventBridge {
     /// Forward an iocraft event to the adapter.
     pub fn forward(&self, event: iocraft::prelude::TerminalEvent) {
         if let Some(converted) = convert_iocraft_event(event) {
-            let _ = self.sender.send(converted);
+            let _ = self.sender.try_send(converted);
         }
     }
 
     /// Send a custom event.
     pub fn send(&self, event: TerminalEvent) {
-        let _ = self.sender.send(event);
+        let _ = self.sender.try_send(event);
     }
 }
 
 impl Default for EventBridge {
     fn default() -> Self {
-        let (sender, _) = mpsc::unbounded_channel();
+        let (sender, _) = mpsc::channel(1);
         Self { sender }
     }
 }
