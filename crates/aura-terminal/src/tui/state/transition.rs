@@ -248,10 +248,10 @@ mod tests {
         use crate::tui::state::modal_queue::QueuedModal;
         use crate::tui::types::SettingsSection;
 
-        // Start on Settings screen, Mfa section, focus on List
+        // Start on Settings screen, Authority section, focus on List
         let mut state = TuiState::new();
         state.router.go_to(Screen::Settings);
-        state.settings.section = SettingsSection::Mfa;
+        state.settings.section = SettingsSection::Authority;
         assert_eq!(state.settings.focus, TwoPanelFocus::List);
 
         // Enqueue MFA setup modal (simulates shell's OpenMfaSetup dispatch)
@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(
             state.settings.section,
             SettingsSection::Devices,
-            "Up arrow should navigate to previous section (Mfa -> Devices)"
+            "Up arrow should navigate to previous section (Authority -> Devices)"
         );
     }
 

@@ -25,8 +25,9 @@
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state_machine::{
-    transition, ChannelInfoModalState, ChatFocus, DetailFocus, DispatchCommand, ModalType,
-    QueuedModal, TopicModalState, TuiCommand, TuiState,
+    transition, ChannelInfoModalState, ChatFocus, CreateChannelModalState, DetailFocus,
+    CreateChannelStep, DispatchCommand, ModalType, QueuedModal, TopicModalState, TuiCommand,
+    TuiState,
 };
 use aura_terminal::tui::types::SettingsSection;
 use proptest::prelude::*;
@@ -231,6 +232,7 @@ mod neighborhood_screen_map {
     #[test]
     fn test_neighborhood_resident_navigation() {
         let mut tui = TestTui::new();
+        tui.state.neighborhood.block_count = 1;
         tui.send_enter();
         tui.state.neighborhood.detail_focus = DetailFocus::Residents;
 
@@ -357,12 +359,24 @@ mod chat_screen {
 
         // Open create channel modal with 'n'
         tui.send_char('n');
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenChatCreateWizard)));
+        tui.state
+            .modal_queue
+            .enqueue(QueuedModal::ChatCreate(CreateChannelModalState::new()));
         assert!(tui.has_modal());
-        assert!(tui.state.is_chat_create_modal_active());
 
         // Type channel name
         tui.type_text("general");
         assert_eq!(tui.state.chat_create_modal_state().unwrap().name, "general");
+
+        // Advance to review step so Enter submits.
+        tui.state
+            .modal_queue
+            .update_active(|modal| {
+                if let QueuedModal::ChatCreate(ref mut s) = modal {
+                    s.step = CreateChannelStep::Review;
+                }
+            });
 
         // Submit with Enter
         tui.clear_commands();
@@ -371,7 +385,11 @@ mod chat_screen {
         assert!(tui.has_dispatch(
             |d| matches!(d, DispatchCommand::CreateChannel { name, .. } if name == "general")
         ));
-        assert!(!tui.has_modal());
+        assert!(tui.has_modal());
+        assert_eq!(
+            tui.state.chat_create_modal_state().unwrap().step,
+            CreateChannelStep::Waiting
+        );
     }
 
     #[test]
@@ -577,7 +595,7 @@ mod settings_screen {
         assert_eq!(tui.state.settings.section, SettingsSection::Devices);
 
         tui.send_char('j');
-        assert_eq!(tui.state.settings.section, SettingsSection::Mfa);
+        assert_eq!(tui.state.settings.section, SettingsSection::Authority);
 
         // Wraps around
         tui.send_char('j');
@@ -591,7 +609,7 @@ mod settings_screen {
 
         // Navigate up with 'k' - should wrap
         tui.send_char('k');
-        assert_eq!(tui.state.settings.section, SettingsSection::Mfa);
+        assert_eq!(tui.state.settings.section, SettingsSection::Authority);
 
         tui.send_char('k');
         assert_eq!(tui.state.settings.section, SettingsSection::Devices);
@@ -639,15 +657,15 @@ mod settings_screen {
     }
 
     #[test]
-    fn test_settings_mfa_cycle() {
+    fn test_settings_authority_mfa_cycle() {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Settings);
 
-        // Go to MFA section
+        // Go to Authority section
         for _ in 0..4 {
             tui.send_char('j');
         }
-        assert_eq!(tui.state.settings.section, SettingsSection::Mfa);
+        assert_eq!(tui.state.settings.section, SettingsSection::Authority);
 
         // Space opens MFA setup
         tui.clear_commands();
@@ -740,6 +758,7 @@ mod neighborhood_screen {
     fn test_neighborhood_enter_block() {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Neighborhood);
+        tui.state.neighborhood.block_count = 1;
 
         tui.clear_commands();
 
@@ -903,6 +922,10 @@ mod modals {
 
         // Open create channel modal
         tui.send_char('n');
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenChatCreateWizard)));
+        tui.state
+            .modal_queue
+            .enqueue(QueuedModal::ChatCreate(CreateChannelModalState::new()));
         assert!(tui.has_modal());
 
         // Empty input - Enter should not submit (or should show error)
@@ -1489,6 +1512,7 @@ mod integration {
     fn test_neighborhood_exploration() {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Neighborhood);
+        tui.state.neighborhood.block_count = 1;
 
         // Navigate around the grid
         tui.send_char('l');

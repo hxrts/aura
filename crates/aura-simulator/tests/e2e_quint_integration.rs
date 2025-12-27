@@ -35,13 +35,13 @@ async fn test_simulator_full_effect_composition() -> aura_core::AuraResult<()> {
     assert!(timestamp > 0);
 
     // Test crypto effects
-    use aura_core::effects::CryptoEffects;
+    use aura_core::effects::CryptoCoreEffects;
     let (private_key, public_key) = effects.ed25519_generate_keypair().await?;
     assert!(!private_key.is_empty());
     assert!(!public_key.is_empty());
 
     // Test storage effects
-    use aura_core::effects::StorageEffects;
+    use aura_core::effects::StorageCoreEffects;
     let test_key = "test_key";
     let test_value = b"test_value".to_vec();
     effects.store(test_key, test_value.clone()).await?;

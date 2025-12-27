@@ -9,7 +9,7 @@
 //! These tests validate that the unified ThresholdSigningEffects infrastructure
 //! produces valid FROST signatures that can be verified.
 
-use aura_core::effects::CryptoEffects;
+use aura_core::effects::CryptoExtendedEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{
     ApprovalContext, GroupAction, SignableOperation, SigningContext, ThresholdConfig,
@@ -494,13 +494,13 @@ mod integration_tests {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Real FROST Crypto Tests (using CryptoEffects directly)
+// Real FROST Crypto Tests (using CryptoExtendedEffects directly)
 // ═══════════════════════════════════════════════════════════════════════════
 
 mod real_frost_tests {
     use super::*;
 
-    /// Test FROST key generation via CryptoEffects
+    /// Test FROST key generation via CryptoExtendedEffects
     #[tokio::test]
     async fn test_frost_key_generation() {
         let effects = MockEffects::deterministic();

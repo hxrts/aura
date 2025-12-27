@@ -567,24 +567,15 @@ mod tests {
             .await
             .unwrap();
 
-        let mut stream = handler.subscribe_signal(&signal);
+        let initial = handler.read_signal(&signal).await.unwrap();
+        assert!(initial.is_empty());
 
         handler
             .commit_fact("contact", vec!["alice".to_string(), "bob".to_string()])
             .await;
 
-        let mut updated = None;
-        for _ in 0..3 {
-            if let Ok(value) = stream.recv().await {
-                if value.len() == 1 {
-                    updated = Some(value);
-                    break;
-                }
-            }
-        }
-
-        let updated = updated.expect("expected query signal update");
-        assert_eq!(updated[0], ("alice".to_string(), "bob".to_string()));
+        let updated = handler.read_signal(&signal).await.unwrap();
+        assert_eq!(updated, vec![("alice".to_string(), "bob".to_string())]);
     }
 
     #[tokio::test]

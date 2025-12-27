@@ -197,7 +197,7 @@ async fn execute_threshold_verification(
     threshold: u32,
     output: &mut CliOutput,
 ) -> TerminalResult<()> {
-    use aura_core::effects::{CryptoEffects, ThresholdSigningEffects};
+    use aura_core::effects::{CryptoExtendedEffects, ThresholdSigningEffects};
 
     output.section("Threshold Verification Operation");
 

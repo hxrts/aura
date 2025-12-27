@@ -20,7 +20,7 @@
 //! - `GeneratedTestCase`: Test case generated from simulation traces
 
 use async_trait::async_trait;
-use aura_core::effects::{RandomCoreEffects, RandomEffects, RandomExtendedEffects};
+use aura_core::effects::{RandomCoreEffects, RandomExtendedEffects};
 use aura_core::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -225,28 +225,6 @@ impl RandomCoreEffects for SeededRandomProvider {
 
     async fn random_u64(&self) -> u64 {
         self.next_value()
-    }
-
-}
-
-#[async_trait]
-impl RandomExtendedEffects for SeededRandomProvider {
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        if min >= max {
-            return min;
-        }
-        let range = max - min;
-        min + (self.next_value() % range)
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let bytes = self.random_bytes(16).await;
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes);
-        // Set version 4 and variant bits
-        uuid_bytes[6] = (uuid_bytes[6] & 0x0f) | 0x40;
-        uuid_bytes[8] = (uuid_bytes[8] & 0x3f) | 0x80;
-        uuid::Uuid::from_bytes(uuid_bytes)
     }
 }
 

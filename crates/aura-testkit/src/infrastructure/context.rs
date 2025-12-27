@@ -257,7 +257,7 @@ impl CryptoCoreEffects for CompositeTestHandler {
     }
 
     fn is_simulated(&self) -> bool {
-        aura_core::CryptoEffects::is_simulated(&self.crypto)
+        self.crypto.is_simulated()
     }
 
     fn crypto_capabilities(&self) -> Vec<String> {
@@ -563,17 +563,29 @@ impl NetworkCoreEffects for CompositeTestHandler {
         peer_id: uuid::Uuid,
         message: Vec<u8>,
     ) -> Result<(), aura_core::effects::NetworkError> {
-        // Delegate to the NetworkEffects trait implementation on InMemoryTransportHandler
-        NetworkEffects::send_to_peer(&self.network, peer_id, message).await
+        // Delegate to the NetworkCoreEffects trait implementation on InMemoryTransportHandler
+        <crate::stateful_effects::InMemoryTransportHandler as NetworkCoreEffects>::send_to_peer(
+            &self.network,
+            peer_id,
+            message,
+        )
+        .await
     }
 
     async fn broadcast(&self, message: Vec<u8>) -> Result<(), aura_core::effects::NetworkError> {
-        // Delegate to the NetworkEffects trait implementation on InMemoryTransportHandler
-        NetworkEffects::broadcast(&self.network, message).await
+        // Delegate to the NetworkCoreEffects trait implementation on InMemoryTransportHandler
+        <crate::stateful_effects::InMemoryTransportHandler as NetworkCoreEffects>::broadcast(
+            &self.network,
+            message,
+        )
+        .await
     }
 
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), aura_core::effects::NetworkError> {
-        self.network.receive().await
+        <crate::stateful_effects::InMemoryTransportHandler as NetworkCoreEffects>::receive(
+            &self.network,
+        )
+        .await
     }
 }
 

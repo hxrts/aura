@@ -7,7 +7,7 @@
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_core::effects::StorageEffects;
+use aura_core::effects::StorageCoreEffects;
 use aura_core::{hash, AccountId, Hash32, SemanticVersion};
 use aura_sync::maintenance::{IdentityEpochFence, UpgradeProposal};
 use aura_sync::protocols::ota::UpgradeKind;

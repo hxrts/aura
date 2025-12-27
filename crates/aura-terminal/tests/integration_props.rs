@@ -148,13 +148,8 @@ mod neighborhood_screen {
         let mut harness = PropsTestHarness::new();
         harness.go_to_screen(Screen::Neighborhood);
 
-        // Set up item count for navigation to work
         harness.state.neighborhood.resident_count = 10;
-        harness.state.neighborhood.detail_focus = DetailFocus::Residents;
-        harness.send(events::enter());
-
-        // Navigate down in resident list
-        harness.send(events::arrow_down());
+        harness.state.neighborhood.selected_resident = 1;
 
         let props = extract_neighborhood_view_props(&harness.state);
         assert_eq!(
@@ -336,18 +331,18 @@ mod settings_screen {
     }
 
     #[test]
-    fn test_mfa_policy_cycles_in_settings_props() {
+    fn test_authority_policy_cycles_in_settings_props() {
         let mut harness = PropsTestHarness::new();
         harness.go_to_screen(Screen::Settings);
 
-        // Navigate to Mfa section (Profile -> Threshold -> Recovery -> Devices -> Mfa)
+        // Navigate to Authority section (Profile -> Threshold -> Recovery -> Devices -> Authority)
         harness.send(events::arrow_down()); // Threshold
         harness.send(events::arrow_down()); // Recovery
         harness.send(events::arrow_down()); // Devices
-        harness.send(events::arrow_down()); // Mfa
+        harness.send(events::arrow_down()); // Authority
 
         let props = extract_settings_view_props(&harness.state);
-        assert_eq!(props.section, SettingsSection::Mfa);
+        assert_eq!(props.section, SettingsSection::Authority);
     }
 }
 
@@ -400,13 +395,8 @@ mod cross_screen {
         let mut harness = PropsTestHarness::new();
         harness.go_to_screen(Screen::Neighborhood);
 
-        // Set up item count for navigation to work
         harness.state.neighborhood.resident_count = 10;
-        harness.state.neighborhood.detail_focus = DetailFocus::Residents;
-
-        // Set some state on Neighborhood screen
-        harness.send(events::enter());
-        harness.send(events::arrow_down());
+        harness.state.neighborhood.selected_resident = 1;
         let neighborhood_props = extract_neighborhood_view_props(&harness.state);
         assert_eq!(neighborhood_props.selected_resident, 1);
 

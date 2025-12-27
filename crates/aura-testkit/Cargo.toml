@@ -84,3 +84,4 @@ serial_test = { workspace = true }
 # For testing the test utilities themselves
 # tokio-test = { workspace = true } # removed - unused
 criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+bincode = { workspace = true }

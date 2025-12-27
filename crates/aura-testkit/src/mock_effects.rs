@@ -776,8 +776,11 @@ impl NetworkCoreEffects for MockEffects {
     }
 
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
-        // Mock: return empty message
-        Ok((Uuid::new_v4(), vec![]))
+        // Mock: return empty message with deterministic peer id
+        use rand::Rng;
+        let mut state = self.state.lock().unwrap();
+        let bytes: [u8; 16] = state.rng.gen();
+        Ok((Uuid::from_bytes(bytes), vec![]))
     }
 }
 

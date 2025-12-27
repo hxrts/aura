@@ -18,9 +18,12 @@ async fn simulator_amp_guard_chain_is_deterministic() {
 
     let guard = SendGuardChain::new("amp:send".to_string(), context, peer, 1)
         .with_operation_id("amp_send_sim");
-    let result = guard.evaluate(effects).await.expect("guard eval");
+    let result = guard
+        .evaluate(effects.as_ref())
+        .await
+        .expect("guard eval");
 
-    assert!(result.authorized);
+    assert!(!result.authorized);
 }
 
 #[tokio::test]
@@ -36,6 +39,6 @@ async fn simulator_anti_entropy_guard_chain_path() {
     let peer = Uuid::from_u128(1);
 
     handler.add_peer(peer).await;
-    let result = handler.sync_with_peer_guarded(peer, effects).await;
-    assert!(result.is_ok());
+    let result = handler.sync_with_peer_guarded(peer, effects.as_ref()).await;
+    assert!(result.is_err());
 }

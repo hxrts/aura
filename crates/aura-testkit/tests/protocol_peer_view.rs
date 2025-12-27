@@ -1,4 +1,5 @@
-use aura_core::effects::RandomEffects;
+use aura_core::effects::RandomExtendedEffects;
+use aura_core::{Bottom, JoinSemilattice};
 use aura_protocol::state::peer_view::PeerView;
 use aura_testkit::stateful_effects::random::MockRandomHandler;
 

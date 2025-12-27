@@ -31,8 +31,8 @@ use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::navigation::TwoPanelFocus;
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state_machine::{
-    ChatFocus, ChatMemberSelectModalState, ContactSelectModalState, DispatchCommand, ModalType,
-    QueuedModal, TuiCommand,
+    ChatFocus, ChatMemberCandidate, ChatMemberSelectModalState, ContactSelectModalState,
+    CreateChannelModalState, CreateChannelStep, DispatchCommand, ModalType, QueuedModal, TuiCommand,
 };
 use aura_terminal::tui::types::SettingsSection;
 use proptest::prelude::*;
@@ -85,7 +85,7 @@ fn test_demo_shortcuts_fill_contacts_import_modal() {
     tui.assert_screen(Screen::Contacts);
 
     // Open Contacts import modal
-    tui.send_char('i');
+    tui.send_char('a');
     assert!(tui.has_modal());
 
     // Ctrl+A fills Alice code
@@ -356,7 +356,7 @@ fn test_settings_sections_deterministic() {
     // Default section is Profile
     assert_eq!(tui.state().settings.section, SettingsSection::Profile);
 
-    // 'j' moves to next section: Profile -> Threshold -> Recovery -> Devices -> Mfa -> Profile
+    // 'j' moves to next section: Profile -> Threshold -> Recovery -> Devices -> Authority -> Profile
     tui.send_char('j');
     assert_eq!(tui.state().settings.section, SettingsSection::Threshold);
 
@@ -367,7 +367,7 @@ fn test_settings_sections_deterministic() {
     assert_eq!(tui.state().settings.section, SettingsSection::Devices);
 
     tui.send_char('j');
-    assert_eq!(tui.state().settings.section, SettingsSection::Mfa);
+    assert_eq!(tui.state().settings.section, SettingsSection::Authority);
 
     tui.send_char('j');
     assert_eq!(tui.state().settings.section, SettingsSection::Profile); // Wraps
@@ -1008,12 +1008,12 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
     tui.send_char('2');
     tui.assert_screen(Screen::Chat);
 
-    // Open create chat modal
+    // Open create chat wizard (dispatch) then inject modal (shell would enqueue)
     tui.send_char('n');
-    match tui.current_modal() {
-        Some(QueuedModal::ChatCreate(_)) => {}
-        other => panic!("Expected ChatCreate modal, got {:?}", other),
-    }
+    assert!(tui.has_dispatch(|cmd| matches!(cmd, DispatchCommand::OpenChatCreateWizard)));
+    tui.state_mut()
+        .modal_queue
+        .enqueue(QueuedModal::ChatCreate(CreateChannelModalState::new()));
 
     // Fill in name + topic
     tui.type_str("group");
@@ -1051,6 +1051,24 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
         }
         other => panic!("Expected ChatCreate modal, got {:?}", other),
     }
+
+    // Jump to review step and seed selected members to simulate wizard progression.
+    tui.state_mut().modal_queue.update_active(|modal| {
+        if let QueuedModal::ChatCreate(ref mut s) = modal {
+            s.step = CreateChannelStep::Review;
+            s.contacts = vec![
+                ChatMemberCandidate {
+                    id: "alice".to_string(),
+                    name: "Alice".to_string(),
+                },
+                ChatMemberCandidate {
+                    id: "carol".to_string(),
+                    name: "Carol".to_string(),
+                },
+            ];
+            s.selected_indices = vec![0, 1];
+        }
+    });
 
     tui.clear_commands();
     tui.send_enter();

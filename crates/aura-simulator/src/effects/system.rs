@@ -386,21 +386,6 @@ impl RandomCoreEffects for SimulationEffectSystem {
     async fn random_u64(&self) -> u64 {
         self.random.random_u64().await
     }
-
-}
-
-#[async_trait]
-impl RandomExtendedEffects for SimulationEffectSystem {
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        self.random.random_range(min, max).await
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let bytes = self.random_bytes(16).await;
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes);
-        uuid::Uuid::from_bytes(uuid_bytes)
-    }
 }
 
 #[async_trait]
@@ -492,13 +477,18 @@ impl NetworkCoreEffects for SimulationEffectSystem {
             // Drop message silently on network partition
             return Ok(());
         }
-        // Use NetworkEffects trait method explicitly
-        NetworkEffects::send_to_peer(&self.network, peer_id, message).await
+        // Use NetworkCoreEffects trait method explicitly
+        <InMemoryTransportHandler as NetworkCoreEffects>::send_to_peer(
+            &self.network,
+            peer_id,
+            message,
+        )
+        .await
     }
 
     async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
-        // Use NetworkEffects trait method explicitly
-        NetworkEffects::broadcast(&self.network, message).await
+        // Use NetworkCoreEffects trait method explicitly
+        <InMemoryTransportHandler as NetworkCoreEffects>::broadcast(&self.network, message).await
     }
 
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), NetworkError> {
@@ -632,7 +622,7 @@ impl PhysicalTimeEffects for SimulationEffectSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::CryptoEffects;
+    use aura_core::effects::CryptoCoreEffects;
 
     #[tokio::test]
     async fn test_simulation_system_creation() {
@@ -643,7 +633,7 @@ mod tests {
 
         assert_eq!(system.device_id(), device_id);
         assert_eq!(system.simulation_seed(), 12345);
-        assert!(CryptoEffects::is_simulated(&system));
+        assert!(CryptoCoreEffects::is_simulated(&system));
     }
 
     #[tokio::test]

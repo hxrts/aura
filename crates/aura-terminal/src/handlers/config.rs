@@ -1,6 +1,6 @@
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::HandlerContext;
-use aura_core::effects::StorageEffects;
+use aura_core::effects::StorageCoreEffects;
 
 /// Load config bytes from StorageEffects by key (usually a path string).
 pub async fn load_config_bytes(ctx: &HandlerContext<'_>, key: &str) -> TerminalResult<Vec<u8>> {

@@ -22,7 +22,7 @@ use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::effects::StorageEffects;
+use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_effects::time::PhysicalTimeHandler;
@@ -169,7 +169,9 @@ fn cleanup_demo_directory(base_path: &Path) {
 ///
 /// Returns `Loaded` if account exists, `NotFound` otherwise.
 /// Does NOT auto-create accounts - this allows the TUI to show an account setup modal.
-async fn try_load_account(storage: &impl StorageEffects) -> Result<AccountLoadResult, AuraError> {
+async fn try_load_account(
+    storage: &impl StorageCoreEffects,
+) -> Result<AccountLoadResult, AuraError> {
     let Some(bytes) = storage
         .retrieve(ACCOUNT_FILENAME)
         .await
@@ -221,7 +223,7 @@ fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
 }
 
 async fn persist_account_config(
-    storage: &impl StorageEffects,
+    storage: &impl StorageCoreEffects,
     time: &impl PhysicalTimeEffects,
     authority_id: AuthorityId,
     context_id: ContextId,

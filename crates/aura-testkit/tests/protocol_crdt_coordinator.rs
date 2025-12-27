@@ -1,6 +1,6 @@
 use aura_protocol::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 use aura_protocol::effects::crdt::CvHandler;
-use aura_protocol::CrdtCoordinator;
+use aura_protocol::effects::crdt::CrdtCoordinator;
 use aura_core::{
     semilattice::{
         Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, JoinSemilattice, MvState,
@@ -10,7 +10,6 @@ use aura_core::{
     AuraResult, AuthorityId, DeviceId, SessionId,
 };
 use aura_journal::CausalContext;
-use aura_macros::aura_test;
 use aura_testkit::TestFixture;
 use serde::{Deserialize, Serialize};
 
@@ -193,7 +192,7 @@ fn test_builder_chaining() {
     assert!(coordinator.has_handler(CrdtType::Convergent));
 }
 
-#[aura_test]
+#[tokio::test]
 async fn test_sync_request_creation() -> AuraResult<()> {
     let fixture = TestFixture::new().await?;
     let device_uuid: uuid::Uuid = fixture.device_id().into();
@@ -215,7 +214,7 @@ async fn test_sync_request_creation() -> AuraResult<()> {
     Ok(())
 }
 
-#[aura_test]
+#[tokio::test]
 async fn test_cv_sync_request_handling() -> AuraResult<()> {
     let fixture = TestFixture::new().await?;
     let device_uuid: uuid::Uuid = fixture.device_id().into();
@@ -244,7 +243,7 @@ async fn test_cv_sync_request_handling() -> AuraResult<()> {
     Ok(())
 }
 
-#[aura_test]
+#[tokio::test]
 async fn test_cv_sync_response_handling() -> AuraResult<()> {
     let fixture = TestFixture::new().await?;
     let device_uuid: uuid::Uuid = fixture.device_id().into();

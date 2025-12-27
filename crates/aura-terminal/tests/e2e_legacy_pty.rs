@@ -194,7 +194,7 @@ use aura_terminal::tui::types::{Contact, ContactStatus};
 async fn test_account_creation_callback_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
-    use aura_core::effects::StorageEffects;
+    use aura_core::effects::StorageCoreEffects;
     use aura_effects::{
         EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
         RealSecureStorageHandler,
@@ -329,7 +329,7 @@ async fn test_account_creation_callback_flow() {
 async fn test_device_id_determinism() {
     use async_lock::RwLock;
     use aura_app::AppCore;
-    use aura_core::effects::StorageEffects;
+    use aura_core::effects::StorageCoreEffects;
     use aura_effects::{
         EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
         RealSecureStorageHandler,
@@ -499,7 +499,7 @@ async fn test_device_id_determinism() {
 async fn test_guardian_recovery_preserves_cryptographic_identity() {
     use async_lock::RwLock;
     use aura_app::AppCore;
-    use aura_core::effects::StorageEffects;
+    use aura_core::effects::StorageCoreEffects;
     use aura_effects::{
         EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
         RealSecureStorageHandler,

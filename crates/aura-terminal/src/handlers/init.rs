@@ -7,7 +7,7 @@ use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::time::TimeStamp;
-use aura_protocol::effect_traits::StorageEffects;
+use aura_core::effects::StorageCoreEffects;
 use std::path::Path;
 
 /// Handle initialization through effects

@@ -5,7 +5,7 @@
 use crate::cli::authority::AuthorityCommands;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_core::effects::{PhysicalTimeEffects, StorageEffects};
+use aura_core::effects::{PhysicalTimeEffects, StorageCoreEffects};
 use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
