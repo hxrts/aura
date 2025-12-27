@@ -3,6 +3,7 @@
 /// Default wire format version for protocol messages.
 pub const DEFAULT_WIRE_FORMAT_VERSION: u16 = 1;
 
+/// Runtime configuration for protocol serialization and compatibility.
 #[derive(Debug, Clone)]
 pub struct ProtocolRuntimeConfig {
     /// Wire format version used for protocol serialization.

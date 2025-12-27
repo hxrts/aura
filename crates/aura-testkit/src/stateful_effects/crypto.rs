@@ -15,7 +15,6 @@ use aura_core::effects::crypto::{
 };
 use aura_core::effects::{
     CryptoCoreEffects, CryptoEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
-    RandomEffects, RandomExtendedEffects,
 };
 use std::sync::{Arc, Mutex};
 
@@ -74,27 +73,6 @@ impl RandomCoreEffects for MockCryptoHandler {
         let mut counter = self.counter.lock().unwrap();
         *counter = counter.wrapping_add(1);
         self.seed.wrapping_add(*counter)
-    }
-
-}
-
-// RandomExtendedEffects implementation for MockCryptoHandler
-#[async_trait]
-impl RandomExtendedEffects for MockCryptoHandler {
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        if min >= max {
-            return min;
-        }
-        let range = max - min;
-        let random = self.random_u64().await;
-        min + (random % range)
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let bytes = self.random_bytes(16).await;
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes);
-        uuid::Uuid::from_bytes(uuid_bytes)
     }
 }
 

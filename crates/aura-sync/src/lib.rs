@@ -73,7 +73,7 @@
 //!
 //! - **`PhysicalTime`**: Wall-clock timestamps with optional uncertainty bounds.
 //!   Used for timestamps, timeouts, and coordination deadlines.
-//! - All time access goes through `PhysicalTimeEffects` trait, never `SystemTime::now()`
+//! - All time access goes through `PhysicalTimeEffects` trait, never direct `SystemTime` calls
 //! - Time is passed explicitly to methods, enabling deterministic testing
 //!
 //! See `docs/106_effect_system_and_runtime.md` for the unified time architecture.

@@ -74,6 +74,7 @@ pub mod storage;
 pub mod supertraits;
 pub mod sync; // Anti-entropy synchronization
 pub mod system;
+pub mod trace;
 pub mod terminal; // Terminal I/O for deterministic TUI/CLI testing
 pub mod threshold; // Unified threshold signing
 pub mod time;
@@ -215,6 +216,7 @@ pub use supertraits::{
     SnapshotEffects, TreeEffects,
 };
 pub use system::{SystemEffects, SystemError};
+pub use trace::{TraceEffects, TraceEvent, TraceSpanId};
 pub use terminal::{
     Cell, Color, CursorPosition, CursorShape, KeyCode, KeyEvent, KeyEventKind, Modifiers,
     MouseButton, MouseEvent, MouseEventKind, Style, TerminalEffects, TerminalError, TerminalEvent,
@@ -327,6 +329,8 @@ pub enum EffectType {
 
     /// System monitoring, logging, and configuration
     System,
+    /// Structured tracing and instrumentation
+    Trace,
 
     /// Device-local storage
     DeviceStorage,
@@ -372,6 +376,7 @@ impl std::fmt::Display for EffectType {
             Self::Tree => write!(f, "tree"),
             Self::Choreographic => write!(f, "choreographic"),
             Self::System => write!(f, "system"),
+            Self::Trace => write!(f, "trace"),
             Self::DeviceStorage => write!(f, "device_storage"),
             Self::Authentication => write!(f, "authentication"),
             Self::Configuration => write!(f, "configuration"),
@@ -405,6 +410,7 @@ impl EffectType {
             Self::Tree,
             Self::Choreographic,
             Self::System,
+            Self::Trace,
             Self::DeviceStorage,
             Self::Authentication,
             Self::Configuration,

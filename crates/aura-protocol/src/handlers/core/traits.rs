@@ -127,6 +127,7 @@ pub trait AuraHandlerFactory {
     fn for_production(
         device_id: DeviceId,
     ) -> Result<super::erased::BoxedHandler, FactoryError> {
+        // Production handler assembly is owned by aura-agent.
         Self::create_handler(AuraHandlerConfig::for_production(device_id))
     }
 

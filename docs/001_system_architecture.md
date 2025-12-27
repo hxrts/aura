@@ -128,7 +128,7 @@ Effect traits define abstract capabilities without exposing implementation detai
 
 Effect traits are organized into three categories that determine implementation location and usage patterns.
 
-Infrastructure effects are foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all use cases. Examples include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, the time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`), and `RandomEffects`. These traits must have corresponding handlers in `aura-effects`. See [Effect System and Runtime](106_effect_system_and_runtime.md) for implementation details.
+Infrastructure effects are foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all use cases. Examples include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, the time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`), `RandomEffects`, and `TraceEffects`. These traits must have corresponding handlers in `aura-effects`. Optional/extended operations are exposed via extension traits so core handlers can stay minimal while adapters opt into extended behavior. See [Effect System and Runtime](106_effect_system_and_runtime.md) for implementation details.
 
 `ReactiveEffects` provides type-safe signal-based state management for UI and inter-component communication. It enables FRP (Functional Reactive Programming) patterns through typed `Signal<T>` identifiers with read, emit, and subscribe operations. The signal system decouples state producers from consumers, allowing UI components to subscribe to specific signals without knowing the source of state changes. Note that `ReactiveEffects` is defined in `aura-core` but implemented in `aura-agent` as it encodes application-level reactive semantics rather than pure OS integration.
 
@@ -158,7 +158,8 @@ The handler registration system enables clean composition across crate boundarie
 
 **`aura-agent`** - Runtime Effect Registry:
 - `EffectRegistry` for dynamic handler lookup and registration
-- Final runtime assembly point for effect system composition
+- **Sole runtime assembly point** for production effect system composition
+- Higher layers should not wire default handlers directly
 
 #### 3.3.2 Registration Flow Across Layers
 

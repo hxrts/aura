@@ -335,6 +335,7 @@ impl PacketCrypto {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::{CryptoCoreEffects, CryptoExtendedEffects};
 
     // Mock crypto for testing
     struct MockCrypto {
@@ -376,21 +377,6 @@ mod tests {
 
         async fn random_u64(&self) -> u64 {
             self.next_seed()
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl aura_core::effects::RandomExtendedEffects for MockCrypto {
-        async fn random_range(&self, min: u64, max: u64) -> u64 {
-            let seed = self.next_seed();
-            min + (seed % (max - min + 1))
-        }
-
-        async fn random_uuid(&self) -> uuid::Uuid {
-            let bytes = self.random_bytes(16).await;
-            let mut uuid_bytes = [0u8; 16];
-            uuid_bytes.copy_from_slice(&bytes);
-            uuid::Uuid::from_bytes(uuid_bytes)
         }
     }
 

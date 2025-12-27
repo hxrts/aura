@@ -128,9 +128,14 @@ impl AuraHandlerFactory {
     pub fn for_production(
         device_id: aura_core::identifiers::DeviceId,
     ) -> Result<Box<dyn AuraHandler>, AuraHandlerError> {
-        let composite = aura_composition::CompositeHandler::for_production(device_id);
-        let adapter = CompositeHandlerAdapter::new(composite);
-        Ok(Box::new(adapter))
+        // Production handler assembly is owned by aura-agent.
+        let _ = device_id;
+        Err(AuraHandlerError::HandlerCreationFailed {
+            source: Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Production handler assembly is owned by aura-agent",
+            )),
+        })
     }
 
     /// Create a handler for simulation

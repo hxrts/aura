@@ -657,7 +657,7 @@ impl AuthoritySubSection {
 }
 
 /// Authority information for display
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct AuthorityInfo {
     pub id: String,
     pub display_name: String,

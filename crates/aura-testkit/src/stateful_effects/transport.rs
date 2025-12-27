@@ -281,7 +281,7 @@ impl NetworkCoreEffects for InMemoryTransportHandler {
         let peers = self.connected_peers().await;
         for peer in peers {
             // Use the trait method explicitly to avoid naming conflict
-            NetworkEffects::send_to_peer(self, peer, message.clone()).await?;
+            <Self as NetworkCoreEffects>::send_to_peer(self, peer, message.clone()).await?;
         }
         Ok(())
     }

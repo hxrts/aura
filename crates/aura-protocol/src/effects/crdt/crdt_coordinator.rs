@@ -1,10 +1,56 @@
 //! CRDT Coordinator for Choreographic Protocol Integration
 //!
-//! The main coordinator struct that bridges CRDT handlers with choreographic protocols.
+//! This module provides the `CrdtCoordinator` that bridges CRDT handlers
+//! with choreographic protocols, enabling distributed state synchronization
+//! across all four CRDT types (CvRDT, CmRDT, Delta-CRDT, MvRDT).
+//!
+//! # Builder Pattern
+//!
+//! The coordinator uses a clean builder pattern for ergonomic setup:
+//!
+//! ```ignore
+//! // Convergent CRDT with default state
+//! let coordinator = CrdtCoordinator::with_cv(authority_id);
+//!
+//! // Convergent CRDT with initial state
+//! let coordinator = CrdtCoordinator::with_cv_state(authority_id, my_state);
+//!
+//! // Commutative CRDT
+//! let coordinator = CrdtCoordinator::with_cm(authority_id, initial_state);
+//!
+//! // Delta CRDT with compaction threshold
+//! let coordinator = CrdtCoordinator::with_delta_threshold(authority_id, 100);
+//!
+//! // Meet-semilattice CRDT
+//! let coordinator = CrdtCoordinator::with_mv(authority_id);
+//!
+//! // RECOMMENDED: Use pre-composed handlers from aura-composition
+//! // let factory = HandlerFactory::for_testing(device_id)?;
+//! // let registry = factory.create_registry()?;
+//! // Extract handlers from registry for coordination
+//!
+//! // Compose handlers externally and inject them
+//! // let coordinator = CrdtCoordinator::new(authority_id)
+//! //     .with_cv_handler(precomposed_cv_handler)
+//! //     .with_delta_handler(precomposed_delta_handler);
+//! ```
+//!
+//! # Integration with Choreographies
+//!
+//! Use the coordinator in anti-entropy and other synchronization protocols:
+//!
+//! ```ignore
+//! let coordinator = CrdtCoordinator::with_cv_state(authority_id, journal_state);
+//! let result = execute_anti_entropy(
+//!     authority_id,
+//!     config,
+//!     is_requester,
+//!     &effect_system,
+//!     coordinator,
+//! ).await?;
+//! ```
 
-use super::clock::{increment_actor, max_counter, merge_vector_clocks};
-use super::error::CrdtCoordinatorError;
-use super::super::{CmHandler, CvHandler, DeltaHandler, MvHandler};
+use super::{CmHandler, CvHandler, DeltaHandler, MvHandler};
 use crate::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 use aura_core::{
     identifiers::DeviceId,
@@ -12,11 +58,77 @@ use aura_core::{
         Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,
     },
     time::{LogicalTime, VectorClock},
-    AuthorityId, SessionId,
+    AuraError, AuthorityId, SessionId,
 };
 use aura_journal::CausalContext;
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
+
+// ============================================================================
+// Error Types
+// ============================================================================
+
+/// Error types for CRDT coordination
+#[derive(Debug, thiserror::Error)]
+pub enum CrdtCoordinatorError {
+    #[error("Serialization error: {0}")]
+    Serialization(String),
+    #[error("Deserialization error: {0}")]
+    Deserialization(String),
+    #[error("CRDT type mismatch: expected {expected:?}, got {actual:?}")]
+    TypeMismatch {
+        expected: CrdtType,
+        actual: CrdtType,
+    },
+    #[error("Unsupported operation: {0}")]
+    UnsupportedOperation(String),
+    #[error("Handler error: {0}")]
+    HandlerError(String),
+}
+
+impl From<CrdtCoordinatorError> for AuraError {
+    fn from(err: CrdtCoordinatorError) -> Self {
+        AuraError::internal(format!("CRDT coordinator error: {}", err))
+    }
+}
+
+// ============================================================================
+// Vector Clock Utilities
+// ============================================================================
+
+/// Merge source vector clock into target, taking the maximum for each actor.
+pub fn merge_vector_clocks(target: &mut VectorClock, other: &VectorClock) {
+    for (actor, time) in other.iter() {
+        let current = match target.get(actor).copied() {
+            Some(value) => value,
+            None => 0,
+        };
+        if *time > current {
+            target.insert(*actor, *time);
+        }
+    }
+}
+
+/// Get the maximum counter value from a vector clock (Lamport time).
+pub fn max_counter(clock: &VectorClock) -> u64 {
+    match clock.iter().map(|(_, counter)| *counter).max() {
+        Some(value) => value,
+        None => 0,
+    }
+}
+
+/// Increment the counter for a specific actor in the vector clock.
+pub fn increment_actor(clock: &mut VectorClock, actor: DeviceId) {
+    let current = match clock.get(&actor).copied() {
+        Some(value) => value,
+        None => 0,
+    };
+    clock.insert(actor, current.saturating_add(1));
+}
+
+// ============================================================================
+// CRDT Coordinator
+// ============================================================================
 
 /// CRDT Coordinator managing all four CRDT handler types
 ///

@@ -1,8 +1,7 @@
 use aura_core::effects::guard::{EffectCommand, EffectInterpreter, EffectResult};
 use aura_core::effects::{
     AuthorizationEffects, FlowBudgetEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects,
-    RandomCoreEffects, RandomEffects, RandomExtendedEffects, StorageCoreEffects, StorageEffects,
-    StorageExtendedEffects,
+    RandomCoreEffects, StorageCoreEffects, StorageExtendedEffects,
 };
 use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, AuraResult, Cap, FlowBudget, Journal};
@@ -106,24 +105,6 @@ impl RandomCoreEffects for TestEffects {
         self.nonce.fetch_add(1, Ordering::SeqCst)
     }
 
-}
-
-#[async_trait]
-impl RandomExtendedEffects for TestEffects {
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        if min >= max {
-            return min;
-        }
-        let value = self.random_u64().await;
-        min + (value % (max - min))
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let bytes = self.random_bytes(16).await;
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes);
-        uuid::Uuid::from_bytes(uuid_bytes)
-    }
 }
 
 #[async_trait]

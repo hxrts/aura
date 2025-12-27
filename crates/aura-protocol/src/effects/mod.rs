@@ -67,9 +67,9 @@
 
 // Protocol-specific effect traits (Layer 4)
 pub mod choreographic;
+pub mod crdt;
 pub mod effect_api;
 pub mod params;
-pub mod semilattice;
 pub mod tree;
 
 // Protocol effect re-exports
@@ -96,7 +96,7 @@ pub use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
 
 pub use effect_api::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 pub use params::*; // Re-export all parameter types
-pub use semilattice::{
+pub use crdt::{
     CausalContext, CmHandler, CvHandler, DeliveryConfig, DeliveryEffect, DeliveryGuarantee,
     DeltaHandler, GossipStrategy, TopicId,
 };

@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use aura_core::effects::StorageEffects;
+use aura_core::effects::StorageCoreEffects;
 use aura_effects::{
     EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
     RealSecureStorageHandler,

@@ -1,12 +1,25 @@
 // Lock poisoning is fatal for this module - we prefer to panic than continue with corrupted state
 #![allow(clippy::expect_used)]
+// Uses std sync primitives for simple in-memory cache coordination.
+#![allow(clippy::disallowed_types)]
 
-//! Persistent commitment tree handler backed by StorageEffects.
+//! Layer 4: Tree Handler Implementations
+//!
+//! Handlers for commitment tree operations.
+//!
+//! ## Handlers
+//!
+//! - **PersistentTreeHandler**: Production handler with storage persistence
+//!
+//! **Note**: Tree reduction and application logic lives in aura-journal (Layer 2),
+//! enabling separation between domain CRDT operations and protocol-layer orchestration.
+//!
+//! ## Persistent Handler
 //!
 //! This handler persists the OpLog to storage, enabling tree state to survive
 //! across restarts and supporting cross-device sync.
 //!
-//! ## Shared Storage
+//! ### Shared Storage
 //!
 //! Uses the same storage keys as `PersistentSyncHandler` via
 //! `aura_journal::commitment_tree::storage`, ensuring both handlers operate on

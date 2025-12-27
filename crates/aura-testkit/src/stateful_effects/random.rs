@@ -5,7 +5,7 @@
 //! randomness in tests.
 
 use async_trait::async_trait;
-use aura_core::effects::{RandomCoreEffects, RandomEffects, RandomExtendedEffects};
+use aura_core::effects::RandomCoreEffects;
 use std::sync::{Arc, Mutex};
 
 /// Mock random handler for deterministic testing
@@ -65,25 +65,5 @@ impl RandomCoreEffects for MockRandomHandler {
         let mut counter = self.counter.lock().unwrap();
         *counter += 1;
         self.seed.wrapping_add(*counter)
-    }
-
-}
-
-#[async_trait]
-impl RandomExtendedEffects for MockRandomHandler {
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        if min >= max {
-            return min;
-        }
-        let range = max - min;
-        let random = self.random_u64().await;
-        min + (random % range)
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let bytes = self.random_bytes(16).await;
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes);
-        uuid::Uuid::from_bytes(uuid_bytes)
     }
 }

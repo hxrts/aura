@@ -17,7 +17,7 @@ use aura_core::effects::amp::{
     AmpChannelEffects, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
     ChannelSendParams,
 };
-use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
+use aura_core::effects::{PhysicalTimeEffects, RandomExtendedEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};

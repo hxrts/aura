@@ -519,13 +519,21 @@ Coordination systems integrate to provide comprehensive distributed functionalit
 Combine these systems for robust distributed applications:
 
 ```rust
-use aura_agent::AuraAgent;
+use aura_agent::{create_production_agent, EffectContext, ExecutionMode};
+use aura_core::hash::hash;
+use aura_core::identifiers::{AuthorityId, ContextId};
 
 pub async fn create_coordinated_application(
     device_id: aura_core::DeviceId,
     config: CoordinationConfig,
 ) -> Result<CoordinatedApp, ApplicationError> {
-    let agent = AuraAgent::for_production(device_id)?;
+    let authority_id = AuthorityId::from_uuid(device_id.0);
+    let ctx = EffectContext::new(
+        authority_id,
+        ContextId::new_from_entropy(hash(&authority_id.to_bytes())),
+        ExecutionMode::Production,
+    );
+    let agent = create_production_agent(&ctx, authority_id).await?;
     agent.initialize().await?;
 
     let coordination_systems = CoordinationSystems::new(agent, config)?;

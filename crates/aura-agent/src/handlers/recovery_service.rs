@@ -9,6 +9,7 @@ use super::recovery::{
 };
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
+use aura_core::effects::RandomCoreEffects;
 use aura_core::identifiers::AuthorityId;
 use std::sync::Arc;
 

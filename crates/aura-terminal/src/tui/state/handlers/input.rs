@@ -155,6 +155,7 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             | QueuedModal::SettingsDeviceImport(_)
             | QueuedModal::SettingsDeviceEnrollment(_)
             | QueuedModal::SettingsRemoveDevice(_)
+            | QueuedModal::AuthorityPicker(_)
             | QueuedModal::ChatMemberSelect(_) => {}
         }
     }

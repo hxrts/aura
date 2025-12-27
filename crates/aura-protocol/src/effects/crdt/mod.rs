@@ -55,7 +55,7 @@
 //! for runtime introspection and generic handler manipulation:
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::{
+//! use aura_protocol::effects::crdt::{
 //!     CrdtHandler, CrdtSemantics, CvHandler, MvHandler, DeltaHandler,
 //! };
 //!
@@ -122,7 +122,7 @@
 //!
 //! # Architecture
 //!
-//! The effect layer is organized into three main components:
+//! The effect layer is organized into these components:
 //!
 //! 1. **Handlers**: Enforce CRDT laws for different CRDT types
 //!    - `CvHandler`: State-based CRDTs with join semilattice laws
@@ -135,7 +135,11 @@
 //!    - At-least-once delivery with deduplication
 //!    - Gossip protocols for anti-entropy
 //!
-//! 3. **Handler Composition**: Utilities for combining handlers with delivery effects
+//! 3. **Execution**: Utilities for integrating handlers with choreographic protocols
+//!
+//! 4. **Composition**: Utilities for combining multiple handlers
+//!
+//! 5. **Coordinator**: Bridge between CRDT handlers and choreographic protocols
 //!
 //! # Usage Patterns
 //!
@@ -144,7 +148,7 @@
 //! The recommended pattern uses the `CrdtCoordinator` builder for clean setup:
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::CrdtCoordinator;
+//! use aura_protocol::effects::crdt::CrdtCoordinator;
 //!
 //! // Create coordinator with convergent CRDT handler (builder pattern)
 //! let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_map);
@@ -164,7 +168,7 @@
 //! For cases where you need direct handler control:
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::CvHandler;
+//! use aura_protocol::effects::crdt::CvHandler;
 //! use aura_core::semilattice::StateMsg;
 //!
 //! // Create handler for state-based CRDT
@@ -184,7 +188,7 @@
 //! Write functions that work with any handler type:
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::{CrdtHandler, CrdtSemantics};
+//! use aura_protocol::effects::crdt::{CrdtHandler, CrdtSemantics};
 //!
 //! /// Log sync status for any CRDT handler
 //! fn log_sync_status<S: std::fmt::Debug>(handler: &impl CrdtHandler<S>) {
@@ -213,197 +217,40 @@
 //! }
 //! ```
 
+// Handler modules
+pub mod cm_handler;
+pub mod composition;
+pub mod crdt_coordinator;
+pub mod cv_handler;
+pub mod delivery;
+pub mod delta_handler;
+pub mod execution;
+pub mod handler_trait;
+pub mod mv_handler;
+
+// Handler re-exports
 pub use cm_handler::CmHandler;
 pub use crdt_coordinator::{CrdtCoordinator, CrdtCoordinatorError};
 pub use cv_handler::CvHandler;
 pub use delivery::{DeliveryConfig, DeliveryEffect, DeliveryGuarantee, GossipStrategy, TopicId};
 pub use delta_handler::DeltaHandler;
 pub use handler_trait::{CrdtHandler, CrdtSemantics, HandlerDiagnostics, HandlerMetrics};
+pub use mv_handler::{ConstraintEvent, ConstraintResult, MultiConstraintHandler, MvHandler};
 
 // Re-export causal context types from aura-journal
 pub use aura_journal::{CausalContext, VectorClock};
-pub use mv_handler::{ConstraintEvent, ConstraintResult, MultiConstraintHandler, MvHandler};
 
-pub mod cm_handler;
-pub mod crdt_coordinator;
-pub mod cv_handler;
-pub mod delivery;
-pub mod delta_handler;
-pub mod handler_trait;
-pub mod mv_handler;
+// Re-export vector clock utilities
+pub use crdt_coordinator::{increment_actor, max_counter, merge_vector_clocks};
 
-use aura_core::identifiers::{DeviceId, SessionId};
-use aura_core::semilattice::{CausalOp, CmApply, CvState, Dedup, Delta};
-
-/// Execution utilities for integrating handlers with choreographic protocols
-pub mod execution {
-    use super::*;
-
-    /// Execute state-based CRDT synchronization
-    ///
-    /// Performs CvRDT synchronization by broadcasting state to peers.
-    pub async fn execute_cv_sync<S: CvState>(
-        handler: &mut CvHandler<S>,
-        peers: Vec<DeviceId>,
-        _session_id: SessionId,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // Produce a state message for each peer; caller is responsible for transport.
-        let state_msg = handler.create_state_msg();
-        for _peer in peers {
-            // In choreography integration this would enqueue to SendGuard; here we only
-            // exercise the handler to ensure join semantics hold.
-            let _ = state_msg.clone();
-        }
-        Ok(())
-    }
-
-    /// Execute delta-based CRDT gossip
-    pub async fn execute_delta_gossip<S>(
-        handler: &mut DeltaHandler<S, S::Delta>,
-        peers: Vec<DeviceId>,
-        _session_id: SessionId,
-    ) -> Result<(), Box<dyn std::error::Error>>
-    where
-        S: CvState + aura_core::semilattice::DeltaState,
-        S::Delta: Delta + Clone,
-    {
-        // Drain pending deltas so they are applied locally and ready for dissemination.
-        let deltas: Vec<S::Delta> = handler.delta_inbox.drain(..).collect();
-
-        if !deltas.is_empty() {
-            // Apply to local state to maintain convergence guarantees.
-            handler.apply_deltas(deltas.clone());
-
-            // Materialize transport-ready delta messages for each peer.
-            for delta in deltas {
-                let msg = handler.create_delta_msg(delta.clone());
-                for _peer in &peers {
-                    // In choreography integration this would enqueue to SendGuard.
-                    let _ = msg.clone();
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Execute operation-based CRDT broadcast
-    pub async fn execute_op_broadcast<S, Op, Id>(
-        handler: &mut CmHandler<S, Op, Id>,
-        peers: Vec<DeviceId>,
-        _session_id: SessionId,
-    ) -> Result<(), Box<dyn std::error::Error>>
-    where
-        S: CmApply<Op> + Dedup<Id>,
-        Op: CausalOp<Id = Id, Ctx = aura_journal::CausalContext> + Clone,
-        Id: Clone + PartialEq,
-    {
-        // Broadcast any causally buffered operations; dedup semantics in CmHandler
-        // ensure safe replays if dependencies were unresolved.
-        let buffered: Vec<_> = handler.buffer.iter().cloned().collect();
-        if !buffered.is_empty() {
-            for op_with_ctx in buffered {
-                for _peer in &peers {
-                    let _msg =
-                        handler.create_op_msg(op_with_ctx.op.clone(), op_with_ctx.ctx.clone());
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Composition utilities for combining multiple handlers
-pub mod composition {
-    use super::*;
-
-    /// Composed handler for multiple CRDT types
-    ///
-    /// This allows a single session to manage multiple different CRDTs
-    /// with their appropriate handlers and delivery guarantees.
-    pub struct ComposedHandler {
-        /// Registry of handlers by type name
-        pub handlers: std::collections::HashMap<String, Box<dyn std::any::Any + Send + Sync>>,
-        /// Delivery configuration per handler type
-        pub delivery_configs: std::collections::HashMap<String, DeliveryConfig>,
-    }
-
-    impl ComposedHandler {
-        /// Create a new composed handler
-        pub fn new() -> Self {
-            Self {
-                handlers: std::collections::HashMap::new(),
-                delivery_configs: std::collections::HashMap::new(),
-            }
-        }
-
-        /// Register a CvRDT handler
-        pub fn register_cv_handler<S: CvState + Send + Sync + 'static>(
-            &mut self,
-            type_name: String,
-            handler: CvHandler<S>,
-            config: DeliveryConfig,
-        ) {
-            self.handlers.insert(type_name.clone(), Box::new(handler));
-            self.delivery_configs.insert(type_name, config);
-        }
-
-        /// Register a CmRDT handler
-        pub fn register_cm_handler<S, Op, Id>(
-            &mut self,
-            type_name: String,
-            handler: CmHandler<S, Op, Id>,
-            config: DeliveryConfig,
-        ) where
-            S: CmApply<Op> + Dedup<Id> + Send + Sync + 'static,
-            Op: CausalOp<Id = Id, Ctx = aura_journal::CausalContext> + Send + Sync + 'static,
-            Id: Clone + PartialEq + Send + Sync + 'static,
-        {
-            self.handlers.insert(type_name.clone(), Box::new(handler));
-            self.delivery_configs.insert(type_name, config);
-        }
-
-        /// Get a handler by type name
-        pub fn get_cv_handler<S: CvState + 'static>(
-            &self,
-            type_name: &str,
-        ) -> Option<&CvHandler<S>> {
-            self.handlers.get(type_name)?.downcast_ref::<CvHandler<S>>()
-        }
-
-        /// Get a mutable handler by type name
-        pub fn get_cv_handler_mut<S: CvState + 'static>(
-            &mut self,
-            type_name: &str,
-        ) -> Option<&mut CvHandler<S>> {
-            self.handlers
-                .get_mut(type_name)?
-                .downcast_mut::<CvHandler<S>>()
-        }
-
-        /// Get delivery configuration for a handler type
-        pub fn get_delivery_config(&self, type_name: &str) -> Option<&DeliveryConfig> {
-            self.delivery_configs.get(type_name)
-        }
-
-        /// List registered handler types
-        pub fn list_handler_types(&self) -> Vec<&String> {
-            self.handlers.keys().collect()
-        }
-    }
-
-    impl Default for ComposedHandler {
-        fn default() -> Self {
-            Self::new()
-        }
-    }
-}
+// Re-export composition utilities
+pub use composition::ComposedHandler;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_composition::{EffectRegistry, RegistrableHandler};
-    use aura_core::semilattice::{Bottom, JoinSemilattice};
+    use aura_core::semilattice::{Bottom, CvState, JoinSemilattice};
 
     // Test CRDT type
     #[derive(Debug, Clone, PartialEq, Eq)]

@@ -881,23 +881,6 @@ mod tests {
                 .await
         }
 
-        fn is_simulated(&self) -> bool {
-            true
-        }
-
-        fn crypto_capabilities(&self) -> Vec<String> {
-            vec!["mock".to_string()]
-        }
-
-        fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-            a == b
-        }
-
-        fn secure_zero(&self, data: &mut [u8]) {
-            for byte in data.iter_mut() {
-                *byte = 0;
-            }
-        }
     }
 
     struct MockSecureStorage {

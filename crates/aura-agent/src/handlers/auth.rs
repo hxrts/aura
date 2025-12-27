@@ -6,7 +6,10 @@
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::{CryptoEffects, RandomEffects};
+use aura_core::effects::{
+    CryptoCoreEffects, CryptoEffects, CryptoExtendedEffects, RandomCoreEffects,
+    RandomExtendedEffects,
+};
 use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_protocol::effects::EffectApiEffects;
 use aura_guards::chain::create_send_guard;

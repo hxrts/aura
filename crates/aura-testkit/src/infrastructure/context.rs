@@ -41,8 +41,7 @@ use aura_core::{
         },
         ConsoleEffects, CryptoEffects, ExecutionMode, JournalEffects, NetworkCoreEffects,
         NetworkEffects, NetworkExtendedEffects,
-        PhysicalTimeEffects, RandomCoreEffects, RandomEffects, RandomExtendedEffects,
-        StorageEffects,
+        PhysicalTimeEffects, RandomCoreEffects, RandomEffects, StorageEffects,
     },
     AuraResult, DeviceId,
 };
@@ -176,10 +175,7 @@ impl CompositeTestHandler {
         // This provides better determinism while still testing realistic patterns
         let seed = match execution_mode {
             ExecutionMode::Simulation { seed } => seed,
-            _ => std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            _ => 42, // Deterministic default for test repeatability
         };
 
         Ok(Self {
@@ -482,18 +478,6 @@ impl RandomCoreEffects for CompositeTestHandler {
 
     async fn random_u64(&self) -> u64 {
         self.random.random_u64().await
-    }
-
-}
-
-#[async_trait]
-impl RandomExtendedEffects for CompositeTestHandler {
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        self.random.random_range(min, max).await
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        self.random.random_uuid().await
     }
 }
 

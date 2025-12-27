@@ -7,7 +7,10 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 
-use crate::registry::{EffectRegistry, Handler, HandlerContext, HandlerError, RegistrableHandler};
+use crate::registry::{
+    EffectRegistry, Handler, HandlerContext, HandlerError, RegistrableHandler, RegisterAllOptions,
+    RegistryError,
+};
 use aura_core::effects::registry as effect_registry;
 use aura_core::{DeviceId, EffectType, ExecutionMode};
 use aura_mpst::LocalSessionType;
@@ -73,6 +76,13 @@ impl CompositeHandler {
             })?;
 
         Ok(())
+    }
+
+    /// Register the default handler bundle.
+    ///
+    /// Requires explicit opt-in for impure handlers via `RegisterAllOptions`.
+    pub fn register_all(&mut self, options: RegisterAllOptions) -> Result<(), RegistryError> {
+        self.registry.register_all(options)
     }
 
     /// Unregister a handler for a specific effect type

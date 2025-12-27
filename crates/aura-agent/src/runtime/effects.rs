@@ -6,7 +6,7 @@ use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
 use crate::fact_registry::build_fact_registry;
 use async_trait::async_trait;
-use aura_composition::CompositeHandlerAdapter;
+use aura_composition::{CompositeHandlerAdapter, RegisterAllOptions};
 use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::crypto::{FrostSigningPackage, SigningKeyGenResult};
 use aura_core::effects::network::PeerEventStream;
@@ -184,8 +184,9 @@ impl AuraEffectSystem {
         shared_transport: Option<SharedTransport>,
         authority_override: Option<AuthorityId>,
     ) -> Self {
+        let device_id = config.device_id();
         let authority =
-            authority_override.unwrap_or_else(|| AuthorityId::from_uuid(config.device_id().0));
+            authority_override.unwrap_or_else(|| AuthorityId::from_uuid(device_id.0));
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
         let crypto_handler = match crypto_seed {
             Some(seed) => RealCryptoHandler::seeded(seed),
@@ -242,7 +243,7 @@ impl AuraEffectSystem {
             random_rng: parking_lot::Mutex::new(random_rng),
             storage_handler,
             time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockService::new(Some(config.device_id())),
+            logical_clock: LogicalClockService::new(Some(device_id)),
             order_clock: OrderClockHandler,
             authorization_handler,
             leakage_handler,
@@ -426,7 +427,11 @@ impl AuraEffectSystem {
 
     /// Create effect system for production.
     pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let composite = CompositeHandlerAdapter::for_production(config.device_id());
+        let mut composite = CompositeHandlerAdapter::for_production(config.device_id());
+        composite
+            .composite_mut()
+            .register_all(RegisterAllOptions::allow_impure())
+            .map_err(|e| crate::core::AgentError::effects(e.to_string()))?;
         // Production uses OS entropy, no seed
         Ok(Self::build_internal(
             config, composite, false, None, None, None,
@@ -510,7 +515,11 @@ impl AuraEffectSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Result<Self, crate::core::AgentError> {
-        let composite = CompositeHandlerAdapter::for_production(config.device_id());
+        let mut composite = CompositeHandlerAdapter::for_production(config.device_id());
+        composite
+            .composite_mut()
+            .register_all(RegisterAllOptions::allow_impure())
+            .map_err(|e| crate::core::AgentError::effects(e.to_string()))?;
         Ok(Self::build_internal(
             config,
             composite,
@@ -817,23 +826,6 @@ impl RandomCoreEffects for AuraEffectSystem {
 }
 
 #[async_trait]
-impl RandomExtendedEffects for AuraEffectSystem {
-    #[allow(clippy::disallowed_methods)]
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        self.random_rng.lock().gen_range(min..=max)
-    }
-
-    #[allow(clippy::disallowed_methods)]
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let mut bytes = [0u8; 16];
-        self.random_rng.lock().fill_bytes(&mut bytes);
-        bytes[6] = (bytes[6] & 0x0f) | 0x40;
-        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        uuid::Uuid::from_bytes(bytes)
-    }
-}
-
-#[async_trait]
 impl SyncEffects for AuraEffectSystem {
     async fn sync_with_peer(&self, peer_id: uuid::Uuid) -> Result<SyncMetrics, SyncError> {
         self.sync_handler.sync_with_peer(peer_id).await
@@ -1074,7 +1066,7 @@ impl CryptoCoreEffects for AuraEffectSystem {
     }
 
     fn is_simulated(&self) -> bool {
-        aura_core::CryptoEffects::is_simulated(&self.crypto_handler)
+        self.crypto_handler.is_simulated()
     }
 
     fn crypto_capabilities(&self) -> Vec<String> {

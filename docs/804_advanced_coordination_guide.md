@@ -350,8 +350,8 @@ use aura_protocol::choreography::AuraHandlerAdapter;
 // Testing handler with in-memory effects
 let test_handler = AuraHandlerAdapter::for_testing(device_id)?;
 
-// Production handler with real network and storage
-let prod_handler = AuraHandlerAdapter::for_production(device_id)?;
+// Production handler wiring is owned by aura-agent.
+// Use aura-agent runtime assembly to obtain production handlers.
 
 // Simulation handler with fault injection
 let sim_handler = AuraHandlerAdapter::for_simulation(device_id, config)?;

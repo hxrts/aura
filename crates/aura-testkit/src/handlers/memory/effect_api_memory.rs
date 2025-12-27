@@ -3,9 +3,7 @@
 use async_lock::Mutex;
 use async_trait::async_trait;
 use aura_core::effects::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
-use aura_core::effects::{
-    PhysicalTimeEffects, RandomCoreEffects, RandomEffects, RandomExtendedEffects,
-};
+use aura_core::effects::{PhysicalTimeEffects, RandomCoreEffects, RandomEffects};
 use futures::channel::mpsc;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use std::sync::Arc;
@@ -88,20 +86,7 @@ impl RandomCoreEffects for DeterministicRandom {
 
 }
 
-#[async_trait]
-impl RandomExtendedEffects for DeterministicRandom {
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        let mut rng = self.rng.lock().await;
-        rng.gen_range(min..=max)
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let mut rng = self.rng.lock().await;
-        let mut bytes = [0u8; 16];
-        rng.fill_bytes(&mut bytes);
-        uuid::Uuid::from_bytes(bytes)
-    }
-}
+// RandomExtendedEffects is provided by blanket impl in aura_core
 
 #[async_trait]
 impl EffectApiEffects for MemoryLedgerHandler {

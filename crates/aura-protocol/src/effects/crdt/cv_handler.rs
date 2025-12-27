@@ -28,7 +28,7 @@
 //! ## Basic Usage
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::CvHandler;
+//! use aura_protocol::effects::crdt::CvHandler;
 //! use aura_core::semilattice::{StateMsg, CvState, JoinSemilattice, Bottom};
 //!
 //! // Define your CRDT type
@@ -69,7 +69,7 @@
 //! ## Integration with Choreographic Protocols
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::{CvHandler, execution};
+//! use aura_protocol::effects::crdt::{CvHandler, execution};
 //! use aura_core::{DeviceId, SessionId};
 //!
 //! async fn sync_with_peers<S: CvState>(
@@ -88,7 +88,7 @@
 //! ## Complex CRDT Types
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::CvHandler;
+//! use aura_protocol::effects::crdt::CvHandler;
 //! use aura_core::semilattice::{CvState, JoinSemilattice, Bottom};
 //! use std::collections::HashMap;
 //!
@@ -149,7 +149,7 @@
 //! ## Middleware Integration
 //!
 //! ```rust,no_run
-//! use aura_protocol::effects::semilattice::CvHandler;
+//! use aura_protocol::effects::crdt::CvHandler;
 //! use aura_core::semilattice::{StateMsg, CvState};
 //! use std::time::Instant;
 //!
@@ -196,7 +196,7 @@
 //! ## Error Handling and Validation
 //!
 //! ```rust,no_run
-//! use aura_protocol::effects::semilattice::CvHandler;
+//! use aura_protocol::effects::crdt::CvHandler;
 //! use aura_core::semilattice::{StateMsg, CvState};
 //!
 //! // Validated CRDT handler
@@ -238,7 +238,7 @@
 //! CvRDTs can grow unboundedly over time. Consider these patterns:
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::CvHandler;
+//! use aura_protocol::effects::crdt::CvHandler;
 //! use aura_core::semilattice::CvState;
 //!
 //! // Implement compaction for large CRDTs
@@ -261,7 +261,7 @@
 //! For high-throughput scenarios:
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::CvHandler;
+//! use aura_protocol::effects::crdt::CvHandler;
 //! use aura_core::semilattice::{StateMsg, CvState};
 //!
 //! impl<S: CvState> CvHandler<S> {
@@ -277,7 +277,7 @@
 //! # Testing
 //!
 //! ```rust,no_run
-//! use aura_protocol::effects::semilattice::CvHandler;
+//! use aura_protocol::effects::crdt::CvHandler;
 //! use aura_core::semilattice::{StateMsg, CvState, JoinSemilattice, Bottom};
 //!
 //! #[cfg(test)]
@@ -374,7 +374,7 @@ impl<S: CvState> CvHandler<S> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use aura_protocol::effects::semilattice::CvHandler;
+    /// use aura_protocol::effects::crdt::CvHandler;
     /// use aura_core::semilattice::{CvState, JoinSemilattice, Bottom};
     ///
     /// #[derive(Debug, Clone, PartialEq)]
@@ -404,7 +404,7 @@ impl<S: CvState> CvHandler<S> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use aura_protocol::effects::semilattice::CvHandler;
+    /// # use aura_protocol::effects::crdt::CvHandler;
     /// # use aura_core::semilattice::{CvState, JoinSemilattice, Bottom};
     /// # #[derive(Debug, Clone, PartialEq)]
     /// # struct Counter(u64);
@@ -447,7 +447,7 @@ impl<S: CvState> CvHandler<S> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use aura_protocol::effects::semilattice::CvHandler;
+    /// # use aura_protocol::effects::crdt::CvHandler;
     /// # use aura_core::semilattice::{StateMsg, CvState, JoinSemilattice, Bottom};
     /// # #[derive(Debug, Clone, PartialEq)]
     /// # struct Counter(u64);
@@ -481,7 +481,7 @@ impl<S: CvState> CvHandler<S> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use aura_protocol::effects::semilattice::CvHandler;
+    /// # use aura_protocol::effects::crdt::CvHandler;
     /// # use aura_core::semilattice::{CvState, JoinSemilattice, Bottom};
     /// # #[derive(Debug, Clone, PartialEq)]
     /// # struct Counter(u64);
@@ -515,7 +515,7 @@ impl<S: CvState> CvHandler<S> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use aura_protocol::effects::semilattice::CvHandler;
+    /// # use aura_protocol::effects::crdt::CvHandler;
     /// # use aura_core::semilattice::{CvState, JoinSemilattice, Bottom};
     /// # #[derive(Debug, Clone, PartialEq)]
     /// # struct Counter(u64);
@@ -554,7 +554,7 @@ impl<S: CvState> CvHandler<S> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use aura_protocol::effects::semilattice::CvHandler;
+    /// # use aura_protocol::effects::crdt::CvHandler;
     /// # use aura_core::semilattice::{StateMsg, MsgKind, CvState, JoinSemilattice, Bottom};
     /// # #[derive(Debug, Clone, PartialEq)]
     /// # struct Counter(u64);
@@ -600,7 +600,7 @@ impl<S: CvState> CvHandler<S> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use aura_protocol::effects::semilattice::CvHandler;
+    /// # use aura_protocol::effects::crdt::CvHandler;
     /// # use aura_core::semilattice::{CvState, JoinSemilattice, Bottom};
     /// # #[derive(Debug, Clone, PartialEq)]
     /// # struct Counter(u64);
@@ -643,7 +643,7 @@ impl<S: CvState> CvHandler<S> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use aura_protocol::effects::semilattice::CvHandler;
+    /// # use aura_protocol::effects::crdt::CvHandler;
     /// # use aura_core::semilattice::{CvState, JoinSemilattice, Bottom};
     /// # #[derive(Debug, Clone, PartialEq)]
     /// # struct Counter(u64);

@@ -23,7 +23,8 @@ use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::{
-    CryptoEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    CryptoEffects, CryptoExtendedEffects, SecureStorageCapability, SecureStorageEffects,
+    SecureStorageLocation,
 };
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{

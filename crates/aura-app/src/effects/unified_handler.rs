@@ -250,15 +250,9 @@ impl UnifiedHandler {
         signal: &Signal<Q::Result>,
         query: Q,
     ) -> Result<(), ReactiveError> {
-        let query_clone = query.clone();
-        self.reactive.register_query(signal, query).await?;
-        self.query
-            .register_query_binding(signal, query_clone)
-            .await
-            .map_err(|e| ReactiveError::Internal {
-                reason: e.to_string(),
-            })?;
-        Ok(())
+        use aura_core::effects::query::QuerySignalEffects;
+
+        QuerySignalEffects::register_query_signal(self, signal, query).await
     }
 
     /// Read a signal's current value.
@@ -372,6 +366,14 @@ impl QueryEffects for UnifiedHandler {
     ) -> Result<(Q::Result, QueryStats), QueryError> {
         self.query.query_full(query, isolation).await
     }
+
+    async fn register_query_binding<Q: Query>(
+        &self,
+        signal: &Signal<Q::Result>,
+        query: Q,
+    ) -> Result<(), QueryError> {
+        self.query.register_query_binding(signal, query).await
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -454,9 +456,7 @@ mod tests {
                 "contact",
                 vec![DatalogValue::var("a"), DatalogValue::var("b")],
             )];
-            DatalogProgram {
-                rules: vec![DatalogRule { head, body }],
-            }
+            DatalogProgram::new(vec![DatalogRule { head, body }])
         }
 
         fn required_capabilities(&self) -> Vec<QueryCapability> {
@@ -474,11 +474,17 @@ mod tests {
             for row in bindings.rows {
                 let a = row
                     .get("arg0")
-                    .and_then(|v| v.as_string())
+                    .and_then(|v| match v {
+                        DatalogValue::String(s) | DatalogValue::Symbol(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .unwrap_or_default();
                 let b = row
                     .get("arg1")
-                    .and_then(|v| v.as_string())
+                    .and_then(|v| match v {
+                        DatalogValue::String(s) | DatalogValue::Symbol(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .unwrap_or_default();
                 out.push((a, b));
             }

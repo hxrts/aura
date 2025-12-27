@@ -76,14 +76,8 @@
 //! ```rust,ignore
 //! use crate::prelude::*;
 //!
-//! // Create unified system with optional middleware
-//! let base = AuraEffectSystem::for_production(device_id)?;
-//! let enhanced = TracingMiddleware::new(
-//!     MetricsMiddleware::new(
-//!         RetryMiddleware::new(base, 3)
-//!     ),
-//!     "my-service"
-//! );
+//! // Production handler assembly is owned by aura-agent.
+//! // aura-protocol factories are for testing/simulation wiring only.
 //! ```
 //!
 //! ### Protocol Implementation

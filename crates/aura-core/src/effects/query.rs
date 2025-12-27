@@ -256,6 +256,16 @@ pub trait QueryEffects: Send + Sync {
         query: &Q,
         isolation: QueryIsolation,
     ) -> Result<(Q::Result, QueryStats), QueryError>;
+
+    /// Register a query binding for reactive refresh.
+    ///
+    /// Implementations should store the query/signal mapping and emit
+    /// the initial query result.
+    async fn register_query_binding<Q: Query>(
+        &self,
+        signal: &Signal<Q::Result>,
+        query: Q,
+    ) -> Result<(), QueryError>;
 }
 
 /// Convenience extension trait to register query-bound signals via QueryEffects.
@@ -267,7 +277,14 @@ pub trait QuerySignalEffects: QueryEffects + ReactiveEffects {
         signal: &Signal<Q::Result>,
         query: Q,
     ) -> Result<(), ReactiveError> {
-        self.register_query(signal, query).await
+        let query_clone = query.clone();
+        self.register_query(signal, query).await?;
+        self.register_query_binding(signal, query_clone)
+            .await
+            .map_err(|e| ReactiveError::Internal {
+                reason: e.to_string(),
+            })?;
+        Ok(())
     }
 
     /// Read query dependencies for a signal id.
@@ -373,6 +390,14 @@ impl<T: QueryEffects + ?Sized> QueryEffects for Arc<T> {
         isolation: QueryIsolation,
     ) -> Result<(Q::Result, QueryStats), QueryError> {
         (**self).query_full(query, isolation).await
+    }
+
+    async fn register_query_binding<Q: Query>(
+        &self,
+        signal: &Signal<Q::Result>,
+        query: Q,
+    ) -> Result<(), QueryError> {
+        (**self).register_query_binding(signal, query).await
     }
 }
 

@@ -10,8 +10,8 @@ use super::invitation_bridge::execute_guard_outcome;
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::storage::StorageEffects;
-use aura_core::effects::RandomEffects;
+use aura_core::effects::storage::StorageCoreEffects;
+use aura_core::effects::RandomExtendedEffects;
 use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, TransportEffects,
 };

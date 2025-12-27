@@ -4,9 +4,9 @@ This document describes the effect system and runtime architecture in Aura. It d
 
 ## 1. Effect Traits and Categories
 
-Aura defines effect traits as abstract interfaces for system capabilities. Core traits expose essential functionality. Extended traits expose coordinated or system-wide behaviors. Each trait is independent and does not assume global state.
+Aura defines effect traits as abstract interfaces for system capabilities. Core traits expose essential functionality. Extended traits expose optional operations and coordinated or system-wide behaviors. Each trait is independent and does not assume global state.
 
-Core traits include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`, `TimeAttestationEffects`), `RandomEffects`, and `JournalEffects`. Extended traits include `SystemEffects`, `LedgerEffects`, `ChoreographicEffects`, and `AgentEffects`.
+Core traits include `CryptoCoreEffects`, `NetworkCoreEffects`, `StorageCoreEffects`, time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`, `TimeAttestationEffects`), `RandomCoreEffects`, and `JournalEffects`. Extended traits include `CryptoExtendedEffects`, `NetworkExtendedEffects`, `StorageExtendedEffects`, `RandomExtendedEffects`, plus system-level traits such as `SystemEffects`, `LedgerEffects`, `ChoreographicEffects`, and `AgentEffects`. `TraceEffects` provides structured instrumentation as an infrastructure effect.
 
 ```rust
 #[async_trait]
@@ -16,7 +16,7 @@ pub trait CryptoEffects {
 }
 ```
 
-This example shows a core effect trait. Implementations provide cryptographic operations. Traits contain async methods for compatibility with async runtimes.
+This example shows a core effect trait. Implementations provide cryptographic operations. Traits contain async methods for compatibility with async runtimes. Extension traits add optional capabilities without forcing all handlers to implement them.
 
 ### 1.1 Unified Time Traits
 
@@ -65,7 +65,7 @@ See [Cryptography](116_crypto.md) for the detailed threshold signature architect
 
 Application-specific effect traits (like `CliEffects`, `ConfigEffects`, `OutputEffects` in `aura-terminal`) should remain in their application layer (Layer 7). Do not move them to `aura-core` (Layer 1) when the traits compose core effects into application-specific operations. The same applies when only one implementation exists per application.
 
-This follows proper layer separation. The `aura-core` crate provides infrastructure effects such as `ConsoleEffects`, `StorageEffects`, and `PhysicalTimeEffects`. Application layers compose these into domain-specific abstractions.
+This follows proper layer separation. The `aura-core` crate provides infrastructure effects such as `ConsoleEffects`, `StorageCoreEffects`, and `PhysicalTimeEffects` (plus `TraceEffects`). Application layers compose these into domain-specific abstractions.
 
 ### 1.4 DatabaseEffects Organization
 

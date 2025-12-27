@@ -83,6 +83,7 @@ pub fn operations_for(effect_type: EffectType) -> &'static [&'static str] {
             "restart_component",
             "shutdown",
         ],
+        EffectType::Trace => &["trace_event", "trace_span", "trace_span_end"],
         _ => &[],
     }
 }
@@ -102,6 +103,7 @@ pub fn core_operations_for(effect_type: EffectType) -> &'static [&'static str] {
         ],
         EffectType::Network => &["send_to_peer", "broadcast", "receive"],
         EffectType::Storage => &["store", "retrieve", "remove", "list_keys"],
+        EffectType::Trace => &["trace_event", "trace_span", "trace_span_end"],
         _ => &[],
     }
 }

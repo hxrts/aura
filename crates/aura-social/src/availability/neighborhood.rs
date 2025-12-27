@@ -245,7 +245,10 @@ struct RetrieveResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::{network::NetworkError, storage::StorageError};
+    use aura_core::effects::{
+        network::NetworkError, storage::StorageError, NetworkCoreEffects, NetworkExtendedEffects,
+        StorageCoreEffects, StorageExtendedEffects,
+    };
     use aura_core::time::{PhysicalTime, TimeStamp};
     use aura_journal::facts::social::{BlockMemberFact, NeighborhoodFact};
 

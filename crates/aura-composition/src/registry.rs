@@ -5,11 +5,20 @@
 //! and runtime reconfiguration of effect handlers.
 
 use async_trait::async_trait;
-use aura_core::{AuthorityId, ContextId, ContextSnapshot, EffectType, ExecutionMode, SessionId};
+use aura_core::{hash, AuthorityId, ContextId, ContextSnapshot, EffectType, ExecutionMode, SessionId};
 use aura_mpst::LocalSessionType;
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
+use crate::adapters::{
+    ConsoleHandlerAdapter, CryptoHandlerAdapter, LoggingSystemHandlerAdapter, RandomHandlerAdapter,
+    StorageHandlerAdapter, TimeHandlerAdapter, TraceHandlerAdapter, TransportHandlerAdapter,
+};
+use aura_effects::{
+    console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
+    storage::FilesystemStorageHandler, system::logging::LoggingSystemHandler,
+    time::PhysicalTimeHandler, trace::TraceHandler, TcpTransportHandler as RealTransportHandler,
+};
 
 /// Simplified context for handler execution
 #[derive(Debug, Clone)]
@@ -23,6 +32,28 @@ pub struct HandlerContext {
 }
 
 impl HandlerContext {
+    fn deterministic_operation_id(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Uuid {
+        let mut seed = Vec::with_capacity(33);
+        seed.extend_from_slice(&authority_id.to_bytes());
+        seed.extend_from_slice(&context_id.to_bytes());
+        match execution_mode {
+            ExecutionMode::Testing => seed.push(0),
+            ExecutionMode::Production => seed.push(1),
+            ExecutionMode::Simulation { seed: sim_seed } => {
+                seed.push(2);
+                seed.extend_from_slice(&sim_seed.to_le_bytes());
+            }
+        }
+        let digest = hash::hash(&seed);
+        let mut op_bytes = [0u8; 16];
+        op_bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(op_bytes)
+    }
+
     // Registry helper
     /// Create a new handler context
     pub fn new(
@@ -30,7 +61,7 @@ impl HandlerContext {
         context_id: ContextId,
         execution_mode: ExecutionMode,
     ) -> Self {
-        let operation_id = Uuid::new_v4();
+        let operation_id = Self::deterministic_operation_id(authority_id, context_id, execution_mode);
         Self {
             authority_id,
             context_id,
@@ -43,12 +74,16 @@ impl HandlerContext {
 
     /// Create a new handler context from a lightweight snapshot.
     pub fn from_snapshot(snapshot: ContextSnapshot) -> Self {
+        let authority_id = snapshot.authority_id();
+        let context_id = snapshot.context_id();
+        let execution_mode = snapshot.execution_mode();
+        let operation_id = Self::deterministic_operation_id(authority_id, context_id, execution_mode);
         Self {
-            authority_id: snapshot.authority_id(),
-            context_id: snapshot.context_id(),
-            execution_mode: snapshot.execution_mode(),
+            authority_id,
+            context_id,
+            execution_mode,
             session_id: snapshot.session_id(),
-            operation_id: Uuid::new_v4(),
+            operation_id,
             metadata: HashMap::new(),
         }
     }
@@ -63,6 +98,29 @@ impl HandlerContext {
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value);
         self
+    }
+}
+
+/// Options for bulk registering default handlers.
+#[derive(Debug, Clone, Copy)]
+pub struct RegisterAllOptions {
+    /// Allow registering impure handlers that touch OS resources.
+    ///
+    /// Impure handlers include: Console, Random, Crypto, Storage, Time,
+    /// Network (TCP), Trace, and System logging handlers.
+    pub allow_impure: bool,
+}
+
+impl RegisterAllOptions {
+    /// Explicit opt-in for impure default handlers.
+    pub fn allow_impure() -> Self {
+        Self { allow_impure: true }
+    }
+}
+
+impl Default for RegisterAllOptions {
+    fn default() -> Self {
+        Self { allow_impure: false }
     }
 }
 
@@ -320,6 +378,64 @@ impl EffectRegistry {
 
         // Register the handler
         self.handlers.insert(effect_type, handler);
+        Ok(())
+    }
+
+    /// Register a standard set of default handlers.
+    ///
+    /// This method requires explicit opt-in for impure handlers because it
+    /// registers OS-integrated implementations (console, randomness, crypto,
+    /// storage, time, TCP transport, tracing, and system logging).
+    ///
+    /// Intended for runtime assembly in `aura-agent` only.
+    pub fn register_all(&mut self, options: RegisterAllOptions) -> Result<(), RegistryError> {
+        if !options.allow_impure {
+            return Err(RegistryError::registration_failed(
+                EffectType::System,
+                std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "register_all requires allow_impure=true for OS-backed handlers",
+                ),
+            ));
+        }
+
+        self.register_handler(
+            EffectType::Console,
+            Box::new(ConsoleHandlerAdapter::new(RealConsoleHandler::new())),
+        )?;
+        self.register_handler(
+            EffectType::Random,
+            Box::new(RandomHandlerAdapter::new(RealRandomHandler::new())),
+        )?;
+        self.register_handler(
+            EffectType::Crypto,
+            Box::new(CryptoHandlerAdapter::new(RealCryptoHandler::new())),
+        )?;
+        self.register_handler(
+            EffectType::Storage,
+            Box::new(StorageHandlerAdapter::new(
+                FilesystemStorageHandler::with_default_path(),
+            )),
+        )?;
+        self.register_handler(
+            EffectType::Time,
+            Box::new(TimeHandlerAdapter::new(PhysicalTimeHandler::new())),
+        )?;
+        self.register_handler(
+            EffectType::Network,
+            Box::new(TransportHandlerAdapter::new(RealTransportHandler::default())),
+        )?;
+        self.register_handler(
+            EffectType::Trace,
+            Box::new(TraceHandlerAdapter::new(TraceHandler::new())),
+        )?;
+        self.register_handler(
+            EffectType::System,
+            Box::new(LoggingSystemHandlerAdapter::new(
+                LoggingSystemHandler::default(),
+            )),
+        )?;
+
         Ok(())
     }
 
@@ -718,12 +834,22 @@ mod tests {
     }
 
     #[test]
-    fn test_handler_context_operation_id_unique() {
+    fn test_handler_context_operation_id_deterministic() {
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
         let context_id = ContextId::new_from_entropy([2u8; 32]);
         let ctx1 = HandlerContext::new(authority_id, context_id, ExecutionMode::Testing);
         let ctx2 = HandlerContext::new(authority_id, context_id, ExecutionMode::Testing);
 
-        assert_ne!(ctx1.operation_id, ctx2.operation_id);
+        // Same inputs produce the same operation_id (deterministic)
+        assert_eq!(ctx1.operation_id, ctx2.operation_id);
+
+        // Different inputs produce different operation_ids
+        let different_authority = AuthorityId::new_from_entropy([3u8; 32]);
+        let ctx3 = HandlerContext::new(different_authority, context_id, ExecutionMode::Testing);
+        assert_ne!(ctx1.operation_id, ctx3.operation_id);
+
+        // Different execution mode produces different operation_id
+        let ctx4 = HandlerContext::new(authority_id, context_id, ExecutionMode::Production);
+        assert_ne!(ctx1.operation_id, ctx4.operation_id);
     }
 }

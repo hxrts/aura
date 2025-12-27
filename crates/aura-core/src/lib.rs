@@ -219,6 +219,7 @@ pub use effects::{
     // Unified threshold signing effects
     ThresholdSigningEffects,
     TimeEffects,
+    TraceEffects,
     TreeEffects,
     WakeCondition,
 };

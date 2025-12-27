@@ -17,6 +17,20 @@
 //! - MUST NOT do multi-handler coordination
 //! - MUST NOT do multi-party protocol logic
 //!
+//! ## Stateful Boundary (compile-fail example)
+//!
+//! Handlers in Layer 3 are stateless. Stateful caches belong in Layer 6 services.
+//!
+//! ```compile_fail
+//! use std::sync::RwLock;
+//!
+//! struct BadHandler {
+//!     cache: RwLock<Vec<u8>>,
+//! }
+//!
+//! compile_error!("Stateful caches must live in Layer 6 handlers, not aura-effects.");
+//! ```
+//!
 //! # Required Infrastructure Effects
 //!
 //! This crate MUST provide handlers for:
@@ -83,6 +97,7 @@ pub mod storage;
 // sync_bridge removed - replaced by pure guard evaluation (ADR-014)
 pub mod system;
 pub mod time;
+pub mod trace;
 pub mod transport;
 
 // Re-export production handlers only - mock handlers moved to aura-testkit

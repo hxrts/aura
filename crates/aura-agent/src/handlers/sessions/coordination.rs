@@ -8,7 +8,7 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::transport::TransportEnvelope;
-use aura_core::effects::{RandomEffects, SessionType, StorageEffects, TransportEffects};
+use aura_core::effects::{RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects};
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use aura_macros::choreography;
 use aura_protocol::effects::{ChoreographicRole, EffectApiEffects};

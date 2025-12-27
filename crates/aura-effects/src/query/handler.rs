@@ -969,6 +969,14 @@ impl QueryEffects for QueryHandler {
 
         Ok((result, stats))
     }
+
+    async fn register_query_binding<Q: Query>(
+        &self,
+        signal: &Signal<Q::Result>,
+        query: Q,
+    ) -> Result<(), QueryError> {
+        QueryHandler::register_query_binding(self, signal, query).await
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

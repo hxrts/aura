@@ -19,9 +19,10 @@ use aura_core::effects::{
         AmpChannelEffects, AmpChannelError, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
         ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
     },
+    random::RandomCoreEffects,
     reactive::ReactiveEffects,
     time::PhysicalTimeEffects,
-    StorageEffects, ThresholdSigningEffects, TransportEffects,
+    StorageCoreEffects, ThresholdSigningEffects, TransportEffects,
 };
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};

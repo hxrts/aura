@@ -7,7 +7,7 @@ use super::rendezvous_bridge::execute_guard_outcome;
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::RandomEffects;
+use aura_core::effects::RandomExtendedEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
 use aura_protocol::effects::EffectApiEffects;

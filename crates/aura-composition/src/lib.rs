@@ -61,7 +61,7 @@ pub mod view_delta;
 // Re-export core types for convenience
 pub use registry::{
     EffectCapability, EffectRegistry, Handler, HandlerContext, HandlerError, RegistrableHandler,
-    RegistryCapabilities, RegistryError,
+    RegisterAllOptions, RegistryCapabilities, RegistryError,
 };
 
 pub use composite::{
@@ -70,7 +70,7 @@ pub use composite::{
 
 pub use adapters::{
     ConsoleHandlerAdapter, CryptoHandlerAdapter, LoggingSystemHandlerAdapter, RandomHandlerAdapter,
-    StorageHandlerAdapter, TimeHandlerAdapter, TransportHandlerAdapter,
+    StorageHandlerAdapter, TimeHandlerAdapter, TraceHandlerAdapter, TransportHandlerAdapter,
 };
 
 pub use view_delta::{

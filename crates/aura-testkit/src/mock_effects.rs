@@ -28,7 +28,7 @@ use aura_core::effects::{
     },
     BiscuitAuthorizationEffects, CryptoCoreEffects, CryptoEffects, CryptoExtendedEffects,
     FlowBudgetEffects, JournalEffects, NetworkCoreEffects, NetworkEffects, NetworkExtendedEffects,
-    RandomCoreEffects, RandomEffects, RandomExtendedEffects, StorageCoreEffects, StorageEffects,
+    RandomCoreEffects, RandomEffects, StorageCoreEffects, StorageEffects,
     StorageExtendedEffects,
 };
 use aura_core::epochs::Epoch;
@@ -229,22 +229,6 @@ impl RandomCoreEffects for MockEffects {
         use rand::Rng;
         let mut state = self.state.lock().unwrap();
         state.rng.gen()
-    }
-}
-
-#[async_trait]
-impl RandomExtendedEffects for MockEffects {
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        use rand::Rng;
-        let mut state = self.state.lock().unwrap();
-        state.rng.gen_range(min..=max)
-    }
-
-    async fn random_uuid(&self) -> Uuid {
-        use rand::Rng;
-        let mut state = self.state.lock().unwrap();
-        let bytes: [u8; 16] = state.rng.gen();
-        Uuid::from_bytes(bytes)
     }
 }
 

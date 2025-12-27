@@ -1,5 +1,5 @@
 use aura_protocol::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
-use aura_protocol::effects::semilattice::CvHandler;
+use aura_protocol::effects::crdt::CvHandler;
 use aura_protocol::CrdtCoordinator;
 use aura_core::{
     semilattice::{

@@ -246,3 +246,35 @@ impl<T: NetworkCoreEffects + ?Sized> NetworkCoreEffects for std::sync::Arc<T> {
         (**self).receive().await
     }
 }
+
+/// Blanket implementation for Arc<T> where T: NetworkExtendedEffects
+#[async_trait]
+impl<T: NetworkExtendedEffects + ?Sized> NetworkExtendedEffects for std::sync::Arc<T> {
+    async fn receive_from(&self, peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
+        (**self).receive_from(peer_id).await
+    }
+
+    async fn connected_peers(&self) -> Vec<Uuid> {
+        (**self).connected_peers().await
+    }
+
+    async fn is_peer_connected(&self, peer_id: Uuid) -> bool {
+        (**self).is_peer_connected(peer_id).await
+    }
+
+    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
+        (**self).subscribe_to_peer_events().await
+    }
+
+    async fn open(&self, address: &str) -> Result<String, NetworkError> {
+        (**self).open(address).await
+    }
+
+    async fn send(&self, connection_id: &str, data: Vec<u8>) -> Result<(), NetworkError> {
+        (**self).send(connection_id, data).await
+    }
+
+    async fn close(&self, connection_id: &str) -> Result<(), NetworkError> {
+        (**self).close(connection_id).await
+    }
+}

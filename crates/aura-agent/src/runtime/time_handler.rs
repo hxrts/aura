@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use tokio::sync::RwLock;
-use aura_core::effects::{PhysicalTimeEffects, RandomEffects, TimeoutHandle, WakeCondition};
+use aura_core::effects::{PhysicalTimeEffects, RandomExtendedEffects, TimeoutHandle, WakeCondition};
 use aura_core::{AuraError, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ pub struct EnhancedTimeHandler {
     /// Underlying time provider for deterministic/testing overrides
     provider: Arc<dyn PhysicalTimeEffects>,
     /// Random provider for generating unique IDs
-    random_provider: Arc<dyn RandomEffects>,
+    random_provider: Arc<dyn RandomExtendedEffects>,
     /// Whether the handler is using a simulated/virtual time source
     simulated: bool,
 }
@@ -216,7 +216,7 @@ impl EnhancedTimeHandler {
 
     pub fn with_providers(
         provider: Arc<dyn PhysicalTimeEffects>,
-        random_provider: Arc<dyn RandomEffects>,
+        random_provider: Arc<dyn RandomExtendedEffects>,
         simulated: bool,
     ) -> Self {
         Self {
