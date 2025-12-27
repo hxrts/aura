@@ -14,7 +14,7 @@ use aura_core::effects::crypto::{
     FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext, SigningKeyGenResult,
 };
 use aura_core::effects::{
-    CryptoCoreEffects, CryptoEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
+    CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
 };
 use std::sync::{Arc, Mutex};
 

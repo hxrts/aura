@@ -31,7 +31,7 @@
 
 use crate::{effects::RecoveryEffects, RecoveryError, RecoveryResult};
 use aura_core::{
-    effects::{JournalEffects, PhysicalTimeEffects, RandomEffects},
+    effects::{JournalEffects, PhysicalTimeEffects},
     hash,
     identifiers::AuthorityId,
     time::PhysicalTime,

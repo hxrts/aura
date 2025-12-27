@@ -7,7 +7,7 @@ use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::{
-    CryptoCoreEffects, CryptoEffects, CryptoExtendedEffects, RandomCoreEffects,
+    CryptoCoreEffects, CryptoExtendedEffects, RandomCoreEffects,
     RandomExtendedEffects,
 };
 use aura_core::identifiers::{AuthorityId, DeviceId};
@@ -545,7 +545,7 @@ mod tests {
 
     #[tokio::test]
     async fn threshold_signature_verification_works() {
-        use aura_core::effects::CryptoEffects;
+        
 
         let authority_id = AuthorityId::new_from_entropy([93u8; 32]);
         let mut authority_context = AuthorityContext::new(authority_id);

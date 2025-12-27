@@ -43,7 +43,6 @@ use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use aura_authorization::{BiscuitAuthorizationBridge, FlowBudgetHandler};
 use biscuit_auth::{Biscuit, KeyPair, PublicKey};
 use rand::rngs::StdRng;
-use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
 use std::collections::HashMap;

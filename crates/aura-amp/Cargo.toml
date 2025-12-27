@@ -41,6 +41,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-aura-testkit = { path = "../aura-testkit" }
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+aura-testkit = { path = "../aura-testkit" }

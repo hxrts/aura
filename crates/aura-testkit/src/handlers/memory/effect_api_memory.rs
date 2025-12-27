@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use aura_core::effects::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 use aura_core::effects::{PhysicalTimeEffects, RandomCoreEffects, RandomEffects};
 use futures::channel::mpsc;
-use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 use std::sync::Arc;
 
 type EventLog = Arc<Mutex<Vec<(u64, Vec<u8>)>>>;

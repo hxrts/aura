@@ -7,7 +7,7 @@ use async_channel::unbounded as async_unbounded;
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::{
-    NetworkCoreEffects, NetworkEffects, NetworkError, NetworkExtendedEffects, PeerEvent,
+    NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent,
     PeerEventStream,
 };
 use std::collections::HashMap;

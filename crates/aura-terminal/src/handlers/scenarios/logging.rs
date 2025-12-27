@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{TerminalError, TerminalResult};
-use aura_core::effects::{ConsoleEffects, StorageEffects};
+use aura_core::effects::{ConsoleEffects, StorageCoreEffects};
 
 use crate::handlers::HandlerContext;
 
@@ -38,12 +38,9 @@ pub async fn persist_log(
     let output_path = scenario_log_output_path(scenario_path);
     let storage_key = format!("scenario_log:{}", output_path.display());
 
-    StorageEffects::store(
-        ctx.effects(),
-        &storage_key,
-        log.lines.join("\n").into_bytes(),
-    )
-    .await
+    ctx.effects()
+        .store(&storage_key, log.lines.join("\n").into_bytes())
+        .await
     .map_err(|e| {
         TerminalError::Operation(format!(
             "Failed to persist scenario log via storage effects: {}",

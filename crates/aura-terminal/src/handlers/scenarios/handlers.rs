@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use crate::error::{TerminalError, TerminalResult};
-use aura_core::effects::StorageEffects;
+use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
 
 use super::execution::{collect_scenario_files, execute_scenarios};
 use super::types::{ScenarioInfo, ScenarioResult};

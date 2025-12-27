@@ -937,7 +937,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         device_ids: &[String],
     ) -> Result<String, IntentError> {
         use aura_core::effects::{
-            RandomEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+            SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
             ThresholdSigningEffects,
         };
         use aura_core::hash::hash;
@@ -1184,7 +1184,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         device_name: String,
     ) -> Result<aura_app::runtime_bridge::DeviceEnrollmentStart, IntentError> {
         use aura_core::effects::{
-            RandomEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+            SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
             ThresholdSigningEffects,
         };
         use aura_core::hash::hash;
@@ -1504,7 +1504,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         device_id: String,
     ) -> Result<String, IntentError> {
-        use aura_core::effects::{RandomEffects, ThresholdSigningEffects};
+        use aura_core::effects::ThresholdSigningEffects;
         use aura_core::hash::hash;
         use aura_core::threshold::ParticipantIdentity;
 

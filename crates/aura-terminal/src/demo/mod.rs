@@ -42,7 +42,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
-use aura_core::effects::{amp::AmpChannelEffects, StorageEffects};
+use aura_core::effects::{amp::AmpChannelEffects, StorageCoreEffects};
 use aura_core::hash::hash;
 use aura_core::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_simulator::{ComposedSimulationEnvironment, SimulationEffectComposer};

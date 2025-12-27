@@ -338,8 +338,8 @@ mod tests {
     use async_trait::async_trait;
     use aura_core::{
         effects::{
-            FlowBudgetEffects, JournalEffects, LeakageEffects, NetworkEffects, NetworkExtendedEffects,
-            RandomEffects, StorageEffects, StorageExtendedEffects,
+            FlowBudgetEffects, JournalEffects, LeakageEffects, NetworkCoreEffects,
+            NetworkExtendedEffects, StorageCoreEffects, StorageExtendedEffects,
         },
         time::PhysicalTime,
     };

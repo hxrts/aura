@@ -165,7 +165,7 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
         _session_id: &str,
         signature: &[u8],
     ) -> crate::RecoveryResult<bool> {
-        use aura_core::effects::CryptoEffects;
+        
 
         // Reconstruct the message that was signed
         let operation = SignableOperation::RecoveryApproval {

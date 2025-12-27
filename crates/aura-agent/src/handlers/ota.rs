@@ -6,7 +6,7 @@
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::{CryptoCoreEffects, CryptoEffects};
+use aura_core::effects::CryptoCoreEffects;
 use aura_core::hash::hash;
 use std::sync::Arc;
 use tokio::sync::RwLock;
