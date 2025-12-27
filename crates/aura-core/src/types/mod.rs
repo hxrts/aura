@@ -6,6 +6,7 @@
 //! **Layer 1**: Pure type definitions with no implementations or business logic.
 
 pub mod authority;
+pub mod facts;
 pub mod epochs;
 pub mod flow;
 pub mod identifiers;

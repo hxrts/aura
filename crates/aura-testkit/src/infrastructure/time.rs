@@ -141,7 +141,7 @@ pub mod assertions {
                 )));
             }
 
-            std::thread::yield_now();
+            futures::future::yield_now().await;
         }
     }
 

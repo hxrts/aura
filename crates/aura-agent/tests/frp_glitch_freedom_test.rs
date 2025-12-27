@@ -18,6 +18,7 @@
 use aura_agent::fact_registry::build_fact_registry;
 use aura_agent::reactive::{Dynamic, ReactiveScheduler, ReactiveView, SchedulerConfig};
 use aura_journal::fact::Fact;
+use futures::future::yield_now;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -341,7 +342,7 @@ async fn test_rapid_updates_consistency() {
         source.set(i).await;
         // Yield every 10 updates to allow the reactive task to process
         if i % 10 == 0 {
-            tokio::task::yield_now().await;
+            yield_now().await;
         }
     }
 

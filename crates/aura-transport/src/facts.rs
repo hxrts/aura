@@ -5,12 +5,15 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
+use aura_core::{decode_domain_fact, encode_domain_fact};
 use serde::{Deserialize, Serialize};
 
 use crate::context_transport::TransportProtocol;
 
 /// Unique type identifier for transport facts
 pub const TRANSPORT_FACT_TYPE_ID: &str = "transport/v1";
+/// Schema version for transport fact encoding
+pub const TRANSPORT_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Transport domain facts for state changes.
 ///
@@ -336,6 +339,16 @@ impl TransportFact {
             TransportFact::FlowBudgetCharged { .. } => "flow_budget_charged",
             TransportFact::HolePunchCompleted { .. } => "hole_punch_completed",
         }
+    }
+
+    /// Encode this fact with a canonical envelope.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        encode_domain_fact(TRANSPORT_FACT_TYPE_ID, TRANSPORT_FACT_SCHEMA_VERSION, self)
+    }
+
+    /// Decode a fact from a canonical envelope.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        decode_domain_fact(TRANSPORT_FACT_TYPE_ID, TRANSPORT_FACT_SCHEMA_VERSION, bytes)
     }
 }
 

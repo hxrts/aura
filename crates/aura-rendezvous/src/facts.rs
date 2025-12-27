@@ -22,13 +22,7 @@ fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
 
 /// Type identifier for rendezvous facts
 pub const RENDEZVOUS_FACT_TYPE_ID: &str = "rendezvous";
-pub const RENDEZVOUS_FACT_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct VersionedRendezvousFact {
-    schema_version: u32,
-    fact: RendezvousFact,
-}
+pub const RENDEZVOUS_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RendezvousFactKey {
@@ -167,28 +161,15 @@ impl DomainFact for RendezvousFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(&VersionedRendezvousFact {
-            schema_version: RENDEZVOUS_FACT_SCHEMA_VERSION,
-            fact: self.clone(),
-        })
-        .unwrap_or_else(|err| {
-            // Serialization should be infallible for well-formed facts; treat failures as unreachable bugs.
-            unreachable!("RendezvousFact serialization should not fail: {err}")
-        })
+        aura_journal::encode_domain_fact(self.type_id(), RENDEZVOUS_FACT_SCHEMA_VERSION, self)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if let Ok(versioned) = bincode::deserialize::<VersionedRendezvousFact>(bytes) {
-            if versioned.schema_version == RENDEZVOUS_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        if let Ok(versioned) = serde_json::from_slice::<VersionedRendezvousFact>(bytes) {
-            if versioned.schema_version == RENDEZVOUS_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        serde_json::from_slice(bytes).ok()
+        aura_journal::decode_domain_fact(
+            RENDEZVOUS_FACT_TYPE_ID,
+            RENDEZVOUS_FACT_SCHEMA_VERSION,
+            bytes,
+        )
     }
 }
 

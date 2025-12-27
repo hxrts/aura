@@ -39,13 +39,7 @@ use serde::{Deserialize, Serialize};
 /// Type identifier for social facts
 pub const SOCIAL_FACT_TYPE_ID: &str = "social";
 /// Schema version for social fact serialization
-pub const SOCIAL_FACT_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct VersionedSocialFact {
-    schema_version: u32,
-    fact: SocialFact,
-}
+pub const SOCIAL_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Key for indexing social facts in the journal
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -381,30 +375,15 @@ impl DomainFact for SocialFact {
         }
     }
 
-    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(&VersionedSocialFact {
-            schema_version: SOCIAL_FACT_SCHEMA_VERSION,
-            fact: self.clone(),
-        })
-        .expect("SocialFact must serialize")
+        aura_journal::encode_domain_fact(self.type_id(), SOCIAL_FACT_SCHEMA_VERSION, self)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
-        if let Ok(versioned) = bincode::deserialize::<VersionedSocialFact>(bytes) {
-            if versioned.schema_version == SOCIAL_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        if let Ok(versioned) = serde_json::from_slice::<VersionedSocialFact>(bytes) {
-            if versioned.schema_version == SOCIAL_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        serde_json::from_slice(bytes).ok()
+        aura_journal::decode_domain_fact(SOCIAL_FACT_TYPE_ID, SOCIAL_FACT_SCHEMA_VERSION, bytes)
     }
 }
 

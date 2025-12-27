@@ -134,6 +134,7 @@ pub use util::context::{
 // Authority abstraction (new architecture)
 #[doc = "unstable: Authority model is under active development - migration from AccountId ongoing"]
 pub use types::authority::{Authority, AuthorityRef, AuthorityState, TreeStateSummary};
+pub use types::facts::{decode_domain_fact, encode_domain_fact, FactEncoding, FactEnvelope};
 
 // Consensus types
 #[doc = "stable: Core consensus types with semver guarantees"]

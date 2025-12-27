@@ -14,7 +14,7 @@ use aura_core::effects::amp::{
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{OrderTime, TimeStamp};
-use aura_journal::extensibility::DomainFact;
+use aura_journal::{decode_domain_fact, encode_domain_fact, DomainFact};
 use aura_journal::fact::{
     ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, RelationalFact,
 };
@@ -274,17 +274,15 @@ impl DomainFact for ChannelMembershipFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        match serde_json::to_vec(self) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                tracing::error!("channel membership serialization failed: {err}");
-                Vec::new()
-            }
-        }
+        encode_domain_fact(self.type_id(), channel_membership_schema_version(), self)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_domain_fact(
+            "amp-channel-membership",
+            channel_membership_schema_version(),
+            bytes,
+        )
     }
 }
 

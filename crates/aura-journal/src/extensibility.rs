@@ -43,6 +43,8 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
+pub use aura_core::facts::{decode_domain_fact, encode_domain_fact, FactEncoding, FactEnvelope};
+
 /// Trait for domain-specific fact types
 ///
 /// Domain crates implement this trait for their fact enums to enable

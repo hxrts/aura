@@ -3,13 +3,15 @@
 use super::constants::*;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::PhysicalTime;
-use aura_journal::DomainFact;
-use serde::{Deserialize, Serialize};
+use aura_journal::{decode_domain_fact, encode_domain_fact, DomainFact};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-fn serialize_fact<T: Serialize>(value: &T, label: &'static str) -> Vec<u8> {
-    let bytes = serde_json::to_vec(value);
-    debug_assert!(bytes.is_ok(), "failed to serialize {label}");
-    bytes.unwrap_or_default()
+fn encode_moderation_fact<T: Serialize>(value: &T, type_id: &str) -> Vec<u8> {
+    encode_domain_fact(type_id, MODERATION_FACT_SCHEMA_VERSION, value)
+}
+
+fn decode_moderation_fact<T: DeserializeOwned>(type_id: &str, bytes: &[u8]) -> Option<T> {
+    decode_domain_fact(type_id, MODERATION_FACT_SCHEMA_VERSION, bytes)
 }
 
 /// Fact representing a block-wide mute or channel-specific mute.
@@ -80,11 +82,11 @@ impl DomainFact for BlockMuteFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serialize_fact(self, "block mute fact")
+        encode_moderation_fact(self, BLOCK_MUTE_FACT_TYPE_ID)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_moderation_fact(BLOCK_MUTE_FACT_TYPE_ID, bytes)
     }
 }
 
@@ -140,11 +142,11 @@ impl DomainFact for BlockUnmuteFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serialize_fact(self, "block unmute fact")
+        encode_moderation_fact(self, BLOCK_UNMUTE_FACT_TYPE_ID)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_moderation_fact(BLOCK_UNMUTE_FACT_TYPE_ID, bytes)
     }
 }
 
@@ -216,11 +218,11 @@ impl DomainFact for BlockBanFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serialize_fact(self, "block ban fact")
+        encode_moderation_fact(self, BLOCK_BAN_FACT_TYPE_ID)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_moderation_fact(BLOCK_BAN_FACT_TYPE_ID, bytes)
     }
 }
 
@@ -276,11 +278,11 @@ impl DomainFact for BlockUnbanFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serialize_fact(self, "block unban fact")
+        encode_moderation_fact(self, BLOCK_UNBAN_FACT_TYPE_ID)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_moderation_fact(BLOCK_UNBAN_FACT_TYPE_ID, bytes)
     }
 }
 
@@ -340,11 +342,11 @@ impl DomainFact for BlockKickFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serialize_fact(self, "block kick fact")
+        encode_moderation_fact(self, BLOCK_KICK_FACT_TYPE_ID)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_moderation_fact(BLOCK_KICK_FACT_TYPE_ID, bytes)
     }
 }
 
@@ -395,11 +397,11 @@ impl DomainFact for BlockPinFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serialize_fact(self, "block pin fact")
+        encode_moderation_fact(self, BLOCK_PIN_FACT_TYPE_ID)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_moderation_fact(BLOCK_PIN_FACT_TYPE_ID, bytes)
     }
 }
 
@@ -450,11 +452,11 @@ impl DomainFact for BlockUnpinFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serialize_fact(self, "block unpin fact")
+        encode_moderation_fact(self, BLOCK_UNPIN_FACT_TYPE_ID)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_moderation_fact(BLOCK_UNPIN_FACT_TYPE_ID, bytes)
     }
 }
 
@@ -506,11 +508,11 @@ impl DomainFact for BlockGrantStewardFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serialize_fact(self, "block grant steward fact")
+        encode_moderation_fact(self, BLOCK_GRANT_STEWARD_FACT_TYPE_ID)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_moderation_fact(BLOCK_GRANT_STEWARD_FACT_TYPE_ID, bytes)
     }
 }
 
@@ -562,10 +564,10 @@ impl DomainFact for BlockRevokeStewardFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serialize_fact(self, "block revoke steward fact")
+        encode_moderation_fact(self, BLOCK_REVOKE_STEWARD_FACT_TYPE_ID)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        decode_moderation_fact(BLOCK_REVOKE_STEWARD_FACT_TYPE_ID, bytes)
     }
 }

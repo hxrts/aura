@@ -59,13 +59,7 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for recovery facts
 pub const RECOVERY_FACT_TYPE_ID: &str = "recovery";
-pub const RECOVERY_FACT_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct VersionedRecoveryFact {
-    schema_version: u32,
-    fact: RecoveryFact,
-}
+pub const RECOVERY_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryFactKey {
@@ -782,28 +776,14 @@ impl DomainFact for RecoveryFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(&VersionedRecoveryFact {
-            schema_version: RECOVERY_FACT_SCHEMA_VERSION,
-            fact: self.clone(),
-        })
-        .unwrap_or_default()
+        aura_journal::encode_domain_fact(self.type_id(), RECOVERY_FACT_SCHEMA_VERSION, self)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
-        if let Ok(versioned) = bincode::deserialize::<VersionedRecoveryFact>(bytes) {
-            if versioned.schema_version == RECOVERY_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        if let Ok(versioned) = serde_json::from_slice::<VersionedRecoveryFact>(bytes) {
-            if versioned.schema_version == RECOVERY_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        serde_json::from_slice(bytes).ok()
+        aura_journal::decode_domain_fact(RECOVERY_FACT_TYPE_ID, RECOVERY_FACT_SCHEMA_VERSION, bytes)
     }
 }
 

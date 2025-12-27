@@ -1,5 +1,8 @@
 //! Moderation fact type ID constants
 
+/// Schema version for moderation fact payloads.
+pub const MODERATION_FACT_SCHEMA_VERSION: u16 = 1;
+
 /// Fact type ID for muting a user in a context or channel
 pub const BLOCK_MUTE_FACT_TYPE_ID: &str = "moderation:block-mute";
 /// Fact type ID for unmuting a previously muted user

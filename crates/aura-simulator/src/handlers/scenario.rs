@@ -9,29 +9,12 @@ use aura_core::effects::{TestingEffects, TestingError};
 use aura_core::frost::ThresholdSignature;
 use aura_core::{AuraError, AuthorityId};
 use aura_testkit::simulation::choreography::{test_threshold_group, ChoreographyTestHarness};
-use futures::pin_mut;
-use futures::task::noop_waker;
-use futures::Future;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
-use std::thread;
 use std::time::Duration;
 
 type SimTimestamp = u64;
-
-fn run_sync<F: Future>(fut: F) -> F::Output {
-    let waker = noop_waker();
-    let mut cx = Context::from_waker(&waker);
-    pin_mut!(fut);
-    loop {
-        match fut.as_mut().poll(&mut cx) {
-            Poll::Ready(val) => return val,
-            Poll::Pending => thread::yield_now(),
-        }
-    }
-}
 
 // Lightweight deterministic FROST-like types to avoid pulling the full aura-frost dependency in simulator-only code.
 #[derive(Debug, Clone)]
@@ -574,7 +557,7 @@ impl SimulationScenarioHandler {
     }
 
     /// Execute real choreography behaviors using testkit harnesses and protocol helpers.
-    pub fn run_choreography(
+    pub async fn run_choreography(
         &self,
         name: &str,
         participants: Vec<String>,
@@ -583,19 +566,19 @@ impl SimulationScenarioHandler {
         let normalized = name.to_lowercase();
         match normalized.as_str() {
             "frost_threshold_sign" | "threshold_sign" | "frost_sign" => {
-                self.execute_frost_threshold(&participants, &params)
+                self.execute_frost_threshold(&participants, &params).await
             }
             "frost_key_generation" | "frost_keygen" | "keygen" => {
-                self.execute_frost_keygen(&participants, &params)
+                self.execute_frost_keygen(&participants, &params).await
             }
             "frost_commitment" | "commitment" | "commit" => {
-                self.execute_frost_commitment_phase(&participants, &params)
+                self.execute_frost_commitment_phase(&participants, &params).await
             }
             "frost_signing" | "signing" | "sign_only" => {
-                self.execute_frost_signing_phase(&participants, &params)
+                self.execute_frost_signing_phase(&participants, &params).await
             }
             "commit_reveal" | "frost_commit_reveal" => {
-                self.execute_frost_commit_reveal(&participants, &params)
+                self.execute_frost_commit_reveal(&participants, &params).await
             }
             "coordinator_failure_recovery" | "frost_recovery" => {
                 self.execute_frost_recovery(&participants, &params)
@@ -605,8 +588,8 @@ impl SimulationScenarioHandler {
                 self.execute_context_agreement(&participants, &params)
             }
             "p2p_dkd" | "dkd_point_to_point" => self.execute_p2p_dkd(&participants, &params),
-            "distributed_keygen" | "dkg" => self.execute_dkg(&participants, &params),
-            "session_setup" | "session" => self.execute_session_setup(&participants),
+            "distributed_keygen" | "dkg" => self.execute_dkg(&participants, &params).await,
+            "session_setup" | "session" => self.execute_session_setup(&participants).await,
             "guardian_setup" | "guardian_request" => {
                 self.execute_guardian_setup(&participants, &params)
             }
@@ -760,19 +743,19 @@ impl SimulationScenarioHandler {
         Ok((harness, config, authorities))
     }
 
-    fn execute_frost_keygen(
+    async fn execute_frost_keygen(
         &self,
         participants: &[String],
         params: &HashMap<String, String>,
     ) -> Result<(), TestingError> {
         let (harness, config, authorities) = self.frost_setup(participants, params)?;
-        let result = run_sync(async {
+        let result = {
             let device_ctx = harness
                 .device_context(0)
                 .ok_or_else(|| AuraError::internal("missing device context"))?;
 
             FrostCrypto::generate_key_material(&authorities, &config, device_ctx).await
-        });
+        };
 
         match result {
             Ok(_material) => self.record_simple_event(

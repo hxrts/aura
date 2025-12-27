@@ -46,13 +46,7 @@ use serde::{Deserialize, Serialize};
 /// Type identifier for chat facts
 pub const CHAT_FACT_TYPE_ID: &str = "chat";
 /// Schema version for chat fact serialization
-pub const CHAT_FACT_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct VersionedChatFact {
-    schema_version: u32,
-    fact: ChatFact,
-}
+pub const CHAT_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Key for indexing chat facts in the journal
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -507,30 +501,15 @@ impl DomainFact for ChatFact {
         }
     }
 
-    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(&VersionedChatFact {
-            schema_version: CHAT_FACT_SCHEMA_VERSION,
-            fact: self.clone(),
-        })
-        .expect("ChatFact must serialize")
+        aura_journal::encode_domain_fact(self.type_id(), CHAT_FACT_SCHEMA_VERSION, self)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
-        if let Ok(versioned) = bincode::deserialize::<VersionedChatFact>(bytes) {
-            if versioned.schema_version == CHAT_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        if let Ok(versioned) = serde_json::from_slice::<VersionedChatFact>(bytes) {
-            if versioned.schema_version == CHAT_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        serde_json::from_slice(bytes).ok()
+        aura_journal::decode_domain_fact(CHAT_FACT_TYPE_ID, CHAT_FACT_SCHEMA_VERSION, bytes)
     }
 }
 

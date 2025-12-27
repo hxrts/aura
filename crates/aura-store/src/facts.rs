@@ -11,11 +11,13 @@
 
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
-use aura_core::{ChunkId, ContentId, ContextId};
+use aura_core::{decode_domain_fact, encode_domain_fact, ChunkId, ContentId, ContextId};
 use serde::{Deserialize, Serialize};
 
 /// Unique type ID for storage facts in the journal system
 pub const STORAGE_FACT_TYPE_ID: &str = "aura.store.v1";
+/// Schema version for storage fact encoding
+pub const STORAGE_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Storage domain facts for journal integration
 ///
@@ -173,6 +175,16 @@ impl StorageFact {
     /// Get the fact type ID for journal registration
     pub fn type_id() -> &'static str {
         STORAGE_FACT_TYPE_ID
+    }
+
+    /// Encode this fact with a canonical envelope.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        encode_domain_fact(STORAGE_FACT_TYPE_ID, STORAGE_FACT_SCHEMA_VERSION, self)
+    }
+
+    /// Decode a fact from a canonical envelope.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        decode_domain_fact(STORAGE_FACT_TYPE_ID, STORAGE_FACT_SCHEMA_VERSION, bytes)
     }
 }
 

@@ -10,6 +10,7 @@
 use async_trait::async_trait;
 use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
 use aura_core::time::PhysicalTime;
+use futures::future::yield_now;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -114,7 +115,7 @@ impl PhysicalTimeEffects for SimulationTimeHandler {
         }
 
         // Yield so callers that expect cooperative scheduling still progress.
-        tokio::task::yield_now().await;
+        yield_now().await;
         Ok(())
     }
 }

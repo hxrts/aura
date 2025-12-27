@@ -35,13 +35,7 @@ use crate::guards::RecoveryOperationType;
 
 /// Fact type identifier for authentication facts
 pub const AUTH_FACT_TYPE_ID: &str = "aura.authenticate.v1";
-pub const AUTH_FACT_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct VersionedAuthFact {
-    schema_version: u32,
-    fact: AuthFact,
-}
+pub const AUTH_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthFactKey {
@@ -421,30 +415,15 @@ impl DomainFact for AuthFact {
         self.context_id()
     }
 
-    #[allow(clippy::expect_used)]
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(&VersionedAuthFact {
-            schema_version: AUTH_FACT_SCHEMA_VERSION,
-            fact: self.clone(),
-        })
-        .expect("AuthFact must serialize")
+        aura_journal::encode_domain_fact(self.type_id(), AUTH_FACT_SCHEMA_VERSION, self)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
-        if let Ok(versioned) = bincode::deserialize::<VersionedAuthFact>(bytes) {
-            if versioned.schema_version == AUTH_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        if let Ok(versioned) = serde_json::from_slice::<VersionedAuthFact>(bytes) {
-            if versioned.schema_version == AUTH_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        serde_json::from_slice(bytes).ok()
+        aura_journal::decode_domain_fact(AUTH_FACT_TYPE_ID, AUTH_FACT_SCHEMA_VERSION, bytes)
     }
 }
 

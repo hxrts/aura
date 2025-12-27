@@ -9,11 +9,13 @@
 use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::epochs::Epoch;
-use aura_core::{AccountId, Cap};
+use aura_core::{decode_domain_fact, encode_domain_fact, AccountId, Cap};
 use serde::{Deserialize, Serialize};
 
 /// Unique type identifier for verification facts
 pub const VERIFY_FACT_TYPE_ID: &str = "verify/v1";
+/// Schema version for verification fact encoding
+pub const VERIFY_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Verification domain facts for identity state changes.
 ///
@@ -188,6 +190,16 @@ impl VerifyFact {
             VerifyFact::IdentityVerified { verified_at, .. } => verified_at.ts_ms,
             VerifyFact::ThresholdSignatureVerified { verified_at, .. } => verified_at.ts_ms,
         }
+    }
+
+    /// Encode this fact with a canonical envelope.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        encode_domain_fact(VERIFY_FACT_TYPE_ID, VERIFY_FACT_SCHEMA_VERSION, self)
+    }
+
+    /// Decode a fact from a canonical envelope.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        decode_domain_fact(VERIFY_FACT_TYPE_ID, VERIFY_FACT_SCHEMA_VERSION, bytes)
     }
 
     /// Create a DeviceRegistered fact with millisecond timestamp (backward compatibility)

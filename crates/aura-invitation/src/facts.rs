@@ -46,13 +46,7 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for invitation facts
 pub const INVITATION_FACT_TYPE_ID: &str = "invitation";
-pub const INVITATION_FACT_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct VersionedInvitationFact {
-    schema_version: u32,
-    fact: InvitationFact,
-}
+pub const INVITATION_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvitationFactKey {
@@ -346,30 +340,19 @@ impl DomainFact for InvitationFact {
             .unwrap_or_else(|| ContextId::new_from_entropy([0u8; 32]))
     }
 
-    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(&VersionedInvitationFact {
-            schema_version: INVITATION_FACT_SCHEMA_VERSION,
-            fact: self.clone(),
-        })
-        .expect("InvitationFact must serialize")
+        aura_journal::encode_domain_fact(self.type_id(), INVITATION_FACT_SCHEMA_VERSION, self)
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
-        if let Ok(versioned) = bincode::deserialize::<VersionedInvitationFact>(bytes) {
-            if versioned.schema_version == INVITATION_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        if let Ok(versioned) = serde_json::from_slice::<VersionedInvitationFact>(bytes) {
-            if versioned.schema_version == INVITATION_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        serde_json::from_slice(bytes).ok()
+        aura_journal::decode_domain_fact(
+            INVITATION_FACT_TYPE_ID,
+            INVITATION_FACT_SCHEMA_VERSION,
+            bytes,
+        )
     }
 }
 

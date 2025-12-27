@@ -112,7 +112,6 @@ pub mod handlers;
 pub mod messages;
 pub mod session; // Session orchestration types (SessionStatus, SessionOutcome)
 pub mod state;
-pub mod transport;
 pub mod types; // Protocol orchestration types
 pub mod prelude;
 

@@ -9,10 +9,13 @@
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::epochs::Epoch;
+use aura_core::{decode_domain_fact, encode_domain_fact};
 use serde::{Deserialize, Serialize};
 
 /// Unique type identifier for WoT facts
 pub const WOT_FACT_TYPE_ID: &str = "wot/v1";
+/// Schema version for WoT facts
+pub const WOT_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Web of Trust domain facts for authorization state changes.
 ///
@@ -177,6 +180,16 @@ impl WotFact {
             WotFact::TokenIssued { .. } => "token_issued",
             WotFact::TokenAttenuated { .. } => "token_attenuated",
         }
+    }
+
+    /// Encode this fact with a canonical envelope.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        encode_domain_fact(WOT_FACT_TYPE_ID, WOT_FACT_SCHEMA_VERSION, self)
+    }
+
+    /// Decode a fact from a canonical envelope.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        decode_domain_fact(WOT_FACT_TYPE_ID, WOT_FACT_SCHEMA_VERSION, bytes)
     }
 }
 

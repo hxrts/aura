@@ -14,13 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for guardian request facts.
 pub const GUARDIAN_REQUEST_FACT_TYPE_ID: &str = "guardian_request";
-pub const GUARDIAN_REQUEST_FACT_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct VersionedGuardianRequestFact {
-    schema_version: u32,
-    fact: GuardianRequestFact,
-}
+pub const GUARDIAN_REQUEST_FACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuardianRequestFactKey {
@@ -95,25 +89,23 @@ impl DomainFact for GuardianRequestFact {
         }
     }
 
-    #[allow(clippy::expect_used)] // DomainFact::to_bytes is infallible by trait signature.
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(&VersionedGuardianRequestFact {
-            schema_version: GUARDIAN_REQUEST_FACT_SCHEMA_VERSION,
-            fact: self.clone(),
-        })
-        .expect("GuardianRequestFact must serialize")
+        aura_journal::encode_domain_fact(
+            self.type_id(),
+            GUARDIAN_REQUEST_FACT_SCHEMA_VERSION,
+            self,
+        )
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self>
     where
         Self: Sized,
     {
-        if let Ok(versioned) = bincode::deserialize::<VersionedGuardianRequestFact>(bytes) {
-            if versioned.schema_version == GUARDIAN_REQUEST_FACT_SCHEMA_VERSION {
-                return Some(versioned.fact);
-            }
-        }
-        bincode::deserialize(bytes).ok()
+        aura_journal::decode_domain_fact(
+            GUARDIAN_REQUEST_FACT_TYPE_ID,
+            GUARDIAN_REQUEST_FACT_SCHEMA_VERSION,
+            bytes,
+        )
     }
 }
 
