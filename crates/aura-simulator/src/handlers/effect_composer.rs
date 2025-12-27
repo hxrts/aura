@@ -28,8 +28,9 @@ use aura_core::effects::{
 };
 use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
+use parking_lot::RwLock;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tracing::info;
 
 /// Effect-based simulation composer

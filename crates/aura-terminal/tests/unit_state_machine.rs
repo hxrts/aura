@@ -1052,10 +1052,11 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
         other => panic!("Expected ChatCreate modal, got {:?}", other),
     }
 
-    // Jump to review step and seed selected members to simulate wizard progression.
+    // Jump to threshold step and seed selected members to simulate wizard progression.
+    // Channel is now created directly from Threshold step (Review step removed).
     tui.state_mut().modal_queue.update_active(|modal| {
         if let QueuedModal::ChatCreate(ref mut s) = modal {
-            s.step = CreateChannelStep::Review;
+            s.step = CreateChannelStep::Threshold;
             s.contacts = vec![
                 ChatMemberCandidate {
                     id: "alice".to_string(),

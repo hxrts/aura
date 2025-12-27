@@ -92,6 +92,9 @@ bpaf = "0.9"
 tokio = { workspace = true }
 async-lock = "3"
 
+# Concurrency
+parking_lot = { workspace = true }
+
 # Other dependencies
 thiserror = { workspace = true }
 tracing = { workspace = true }

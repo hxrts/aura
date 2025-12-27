@@ -467,7 +467,8 @@ impl<T> SimulationEffects for T where
 use crate::effects::transport::TransportEnvelope;
 use crate::identifiers::AuthorityId;
 use crate::DeviceId;
-use std::sync::{Arc, RwLock};
+use parking_lot::RwLock;
+use std::sync::Arc;
 
 /// Configuration for creating a simulation environment
 ///

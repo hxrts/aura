@@ -39,6 +39,9 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 
+# Concurrency
+parking_lot = { workspace = true }
+
 # Randomness
 rand = { workspace = true }
 rand_chacha = { workspace = true }

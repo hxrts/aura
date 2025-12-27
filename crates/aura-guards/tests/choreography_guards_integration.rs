@@ -8,7 +8,8 @@ use aura_core::{
     effects::guard::{EffectCommand, EffectInterpreter, EffectResult},
     AuthorityId, ContextId, Result,
 };
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 /// Mock effect interpreter that records executed commands for verification
 #[derive(Debug, Clone)]
@@ -25,7 +26,7 @@ impl MockEffectInterpreter {
     }
 
     fn get_executed_commands(&self) -> Vec<EffectCommand> {
-        self.executed_commands.lock().unwrap().clone()
+        self.executed_commands.lock().clone()
     }
 }
 
@@ -34,7 +35,7 @@ impl MockEffectInterpreter {
 impl aura_core::effects::guard::EffectInterpreter for MockEffectInterpreter {
     async fn execute(&self, command: EffectCommand) -> Result<EffectResult> {
         // Record the command
-        self.executed_commands.lock().unwrap().push(command.clone());
+        self.executed_commands.lock().push(command.clone());
 
         // Return appropriate success result
         match command {

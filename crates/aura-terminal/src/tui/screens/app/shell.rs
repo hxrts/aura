@@ -541,11 +541,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             pending_epoch: _,
                             device_id: _,
                         } => {
-                            enqueue_toast!(
-                                format!("Device enrollment started for \"{}\"", device_name),
-                                crate::tui::state_machine::ToastLevel::Info
-                            );
-
                             tui.with_mut(|state| {
                                 state.settings.last_device_enrollment_code =
                                     enrollment_code.clone();
@@ -584,12 +579,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             let mut toast: Option<(String, crate::tui::state_machine::ToastLevel)> =
                                 None;
                             let mut dismiss_ceremony_started_toast = false;
+                            let mut handled_device_enrollment_modal = false;
 
                             tui.with_mut(|state| {
                                 let mut dismiss_modal = false;
 
                                 state.modal_queue.update_active(|modal| {
                                     if let crate::tui::state_machine::QueuedModal::SettingsDeviceEnrollment(ref mut s) = modal {
+                                        handled_device_enrollment_modal = true;
                                         if s.ceremony.ceremony_id.as_deref() == Some(ceremony_id.as_str()) {
                                             s.update_from_status(
                                                 accepted_count,
@@ -784,6 +781,29 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.toast_queue.dismiss();
                                 }
                             });
+
+                            if !handled_device_enrollment_modal
+                                && matches!(kind, aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment)
+                                && (is_complete || has_failed)
+                            {
+                                let app_core = app_core.raw().clone();
+                                tokio::spawn(async move {
+                                    let _ = refresh_settings_from_runtime(&app_core).await;
+                                });
+                                if is_complete {
+                                    toast = Some((
+                                        "Device enrollment complete".to_string(),
+                                        crate::tui::state_machine::ToastLevel::Success,
+                                    ));
+                                } else if has_failed {
+                                    toast = Some((
+                                        error_message
+                                            .clone()
+                                            .unwrap_or_else(|| "Device enrollment failed".to_string()),
+                                        crate::tui::state_machine::ToastLevel::Error,
+                                    ));
+                                }
+                            }
 
                             if let Some((msg, level)) = toast {
                                 enqueue_toast!(msg, level);

@@ -10,7 +10,10 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
-use aura_core::effects::{CryptoEffects, RandomEffects, StorageEffects};
+use aura_core::effects::{
+    CryptoCoreEffects, RandomCoreEffects, RandomEffects, RandomExtendedEffects,
+    StorageCoreEffects,
+};
 use aura_effects::{RealCryptoHandler, RealRandomHandler};
 use aura_testkit::stateful_effects::{
     crypto::MockCryptoHandler, random::MockRandomHandler, storage::MemoryStorageHandler,

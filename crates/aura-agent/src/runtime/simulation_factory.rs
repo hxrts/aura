@@ -28,7 +28,9 @@ use aura_core::hash::hash;
 #[cfg(feature = "simulation")]
 use aura_core::identifiers::AuthorityId;
 #[cfg(feature = "simulation")]
-use std::sync::{Arc, RwLock};
+use parking_lot::RwLock;
+#[cfg(feature = "simulation")]
+use std::sync::Arc;
 
 #[cfg(feature = "simulation")]
 use super::effects::AuraEffectSystem;

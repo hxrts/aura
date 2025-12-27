@@ -463,10 +463,11 @@ pub fn render_add_device_modal(settings: &SettingsViewProps) -> Option<AnyElemen
                     TextInputModal(
                         visible: true,
                         focused: true,
-                        title: "Add Device".to_string(),
+                        title: "Add Device — Step 1 of 3".to_string(),
                         value: settings.add_device_modal_name.clone(),
-                        placeholder: "Enter device name...".to_string(),
-                        hint: String::new(),
+                        placeholder: "e.g. Mobile, Laptop".to_string(),
+                        hint: "This is the device you're inviting (not the current device)."
+                            .to_string(),
                         error: String::new(),
                         submitting: false,
                     )

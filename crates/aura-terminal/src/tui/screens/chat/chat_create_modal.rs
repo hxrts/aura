@@ -71,7 +71,6 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
 
     let name = props.name.clone();
     let topic = props.topic.clone();
-    let members_count = props.members_count;
     let active_field = props.active_field;
     let error = props.error.clone();
     let creating = props.creating;
@@ -86,28 +85,14 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
         Theme::PRIMARY
     };
 
-    // Display text for Review step
-    let name_display = if name.is_empty() {
-        "Enter group name...".to_string()
-    } else {
-        name.clone()
-    };
-
-    let topic_display = if topic.is_empty() {
-        "Enter topic (optional)...".to_string()
-    } else {
-        topic.clone()
-    };
-
-    // Header props with step indicator
+    // Header props with step indicator (4 steps: Details, Members, Threshold, Waiting)
     let step_num = match step {
         CreateChannelStep::Details => 1,
         CreateChannelStep::Members => 2,
         CreateChannelStep::Threshold => 3,
-        CreateChannelStep::Review => 4,
-        CreateChannelStep::Waiting => 5,
+        CreateChannelStep::Waiting => 4,
     };
-    let header_props = ModalHeaderProps::new("New Chat Group").with_step(step_num, 5);
+    let header_props = ModalHeaderProps::new("New Chat Group").with_step(step_num, 4);
 
     // Footer hints vary by step
     let footer_hints = match step {
@@ -124,10 +109,6 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
         CreateChannelStep::Threshold => vec![
             KeyHint::new("Esc", "Back"),
             KeyHint::new("↑↓", "Adjust"),
-            KeyHint::new("Enter", "Continue"),
-        ],
-        CreateChannelStep::Review => vec![
-            KeyHint::new("Esc", "Back"),
             KeyHint::new("Enter", "Create"),
         ],
         CreateChannelStep::Waiting => vec![KeyHint::new("Esc", "Close")],
@@ -218,17 +199,6 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                         };
                         vec![threshold_selector(&selector).into()]
                     },
-                    CreateChannelStep::Review => vec![element! {
-                        View {
-                            Text(content: "Review", color: Theme::TEXT)
-                            View(margin_top: Spacing::XS) {
-                                Text(content: format!("Name: {}", name_display), color: Theme::TEXT_MUTED)
-                                Text(content: format!("Topic: {}", topic_display), color: Theme::TEXT_MUTED)
-                                Text(content: format!("Invites: {}", members_count), color: Theme::TEXT_MUTED)
-                                Text(content: format!("Threshold: {}-of-{}", props.threshold_k, props.threshold_n), color: Theme::TEXT_MUTED)
-                            }
-                        }
-                    }.into_any()],
                     CreateChannelStep::Waiting => vec![element! {
                         View {
                             Text(content: "Invites Sent", color: Theme::TEXT)

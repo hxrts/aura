@@ -46,7 +46,8 @@ use rand::rngs::StdRng;
 use rand::RngCore;
 use rand::SeedableRng;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use parking_lot::RwLock;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::shared_transport::SharedTransport;
@@ -282,10 +283,7 @@ impl AuraEffectSystem {
     }
 
     pub(crate) fn requeue_envelope(&self, envelope: TransportEnvelope) {
-        let mut inbox = self
-            .transport_inbox
-            .write()
-            .expect("transport inbox poisoned");
+        let mut inbox = self.transport_inbox.write();
         inbox.push(envelope);
     }
 
@@ -882,18 +880,12 @@ impl SyncEffects for AuraEffectSystem {
 impl TransportEffects for AuraEffectSystem {
     async fn send_envelope(&self, envelope: TransportEnvelope) -> Result<(), TransportError> {
         {
-            let mut inbox = self
-                .transport_inbox
-                .write()
-                .expect("transport inbox poisoned");
+            let mut inbox = self.transport_inbox.write();
             inbox.push(envelope.clone());
         }
 
         {
-            let mut stats = self
-                .transport_stats
-                .write()
-                .expect("transport stats poisoned");
+            let mut stats = self.transport_stats.write();
             stats.envelopes_sent = stats.envelopes_sent.saturating_add(1);
             let running_total = (stats.avg_envelope_size as u64)
                 .saturating_mul(stats.envelopes_sent.saturating_sub(1))
@@ -907,10 +899,7 @@ impl TransportEffects for AuraEffectSystem {
     async fn receive_envelope(&self) -> Result<TransportEnvelope, TransportError> {
         let self_device_id = self.config.device_id.to_string();
         let maybe = {
-            let mut inbox = self
-                .transport_inbox
-                .write()
-                .expect("transport inbox poisoned");
+            let mut inbox = self.transport_inbox.write();
             // In shared transport mode, filter by destination (this agent's authority ID)
             inbox
                 .iter()
@@ -935,10 +924,7 @@ impl TransportEffects for AuraEffectSystem {
 
         match maybe {
             Some(env) => {
-                let mut stats = self
-                    .transport_stats
-                    .write()
-                    .expect("transport stats poisoned");
+                let mut stats = self.transport_stats.write();
                 stats.envelopes_received = stats.envelopes_received.saturating_add(1);
                 Ok(env)
             }
@@ -953,10 +939,7 @@ impl TransportEffects for AuraEffectSystem {
     ) -> Result<TransportEnvelope, TransportError> {
         let self_device_id = self.config.device_id.to_string();
         let maybe = {
-            let mut inbox = self
-                .transport_inbox
-                .write()
-                .expect("transport inbox poisoned");
+            let mut inbox = self.transport_inbox.write();
             // In shared transport mode, filter by destination AND source/context
             inbox
                 .iter()
@@ -982,10 +965,7 @@ impl TransportEffects for AuraEffectSystem {
 
         match maybe {
             Some(env) => {
-                let mut stats = self
-                    .transport_stats
-                    .write()
-                    .expect("transport stats poisoned");
+                let mut stats = self.transport_stats.write();
                 stats.envelopes_received = stats.envelopes_received.saturating_add(1);
                 Ok(env)
             }
@@ -1004,11 +984,7 @@ impl TransportEffects for AuraEffectSystem {
     }
 
     async fn get_transport_stats(&self) -> TransportStats {
-        let mut stats = self
-            .transport_stats
-            .read()
-            .expect("transport stats poisoned")
-            .clone();
+        let mut stats = self.transport_stats.read().clone();
 
         if let Some(shared) = &self.shared_transport {
             stats.active_channels = shared.connected_peer_count(self.authority_id) as u32;

@@ -10,8 +10,8 @@
 use iocraft::prelude::*;
 
 use crate::tui::components::{
-    contact_multi_select, modal_footer, threshold_selector, ContactMultiSelectItem,
-    ContactMultiSelectProps, ModalFooterProps, ThresholdSelectorProps,
+    contact_multi_select, modal_footer, modal_header, threshold_selector, ContactMultiSelectItem,
+    ContactMultiSelectProps, ModalFooterProps, ModalHeaderProps, ThresholdSelectorProps,
 };
 use crate::tui::layout::dim;
 use crate::tui::state_machine::{GuardianCeremonyResponse, GuardianSetupStep};
@@ -37,9 +37,6 @@ struct GuardianSetupCopy {
     empty_subtitle: &'static str,
     threshold_prompt: &'static str,
     decline_message: &'static str,
-    step1: &'static str,
-    step2: &'static str,
-    step3: &'static str,
     low_hint: &'static str,
 }
 
@@ -53,9 +50,6 @@ impl GuardianSetupKind {
                 empty_subtitle: "Add contacts first to set up guardians.",
                 threshold_prompt: "How many guardians must approve recovery?",
                 decline_message: "Failed: guardian declined",
-                step1: "1.Select",
-                step2: "2.Threshold",
-                step3: "3.Ceremony",
                 low_hint: "Low: any 1 can recover",
             },
             GuardianSetupKind::Mfa => GuardianSetupCopy {
@@ -65,9 +59,6 @@ impl GuardianSetupKind {
                 empty_subtitle: "Add devices first to enable multifactor.",
                 threshold_prompt: "How many devices must sign?",
                 decline_message: "Failed: signer declined",
-                step1: "1.Devices",
-                step2: "2.Threshold",
-                step3: "3.Ceremony",
                 low_hint: "Low: any 1 can sign",
             },
         }
@@ -118,6 +109,14 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
     let copy = props.kind.copy();
     let error = props.error.clone();
 
+    // Step indicator: 1-indexed step number, 3 total steps
+    let step_num = match step {
+        GuardianSetupStep::SelectContacts => 1,
+        GuardianSetupStep::ChooseThreshold => 2,
+        GuardianSetupStep::CeremonyInProgress => 3,
+    };
+    let header_props = ModalHeaderProps::new(copy.title).with_step(step_num, 3);
+
     element! {
         View(
             width: dim::TOTAL_WIDTH,
@@ -128,24 +127,8 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
             border_color: Theme::BORDER_FOCUS,
             overflow: Overflow::Hidden,
         ) {
-            // Title bar
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-            ) {
-                Text(
-                    content: copy.title,
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-                // Step indicator
-                #(render_step_indicator(&step, props.kind))
-            }
+            // Header with step indicator
+            #(Some(modal_header(&header_props).into()))
 
             // Error message if any
             #(if !error.is_empty() {
@@ -176,26 +159,6 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
             #(Some(modal_footer(&get_footer_hints(&step)).into()))
         }
     }
-}
-
-fn render_step_indicator(step: &GuardianSetupStep, kind: GuardianSetupKind) -> AnyElement<'static> {
-    let copy = kind.copy();
-    let (step1, step2, step3) = match step {
-        GuardianSetupStep::SelectContacts => (Theme::PRIMARY, Theme::TEXT_MUTED, Theme::TEXT_MUTED),
-        GuardianSetupStep::ChooseThreshold => (Theme::SUCCESS, Theme::PRIMARY, Theme::TEXT_MUTED),
-        GuardianSetupStep::CeremonyInProgress => (Theme::SUCCESS, Theme::SUCCESS, Theme::PRIMARY),
-    };
-
-    element! {
-        View(flex_direction: FlexDirection::Row, gap: 1) {
-            Text(content: copy.step1, color: step1)
-            Text(content: Icons::ARROW_RIGHT, color: Theme::TEXT_MUTED)
-            Text(content: copy.step2, color: step2)
-            Text(content: Icons::ARROW_RIGHT, color: Theme::TEXT_MUTED)
-            Text(content: copy.step3, color: step3)
-        }
-    }
-    .into_any()
 }
 
 fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static> {

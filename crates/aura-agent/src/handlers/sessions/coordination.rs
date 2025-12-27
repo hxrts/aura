@@ -763,7 +763,7 @@ mod tests {
 
     #[tokio::test]
     async fn invitations_use_transport_envelopes() {
-        use std::sync::RwLock as StdRwLock;
+        use parking_lot::RwLock;
 
         let mut authority_context =
             AuthorityContext::new(AuthorityId::new_from_entropy([70u8; 32]));
@@ -776,7 +776,7 @@ mod tests {
         let config = AgentConfig::default();
 
         // Use shared transport inbox to verify messages are sent
-        let shared_inbox = Arc::new(StdRwLock::new(Vec::new()));
+        let shared_inbox = Arc::new(RwLock::new(Vec::new()));
         let effects = Arc::new(
             AuraEffectSystem::testing_with_shared_transport(
                 &config,
@@ -796,7 +796,7 @@ mod tests {
             .unwrap();
 
         // Verify that an invitation was sent to the transport layer
-        let inbox = shared_inbox.read().unwrap();
+        let inbox = shared_inbox.read();
         assert_eq!(inbox.len(), 1, "Expected exactly one transport envelope");
         let envelope = &inbox[0];
         assert_eq!(envelope.destination, AuthorityId::from_uuid(other_device.0));

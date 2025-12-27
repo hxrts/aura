@@ -7,10 +7,11 @@
 //! shared state used by the runtime's `TransportEffects` implementation.
 
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::AuthorityId;
+use parking_lot::RwLock;
 
 /// Shared transport state for multi-agent simulations.
 ///
@@ -49,25 +50,19 @@ impl SharedTransport {
 
     /// Register an authority as "online" in this shared network.
     pub fn register(&self, authority_id: AuthorityId) {
-        if let Ok(mut online) = self.online.write() {
-            online.insert(authority_id);
-        }
+        self.online.write().insert(authority_id);
     }
 
     /// Count other authorities currently registered as online.
     pub fn connected_peer_count(&self, self_authority: AuthorityId) -> usize {
-        self.online
-            .read()
-            .map(|online| online.iter().filter(|id| **id != self_authority).count())
-            .unwrap_or(0)
+        let online = self.online.read();
+        online.iter().filter(|id| **id != self_authority).count()
     }
 
     /// Check whether a peer authority is online in this shared network.
     pub fn is_peer_online(&self, peer: AuthorityId) -> bool {
-        self.online
-            .read()
-            .map(|online| online.contains(&peer))
-            .unwrap_or(false)
+        let online = self.online.read();
+        online.contains(&peer)
     }
 }
 

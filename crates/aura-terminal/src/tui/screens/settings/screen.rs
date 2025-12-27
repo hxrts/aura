@@ -334,7 +334,7 @@ pub fn SettingsScreen(
                     }
 
                     lines.push((String::new(), Theme::TEXT));
-                    lines.push(("[j/k] Navigate sections".into(), Theme::TEXT_MUTED));
+                    lines.push(("[←/h] [→/l] Navigate sections".into(), Theme::TEXT_MUTED));
 
                     lines
                 }
@@ -355,7 +355,7 @@ pub fn SettingsScreen(
                         (current_mfa.description().into(), Theme::TEXT_MUTED),
                         (String::new(), Theme::TEXT),
                         ("[Enter] Configure multifactor".into(), Theme::SECONDARY),
-                        ("[j/k] Navigate sections".into(), Theme::TEXT_MUTED),
+                        ("[←/h] [→/l] Navigate sections".into(), Theme::TEXT_MUTED),
                     ]
                 }
             }

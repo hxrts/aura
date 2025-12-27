@@ -40,6 +40,12 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
         "Waiting for acceptance…".to_string()
     };
 
+    let step_title = if props.is_complete {
+        "Add Device — Step 3 of 3"
+    } else {
+        "Add Device — Step 2 of 3"
+    };
+
     let progress_text = format!(
         "{}/{} accepted (need {})",
         props.accepted_count, props.total_count, props.threshold
@@ -48,7 +54,7 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
     element! {
         CodeDisplayModal(
             visible: props.visible,
-            title: format!("Enroll device: {}", props.device_name),
+            title: format!("{step_title}: {}", props.device_name),
             status: status,
             status_text: status_text,
             progress_text: progress_text,

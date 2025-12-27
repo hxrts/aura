@@ -520,23 +520,7 @@ fn handle_chat_create_key_queue(
                 });
             }
             Enter => {
-                state.modal_queue.update_active(|modal| {
-                    if let QueuedModal::ChatCreate(ref mut s) = modal {
-                        s.step = CreateChannelStep::Review;
-                    }
-                });
-            }
-            _ => {}
-        },
-        CreateChannelStep::Review => match key.code {
-            Esc => {
-                state.modal_queue.update_active(|modal| {
-                    if let QueuedModal::ChatCreate(ref mut s) = modal {
-                        s.step = CreateChannelStep::Threshold;
-                    }
-                });
-            }
-            Enter => {
+                // Create channel directly from Threshold step (Review step removed)
                 if modal_state.can_submit() {
                     let topic = if modal_state.topic.trim().is_empty() {
                         None

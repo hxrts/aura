@@ -369,12 +369,12 @@ mod chat_screen {
         tui.type_text("general");
         assert_eq!(tui.state.chat_create_modal_state().unwrap().name, "general");
 
-        // Advance to review step so Enter submits.
+        // Advance to threshold step so Enter submits (creates channel directly).
         tui.state
             .modal_queue
             .update_active(|modal| {
                 if let QueuedModal::ChatCreate(ref mut s) = modal {
-                    s.step = CreateChannelStep::Review;
+                    s.step = CreateChannelStep::Threshold;
                 }
             });
 

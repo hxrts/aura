@@ -307,27 +307,31 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
 
     match key.code {
         KeyCode::Left | KeyCode::Char('h') => {
-            state.settings.focus = state.settings.focus.toggle();
+            if in_authority_detail {
+                // Navigate between sub-sections within Authority panel
+                state.settings.authority_sub_section =
+                    state.settings.authority_sub_section.prev();
+            } else {
+                state.settings.focus = state.settings.focus.toggle();
+            }
         }
         KeyCode::Right | KeyCode::Char('l') => {
-            state.settings.focus = state.settings.focus.toggle();
+            if in_authority_detail {
+                // Navigate between sub-sections within Authority panel
+                state.settings.authority_sub_section =
+                    state.settings.authority_sub_section.next();
+            } else {
+                state.settings.focus = state.settings.focus.toggle();
+            }
         }
         KeyCode::Up | KeyCode::Char('k') => {
             if state.settings.focus.is_list() {
                 state.settings.section = state.settings.section.prev();
-            } else if in_authority_detail {
-                // Navigate between sub-sections within Authority panel
-                state.settings.authority_sub_section =
-                    state.settings.authority_sub_section.prev();
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
             if state.settings.focus.is_list() {
                 state.settings.section = state.settings.section.next();
-            } else if in_authority_detail {
-                // Navigate between sub-sections within Authority panel
-                state.settings.authority_sub_section =
-                    state.settings.authority_sub_section.next();
             }
         }
         KeyCode::Char(' ') => {
