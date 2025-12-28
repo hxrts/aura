@@ -10,6 +10,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 
 use aura_core::domain::journal::FactValue;
+use aura_core::effects::reactive::SignalId;
 use aura_core::effects::{
     indexed::IndexedJournalEffects,
     query::{QueryEffects, QueryError, QuerySubscription},
@@ -20,7 +21,6 @@ use aura_core::query::{
     QueryIsolation, QueryStats,
 };
 use aura_core::{Hash32, ResourceScope};
-use aura_core::effects::reactive::SignalId;
 
 use crate::database::query::AuraQuery;
 use crate::reactive::ReactiveHandler;

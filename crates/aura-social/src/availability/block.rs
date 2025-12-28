@@ -157,7 +157,10 @@ where
                     // Wait for response (simplified - real impl would use request/response)
                     match self.network.receive_from(peer.uuid()).await {
                         Ok(response) => {
-                            if let Ok(data) = aura_core::util::serialization::from_slice::<RetrieveResponse>(&response) {
+                            if let Ok(data) = aura_core::util::serialization::from_slice::<
+                                RetrieveResponse,
+                            >(&response)
+                            {
                                 if let Some(content) = data.content {
                                     // Verify hash
                                     let computed = Hash32::from_bytes(&content);

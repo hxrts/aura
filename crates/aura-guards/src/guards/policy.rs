@@ -38,8 +38,8 @@
 //! }
 //! ```
 
-use aura_core::{AuraError, AuraResult, ContextId};
 use aura_authorization::{EffectDecision, EffectPolicy, EffectPolicyRegistry, OperationType};
+use aura_core::{AuraError, AuraResult, ContextId};
 
 /// Guard that evaluates effect policies and determines execution timing
 #[derive(Debug, Clone)]
@@ -310,7 +310,10 @@ mod tests {
 
         assert_eq!(result.operation, OperationType::DeleteChannel);
         assert!(result.is_deferred());
-        assert_eq!(result.policy.security_level, aura_authorization::SecurityLevel::High);
+        assert_eq!(
+            result.policy.security_level,
+            aura_authorization::SecurityLevel::High
+        );
     }
 
     #[test]
@@ -335,6 +338,9 @@ mod tests {
 
         let policy = guard.get_policy(&OperationType::TransferChannelOwnership, None);
         assert_eq!(policy.operation, OperationType::TransferChannelOwnership);
-        assert_eq!(policy.security_level, aura_authorization::SecurityLevel::High);
+        assert_eq!(
+            policy.security_level,
+            aura_authorization::SecurityLevel::High
+        );
     }
 }

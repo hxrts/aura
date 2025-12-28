@@ -7,7 +7,6 @@
 //! Use aura-agent::AgentRuntime for new code.
 
 use aura_core::{identifiers::DeviceId, ContextId};
-use aura_mpst::{AuraEndpoint, AuraHandler};
 use rumpsteak_aura_choreography::extensions::ExtensionRegistry;
 
 #[test]
@@ -20,44 +19,9 @@ fn test_extension_registry_operations() {
 }
 
 #[test]
-fn test_aura_handler_creation() {
-    use aura_effects::time::PhysicalTimeHandler;
-    use std::sync::Arc;
-
-    let device_id = DeviceId::new();
-    let time = Arc::new(PhysicalTimeHandler::new());
-
-    // Test creating handlers for different execution modes
-    let _testing_handler = AuraHandler::for_testing(device_id, time.clone());
-    assert!(_testing_handler.is_ok());
-
-    let _production_handler = AuraHandler::for_production(device_id, time.clone());
-    assert!(_production_handler.is_ok());
-
-    let _simulation_handler = AuraHandler::for_simulation(device_id, time);
-    assert!(_simulation_handler.is_ok());
-}
-
-#[test]
-fn test_aura_endpoint_creation() {
-    let device_id = DeviceId::new();
-    let context_id = ContextId::new_from_entropy([0u8; 32]);
-
-    let mut endpoint = AuraEndpoint::new(device_id, context_id);
-    assert_eq!(endpoint.device_id, device_id);
-    assert_eq!(endpoint.context_id, context_id);
-
-    // Test connection management
-    let peer_id = DeviceId::new();
-    endpoint.add_connection(peer_id, aura_mpst::ConnectionState::Active);
-    assert!(endpoint.is_connected_to(peer_id));
-
-    // Test metadata
-    endpoint.add_metadata("test_key".to_string(), "test_value".to_string());
-    assert_eq!(
-        endpoint.metadata.get("test_key"),
-        Some(&"test_value".to_string())
-    );
+fn test_core_types_available() {
+    let _device_id = DeviceId::new();
+    let _context_id = ContextId::new_from_entropy([0u8; 32]);
 }
 
 #[test]

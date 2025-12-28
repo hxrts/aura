@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use aura_anti_entropy::{PersistentSyncHandler, SyncEffects};
 use aura_testkit::MemoryStorageHandler;
 use std::sync::Arc;

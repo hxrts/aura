@@ -217,19 +217,21 @@ impl OperationalHandler {
         &self,
         result: Option<OpResult>,
     ) -> Option<Result<OpResponse, String>> {
-        result.map(|r| match r {
-            Ok(response) => Ok(response),
-            Err(e) => {
+        match result {
+            Some(Ok(response)) => Some(Ok(response)),
+            Some(Err(e)) => {
                 let terr: TerminalError = e.into();
                 self.emit_error(terr.clone()).await;
-                Err(terr.to_string())
+                Some(Err(terr.to_string()))
             }
-        })
+            None => None,
+        }
     }
 }
 
 /// Helper to create OperationalHandler (for cloning)
 impl OperationalHandler {
+    #[allow(dead_code)]
     fn clone(&self) -> Self {
         Self {
             app_core: self.app_core.clone(),

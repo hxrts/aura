@@ -83,11 +83,7 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
     let guardian_badge = if c.is_guardian { " [guardian]" } else { "" }.to_string();
 
     // Selection indicator: triangle when selected, space otherwise
-    let indicator = if props.is_selected {
-        "➤"
-    } else {
-        " "
-    };
+    let indicator = if props.is_selected { "➤" } else { " " };
     let indicator_color = if props.is_selected {
         Theme::PRIMARY
     } else {
@@ -281,29 +277,25 @@ pub fn ContactsScreen(
         let mut lan_peers_state = lan_peers_state.clone();
         let app_core = app_ctx.app_core.clone();
         async move {
-            subscribe_signal_with_retry(
-                app_core,
-                &*DISCOVERED_PEERS_SIGNAL,
-                move |peers_state| {
-                    let discovered_peers: Vec<DiscoveredPeerInfo> = peers_state
-                        .peers
-                        .iter()
-                        .map(|p| {
-                            DiscoveredPeerInfo::new(&p.authority_id, &p.address)
-                                .with_method(&p.method)
-                                .with_status(if p.invited {
-                                    crate::tui::components::PeerInvitationStatus::Pending
-                                } else {
-                                    crate::tui::components::PeerInvitationStatus::None
-                                })
-                        })
-                        .collect();
+            subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
+                let discovered_peers: Vec<DiscoveredPeerInfo> = peers_state
+                    .peers
+                    .iter()
+                    .map(|p| {
+                        DiscoveredPeerInfo::new(&p.authority_id, &p.address)
+                            .with_method(&p.method)
+                            .with_status(if p.invited {
+                                crate::tui::components::PeerInvitationStatus::Pending
+                            } else {
+                                crate::tui::components::PeerInvitationStatus::None
+                            })
+                    })
+                    .collect();
 
-                    let mut state = DiscoveredPeersState::new();
-                    state.set_peers(discovered_peers);
-                    lan_peers_state.set(state);
-                },
-            )
+                let mut state = DiscoveredPeersState::new();
+                state.set_peers(discovered_peers);
+                lan_peers_state.set(state);
+            })
             .await;
         }
     });

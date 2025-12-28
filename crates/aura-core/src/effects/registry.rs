@@ -7,12 +7,7 @@ use super::EffectType;
 /// This is used by registry/adapters for capability discovery and validation.
 pub fn operations_for(effect_type: EffectType) -> &'static [&'static str] {
     match effect_type {
-        EffectType::Console => &[
-            "log_info",
-            "log_warn",
-            "log_error",
-            "log_debug",
-        ],
+        EffectType::Console => &["log_info", "log_warn", "log_error", "log_debug"],
         EffectType::Random => &[
             "random_bytes",
             "random_bytes_32",

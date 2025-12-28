@@ -321,19 +321,21 @@ where
                     let mut ops_with_ctx = Vec::new();
                     for crdt_op in operations {
                         let op: Op =
-                            aura_core::util::serialization::from_slice(&crdt_op.operation_data).map_err(|e| {
-                                CrdtCoordinatorError::Deserialization(format!(
-                                    "Failed to deserialize operation: {}",
-                                    e
-                                ))
-                            })?;
-                        let ctx: CausalContext = aura_core::util::serialization::from_slice(&crdt_op.causal_context)
-                            .map_err(|e| {
-                                CrdtCoordinatorError::Deserialization(format!(
-                                    "Failed to deserialize causal context: {}",
-                                    e
-                                ))
-                            })?;
+                            aura_core::util::serialization::from_slice(&crdt_op.operation_data)
+                                .map_err(|e| {
+                                    CrdtCoordinatorError::Deserialization(format!(
+                                        "Failed to deserialize operation: {}",
+                                        e
+                                    ))
+                                })?;
+                        let ctx: CausalContext =
+                            aura_core::util::serialization::from_slice(&crdt_op.causal_context)
+                                .map_err(|e| {
+                                    CrdtCoordinatorError::Deserialization(format!(
+                                        "Failed to deserialize causal context: {}",
+                                        e
+                                    ))
+                                })?;
                         ops_with_ctx.push(OpWithCtx::new(op, ctx));
                     }
 
@@ -352,13 +354,15 @@ where
                     // Deserialize all deltas first to avoid borrowing conflicts
                     let mut deltas = Vec::new();
                     for delta_bytes in delta_bytes_vec {
-                        let delta: DeltaS::Delta =
-                            aura_core::util::serialization::from_slice(&delta_bytes).map_err(|e| {
-                                CrdtCoordinatorError::Deserialization(format!(
-                                    "Failed to deserialize delta: {}",
-                                    e
-                                ))
-                            })?;
+                        let delta: DeltaS::Delta = aura_core::util::serialization::from_slice(
+                            &delta_bytes,
+                        )
+                        .map_err(|e| {
+                            CrdtCoordinatorError::Deserialization(format!(
+                                "Failed to deserialize delta: {}",
+                                e
+                            ))
+                        })?;
                         deltas.push(delta);
                     }
 

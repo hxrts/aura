@@ -1,21 +1,22 @@
+#![allow(missing_docs)]
+use async_trait::async_trait;
+use aura_core::effects::authorization::AuthorizationError;
 use aura_core::effects::guard::{EffectCommand, EffectInterpreter, EffectResult};
+use aura_core::effects::leakage::{LeakageBudget, LeakageEvent, ObserverClass};
+use aura_core::effects::storage::{StorageError, StorageStats};
+use aura_core::effects::time::TimeError;
 use aura_core::effects::{
     AuthorizationEffects, FlowBudgetEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects,
     RandomCoreEffects, StorageCoreEffects, StorageExtendedEffects,
 };
 use aura_core::time::PhysicalTime;
+use aura_core::types::epochs::Epoch;
+use aura_core::types::flow::Receipt;
 use aura_core::{AuraError, AuraResult, Cap, FlowBudget, Journal};
 use aura_core::{AuthorityId, ContextId};
-use aura_core::types::flow::Receipt;
-use aura_core::types::epochs::Epoch;
-use aura_core::effects::authorization::AuthorizationError;
-use aura_core::effects::storage::{StorageError, StorageStats};
-use aura_core::effects::time::TimeError;
-use aura_core::effects::leakage::{LeakageBudget, LeakageEvent, ObserverClass};
 use aura_guards::executor::{execute_guard_plan, GuardPlan};
 use aura_guards::guards::pure::GuardRequest;
 use aura_guards::guards::traits::GuardContextProvider;
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -94,7 +95,9 @@ impl PhysicalTimeEffects for TestEffects {
 impl RandomCoreEffects for TestEffects {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         let base = self.nonce.fetch_add(1, Ordering::SeqCst);
-        (0..len).map(|i| (base as u8).wrapping_add(i as u8)).collect()
+        (0..len)
+            .map(|i| (base as u8).wrapping_add(i as u8))
+            .collect()
     }
 
     async fn random_bytes_32(&self) -> [u8; 32] {
@@ -105,7 +108,6 @@ impl RandomCoreEffects for TestEffects {
     async fn random_u64(&self) -> u64 {
         self.nonce.fetch_add(1, Ordering::SeqCst)
     }
-
 }
 
 #[async_trait]
@@ -131,7 +133,6 @@ impl StorageCoreEffects for TestEffects {
         }
         Ok(keys)
     }
-
 }
 
 #[async_trait]
@@ -187,7 +188,11 @@ impl JournalEffects for TestEffects {
         Ok(merged)
     }
 
-    async fn refine_caps(&self, target: &Journal, refinement: &Journal) -> Result<Journal, AuraError> {
+    async fn refine_caps(
+        &self,
+        target: &Journal,
+        refinement: &Journal,
+    ) -> Result<Journal, AuraError> {
         let mut merged = target.clone();
         merged.merge(refinement);
         Ok(merged)
@@ -334,7 +339,9 @@ async fn guard_chain_denies_transport_commands() {
         send_count: send_count.clone(),
     });
 
-    let result = execute_guard_plan(&effects, &plan, interpreter).await.unwrap();
+    let result = execute_guard_plan(&effects, &plan, interpreter)
+        .await
+        .unwrap();
     assert!(!result.authorized);
     assert_eq!(send_count.load(Ordering::SeqCst), 0);
 }

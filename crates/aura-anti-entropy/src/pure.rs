@@ -69,9 +69,7 @@ mod tests {
         let oplog = vec![op1.clone(), op2.clone()];
 
         let local = BloomDigest {
-            cids: [Hash32([1u8; 32]), Hash32([2u8; 32])]
-                .into_iter()
-                .collect(),
+            cids: [Hash32([1u8; 32]), Hash32([2u8; 32])].into_iter().collect(),
         };
         let remote = BloomDigest {
             cids: [Hash32([2u8; 32])].into_iter().collect(),
@@ -88,9 +86,7 @@ mod tests {
             cids: [Hash32([1u8; 32])].into_iter().collect(),
         };
         let remote = BloomDigest {
-            cids: [Hash32([1u8; 32]), Hash32([2u8; 32])]
-                .into_iter()
-                .collect(),
+            cids: [Hash32([1u8; 32]), Hash32([2u8; 32])].into_iter().collect(),
         };
 
         let result = compute_cids_to_pull(&local, &remote);

@@ -16,12 +16,13 @@
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     BridgeDeviceInfo, CeremonyKind, CeremonyStatus, DeviceEnrollmentStart, InvitationBridgeStatus,
-    InvitationBridgeType, InvitationInfo, KeyRotationCeremonyStatus, LanPeerInfo,
-    RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
+    InvitationBridgeType, InvitationInfo, KeyRotationCeremonyStatus, LanPeerInfo, RendezvousStatus,
+    RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_app::views::contacts::{Contact, ContactsState};
 use aura_app::IntentError;
+use aura_app::ReactiveHandler;
 use aura_core::domain::Hash32;
 use aura_core::effects::amp::{
     AmpCiphertext, AmpHeader, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
@@ -34,7 +35,6 @@ use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::FrostThreshold;
 use aura_core::SigningContext;
 use aura_core::{DeviceId, ThresholdSignature};
-use aura_app::ReactiveHandler;
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_relational::ContactFact;
 use base64::Engine;
@@ -262,7 +262,10 @@ impl RuntimeBridge for MockRuntimeBridge {
             {
                 if binding_type.contains("contact") {
                     // Parse the contact fact and update state
-                    if self.process_contact_fact_data(binding_type, binding_data).await {
+                    if self
+                        .process_contact_fact_data(binding_type, binding_data)
+                        .await
+                    {
                         contact_changed = true;
                     }
                 }
@@ -519,11 +522,11 @@ impl RuntimeBridge for MockRuntimeBridge {
     ) -> Result<ThresholdSignature, IntentError> {
         // Return a mock threshold signature
         Ok(ThresholdSignature::new(
-            vec![0u8; 64],   // signature
-            1,              // signer_count
-            vec![1],        // signers
-            vec![0u8; 32],  // public_key_package
-            0,              // epoch
+            vec![0u8; 64], // signature
+            1,             // signer_count
+            vec![1],       // signers
+            vec![0u8; 32], // public_key_package
+            0,             // epoch
         ))
     }
 
@@ -918,12 +921,14 @@ impl RuntimeBridge for MockRuntimeBridge {
             .and_then(|v| v.as_str())
             .unwrap_or("00000000-0000-0000-0000-000000000000");
 
-        let sender_uuid = Uuid::parse_str(sender_uuid_str)
-            .unwrap_or_else(|_| Uuid::new_v4());
+        let sender_uuid = Uuid::parse_str(sender_uuid_str).unwrap_or_else(|_| Uuid::new_v4());
         let sender_id = AuthorityId::from_uuid(sender_uuid);
 
         let expires_at_ms = data.get("expires_at").and_then(|v| v.as_u64());
-        let message = data.get("message").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let message = data
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         // Parse invitation type
         let invitation_type = if let Some(inv_type) = data.get("invitation_type") {

@@ -1,6 +1,7 @@
+#![allow(missing_docs)]
+use aura_journal::commitment_tree::TreeState;
 use aura_protocol::effects::TreeEffects;
 use aura_protocol::prelude::PersistentTreeHandler;
-use aura_journal::commitment_tree::TreeState;
 use aura_testkit::MemoryStorageHandler;
 use std::sync::Arc;
 

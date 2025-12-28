@@ -168,12 +168,13 @@ impl HandlerUtils {
         T: serde::de::DeserializeOwned + Send + Sync,
     {
         // Serialize parameters
-        let param_bytes =
-            aura_core::util::serialization::to_vec(&parameters).map_err(|e| AuraHandlerError::EffectSerialization {
+        let param_bytes = aura_core::util::serialization::to_vec(&parameters).map_err(|e| {
+            AuraHandlerError::EffectSerialization {
                 effect_type,
                 operation: operation.to_string(),
                 source: e.into(),
-            })?;
+            }
+        })?;
 
         // Execute through handler interface
         let result_bytes = handler
@@ -181,10 +182,12 @@ impl HandlerUtils {
             .await?;
 
         // Deserialize the result
-        aura_core::util::serialization::from_slice(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
-            effect_type,
-            operation: operation.to_string(),
-            source: e.into(),
+        aura_core::util::serialization::from_slice(&result_bytes).map_err(|e| {
+            AuraHandlerError::EffectDeserialization {
+                effect_type,
+                operation: operation.to_string(),
+                source: e.into(),
+            }
         })
     }
 }

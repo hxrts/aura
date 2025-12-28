@@ -21,10 +21,10 @@ use aura_core::effects::{PhysicalTimeEffects, RandomExtendedEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_guards::GuardContextProvider;
 use aura_journal::fact::{CommittedChannelEpochBump, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{get_channel_state, AmpChannelCoordinator, AmpJournalEffects};
-use aura_guards::GuardContextProvider;
 use uuid::Uuid;
 
 /// Chat service for the agent layer.
@@ -662,11 +662,7 @@ impl ChatService {
         );
 
         self.effects
-            .commit_generic_fact_bytes(
-                context_id,
-                CHAT_FACT_TYPE_ID,
-                edit_fact.to_bytes(),
-            )
+            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID, edit_fact.to_bytes())
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit edit fact: {e}")))?;
 
@@ -714,11 +710,7 @@ impl ChatService {
         );
 
         self.effects
-            .commit_generic_fact_bytes(
-                context_id,
-                CHAT_FACT_TYPE_ID,
-                delete_fact.to_bytes(),
-            )
+            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID, delete_fact.to_bytes())
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit delete fact: {e}")))?;
 
@@ -769,11 +761,7 @@ impl ChatService {
         );
 
         self.effects
-            .commit_generic_fact_bytes(
-                context_id,
-                CHAT_FACT_TYPE_ID,
-                update_fact.to_bytes(),
-            )
+            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID, update_fact.to_bytes())
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit update fact: {e}")))?;
 

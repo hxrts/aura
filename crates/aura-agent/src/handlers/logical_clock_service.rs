@@ -3,10 +3,10 @@
 //! Provides a stateful implementation of LogicalClockEffects by persisting the
 //! vector clock and Lamport counter across calls.
 
+use async_trait::async_trait;
 use aura_core::effects::time::{LogicalClockEffects, TimeError};
 use aura_core::identifiers::DeviceId;
 use aura_core::time::{LogicalTime, VectorClock};
-use async_trait::async_trait;
 use tokio::sync::RwLock;
 
 /// Mutable logical clock state.
@@ -55,7 +55,10 @@ impl LogicalClockService {
 
 #[async_trait]
 impl LogicalClockEffects for LogicalClockService {
-    async fn logical_advance(&self, observed: Option<&VectorClock>) -> Result<LogicalTime, TimeError> {
+    async fn logical_advance(
+        &self,
+        observed: Option<&VectorClock>,
+    ) -> Result<LogicalTime, TimeError> {
         Ok(self.advance(observed).await)
     }
 

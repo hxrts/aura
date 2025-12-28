@@ -271,7 +271,8 @@ impl SyncEffects for BroadcasterHandler {
         };
 
         // Serialize the operation for transport using the wire module
-        let op_data = crate::wire::serialize_message(&crate::wire::SyncWireMessage::op(op.clone()))?;
+        let op_data =
+            crate::wire::serialize_message(&crate::wire::SyncWireMessage::op(op.clone()))?;
 
         // Send to each peer
         let mut send_errors = Vec::new();

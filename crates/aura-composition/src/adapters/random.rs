@@ -40,57 +40,67 @@ impl RegistrableHandler for RandomHandlerAdapter {
 
         match operation {
             "random_bytes" => {
-                let len: usize = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                let len: usize =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result = self.handler.random_bytes(len).await;
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
-                let result = self.handler.random_bytes(len).await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
                 })
             }
             "random_bytes_32" => {
                 let result = self.handler.random_bytes_32().await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "random_u64" => {
-                let result = self.handler.random_u64().await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "random_range" => {
-                let (min, max): (u64, u64) = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
+                })
+            }
+            "random_u64" => {
+                let result = self.handler.random_u64().await;
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })
+            }
+            "random_range" => {
+                let (min, max): (u64, u64) = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    })?;
                 let result = self.handler.random_range(min, max).await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "random_uuid" => {
                 let result = self.handler.random_uuid().await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             _ => Err(HandlerError::UnknownOperation {

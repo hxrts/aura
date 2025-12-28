@@ -74,7 +74,8 @@ impl UnifiedHandler {
     /// Create a new unified handler with default configuration.
     pub fn new() -> Self {
         let reactive = Arc::new(ReactiveHandler::new());
-        let query = QueryHandler::new_with_policy(reactive.clone(), CapabilityPolicy::DenyUnlessGranted);
+        let query =
+            QueryHandler::new_with_policy(reactive.clone(), CapabilityPolicy::DenyUnlessGranted);
 
         Self {
             query,
@@ -87,7 +88,8 @@ impl UnifiedHandler {
     ///
     /// Allows multiple handlers to share the same signal graph.
     pub fn with_reactive(reactive: Arc<ReactiveHandler>) -> Self {
-        let query = QueryHandler::new_with_policy(reactive.clone(), CapabilityPolicy::DenyUnlessGranted);
+        let query =
+            QueryHandler::new_with_policy(reactive.clone(), CapabilityPolicy::DenyUnlessGranted);
 
         Self {
             query,

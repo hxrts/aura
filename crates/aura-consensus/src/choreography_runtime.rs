@@ -3,14 +3,9 @@
 //! This module provides an executable path for the consensus choreography
 //! using the ChoreographicEffects interface and the generated session types.
 
+use crate::messages::ConsensusMessage;
 use aura_core::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
 use aura_core::util::serialization::{from_slice, to_vec};
-use crate::consensus::messages::ConsensusMessage;
-
-#[allow(dead_code)]
-fn consensus_protocol_annotations() -> std::collections::HashMap<String, String> {
-    crate::consensus::protocol::rumpsteak_session_types_aura_consensus::aura_consensus::get_auraconsensus_annotations()
-}
 
 /// Result from coordinator execution.
 #[derive(Debug, Clone)]
@@ -89,13 +84,17 @@ pub async fn run_witness<E: ChoreographicEffects>(
     let _execute = decode_message(&execute_payload)?;
 
     let nonce_payload = encode_message(&nonce_commit)?;
-    effects.send_to_role_bytes(coordinator, nonce_payload).await?;
+    effects
+        .send_to_role_bytes(coordinator, nonce_payload)
+        .await?;
 
     let sign_payload = effects.receive_from_role_bytes(coordinator).await?;
     let _sign_request = decode_message(&sign_payload)?;
 
     let share_payload = encode_message(&sign_share)?;
-    effects.send_to_role_bytes(coordinator, share_payload).await?;
+    effects
+        .send_to_role_bytes(coordinator, share_payload)
+        .await?;
 
     let result_payload = effects.receive_from_role_bytes(coordinator).await?;
     decode_message(&result_payload)
@@ -104,11 +103,11 @@ pub async fn run_witness<E: ChoreographicEffects>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{CommitFact, ConsensusId};
     use aura_core::effects::{ChoreographyEvent, ChoreographyMetrics};
     use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature};
     use aura_core::time::{PhysicalTime, ProvenancedTime, TimeStamp};
     use aura_core::{AuthorityId, Hash32};
-    use crate::consensus::types::{CommitFact, ConsensusId};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use uuid::Uuid;
@@ -137,13 +136,13 @@ mod tests {
             role: ChoreographicRole,
             message: Vec<u8>,
         ) -> Result<(), ChoreographyError> {
-            let mut queues = self
-                .bus
-                .queues
-                .lock()
-                .map_err(|_| ChoreographyError::InternalError {
-                    message: "shared bus lock poisoned".to_string(),
-                })?;
+            let mut queues =
+                self.bus
+                    .queues
+                    .lock()
+                    .map_err(|_| ChoreographyError::InternalError {
+                        message: "shared bus lock poisoned".to_string(),
+                    })?;
             queues.entry((self.role, role)).or_default().push(message);
             Ok(())
         }
@@ -152,22 +151,24 @@ mod tests {
             &self,
             role: ChoreographicRole,
         ) -> Result<Vec<u8>, ChoreographyError> {
-            let mut queues = self
-                .bus
-                .queues
-                .lock()
-                .map_err(|_| ChoreographyError::InternalError {
-                    message: "shared bus lock poisoned".to_string(),
-                })?;
-            if let Some(queue) = queues.get_mut(&(role, self.role)) {
-                if let Some(payload) = queue.pop() {
-                    return Ok(payload);
+            for _ in 0..10 {
+                {
+                    let mut queues = self
+                        .bus
+                        .queues
+                        .lock()
+                        .map_err(|_| ChoreographyError::InternalError {
+                            message: "shared bus lock poisoned".to_string(),
+                        })?;
+                    if let Some(queue) = queues.get_mut(&(role, self.role)) {
+                        if let Some(payload) = queue.pop() {
+                            return Ok(payload);
+                        }
+                    }
                 }
+                tokio::task::yield_now().await;
             }
-            Err(ChoreographyError::CommunicationTimeout {
-                role,
-                timeout_ms: 1,
-            })
+            Err(ChoreographyError::CommunicationTimeout { role, timeout_ms: 1 })
         }
 
         async fn broadcast_bytes(&self, message: Vec<u8>) -> Result<(), ChoreographyError> {
@@ -208,13 +209,13 @@ mod tests {
             _session_id: Uuid,
             roles: Vec<ChoreographicRole>,
         ) -> Result<(), ChoreographyError> {
-            let mut guard = self
-                .bus
-                .roles
-                .lock()
-                .map_err(|_| ChoreographyError::InternalError {
-                    message: "shared bus lock poisoned".to_string(),
-                })?;
+            let mut guard =
+                self.bus
+                    .roles
+                    .lock()
+                    .map_err(|_| ChoreographyError::InternalError {
+                        message: "shared bus lock poisoned".to_string(),
+                    })?;
             *guard = roles;
             Ok(())
         }
@@ -230,7 +231,10 @@ mod tests {
             Ok(())
         }
 
-        async fn emit_choreo_event(&self, _event: ChoreographyEvent) -> Result<(), ChoreographyError> {
+        async fn emit_choreo_event(
+            &self,
+            _event: ChoreographyEvent,
+        ) -> Result<(), ChoreographyError> {
             Ok(())
         }
 
@@ -250,8 +254,8 @@ mod tests {
 
     #[tokio::test]
     async fn consensus_choreography_round_trip() {
-        let coordinator = ChoreographicRole::new(Uuid::new_v4(), 0);
-        let witness = ChoreographicRole::new(Uuid::new_v4(), 1);
+        let coordinator = ChoreographicRole::new(Uuid::from_bytes([1u8; 16]), 0);
+        let witness = ChoreographicRole::new(Uuid::from_bytes([2u8; 16]), 1);
         let bus = Arc::new(SharedBus::default());
 
         {
@@ -320,23 +324,31 @@ mod tests {
 
         let result = ConsensusMessage::ConsensusResult { commit_fact };
 
+        let witnesses = [witness];
         let coordinator_task = run_coordinator(
             &coordinator_handler,
-            &[witness],
+            &witnesses,
             execute.clone(),
             sign_request.clone(),
             result.clone(),
         );
-        let witness_task =
-            run_witness(&witness_handler, coordinator, nonce_commit.clone(), sign_share.clone());
+        let witness_task = run_witness(
+            &witness_handler,
+            coordinator,
+            nonce_commit.clone(),
+            sign_share.clone(),
+        );
 
-        let (coord_result, witness_result) = tokio::join!(coordinator_task, witness_task);
+        let (coord_result, witness_result) = futures::join!(coordinator_task, witness_task);
 
         let coord_result = coord_result.expect("coordinator should succeed");
         let witness_result = witness_result.expect("witness should succeed");
 
         assert_eq!(coord_result.nonce_commits.len(), 1);
         assert_eq!(coord_result.sign_shares.len(), 1);
-        assert!(matches!(witness_result, ConsensusMessage::ConsensusResult { .. }));
+        assert!(matches!(
+            witness_result,
+            ConsensusMessage::ConsensusResult { .. }
+        ));
     }
 }

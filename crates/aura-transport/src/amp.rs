@@ -4,6 +4,8 @@
 //! without dependencies on journal or authorization domains. Domain-specific logic
 //! has been moved to aura-protocol (Layer 4) where it belongs.
 
+#![allow(missing_docs)] // Macro-generated variants/fields
+
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::Hash32;
 use aura_macros::aura_error_types;
@@ -55,9 +57,10 @@ pub struct RatchetDerivation {
     pub next_gen: u64,
 }
 
-/// Error categories for AMP ratchet operations
 aura_error_types! {
+    /// Error categories for AMP ratchet operations
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[allow(missing_docs)]
     pub enum AmpError {
         #[category = "protocol"]
         EpochMismatch { got: u64, current: u64, pending: Option<u64> } =>

@@ -82,7 +82,6 @@ impl TokenAuthority {
     }
 }
 
-
 /// Biscuit token manager for an authority.
 ///
 /// **Authority Model**: Tokens are managed per-authority, not per-device.

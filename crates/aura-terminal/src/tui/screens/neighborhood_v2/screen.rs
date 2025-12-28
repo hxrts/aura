@@ -10,8 +10,8 @@ use crate::tui::layout::dim;
 use crate::tui::props::NeighborhoodViewProps;
 use crate::tui::state_machine::{DetailFocus, NeighborhoodMode};
 use crate::tui::theme::Theme;
-use crate::tui::types::{format_timestamp, BlockBudget, BlockSummary, Contact, Message, Resident};
 use crate::tui::types::TraversalDepth;
+use crate::tui::types::{format_timestamp, BlockBudget, BlockSummary, Contact, Message, Resident};
 
 pub async fn run_neighborhood_screen_v2() -> std::io::Result<()> {
     element! {
@@ -49,10 +49,7 @@ fn BlockMap(props: &BlockMapProps) -> impl Into<AnyElement<'static>> {
 
     let (depth_icon, depth_label) = (enter_depth.icon().to_string(), enter_depth.label());
 
-    let can_enter_interior = blocks
-        .get(selected)
-        .map(|b| b.can_enter)
-        .unwrap_or(false);
+    let can_enter_interior = blocks.get(selected).map(|b| b.can_enter).unwrap_or(false);
 
     let can_enter_line = format!(
         "Can enter: Street ✔ Frontage ✔ Interior {}",
@@ -434,7 +431,8 @@ pub fn NeighborhoodScreenV2(
                 let contacts = reactive_contacts.read().clone();
 
                 if let Some(channel_id) = &chat_state.selected_channel_id {
-                    if let Some(channel) = chat_state.channels.iter().find(|c| &c.id == channel_id) {
+                    if let Some(channel) = chat_state.channels.iter().find(|c| &c.id == channel_id)
+                    {
                         reactive_channel_name.set(channel.name.clone());
                     }
                 }

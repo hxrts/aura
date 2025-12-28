@@ -7,11 +7,9 @@
 use super::traits::GuardContextProvider;
 use super::types::GuardOperation;
 use super::GuardEffects;
-use crate::guards::executor::{BorrowedEffectInterpreter, GuardPlan, execute_guard_plan};
+use crate::guards::executor::{execute_guard_plan, BorrowedEffectInterpreter, GuardPlan};
 use crate::guards::{
-    config::GuardRuntimeConfig,
-    privacy::track_leakage_consumption,
-    JournalCoupler, LeakageBudget,
+    config::GuardRuntimeConfig, privacy::track_leakage_consumption, JournalCoupler, LeakageBudget,
 };
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Receipt};

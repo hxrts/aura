@@ -481,7 +481,6 @@ impl ChatFact {
     }
 }
 
-
 /// Reducer for chat facts
 ///
 /// Converts chat facts to relational bindings during journal reduction.

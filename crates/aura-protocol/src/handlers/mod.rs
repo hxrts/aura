@@ -279,7 +279,8 @@ mod tests {
 
         let params = TestParams { value: 42 };
         let serialized = aura_core::util::serialization::to_vec(&params).unwrap();
-        let deserialized: TestParams = aura_core::util::serialization::from_slice(&serialized).unwrap();
+        let deserialized: TestParams =
+            aura_core::util::serialization::from_slice(&serialized).unwrap();
 
         assert_eq!(deserialized.value, 42);
     }
@@ -299,7 +300,9 @@ pub mod storage;
 pub mod tree;
 pub use tree::PersistentTreeHandler;
 // Sync handlers consolidated under crate::sync
-pub use crate::sync::{AntiEntropyHandler, BroadcastConfig, BroadcasterHandler, PersistentSyncHandler};
+pub use crate::sync::{
+    AntiEntropyHandler, BroadcastConfig, BroadcasterHandler, PersistentSyncHandler,
+};
 
 pub mod timeout_coordinator;
 pub use timeout_coordinator::TimeoutCoordinator;

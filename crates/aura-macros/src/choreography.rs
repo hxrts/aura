@@ -749,10 +749,13 @@ fn choreography_impl_namespace_aware(input: TokenStream) -> Result<TokenStream, 
 
                 // Standard rumpsteak-aura imports
                 use rumpsteak_aura::{
-                    channel::Bidirectional, session, try_session,
-                    Branch, End, Message, Receive, Role, Roles, Select, Send
+                    channel::{Bidirectional, Pair}, session, try_session,
+                    Branch, End, Message, Receive, Role, Roles, Select, Send, Sealable
                 };
-                use futures::channel::mpsc::{self, Receiver, Sender};
+                use futures::channel::mpsc;
+                use futures::{Sink, Stream};
+                use std::pin::Pin;
+                use std::task::{Context, Poll};
 
                 // Label type for message routing
                 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -763,12 +766,98 @@ fn choreography_impl_namespace_aware(input: TokenStream) -> Result<TokenStream, 
 
                 const CHANNEL_BUFFER: usize = 64;
 
-                fn channel() -> (Sender<Label>, Receiver<Label>) {
-                    mpsc::channel(CHANNEL_BUFFER)
+                #[derive(Debug)]
+                pub struct BoundedSender<T>(mpsc::Sender<T>);
+
+                #[derive(Debug)]
+                pub struct BoundedReceiver<T>(mpsc::Receiver<T>);
+
+                impl<T> Clone for BoundedSender<T> {
+                    fn clone(&self) -> Self {
+                        Self(self.0.clone())
+                    }
+                }
+
+                impl<T> Pair<BoundedReceiver<T>> for BoundedSender<T> {
+                    fn pair() -> (Self, BoundedReceiver<T>) {
+                        let (sender, receiver) = mpsc::channel(CHANNEL_BUFFER);
+                        (BoundedSender(sender), BoundedReceiver(receiver))
+                    }
+                }
+
+                impl<T> Pair<BoundedSender<T>> for BoundedReceiver<T> {
+                    fn pair() -> (Self, BoundedSender<T>) {
+                        let (sender, receiver) = Pair::pair();
+                        (receiver, sender)
+                    }
+                }
+
+                impl<T> Sealable for BoundedSender<T> {
+                    fn seal(&mut self) {
+                        self.0.close_channel();
+                    }
+
+                    fn is_sealed(&self) -> bool {
+                        self.0.is_closed()
+                    }
+                }
+
+                impl<T> Sealable for BoundedReceiver<T> {
+                    fn seal(&mut self) {
+                        self.0.close();
+                    }
+
+                    fn is_sealed(&self) -> bool {
+                        false
+                    }
+                }
+
+                impl<T> Sink<T> for BoundedSender<T> {
+                    type Error = <mpsc::Sender<T> as Sink<T>>::Error;
+
+                    fn poll_ready(
+                        self: Pin<&mut Self>,
+                        cx: &mut Context<'_>,
+                    ) -> Poll<Result<(), Self::Error>> {
+                        Pin::new(&mut self.get_mut().0).poll_ready(cx)
+                    }
+
+                    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+                        Pin::new(&mut self.get_mut().0).start_send(item)
+                    }
+
+                    fn poll_flush(
+                        self: Pin<&mut Self>,
+                        cx: &mut Context<'_>,
+                    ) -> Poll<Result<(), Self::Error>> {
+                        Pin::new(&mut self.get_mut().0).poll_flush(cx)
+                    }
+
+                    fn poll_close(
+                        self: Pin<&mut Self>,
+                        cx: &mut Context<'_>,
+                    ) -> Poll<Result<(), Self::Error>> {
+                        Pin::new(&mut self.get_mut().0).poll_close(cx)
+                    }
+                }
+
+                impl<T> Stream for BoundedReceiver<T> {
+                    type Item = <mpsc::Receiver<T> as Stream>::Item;
+
+                    fn poll_next(
+                        self: Pin<&mut Self>,
+                        cx: &mut Context<'_>,
+                    ) -> Poll<Option<Self::Item>> {
+                        Pin::new(&mut self.get_mut().0).poll_next(cx)
+                    }
+                }
+
+                fn channel() -> (BoundedSender<Label>, BoundedReceiver<Label>) {
+                    Pair::pair()
                 }
 
                 // Channel type definition
-                type Channel = Bidirectional<Sender<Label>, Receiver<Label>>;
+                type Channel = Bidirectional<BoundedSender<Label>, BoundedReceiver<Label>>;
             };
 
             // Generate module name using namespace
@@ -893,10 +982,13 @@ fn choreography_impl_standard(input: TokenStream) -> Result<TokenStream, syn::Er
 
                 // Standard rumpsteak-aura imports (from external demo analysis)
                 use rumpsteak_aura::{
-                    channel::Bidirectional, session, try_session,
-                    Branch, End, Message, Receive, Role, Roles, Select, Send
+                    channel::{Bidirectional, Pair}, session, try_session,
+                    Branch, End, Message, Receive, Role, Roles, Select, Send, Sealable
                 };
-                use futures::channel::mpsc::{self, Receiver, Sender};
+                use futures::channel::mpsc;
+                use futures::{Sink, Stream};
+                use std::pin::Pin;
+                use std::task::{Context, Poll};
 
                 // Label type for message routing
                 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -907,12 +999,98 @@ fn choreography_impl_standard(input: TokenStream) -> Result<TokenStream, syn::Er
 
                 const CHANNEL_BUFFER: usize = 64;
 
-                fn channel() -> (Sender<Label>, Receiver<Label>) {
-                    mpsc::channel(CHANNEL_BUFFER)
+                #[derive(Debug)]
+                pub struct BoundedSender<T>(mpsc::Sender<T>);
+
+                #[derive(Debug)]
+                pub struct BoundedReceiver<T>(mpsc::Receiver<T>);
+
+                impl<T> Clone for BoundedSender<T> {
+                    fn clone(&self) -> Self {
+                        Self(self.0.clone())
+                    }
+                }
+
+                impl<T> Pair<BoundedReceiver<T>> for BoundedSender<T> {
+                    fn pair() -> (Self, BoundedReceiver<T>) {
+                        let (sender, receiver) = mpsc::channel(CHANNEL_BUFFER);
+                        (BoundedSender(sender), BoundedReceiver(receiver))
+                    }
+                }
+
+                impl<T> Pair<BoundedSender<T>> for BoundedReceiver<T> {
+                    fn pair() -> (Self, BoundedSender<T>) {
+                        let (sender, receiver) = Pair::pair();
+                        (receiver, sender)
+                    }
+                }
+
+                impl<T> Sealable for BoundedSender<T> {
+                    fn seal(&mut self) {
+                        self.0.close_channel();
+                    }
+
+                    fn is_sealed(&self) -> bool {
+                        self.0.is_closed()
+                    }
+                }
+
+                impl<T> Sealable for BoundedReceiver<T> {
+                    fn seal(&mut self) {
+                        self.0.close();
+                    }
+
+                    fn is_sealed(&self) -> bool {
+                        false
+                    }
+                }
+
+                impl<T> Sink<T> for BoundedSender<T> {
+                    type Error = <mpsc::Sender<T> as Sink<T>>::Error;
+
+                    fn poll_ready(
+                        self: Pin<&mut Self>,
+                        cx: &mut Context<'_>,
+                    ) -> Poll<Result<(), Self::Error>> {
+                        Pin::new(&mut self.get_mut().0).poll_ready(cx)
+                    }
+
+                    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+                        Pin::new(&mut self.get_mut().0).start_send(item)
+                    }
+
+                    fn poll_flush(
+                        self: Pin<&mut Self>,
+                        cx: &mut Context<'_>,
+                    ) -> Poll<Result<(), Self::Error>> {
+                        Pin::new(&mut self.get_mut().0).poll_flush(cx)
+                    }
+
+                    fn poll_close(
+                        self: Pin<&mut Self>,
+                        cx: &mut Context<'_>,
+                    ) -> Poll<Result<(), Self::Error>> {
+                        Pin::new(&mut self.get_mut().0).poll_close(cx)
+                    }
+                }
+
+                impl<T> Stream for BoundedReceiver<T> {
+                    type Item = <mpsc::Receiver<T> as Stream>::Item;
+
+                    fn poll_next(
+                        self: Pin<&mut Self>,
+                        cx: &mut Context<'_>,
+                    ) -> Poll<Option<Self::Item>> {
+                        Pin::new(&mut self.get_mut().0).poll_next(cx)
+                    }
+                }
+
+                fn channel() -> (BoundedSender<Label>, BoundedReceiver<Label>) {
+                    Pair::pair()
                 }
 
                 // Channel type definition following external demo pattern
-                type Channel = Bidirectional<Sender<Label>, Receiver<Label>>;
+                type Channel = Bidirectional<BoundedSender<Label>, BoundedReceiver<Label>>;
             };
 
             Ok(quote! {

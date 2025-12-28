@@ -166,7 +166,10 @@ pub fn NotificationsScreen(
     notifications.extend(reactive_recovery.read().clone());
     notifications.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
-    let selected_index = props.view.selected_index.min(notifications.len().saturating_sub(1));
+    let selected_index = props
+        .view
+        .selected_index
+        .min(notifications.len().saturating_sub(1));
     let selected = notifications.get(selected_index);
 
     let list_items: Vec<AnyElement<'static>> = notifications
@@ -210,8 +213,7 @@ pub fn NotificationsScreen(
         vec![
             element! { KeyValue(label: "Type".to_string(), value: item.kind.label().to_string()) }
                 .into_any(),
-            element! { KeyValue(label: "Title".to_string(), value: item.title.clone()) }
-                .into_any(),
+            element! { KeyValue(label: "Title".to_string(), value: item.title.clone()) }.into_any(),
             element! { KeyValue(label: "Details".to_string(), value: item.subtitle.clone()) }
                 .into_any(),
         ]

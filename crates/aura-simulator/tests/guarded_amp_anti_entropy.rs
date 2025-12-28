@@ -1,8 +1,9 @@
+#![allow(missing_docs)]
 use aura_anti_entropy::{AntiEntropyConfig, AntiEntropyHandler};
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_guards::chain::SendGuardChain;
 use aura_simulator::handlers::effect_composer::factory::create_deterministic_environment;
 use aura_testkit::DeviceTestFixture;
-use aura_core::identifiers::{AuthorityId, ContextId};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -18,10 +19,7 @@ async fn simulator_amp_guard_chain_is_deterministic() {
 
     let guard = SendGuardChain::new("amp:send".to_string(), context, peer, 1)
         .with_operation_id("amp_send_sim");
-    let result = guard
-        .evaluate(effects.as_ref())
-        .await
-        .expect("guard eval");
+    let result = guard.evaluate(effects.as_ref()).await.expect("guard eval");
 
     assert!(!result.authorized);
 }

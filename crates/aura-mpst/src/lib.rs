@@ -174,13 +174,7 @@ pub use aura_core::{identifiers::DeviceId, AuraError, AuraResult, Cap, Journal, 
 pub use journal::{JournalAnnotation, JournalCoupling};
 pub use session::LocalSessionType;
 
-// Deprecated re-exports (for backward compatibility until 1.0)
-#[allow(deprecated)]
-pub use context::{ContextIsolation, ContextType};
-// guards re-exports REMOVED - use aura-protocol::guards instead
-#[allow(deprecated)]
-pub use leakage::{LeakageBudget, LeakageTracker};
-pub use runtime::{AuraEndpoint, AuraHandler, ConnectionState, ExecutionContext, ExecutionMode};
+// Deprecated runtime/context/leakage APIs removed to keep MPST surface clean.
 
 /// Standard result type for MPST operations
 pub type MpstResult<T> = std::result::Result<T, MpstError>;
@@ -249,35 +243,6 @@ impl MpstError {
             violation: violation.into(),
         }
     }
-}
-
-/// Execute choreography with aura-mpst runtime integration using rumpsteak-aura
-pub async fn execute_choreography<M>(
-    handler: &mut AuraHandler,
-    endpoint: &mut AuraEndpoint,
-    program: rumpsteak_aura_choreography::effects::Program<DeviceId, M>,
-) -> MpstResult<()>
-where
-    M: rumpsteak_aura_choreography::effects::ProgramMessage
-        + serde::Serialize
-        + for<'de> serde::Deserialize<'de>
-        + std::marker::Send
-        + std::marker::Sync
-        + 'static,
-{
-    // Note: Runtime validation removed - use aura-protocol guards for validation
-
-    // Execute the program through rumpsteak-aura interpreter
-    rumpsteak_aura_choreography::effects::interpret_extensible(handler, endpoint, program)
-        .await
-        .map_err(|e| {
-            MpstError::Core(aura_core::AuraError::invalid(format!(
-                "Choreography execution failed: {}",
-                e
-            )))
-        })?;
-
-    Ok(())
 }
 
 #[cfg(test)]

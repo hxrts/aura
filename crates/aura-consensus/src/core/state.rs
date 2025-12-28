@@ -297,10 +297,7 @@ pub struct GlobalConsensusState {
 impl GlobalConsensusState {
     /// Create a new empty global state.
     pub fn new(witnesses: BTreeSet<String>, epoch: u64) -> Self {
-        let witness_nonces = witnesses
-            .iter()
-            .map(|w| (w.clone(), None))
-            .collect();
+        let witness_nonces = witnesses.iter().map(|w| (w.clone(), None)).collect();
 
         Self {
             instances: HashMap::new(),

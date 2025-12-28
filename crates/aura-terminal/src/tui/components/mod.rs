@@ -10,8 +10,8 @@
 mod account_setup_modal_template;
 mod code_display_modal;
 mod command_palette;
-mod contact_select_modal_template;
 mod contact_multi_select;
+mod contact_select_modal_template;
 #[cfg(feature = "development")]
 mod demo_hint;
 mod detail_panel;
@@ -37,15 +37,17 @@ mod tab_bar;
 mod text_input;
 mod text_input_modal_template;
 mod text_styled;
-mod threshold_selector;
 mod textarea;
+mod threshold_selector;
 mod toast;
 
 pub use account_setup_modal_template::{AccountSetupModal, AccountSetupState};
 pub use code_display_modal::{copy_to_clipboard, CodeDisplayModal, CodeDisplayStatus};
 pub use command_palette::{CommandItem, CommandPalette, PaletteCommand};
+pub use contact_multi_select::{
+    contact_multi_select, ContactMultiSelectItem, ContactMultiSelectProps,
+};
 pub use contact_select_modal_template::{ContactSelectModal, ContactSelectState};
-pub use contact_multi_select::{contact_multi_select, ContactMultiSelectItem, ContactMultiSelectProps};
 #[cfg(feature = "development")]
 pub use demo_hint::{DemoHintBar, DemoInviteCodes};
 pub use detail_panel::DetailPanel;
@@ -81,8 +83,8 @@ pub use tab_bar::{TabBar, TabBarProps, TabItem};
 pub use text_input::TextInput;
 pub use text_input_modal_template::{TextInputModal, TextInputState};
 pub use text_styled::{Badge, Divider, Heading, KeyValue, StyledText, TextStyle};
-pub use threshold_selector::{threshold_selector, ThresholdSelectorProps};
 pub use textarea::{Textarea, TextareaState};
+pub use threshold_selector::{threshold_selector, ThresholdSelectorProps};
 pub use toast::{
     StatusBar, Toast, ToastContainer, ToastContent, ToastFrame, ToastLevel, ToastMessage,
 };

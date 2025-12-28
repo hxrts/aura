@@ -46,31 +46,35 @@ impl RegistrableHandler for TimeHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "sleep_ms" => {
-                let millis: u64 = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
+                })
+            }
+            "sleep_ms" => {
+                let millis: u64 =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
                 let _ = PhysicalTimeEffects::sleep_ms(&self.physical, millis).await;
                 Ok(Vec::new()) // sleep returns void
             }
             "sleep_until" => {
-                let epoch: u64 = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
+                let epoch: u64 =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
                 self.physical.sleep_until(epoch).await;
                 Ok(Vec::new())
             }
@@ -90,10 +94,12 @@ impl RegistrableHandler for TimeHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "logical_now" => {
@@ -102,22 +108,28 @@ impl RegistrableHandler for TimeHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "order_time" => {
-                let result = self.order.order_time().await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
+                let result =
+                    self.order
+                        .order_time()
+                        .await
+                        .map_err(|e| HandlerError::ExecutionFailed {
+                            source: Box::new(e),
+                        })?;
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
                 })
             }
             _ => Err(HandlerError::UnknownOperation {

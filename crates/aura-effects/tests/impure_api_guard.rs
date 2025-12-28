@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -34,7 +35,10 @@ fn test_no_impure_api_usage_outside_handlers() {
     ];
 
     let patterns = [
-        ("SystemTime::now", "Use PhysicalTimeEffects instead of SystemTime::now"),
+        (
+            "SystemTime::now",
+            "Use PhysicalTimeEffects instead of SystemTime::now",
+        ),
         ("chrono::", "Use unified TimeEffects instead of chrono"),
         ("thread_rng", "Use RandomEffects instead of thread_rng"),
         ("rand::", "Use RandomEffects instead of rand::*"),
@@ -58,15 +62,14 @@ fn test_no_impure_api_usage_outside_handlers() {
 
         for (pattern, guidance) in patterns {
             if contents.contains(pattern) {
-                violations.push(format!(
-                    "{}: found '{}' ({} )",
-                    rel_str, pattern, guidance
-                ));
+                violations.push(format!("{}: found '{}' ({} )", rel_str, pattern, guidance));
             }
         }
     }
 
     if !violations.is_empty() {
-        panic!("Impure API usage detected:\n{}", violations.join("\n"));
+        panic!("Impure API usage detected:
+{}", violations.join("
+"));
     }
 }

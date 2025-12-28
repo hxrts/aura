@@ -73,9 +73,7 @@ impl Parse for DomainFactMeta {
             input.parse::<Token![=]>()?;
             let value: syn::Lit = input.parse()?;
             let (lit_str, lit_int, is_int) = match value {
-                syn::Lit::Str(s) => {
-                    (s, None, false)
-                }
+                syn::Lit::Str(s) => (s, None, false),
                 syn::Lit::Int(i) => {
                     let lit_str = LitStr::new(&i.to_string(), i.span());
                     (lit_str, Some(i), true)
@@ -198,10 +196,7 @@ fn context_expr(data: &Data, args: &DomainFactArgs) -> Result<TokenStream> {
                 if !found {
                     return Err(syn::Error::new(
                         Span::call_site(),
-                        format!(
-                            "expected field `{}` for DomainFact context_id",
-                            field_ident
-                        ),
+                        format!("expected field `{}` for DomainFact context_id", field_ident),
                     ));
                 }
                 Ok(quote! { self.#field_ident })

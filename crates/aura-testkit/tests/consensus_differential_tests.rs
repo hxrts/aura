@@ -73,7 +73,11 @@ fn arb_share_data(binding: String) -> impl Strategy<Value = ShareData> {
 
 /// Generate a share proposal
 fn arb_share_proposal() -> impl Strategy<Value = ShareProposal> {
-    (arb_witness(), arb_result_id(), "[a-f0-9]{16}".prop_map(String::from))
+    (
+        arb_witness(),
+        arb_result_id(),
+        "[a-f0-9]{16}".prop_map(String::from),
+    )
         .prop_flat_map(|(witness, result_id, binding)| {
             arb_share_data(binding).prop_map(move |share| ShareProposal {
                 witness: witness.clone(),
@@ -96,8 +100,7 @@ fn arb_vote() -> impl Strategy<Value = Vote> {
 
 /// Generate a list of unique witnesses
 fn arb_unique_witnesses(min: usize, max: usize) -> impl Strategy<Value = Vec<String>> {
-    prop::collection::hash_set(arb_witness(), min..=max)
-        .prop_map(|set| set.into_iter().collect())
+    prop::collection::hash_set(arb_witness(), min..=max).prop_map(|set| set.into_iter().collect())
 }
 
 // ============================================================================
@@ -380,7 +383,8 @@ fn arb_evidence() -> impl Strategy<Value = Evidence> {
         "cns[0-9]{1,2}".prop_map(String::from),
         prop::collection::vec(arb_vote(), 0..5),
         // Use hash_set to ensure unique equivocators - duplicates would violate CRDT properties
-        prop::collection::hash_set(arb_witness(), 0..3).prop_map(|set| set.into_iter().collect::<Vec<_>>()),
+        prop::collection::hash_set(arb_witness(), 0..3)
+            .prop_map(|set| set.into_iter().collect::<Vec<_>>()),
     )
         .prop_map(|(consensus_id, votes, equivocators)| Evidence {
             consensus_id,

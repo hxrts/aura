@@ -52,11 +52,8 @@ pub async fn handle_recovery(
                                 )))
                             } else {
                                 // Initiate guardian ceremony with existing guardians
-                                let guardian_ids: Vec<String> = state
-                                    .guardians
-                                    .iter()
-                                    .map(|g| g.id.to_string())
-                                    .collect();
+                                let guardian_ids: Vec<String> =
+                                    state.guardians.iter().map(|g| g.id.to_string()).collect();
                                 let threshold =
                                     aura_core::types::FrostThreshold::new(state.threshold as u16)
                                         .unwrap_or_else(|_| {
@@ -132,9 +129,7 @@ pub async fn handle_recovery(
                                     ))))
                                 }
                             }
-                            None => {
-                                Some(Err(OpError::Failed("No active recovery".to_string())))
-                            }
+                            None => Some(Err(OpError::Failed("No active recovery".to_string()))),
                         },
                         Err(e) => Some(Err(OpError::Failed(format!(
                             "Failed to get recovery status: {}",
@@ -161,13 +156,11 @@ pub async fn handle_recovery(
                         Ok(state) => match state.active_recovery {
                             Some(_recovery) => {
                                 // Would call RuntimeBridge to cancel the ceremony
-                                Some(Ok(OpResponse::Data(
-                                    "Recovery cancelled".to_string(),
-                                )))
+                                Some(Ok(OpResponse::Data("Recovery cancelled".to_string())))
                             }
-                            None => {
-                                Some(Err(OpError::Failed("No active recovery to cancel".to_string())))
-                            }
+                            None => Some(Err(OpError::Failed(
+                                "No active recovery to cancel".to_string(),
+                            ))),
                         },
                         Err(e) => Some(Err(OpError::Failed(format!(
                             "Failed to get recovery status: {}",

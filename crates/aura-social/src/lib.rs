@@ -82,12 +82,12 @@ pub use availability::{BlockAvailability, NeighborhoodAvailability};
 pub use block::Block;
 pub use error::SocialError;
 pub use facts::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
-pub use neighborhood::Neighborhood;
 pub use moderation::{
     is_user_banned, is_user_muted, query_current_bans, query_current_mutes, query_kick_history,
     register_moderation_facts, BanStatus, BlockBanFact, BlockGrantStewardFact, BlockKickFact,
     BlockMuteFact, BlockRevokeStewardFact, BlockUnbanFact, BlockUnmuteFact, KickRecord, MuteStatus,
 };
+pub use neighborhood::Neighborhood;
 pub use relay::{ReachabilityChecker, RelayCandidateBuilder};
 pub use storage::StorageService;
 pub use topology::{DiscoveryLayer, SocialTopology};

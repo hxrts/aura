@@ -59,7 +59,10 @@ pub fn validate_share(
     // Quint: share.dataBinding.bindCid == cid
     // Note: In pure core, we use string comparison on data_binding field
     // Production would verify cryptographic binding
-    let expected_binding = format!("{}:{}:{}", expected_cid, expected_rid, expected_prestate_hash);
+    let expected_binding = format!(
+        "{}:{}:{}",
+        expected_cid, expected_rid, expected_prestate_hash
+    );
 
     // Quint: share.shareValue != ""
     if share.share_value.is_empty() {
@@ -122,7 +125,11 @@ pub fn is_equivocator(proposals: &[ShareProposal], witness: &str) -> bool {
 /// Shares are consistent if all matching proposals have valid data bindings.
 ///
 /// Lean: Aura.Consensus.Frost.share_session_consistency
-pub fn shares_consistent(proposals: &[ShareProposal], result_id: &str, prestate_hash: &str) -> bool {
+pub fn shares_consistent(
+    proposals: &[ShareProposal],
+    result_id: &str,
+    prestate_hash: &str,
+) -> bool {
     proposals
         .iter()
         .filter(|p| p.result_id == result_id)
@@ -239,7 +246,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::consensus::core::state::PathSelection;
+    use crate::core::state::PathSelection;
 
     fn make_share(witness: &str, result_id: &str) -> ShareProposal {
         ShareProposal {
@@ -381,7 +388,7 @@ mod tests {
                 prestate_hash: "pre".to_string(),
             },
             PureCommitFact {
-                cid: "cns1".to_string(), // Same cid
+                cid: "cns1".to_string(),       // Same cid
                 result_id: "rid2".to_string(), // Different rid - violation!
                 signature: "sig2".to_string(),
                 prestate_hash: "pre".to_string(),

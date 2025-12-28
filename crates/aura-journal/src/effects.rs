@@ -3,7 +3,8 @@ use crate::extensibility::FactRegistry;
 use async_trait::async_trait;
 use aura_core::effects::BiscuitAuthorizationEffects;
 use aura_core::effects::{CryptoEffects, JournalEffects, StorageEffects};
-use aura_core::flow::{FlowBudget, Receipt};
+use aura_core::epochs::Epoch;
+use aura_core::flow::FlowBudget;
 use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{
@@ -76,11 +77,7 @@ fn relational_context_id(rel: &crate::fact::RelationalFact) -> ContextId {
 }
 
 /// Domain-specific journal handler that persists state via StorageEffects
-pub struct JournalHandler<
-    C: CryptoEffects,
-    S: StorageEffects,
-    A: BiscuitAuthorizationEffects,
-> {
+pub struct JournalHandler<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> {
     crypto: C,
     storage: S,
     authorization: Option<A>,
@@ -91,9 +88,7 @@ pub struct JournalHandler<
     _phantom: PhantomData<()>,
 }
 
-impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects>
-    JournalHandler<C, S, A>
-{
+impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> JournalHandler<C, S, A> {
     /// Creates a new journal handler with a fresh authority ID.
     pub fn new(crypto: C, storage: S) -> Self {
         Self::with_authority(AuthorityId::default(), crypto, storage)
@@ -262,11 +257,8 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects>
 }
 
 #[async_trait]
-impl<
-        C: CryptoEffects,
-        S: StorageEffects,
-        A: BiscuitAuthorizationEffects + Send + Sync,
-    > JournalEffects for JournalHandler<C, S, A>
+impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send + Sync>
+    JournalEffects for JournalHandler<C, S, A>
 {
     async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
         for content in self.extract_fact_contents(delta) {
@@ -379,12 +371,7 @@ impl<
     }
 }
 
-impl<
-        C: CryptoEffects,
-        S: StorageEffects,
-        A: BiscuitAuthorizationEffects,
-    > JournalHandler<C, S, A>
-{
+impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> JournalHandler<C, S, A> {
     fn flow_budget_key(&self, context: &ContextId, peer: &AuthorityId) -> String {
         format!(
             "journal/flow-budget/{}/{}",
@@ -394,11 +381,8 @@ impl<
     }
 }
 
-impl<
-        C: CryptoEffects,
-        S: StorageEffects,
-        A: BiscuitAuthorizationEffects + Send + Sync,
-    > Default for JournalHandler<C, S, A>
+impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send + Sync> Default
+    for JournalHandler<C, S, A>
 where
     C: Default,
     S: Default,

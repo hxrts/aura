@@ -3,9 +3,9 @@
 //! Provides helpers for integrating the LocalStore with the TUI lifecycle.
 //! Handles loading preferences on startup and saving on shutdown.
 
+use crate::local_store::{ContactCache, LocalData, LocalStore, LocalStoreConfig, LocalStoreError};
 use aura_core::effects::StorageEffects;
 use aura_core::AuthorityId;
-use crate::local_store::{ContactCache, LocalData, LocalStore, LocalStoreConfig, LocalStoreError};
 use std::path::PathBuf;
 use std::sync::Arc;
 

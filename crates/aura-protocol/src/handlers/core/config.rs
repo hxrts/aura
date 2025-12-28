@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use aura_core::identifiers::DeviceId;
 
-use crate::handlers::{EffectType, ExecutionMode};
 use super::error::FactoryError;
+use crate::handlers::{EffectType, ExecutionMode};
 
 /// Configuration for handler factory
 #[derive(Debug, Clone)]

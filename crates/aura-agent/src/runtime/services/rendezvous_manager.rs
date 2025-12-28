@@ -538,13 +538,13 @@ impl RendezvousManager {
                 }
 
                 // Also cache the descriptor locally for rendezvous resolution.
-                cache
-                    .write()
-                    .await
-                    .insert(
-                        (peer_clone.descriptor.context_id, peer_clone.descriptor.authority_id),
-                        peer_clone.descriptor,
-                    );
+                cache.write().await.insert(
+                    (
+                        peer_clone.descriptor.context_id,
+                        peer_clone.descriptor.authority_id,
+                    ),
+                    peer_clone.descriptor,
+                );
 
                 tracing::info!(
                     authority = %peer.authority_id,

@@ -133,7 +133,8 @@ impl<S: MvState + Top> MvHandler<S> {
 
     /// Generate consistency proof for current state
     pub fn generate_consistency_proof(&self, participant: DeviceId) -> ConsistencyProof {
-        let state_bytes = aura_core::util::serialization::to_vec(&self.state).unwrap_or_else(|_| Vec::new());
+        let state_bytes =
+            aura_core::util::serialization::to_vec(&self.state).unwrap_or_else(|_| Vec::new());
         let constraint_hash: [u8; 32] = aura_core::hash::hash(&state_bytes);
 
         ConsistencyProof::new(constraint_hash, participant, current_timestamp())
@@ -148,7 +149,8 @@ impl<S: MvState + Top> MvHandler<S> {
         }
 
         let our_hash: [u8; 32] = {
-            let state_bytes = aura_core::util::serialization::to_vec(&self.state).unwrap_or_else(|_| Vec::new());
+            let state_bytes =
+                aura_core::util::serialization::to_vec(&self.state).unwrap_or_else(|_| Vec::new());
             aura_core::hash::hash(&state_bytes)
         };
 

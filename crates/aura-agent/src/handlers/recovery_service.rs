@@ -401,7 +401,7 @@ impl RecoveryService {
         key_package: &[u8],
     ) -> AgentResult<()> {
         use crate::core::AgentError;
-        
+
         use aura_core::effects::TransportEffects;
         use aura_core::ContextId;
         use aura_recovery::guardian_ceremony::CeremonyProposal;

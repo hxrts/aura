@@ -3,10 +3,14 @@
 //! This module uses aura-macros to standardize error categories and messages
 //! without relying on ad-hoc type aliases.
 
+#![allow(missing_docs)] // Macro-generated variants/fields
+
 use aura_macros::aura_error_types;
 
 aura_error_types! {
+    /// Storage error types for persistence operations
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    #[allow(missing_docs)]
     pub enum StorageError {
         #[category = "storage"]
         NotFound { key: String } => "Storage key not found: {key}",

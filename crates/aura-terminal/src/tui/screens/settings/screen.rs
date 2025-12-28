@@ -118,8 +118,7 @@ pub fn SettingsScreen(
                     })
                     .collect();
                 reactive_devices.set(devices);
-                reactive_threshold
-                    .set((settings_state.threshold_k, settings_state.threshold_n));
+                reactive_threshold.set((settings_state.threshold_k, settings_state.threshold_n));
             })
             .await;
         }
@@ -222,10 +221,7 @@ pub fn SettingsScreen(
                         "Add guardians from your contacts to".into(),
                         Theme::TEXT_MUTED,
                     ),
-                    (
-                        "enable account recovery.".into(),
-                        Theme::TEXT_MUTED,
-                    ),
+                    ("enable account recovery.".into(), Theme::TEXT_MUTED),
                     (String::new(), Theme::TEXT),
                     ("[Enter] Set up guardians".into(), Theme::SECONDARY),
                 ]
@@ -307,7 +303,10 @@ pub fn SettingsScreen(
 
                     // Show current authority info
                     if let Some(auth) = current_auth {
-                        lines.push((format!("Authority: {}", auth.display_name), Theme::SECONDARY));
+                        lines.push((
+                            format!("Authority: {}", auth.display_name),
+                            Theme::SECONDARY,
+                        ));
                         lines.push((format!("ID: {}", auth.short_id), Theme::TEXT_MUTED));
                     } else {
                         lines.push(("No authority configured".into(), Theme::WARNING));
@@ -346,10 +345,7 @@ pub fn SettingsScreen(
                             "Create a threshold signer set across your devices".into(),
                             Theme::TEXT_MUTED,
                         ),
-                        (
-                            "to approve sensitive operations.".into(),
-                            Theme::TEXT_MUTED,
-                        ),
+                        ("to approve sensitive operations.".into(), Theme::TEXT_MUTED),
                         (String::new(), Theme::TEXT),
                         (format!("Policy: {}", current_mfa.name()), Theme::TEXT),
                         (current_mfa.description().into(), Theme::TEXT_MUTED),

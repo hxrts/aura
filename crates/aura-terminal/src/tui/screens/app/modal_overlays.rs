@@ -10,7 +10,9 @@ use iocraft::prelude::*;
 use crate::tui::components::{
     AccountSetupModal, ConfirmModal, ContactSelectModal, HelpModal, ModalFrame, TextInputModal,
 };
-use crate::tui::props::{ChatViewProps, ContactsViewProps, NeighborhoodViewProps, SettingsViewProps};
+use crate::tui::props::{
+    ChatViewProps, ContactsViewProps, NeighborhoodViewProps, SettingsViewProps,
+};
 use crate::tui::screens::{
     BlockCreateModal, ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal,
     GuardianCandidateProps, GuardianSetupKind, GuardianSetupModal, InvitationCodeModal,

@@ -982,7 +982,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn test_sync_service_creation() {
         let config = SyncServiceConfig::default();

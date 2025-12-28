@@ -203,10 +203,6 @@ pub use aura_core::{
 pub use aura_authorization::{BiscuitError, BiscuitTokenManager, TokenAuthority};
 pub use biscuit_auth::Biscuit as BiscuitToken;
 
-// Deprecated alias for backward compatibility
-#[deprecated(since = "0.2.0", note = "Use TokenAuthority instead")]
-#[allow(deprecated)]
-pub use aura_authorization::AccountAuthority;
 
 // Re-export auth types
 pub use aura_authentication::{

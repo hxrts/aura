@@ -60,8 +60,8 @@ pub mod view_delta;
 
 // Re-export core types for convenience
 pub use registry::{
-    EffectCapability, EffectRegistry, Handler, HandlerContext, HandlerError, RegistrableHandler,
-    RegisterAllOptions, RegistryCapabilities, RegistryError,
+    EffectCapability, EffectRegistry, Handler, HandlerContext, HandlerError, RegisterAllOptions,
+    RegistrableHandler, RegistryCapabilities, RegistryError,
 };
 
 pub use composite::{

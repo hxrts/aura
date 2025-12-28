@@ -20,8 +20,8 @@ use aura_terminal::tui::props::{
     extract_chat_view_props, extract_contacts_view_props, extract_neighborhood_view_props,
     extract_settings_view_props,
 };
-use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::screens::ChatFocus;
+use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state_machine::{
     transition, ChatFocus as StateChatFocus, DetailFocus, DispatchCommand, NicknameModalState,
     QueuedModal, TuiCommand, TuiState,

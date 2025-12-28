@@ -25,8 +25,7 @@
 //! let bytes = bridge.random_bytes(32).await;
 //! ```
 
-use aura_protocol::effects::params::RandomBytesParams;
-use aura_protocol::handlers::{AuraContext, AuraHandler, EffectType, HandlerUtils};
+use crate::bridges::config::BridgeRuntimeConfig;
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::crypto::single_signer::SigningMode;
@@ -34,8 +33,9 @@ use aura_core::effects::crypto::{FrostKeyGenResult, SigningKeyGenResult};
 use aura_core::effects::random::RandomCoreEffects;
 use aura_core::effects::{CryptoCoreEffects, CryptoError, CryptoExtendedEffects};
 use aura_core::AuraError;
+use aura_protocol::effects::params::RandomBytesParams;
+use aura_protocol::handlers::{AuraContext, AuraHandler, EffectType, HandlerUtils};
 use std::sync::Arc;
-use crate::bridges::config::BridgeRuntimeConfig;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Newtype Wrapper to Avoid Orphan Rules
@@ -479,8 +479,8 @@ impl aura_core::effects::ConsoleEffects for TypedHandlerBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_protocol::handlers::core::erased::AuraHandlerFactory as ErasedAuraHandlerFactory;
     use aura_core::{DeviceId, ExecutionMode};
+    use aura_protocol::handlers::core::erased::AuraHandlerFactory as ErasedAuraHandlerFactory;
 
     #[tokio::test]
     async fn test_crypto_effects_bridge() {

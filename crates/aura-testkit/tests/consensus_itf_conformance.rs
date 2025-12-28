@@ -310,10 +310,7 @@ impl fmt::Display for InferredAction {
 }
 
 /// Infer action from state difference
-fn infer_action(
-    prev: &ITFState,
-    curr: &ITFState,
-) -> Vec<InferredAction> {
+fn infer_action(prev: &ITFState, curr: &ITFState) -> Vec<InferredAction> {
     let mut actions = Vec::new();
 
     // Check for epoch changes
@@ -386,7 +383,8 @@ fn test_itf_action_inference() {
 
     let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
 
-    let mut action_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut action_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -420,8 +418,11 @@ fn test_itf_action_inference() {
         .map(|(_, v)| v)
         .sum();
 
-    println!("✓ Inferred {} meaningful actions from {} transitions",
-             meaningful_actions, trace.states.len() - 1);
+    println!(
+        "✓ Inferred {} meaningful actions from {} transitions",
+        meaningful_actions,
+        trace.states.len() - 1
+    );
 }
 
 /// Test equivocator detection matches between states
@@ -527,7 +528,9 @@ fn compare_trace_states_with_divergence(
 /// Check if a divergence is expected based on inferred actions
 fn is_expected_divergence(actions: &[InferredAction], diff: &InstanceDiff) -> bool {
     // Proposals growing is expected for ApplyShare
-    let has_apply_share = actions.iter().any(|a| matches!(a, InferredAction::ApplyShare { .. }));
+    let has_apply_share = actions
+        .iter()
+        .any(|a| matches!(a, InferredAction::ApplyShare { .. }));
     let only_proposals_diff = diff.diffs.iter().all(|d| d.field.contains("proposals"));
 
     if has_apply_share && only_proposals_diff {
@@ -612,7 +615,10 @@ fn test_itf_state_comparison_with_divergence() {
         // In a strict conformance test, we would: panic!("Unexpected divergences detected");
     }
 
-    println!("✓ All {} state transitions analyzed with divergence reporting", trace.states.len() - 1);
+    println!(
+        "✓ All {} state transitions analyzed with divergence reporting",
+        trace.states.len() - 1
+    );
 }
 
 /// Demonstrate divergence report format with synthetic data
@@ -657,7 +663,9 @@ fn test_divergence_report_format() {
         "Should detect phase difference"
     );
     assert!(
-        diff.diffs.iter().any(|d| d.field == "fallback_timer_active"),
+        diff.diffs
+            .iter()
+            .any(|d| d.field == "fallback_timer_active"),
         "Should detect fallback_timer_active difference"
     );
     assert!(
@@ -668,9 +676,15 @@ fn test_divergence_report_format() {
     // Generate and verify report format
     let report = DivergenceReport::for_instance(5, &diff);
 
-    assert!(report.contains("DIVERGENCE DETECTED"), "Report should have header");
+    assert!(
+        report.contains("DIVERGENCE DETECTED"),
+        "Report should have header"
+    );
     assert!(report.contains("step 5"), "Report should show step index");
-    assert!(report.contains("cns_test"), "Report should show instance id");
+    assert!(
+        report.contains("cns_test"),
+        "Report should show instance id"
+    );
     assert!(report.contains("phase"), "Report should show phase field");
 
     println!("Divergence report format test:\n{}", report);
@@ -721,7 +735,10 @@ fn test_invariant_violation_with_divergence() {
     assert!(diff.diffs.iter().any(|d| d.field == "threshold"));
 
     // The diff clearly shows the threshold change
-    println!("Invariant violation diff:\n{}", DivergenceReport::for_instance(0, &diff));
+    println!(
+        "Invariant violation diff:\n{}",
+        DivergenceReport::for_instance(0, &diff)
+    );
 }
 
 /// Test action inference accuracy with divergence correlation
@@ -757,7 +774,9 @@ fn test_action_inference_with_divergence() {
                             InferredAction::EpochAdvance { .. } => "EpochAdvance",
                             InferredAction::NoOp => "NoOp",
                         };
-                        *action_divergence_correlation.entry(key.to_string()).or_insert(0) += 1;
+                        *action_divergence_correlation
+                            .entry(key.to_string())
+                            .or_insert(0) += 1;
                     }
                 }
             }
@@ -769,8 +788,10 @@ fn test_action_inference_with_divergence() {
         println!("  {}: {} divergences", action, count);
     }
 
-    println!("✓ Action inference correlated with {} total divergence instances",
-             action_divergence_correlation.values().sum::<usize>());
+    println!(
+        "✓ Action inference correlated with {} total divergence instances",
+        action_divergence_correlation.values().sum::<usize>()
+    );
 }
 
 // ============================================================================
@@ -842,10 +863,9 @@ fn validate_trace(path: &Path) -> Result<TraceValidationResult, String> {
     for state in &trace.states {
         for (cid, inst) in &state.instances {
             if let Err(e) = check_invariants(inst) {
-                result.invariant_violations.push(format!(
-                    "State {} instance {}: {:?}",
-                    state.index, cid, e
-                ));
+                result
+                    .invariant_violations
+                    .push(format!("State {} instance {}: {:?}", state.index, cid, e));
             }
         }
     }
@@ -999,8 +1019,10 @@ fn test_exhaustive_trace_conformance() {
     );
 
     println!();
-    println!("✓ All {} traces passed conformance testing ({} total states)",
-             passed, total_states);
+    println!(
+        "✓ All {} traces passed conformance testing ({} total states)",
+        passed, total_states
+    );
 }
 
 /// Test for minimum trace coverage

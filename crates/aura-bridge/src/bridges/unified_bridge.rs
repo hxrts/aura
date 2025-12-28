@@ -9,10 +9,12 @@ use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
 
-use aura_protocol::effects::*;
-use aura_protocol::handlers::{AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 use aura_core::hash::hash;
 use aura_mpst::LocalSessionType;
+use aura_protocol::effects::*;
+use aura_protocol::handlers::{
+    AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
+};
 use serde::Serialize;
 
 /// Type-erased bridge for dynamic handler composition
@@ -23,7 +25,9 @@ use serde::Serialize;
 /// - Runtime reconfiguration of effect implementations
 /// - Type-safe effect dispatch through trait objects
 /// - Middleware composition and decoration
-#[deprecated(note = "Prefer aura-protocol AuraHandler + aura-composition CompositeHandlerAdapter for unified dispatch.")]
+#[deprecated(
+    note = "Prefer aura-protocol AuraHandler + aura-composition CompositeHandlerAdapter for unified dispatch."
+)]
 pub struct UnifiedAuraHandlerBridge {
     /// The wrapped effect implementation
     effects: Arc<Mutex<dyn AuraEffects>>,
@@ -50,10 +54,12 @@ impl UnifiedAuraHandlerBridge {
         operation: &str,
         value: &T,
     ) -> Result<Vec<u8>, AuraHandlerError> {
-        aura_core::util::serialization::to_vec(value).map_err(|e| AuraHandlerError::EffectSerialization {
-            effect_type,
-            operation: operation.to_string(),
-            source: e.into(),
+        aura_core::util::serialization::to_vec(value).map_err(|e| {
+            AuraHandlerError::EffectSerialization {
+                effect_type,
+                operation: operation.to_string(),
+                source: e.into(),
+            }
         })
     }
 
@@ -136,12 +142,13 @@ impl UnifiedAuraHandlerBridge {
         R: serde::de::DeserializeOwned + Send,
     {
         // Serialize parameters
-        let param_bytes =
-            aura_core::util::serialization::to_vec(&params).map_err(|e| AuraHandlerError::EffectSerialization {
+        let param_bytes = aura_core::util::serialization::to_vec(&params).map_err(|e| {
+            AuraHandlerError::EffectSerialization {
                 effect_type,
                 operation: operation.to_string(),
                 source: e.into(),
-            })?;
+            }
+        })?;
 
         // Execute through the handler interface
         let result_bytes = self
@@ -149,10 +156,12 @@ impl UnifiedAuraHandlerBridge {
             .await?;
 
         // Deserialize the result
-        aura_core::util::serialization::from_slice(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
-            effect_type,
-            operation: operation.to_string(),
-            source: e.into(),
+        aura_core::util::serialization::from_slice(&result_bytes).map_err(|e| {
+            AuraHandlerError::EffectDeserialization {
+                effect_type,
+                operation: operation.to_string(),
+                source: e.into(),
+            }
         })
     }
 }
@@ -269,9 +278,9 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "send_to_peer" => {
-                let (peer_id, message): (uuid::Uuid, Vec<u8>) = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| AuraHandlerError::ParameterDeserializationFailed {
-                        source: e.into(),
+                let (peer_id, message): (uuid::Uuid, Vec<u8>) =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                     })?;
 
                 effects.send_to_peer(peer_id, message).await.map_err(|e| {
@@ -283,9 +292,10 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Network, operation, &())
             }
             "broadcast" => {
-                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
-                })?;
+                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ParameterDeserializationFailed {
+                        source: e.into(),
+                    })?;
 
                 effects.broadcast(message).await.map_err(|e| {
                     AuraHandlerError::ExecutionFailed {
@@ -340,9 +350,10 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Storage, operation, &())
             }
             "retrieve" => {
-                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
-                })?;
+                let key: String =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                    })?;
 
                 let result = effects.retrieve(&key).await.map_err(|e| {
                     AuraHandlerError::ExecutionFailed {
@@ -353,9 +364,10 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Storage, operation, &result)
             }
             "remove" => {
-                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
-                })?;
+                let key: String =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                    })?;
 
                 let result =
                     effects
@@ -383,17 +395,19 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "hash" => {
-                let data: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
-                })?;
+                let data: Vec<u8> = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ParameterDeserializationFailed {
+                        source: e.into(),
+                    })?;
 
                 let result = hash(&data);
                 self.serialize_result(EffectType::Crypto, operation, &result)
             }
             "random_bytes" => {
-                let len: usize = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
-                })?;
+                let len: usize =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                    })?;
 
                 let result = effects.random_bytes(len).await;
                 self.serialize_result(EffectType::Crypto, operation, &result)
@@ -408,10 +422,10 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Crypto, operation, &result)
             }
             "ed25519_sign" => {
-                let (message, private_key): (Vec<u8>, Vec<u8>) = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| {
-                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
-                })?;
+                let (message, private_key): (Vec<u8>, Vec<u8>) =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                    })?;
 
                 let result = effects
                     .ed25519_sign(&message, &private_key)
@@ -454,9 +468,10 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Time, operation, &result)
             }
             "sleep_ms" => {
-                let ms: u64 = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
-                })?;
+                let ms: u64 =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                    })?;
 
                 effects
                     .sleep_ms(ms)
@@ -539,9 +554,10 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "random_bytes" => {
-                let len: usize = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
-                })?;
+                let len: usize =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                    })?;
 
                 let result = effects.random_bytes(len).await;
                 self.serialize_result(EffectType::Random, operation, &result)
@@ -572,10 +588,10 @@ impl UnifiedAuraHandlerBridge {
             "current_epoch" => {
                 let result =
                     aura_protocol::effects::effect_api::EffectApiEffects::current_epoch(effects)
-                    .await
-                    .map_err(|e| AuraHandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                        .await
+                        .map_err(|e| AuraHandlerError::ExecutionFailed {
+                            source: Box::new(e),
+                        })?;
                 self.serialize_result(EffectType::EffectApi, operation, &result)
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
@@ -665,9 +681,10 @@ impl UnifiedAuraHandlerBridge {
                 self.serialize_result(EffectType::Choreographic, operation, &())
             }
             "broadcast_bytes" => {
-                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
-                })?;
+                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ParameterDeserializationFailed {
+                        source: e.into(),
+                    })?;
 
                 effects.broadcast_bytes(message).await.map_err(|e| {
                     AuraHandlerError::ExecutionFailed {

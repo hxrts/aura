@@ -152,7 +152,6 @@ mod tests {
             };
             Ok(keys)
         }
-
     }
 
     #[async_trait]

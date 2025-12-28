@@ -18,11 +18,11 @@
 use aura_agent::fact_registry::build_fact_registry;
 use aura_agent::reactive::{Dynamic, ReactiveScheduler, ReactiveView, SchedulerConfig};
 use aura_journal::fact::Fact;
-use tokio::task::yield_now;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
+use tokio::task::yield_now;
 
 fn scheduler_with_registry(
     config: SchedulerConfig,
@@ -85,11 +85,11 @@ async fn test_combine_consistent_snapshots() {
 
     let combined = a
         .combine(&b, move |x, y| {
-        if *x != *y {
-            inc_clone.fetch_add(1, Ordering::SeqCst);
-        }
-        (*x, *y)
-    })
+            if *x != *y {
+                inc_clone.fetch_add(1, Ordering::SeqCst);
+            }
+            (*x, *y)
+        })
         .await;
 
     // Subscribe to force evaluation

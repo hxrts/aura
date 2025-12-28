@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 #[cfg(not(feature = "simulation"))]
 #[test]
 fn default_features_are_minimal() {

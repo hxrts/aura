@@ -1,7 +1,7 @@
 //! Trace effect handler implementations.
 
 use async_trait::async_trait;
-use aura_core::effects::trace::{TraceEvent, TraceEffects, TraceSpanId};
+use aura_core::effects::trace::{TraceEffects, TraceEvent, TraceSpanId};
 use aura_core::hash::hash;
 use std::collections::BTreeMap;
 

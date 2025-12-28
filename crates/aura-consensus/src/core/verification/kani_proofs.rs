@@ -44,7 +44,9 @@
 
 use std::collections::BTreeSet;
 
-use super::super::state::{ConsensusPhase, ConsensusState, PathSelection, ShareData, ShareProposal};
+use super::super::state::{
+    ConsensusPhase, ConsensusState, PathSelection, ShareData, ShareProposal,
+};
 use super::super::transitions::{apply_share, fail_consensus, trigger_fallback, TransitionResult};
 use super::super::validation::check_invariants;
 

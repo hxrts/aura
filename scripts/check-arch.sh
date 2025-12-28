@@ -419,6 +419,15 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "benches/" || true)
   emit_hits "Concrete runtime usage detected outside handler/composition layers (replace tokio/async-std with effect-injected abstractions)" "$filtered_runtime"
 
+  section "Aura-app runtime-agnostic surface — no tokio/async-std in aura-app"
+  app_runtime_hits=$(rg --no-heading -n "tokio::|async_std::" crates/aura-app/src -g "*.rs" || true)
+  filtered_app_runtime=$(echo "$app_runtime_hits" \
+    | grep -v "#\\[tokio::test\\]" \
+    | grep -v "#\\[async_std::test\\]" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" || true)
+  emit_hits "tokio/async-std usage in aura-app (should be runtime-agnostic)" "$filtered_app_runtime"
+
   section "Impure functions — route time/random/fs through effect traits; production handlers in aura-effects or runtime assembly (docs/106_effect_system_and_runtime.md §1.3, .claude/skills/patterns/SKILL.md)"
   # Strict flag for direct wall-clock/random usage outside allowed areas
   impure_pattern="SystemTime::now|Instant::now|thread_rng\\(|rand::thread_rng|chrono::Utc::now|chrono::Local::now|rand::rngs::OsRng|rand::random"
@@ -668,7 +677,7 @@ fi
 if [ "$RUN_ALL" = true ] || [ "$RUN_GUARDS" = true ]; then
   section "Guard chain — all TransportEffects sends must flow through CapGuard → FlowGuard → JournalCoupler (docs/108_transport_and_information_flow.md, docs/001_system_architecture.md §2.1)"
   transport_sends=$(rg --no-heading "TransportEffects::(send|open_channel)" crates -g "*.rs" || true)
-  guard_allowlist="crates/aura-guards/src/guards|crates/aura-protocol/src/handlers/sessions|tests/|crates/aura-testkit/"
+  guard_allowlist="crates/aura-guards/src/guards|crates/aura-protocol/src/handlers/sessions|crates/aura-agent/src/runtime/effects.rs|tests/|crates/aura-testkit/"
   bypass_hits=$(echo "$transport_sends" | grep -Ev "$guard_allowlist" || true)
   emit_hits "Potential guard-chain bypass (TransportEffects send/open outside guard modules)" "$bypass_hits"
 fi

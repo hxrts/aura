@@ -276,7 +276,10 @@ pub fn apply_share_ref(state: &ConsensusState, proposal: ShareProposal) -> Trans
     }
 
     // Precondition 2: witness must not have already voted
-    let has_voted = state.proposals.iter().any(|p| p.witness == proposal.witness);
+    let has_voted = state
+        .proposals
+        .iter()
+        .any(|p| p.witness == proposal.witness);
     if has_voted {
         return TransitionResultRef::NotEnabled(format!(
             "witness {} already voted",

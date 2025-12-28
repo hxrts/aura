@@ -68,7 +68,10 @@ pub trait SyncCoreJournalEffects: JournalEffects + Send + Sync {}
 
 impl<T> SyncCoreJournalEffects for T where T: JournalEffects + Send + Sync {}
 
-pub trait SyncCoreProtocolEffects: SyncCoreJournalEffects + NetworkEffects + PhysicalTimeEffects {}
+pub trait SyncCoreProtocolEffects:
+    SyncCoreJournalEffects + NetworkEffects + PhysicalTimeEffects
+{
+}
 
 impl<T> SyncCoreProtocolEffects for T where
     T: SyncCoreJournalEffects + NetworkEffects + PhysicalTimeEffects

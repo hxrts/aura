@@ -23,13 +23,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_lock::RwLock;
+#[cfg(feature = "development")]
+use aura_agent::AuraAgent;
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
 use aura_app::AppCore;
-#[cfg(feature = "development")]
-use aura_agent::AuraAgent;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use crate::error::TerminalError;
@@ -38,8 +38,8 @@ use crate::tui::context::{
     AccountFilesHelper, DispatchHelper, InitializedAppCore, SnapshotHelper, ToastHelper,
 };
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
-use crate::tui::types::ChannelMode;
 use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::types::ChannelMode;
 
 use crate::tui::hooks::{
     BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,

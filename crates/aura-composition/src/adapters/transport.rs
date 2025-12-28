@@ -75,18 +75,18 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 Ok(Vec::new()) // send returns void
             }
             "broadcast" => {
-                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
-                    }
-                })?;
-                self.core.broadcast(message).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
+                    })?;
+                self.core
+                    .broadcast(message)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
-                    }
-                })?;
+                    })?;
                 Ok(Vec::new()) // broadcast returns void
             }
             "receive" => {
@@ -95,108 +95,121 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&received).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&received).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "receive_from" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                let peer_id: uuid::Uuid = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
-                    }
-                })?;
-                let peer_id: uuid::Uuid = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
-                let received = handler
-                    .receive_from(peer_id)
-                    .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&received).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                let received = handler.receive_from(peer_id).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                aura_core::util::serialization::to_vec(&received).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "connected_peers" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let peers = handler.connected_peers().await;
-                aura_core::util::serialization::to_vec(&peers).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "is_peer_connected" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
-                let peer_id: uuid::Uuid = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                aura_core::util::serialization::to_vec(&peers).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
+                })
+            }
+            "is_peer_connected" => {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                let peer_id: uuid::Uuid = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    })?;
                 let result = handler.is_peer_connected(peer_id).await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "subscribe_to_peer_events" => Err(HandlerError::ExecutionFailed {
                 source: "Peer event streams are not serializable in registry adapters".into(),
             }),
             "open" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                let address: String = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
-                    }
-                })?;
-                let address: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                        source: Box::new(e),
+                    })?;
+                let connection_id =
+                    handler
+                        .open(&address)
+                        .await
+                        .map_err(|e| HandlerError::ExecutionFailed {
+                            source: Box::new(e),
+                        })?;
+                aura_core::util::serialization::to_vec(&connection_id).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
-                let connection_id = handler.open(&address).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                aura_core::util::serialization::to_vec(&connection_id).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
                 })
             }
             "send" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let (connection_id, data): (String, Vec<u8>) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -213,24 +226,25 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 Ok(Vec::new())
             }
             "close" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
-                let connection_id: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                let connection_id: String = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
-                    }
-                })?;
-                handler.close(&connection_id).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
+                    })?;
+                handler
+                    .close(&connection_id)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
-                    }
-                })?;
+                    })?;
                 Ok(Vec::new())
             }
             _ => Err(HandlerError::UnknownOperation {

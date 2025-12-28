@@ -220,7 +220,9 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
         public_key_package: &[u8],
     ) -> Result<FrostSigningPackage, CryptoError> {
         let _ = (message, nonces, participants, public_key_package);
-        Err(AuraError::crypto("frost_create_signing_package not supported"))
+        Err(AuraError::crypto(
+            "frost_create_signing_package not supported",
+        ))
     }
 
     async fn frost_sign_share(
@@ -239,7 +241,9 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
         signature_shares: &[Vec<u8>],
     ) -> Result<Vec<u8>, CryptoError> {
         let _ = (signing_package, signature_shares);
-        Err(AuraError::crypto("frost_aggregate_signatures not supported"))
+        Err(AuraError::crypto(
+            "frost_aggregate_signatures not supported",
+        ))
     }
 
     async fn frost_verify(

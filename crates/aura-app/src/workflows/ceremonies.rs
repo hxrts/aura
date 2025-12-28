@@ -36,9 +36,7 @@ pub async fn start_device_threshold_ceremony(
     let core = app_core.read().await;
     core.initiate_device_threshold_ceremony(threshold_k, total_n, &device_ids)
         .await
-        .map_err(|e| {
-            AuraError::agent(format!("Failed to start device threshold ceremony: {}", e))
-        })
+        .map_err(|e| AuraError::agent(format!("Failed to start device threshold ceremony: {}", e)))
 }
 
 /// Start a device enrollment ("add device") ceremony.

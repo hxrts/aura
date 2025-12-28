@@ -12,7 +12,7 @@ trait definitions.
 - Bridged handler calls with stable serialization formats.
 
 ## Invariants
-- Production serialization uses bincode; JSON is debug-only.
+- Production serialization uses DAG-CBOR; JSON is debug-only.
 - Only one production type-erasure stack is supported; legacy bridge is deprecated.
 
 ## Boundaries

@@ -104,16 +104,16 @@ pub use aura_amp as amp;
 pub use aura_anti_entropy as sync;
 // Intentionally avoid re-exporting aura-consensus/aura-guards to keep crate ownership explicit.
 pub mod choreography;
+pub mod config;
 pub mod effects;
 pub mod error;
-pub mod config;
 pub mod facades; // High-level facade traits (Layer 4 appropriate - traits only, implementations in Layer 6)
 pub mod handlers;
 pub mod messages;
+pub mod prelude;
 pub mod session; // Session orchestration types (SessionStatus, SessionOutcome)
 pub mod state;
 pub mod types; // Protocol orchestration types
-pub mod prelude;
 
 pub use error::ProtocolError;
 
@@ -162,7 +162,6 @@ pub mod orchestration {
 
     // Protocol messaging
     pub use crate::messages::{AuraMessage, CryptoMessage, CryptoPayload, WIRE_FORMAT_VERSION};
-
 }
 
 /// Standard effect composition patterns and bundles

@@ -243,7 +243,9 @@ impl SocialFact {
                 sub_type: "storage-updated",
                 data: block_id.0.to_vec(),
             },
-            SocialFact::NeighborhoodCreated { neighborhood_id, .. } => SocialFactKey {
+            SocialFact::NeighborhoodCreated {
+                neighborhood_id, ..
+            } => SocialFactKey {
                 sub_type: "neighborhood-created",
                 data: neighborhood_id.0.to_vec(),
             },

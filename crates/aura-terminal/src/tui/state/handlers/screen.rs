@@ -9,8 +9,8 @@ use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::QueuedModal;
 use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
-    AddDeviceModalState, ChatFocus, DetailFocus, DisplayNameModalState,
-    ImportInvitationModalState, NeighborhoodMode,
+    AddDeviceModalState, ChatFocus, DetailFocus, DisplayNameModalState, ImportInvitationModalState,
+    NeighborhoodMode,
 };
 use super::super::TuiState;
 
@@ -197,9 +197,9 @@ pub fn handle_neighborhood_key(
             }
             KeyCode::Char('a') => {
                 // Open accept invitation modal
-                state
-                    .modal_queue
-                    .enqueue(QueuedModal::ContactsImport(ImportInvitationModalState::default()));
+                state.modal_queue.enqueue(QueuedModal::ContactsImport(
+                    ImportInvitationModalState::default(),
+                ));
             }
             KeyCode::Char('i') => {
                 // Enter block in insert mode (like chat screen)
@@ -261,7 +261,8 @@ pub fn handle_neighborhood_key(
                     );
                 }
                 DetailFocus::Messages => {
-                    state.neighborhood.message_scroll = state.neighborhood.message_scroll.saturating_sub(1);
+                    state.neighborhood.message_scroll =
+                        state.neighborhood.message_scroll.saturating_sub(1);
                 }
                 DetailFocus::Input => {}
             },
@@ -281,7 +282,8 @@ pub fn handle_neighborhood_key(
                     );
                 }
                 DetailFocus::Messages => {
-                    state.neighborhood.message_scroll = state.neighborhood.message_scroll.saturating_add(1);
+                    state.neighborhood.message_scroll =
+                        state.neighborhood.message_scroll.saturating_add(1);
                 }
                 DetailFocus::Input => {}
             },
@@ -309,8 +311,7 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
         KeyCode::Left | KeyCode::Char('h') => {
             if in_authority_detail {
                 // Navigate between sub-sections within Authority panel
-                state.settings.authority_sub_section =
-                    state.settings.authority_sub_section.prev();
+                state.settings.authority_sub_section = state.settings.authority_sub_section.prev();
             } else {
                 state.settings.focus = state.settings.focus.toggle();
             }
@@ -318,8 +319,7 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
         KeyCode::Right | KeyCode::Char('l') => {
             if in_authority_detail {
                 // Navigate between sub-sections within Authority panel
-                state.settings.authority_sub_section =
-                    state.settings.authority_sub_section.next();
+                state.settings.authority_sub_section = state.settings.authority_sub_section.next();
             } else {
                 state.settings.focus = state.settings.focus.toggle();
             }
@@ -404,11 +404,9 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
         }
         KeyCode::Char('i') => {
             if state.settings.section == SettingsSection::Devices {
-                state
-                    .modal_queue
-                    .enqueue(QueuedModal::SettingsDeviceImport(
-                        ImportInvitationModalState::default(),
-                    ));
+                state.modal_queue.enqueue(QueuedModal::SettingsDeviceImport(
+                    ImportInvitationModalState::default(),
+                ));
                 if !state.settings.demo_mobile_device_id.is_empty() {
                     state.next_toast_id += 1;
                     state.toast_queue.enqueue(QueuedToast::new(
@@ -425,8 +423,7 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             } else if state.settings.section == SettingsSection::Authority {
                 // Switch authority - open picker if multiple authorities available
                 if state.settings.authorities.len() > 1 {
-                    commands
-                        .push(TuiCommand::Dispatch(DispatchCommand::OpenAuthorityPicker));
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::OpenAuthorityPicker));
                 }
             }
         }

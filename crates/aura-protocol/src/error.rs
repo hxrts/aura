@@ -3,11 +3,11 @@
 //! This consolidates overlapping error enums (consensus, guards, messaging)
 //! and provides straightforward conversions between them.
 
-use aura_consensus::ConsensusError;
-use aura_guards::GuardError;
-use aura_core::AuraError;
-use aura_core::effects::amp::AmpChannelError;
 use aura_anti_entropy::SyncError;
+use aura_consensus::ConsensusError;
+use aura_core::effects::amp::AmpChannelError;
+use aura_core::AuraError;
+use aura_guards::GuardError;
 use thiserror::Error;
 
 /// Error types for protocol orchestration.

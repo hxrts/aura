@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::{Bottom, JoinSemilattice};
 use aura_protocol::state::peer_view::PeerView;

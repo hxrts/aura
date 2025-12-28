@@ -83,7 +83,6 @@ impl RandomCoreEffects for DeterministicRandom {
         let mut rng = self.rng.lock().await;
         rng.next_u64()
     }
-
 }
 
 // RandomExtendedEffects is provided by blanket impl in aura_core

@@ -1,6 +1,7 @@
 //! Moderation fact type ID constants
 
 /// Schema version for moderation fact payloads.
+#[allow(dead_code)]
 pub const MODERATION_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Fact type ID for muting a user in a context or channel

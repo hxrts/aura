@@ -61,6 +61,7 @@
 //! - WASM compatibility (pure guards can run in WASM)
 //! - Clear separation between business logic and I/O
 
+use crate::Layer3Error;
 use async_trait::async_trait;
 use aura_core::{
     effects::{
@@ -72,7 +73,6 @@ use aura_core::{
     identifiers::AuthorityId,
     AuraError, AuraResult as Result,
 };
-use crate::Layer3Error;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
@@ -192,7 +192,10 @@ where
                 // Get current journal, merge the new fact, and persist
                 let current = self.journal.get_journal().await.map_err(|e| {
                     error!("Failed to get current journal: {}", e);
-                    AuraError::from(Layer3Error::handler_failure(format!("Failed to get journal: {}", e)))
+                    AuraError::from(Layer3Error::handler_failure(format!(
+                        "Failed to get journal: {}",
+                        e
+                    )))
                 })?;
 
                 // Create a delta journal containing the new fact to be merged
@@ -205,13 +208,19 @@ where
                     .await
                     .map_err(|e| {
                         error!("Failed to merge facts: {}", e);
-                        AuraError::from(Layer3Error::handler_failure(format!("Failed to merge: {}", e)))
+                        AuraError::from(Layer3Error::handler_failure(format!(
+                            "Failed to merge: {}",
+                            e
+                        )))
                     })?;
 
                 // Persist the updated journal
                 self.journal.persist_journal(&updated).await.map_err(|e| {
                     error!("Failed to persist journal: {}", e);
-                    AuraError::from(Layer3Error::handler_failure(format!("Failed to persist: {}", e)))
+                    AuraError::from(Layer3Error::handler_failure(format!(
+                        "Failed to persist: {}",
+                        e
+                    )))
                 })?;
 
                 info!(
@@ -251,7 +260,10 @@ where
 
                 self.leakage.record_leakage(event).await.map_err(|e| {
                     error!("Failed to record leakage: {}", e);
-                    AuraError::from(Layer3Error::handler_failure(format!("Failed to record leakage: {}", e)))
+                    AuraError::from(Layer3Error::handler_failure(format!(
+                        "Failed to record leakage: {}",
+                        e
+                    )))
                 })?;
 
                 info!(bits, "Successfully recorded leakage");
@@ -267,7 +279,10 @@ where
 
                 self.storage.store(&key, data).await.map_err(|e| {
                     error!("Failed to store metadata: {}", e);
-                    AuraError::from(Layer3Error::handler_failure(format!("Failed to store: {}", e)))
+                    AuraError::from(Layer3Error::handler_failure(format!(
+                        "Failed to store: {}",
+                        e
+                    )))
                 })?;
 
                 info!(key, "Successfully stored metadata");
@@ -275,7 +290,11 @@ where
                 Ok(EffectResult::Success)
             }
 
-            EffectCommand::SendEnvelope { to, peer_id, envelope } => {
+            EffectCommand::SendEnvelope {
+                to,
+                peer_id,
+                envelope,
+            } => {
                 debug!(
                     to = ?to,
                     envelope_size = envelope.len(),
@@ -297,7 +316,10 @@ where
                     .await
                     .map_err(|e| {
                         error!("Failed to send envelope: {}", e);
-                        AuraError::from(Layer3Error::handler_failure(format!("Failed to send: {}", e)))
+                        AuraError::from(Layer3Error::handler_failure(format!(
+                            "Failed to send: {}",
+                            e
+                        )))
                     })?;
 
                 info!(
@@ -437,7 +459,9 @@ mod tests {
                     sig: vec![],
                 })
             } else {
-                Err(AuraError::from(Layer3Error::invalid_input("Insufficient budget")))
+                Err(AuraError::from(Layer3Error::invalid_input(
+                    "Insufficient budget",
+                )))
             }
         }
     }
@@ -582,7 +606,6 @@ mod tests {
 
     #[async_trait]
     impl NetworkExtendedEffects for MockNetworkEffects {
-
         async fn receive_from(
             &self,
             _peer_id: uuid::Uuid,
@@ -648,7 +671,6 @@ mod tests {
         async fn random_u64(&self) -> u64 {
             42
         }
-
     }
 
     // RandomExtendedEffects is provided by the blanket impl in aura-core.

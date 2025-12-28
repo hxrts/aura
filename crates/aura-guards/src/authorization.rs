@@ -15,8 +15,8 @@
     clippy::disallowed_methods, // Guard chain coordinates time/random effects
     deprecated // Deprecated time/random functions used intentionally for effect coordination
 )]
-use aura_core::identifiers::AuthorityId;
 use aura_authorization::{BiscuitError, ResourceScope};
+use aura_core::identifiers::AuthorityId;
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 
 pub struct BiscuitAuthorizationBridge {

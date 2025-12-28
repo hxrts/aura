@@ -50,7 +50,6 @@ impl RandomCoreEffects for RealRandomHandler {
         use rand::Rng;
         rand::thread_rng().gen()
     }
-
 }
 
 // MockRandomHandler moved to aura-testkit

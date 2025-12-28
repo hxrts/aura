@@ -11,10 +11,8 @@ use uuid::Uuid;
 use aura_core::identifiers::DeviceId;
 use aura_core::{AccountId, SessionId};
 
+use super::{AgentContext, ChoreographicContext, MiddlewareContext, SimulationContext};
 use crate::handlers::ExecutionMode;
-use super::{
-    AgentContext, ChoreographicContext, MiddlewareContext, SimulationContext,
-};
 
 /// Immutable unified context for all Aura operations
 ///

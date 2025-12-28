@@ -325,7 +325,8 @@ impl FactSyncProtocol {
     /// Get local Bloom filter for exchange with peer
     pub async fn local_bloom_filter(&self) -> Result<Vec<u8>, AuraError> {
         let filter = self.verifier.local_bloom_filter().await?;
-        aura_core::util::serialization::to_vec(&filter).map_err(|err| AuraError::serialization(err.to_string()))
+        aura_core::util::serialization::to_vec(&filter)
+            .map_err(|err| AuraError::serialization(err.to_string()))
     }
 
     /// Get protocol configuration

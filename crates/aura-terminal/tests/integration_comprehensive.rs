@@ -25,9 +25,8 @@
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state_machine::{
-    transition, ChannelInfoModalState, ChatFocus, CreateChannelModalState, DetailFocus,
-    CreateChannelStep, DispatchCommand, ModalType, QueuedModal, TopicModalState, TuiCommand,
-    TuiState,
+    transition, ChannelInfoModalState, ChatFocus, CreateChannelModalState, CreateChannelStep,
+    DetailFocus, DispatchCommand, ModalType, QueuedModal, TopicModalState, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::SettingsSection;
 use proptest::prelude::*;
@@ -370,13 +369,11 @@ mod chat_screen {
         assert_eq!(tui.state.chat_create_modal_state().unwrap().name, "general");
 
         // Advance to threshold step so Enter submits (creates channel directly).
-        tui.state
-            .modal_queue
-            .update_active(|modal| {
-                if let QueuedModal::ChatCreate(ref mut s) = modal {
-                    s.step = CreateChannelStep::Threshold;
-                }
-            });
+        tui.state.modal_queue.update_active(|modal| {
+            if let QueuedModal::ChatCreate(ref mut s) = modal {
+                s.step = CreateChannelStep::Threshold;
+            }
+        });
 
         // Submit with Enter
         tui.clear_commands();
@@ -898,10 +895,10 @@ mod modals {
 
         // Test all modal types that can be opened
         let modal_openers = vec![
-            (Screen::Neighborhood, '?'),    // Help
-            (Screen::Chat, 'n'),     // Create channel
-            (Screen::Chat, 't'),     // Set topic
-            (Screen::Contacts, 'e'), // Edit nickname
+            (Screen::Neighborhood, '?'), // Help
+            (Screen::Chat, 'n'),         // Create channel
+            (Screen::Chat, 't'),         // Set topic
+            (Screen::Contacts, 'e'),     // Edit nickname
         ];
 
         for (screen, key) in modal_openers {
@@ -947,16 +944,13 @@ mod modals {
         assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenGuardianSetup)));
 
         // Simulate the shell opening the modal.
-        tui.state
-            .modal_queue
-            .enqueue(QueuedModal::GuardianSetup(
-                aura_terminal::tui::state_machine::GuardianSetupModalState::default(),
-            ));
+        tui.state.modal_queue.enqueue(QueuedModal::GuardianSetup(
+            aura_terminal::tui::state_machine::GuardianSetupModalState::default(),
+        ));
         assert!(tui.state.is_guardian_setup_modal_active());
 
         // Set up contacts for navigation to work (must modify the queued modal)
-        if let Some(QueuedModal::GuardianSetup(ref mut state)) =
-            tui.state.modal_queue.current_mut()
+        if let Some(QueuedModal::GuardianSetup(ref mut state)) = tui.state.modal_queue.current_mut()
         {
             state.contacts = vec![
                 aura_terminal::tui::state_machine::GuardianCandidate {
@@ -1187,13 +1181,7 @@ mod stress {
 
 fn screen_key_strategy() -> impl Strategy<Value = char> {
     // 5 screens: Neighborhood(1), Chat(2), Contacts(3), Notifications(4), Settings(5)
-    prop_oneof![
-        Just('1'),
-        Just('2'),
-        Just('3'),
-        Just('4'),
-        Just('5'),
-    ]
+    prop_oneof![Just('1'), Just('2'), Just('3'), Just('4'), Just('5'),]
 }
 
 fn navigation_key_strategy() -> impl Strategy<Value = char> {
@@ -1432,16 +1420,13 @@ mod integration {
         tui.clear_commands();
         tui.send_char('g');
         assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenGuardianSetup)));
-        tui.state
-            .modal_queue
-            .enqueue(QueuedModal::GuardianSetup(
-                aura_terminal::tui::state_machine::GuardianSetupModalState::default(),
-            ));
+        tui.state.modal_queue.enqueue(QueuedModal::GuardianSetup(
+            aura_terminal::tui::state_machine::GuardianSetupModalState::default(),
+        ));
         assert!(tui.state.is_guardian_setup_modal_active());
 
         // 2b. Populate contacts in the modal (shell would normally do this)
-        if let Some(QueuedModal::GuardianSetup(ref mut state)) =
-            tui.state.modal_queue.current_mut()
+        if let Some(QueuedModal::GuardianSetup(ref mut state)) = tui.state.modal_queue.current_mut()
         {
             state.contacts = vec![
                 aura_terminal::tui::state_machine::GuardianCandidate {
@@ -1465,7 +1450,10 @@ mod integration {
         // 4. Proceed to threshold selection
         tui.send_enter();
         if let Some(QueuedModal::GuardianSetup(state)) = tui.state.modal_queue.current() {
-            assert_eq!(state.step, aura_terminal::tui::state_machine::GuardianSetupStep::ChooseThreshold);
+            assert_eq!(
+                state.step,
+                aura_terminal::tui::state_machine::GuardianSetupStep::ChooseThreshold
+            );
         } else {
             unreachable!("guardian setup modal missing after enter");
         }
@@ -1473,10 +1461,7 @@ mod integration {
         // 5. Start ceremony
         tui.clear_commands();
         tui.send_enter();
-        assert!(tui.has_dispatch(|d| matches!(
-            d,
-            DispatchCommand::StartGuardianCeremony { .. }
-        )));
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::StartGuardianCeremony { .. })));
     }
 
     #[test]

@@ -154,8 +154,11 @@ impl ConsensusProtocol {
         key_packages: HashMap<AuthorityId, Share>,
         group_public_key: PublicKeyPackage,
     ) -> Result<Self> {
-        let frost_orchestrator =
-            FrostConsensusOrchestrator::new(config.clone(), key_packages, group_public_key.clone())?;
+        let frost_orchestrator = FrostConsensusOrchestrator::new(
+            config.clone(),
+            key_packages,
+            group_public_key.clone(),
+        )?;
 
         Ok(Self {
             authority_id,
@@ -180,7 +183,7 @@ impl ConsensusProtocol {
 
         // Compute hashes
         let prestate_hash = prestate.compute_hash();
-        let operation_hash = crate::consensus::hash_operation(&operation_bytes)?;
+        let operation_hash = crate::hash_operation(&operation_bytes)?;
 
         let request = ConsensusRequest {
             prestate_hash,

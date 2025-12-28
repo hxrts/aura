@@ -6,7 +6,9 @@
 
 use super::{TransportConfig, TransportConnection, TransportError, TransportResult};
 use async_trait::async_trait;
-use aura_core::effects::{NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream};
+use aura_core::effects::{
+    NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream,
+};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use tokio::net::TcpStream;

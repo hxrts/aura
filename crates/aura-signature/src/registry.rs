@@ -4,9 +4,8 @@
 //! and authority management. Tracks authority lifecycle and organizational status.
 
 use aura_core::{
-    AuthorityId,
     tree::{verify_attested_op, AttestedOp, BranchSigningKey},
-    AccountId, AuraError, AuraResult, Cap, Epoch, Hash32, Policy,
+    AccountId, AuraError, AuraResult, AuthorityId, Cap, Epoch, Hash32, Policy,
 };
 use std::collections::HashMap;
 
@@ -209,11 +208,7 @@ impl AuthorityRegistry {
             .ok_or_else(|| AuraError::not_found("Unknown authority"))?;
 
         authority_info.status = status;
-        tracing::info!(
-            "Updated authority {} status to {:?}",
-            authority_id,
-            status
-        );
+        tracing::info!("Updated authority {} status to {:?}", authority_id, status);
         Ok(())
     }
 }

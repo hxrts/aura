@@ -21,7 +21,10 @@ pub struct MessagePanelProps {
 pub fn MessagePanel(props: &MessagePanelProps) -> impl Into<AnyElement<'static>> {
     let messages = props.messages.clone();
     let title = props.title.clone().filter(|value| !value.is_empty());
-    let empty_message = props.empty_message.clone().filter(|value| !value.is_empty());
+    let empty_message = props
+        .empty_message
+        .clone()
+        .filter(|value| !value.is_empty());
 
     let panel_padding = Spacing::PANEL_PADDING;
     let padding_top = if title.is_some() { 0 } else { panel_padding };

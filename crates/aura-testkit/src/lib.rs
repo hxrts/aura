@@ -116,9 +116,9 @@ pub mod consensus; // ITF conformance and differential testing for consensus
 pub mod differential; // Lean oracle differential testing (T7.11)
 pub mod effect_api;
 pub mod fixtures;
+pub mod flow_budget;
 pub mod foundation;
 pub mod handlers; // Test and mock handlers moved from aura-protocol
-pub mod flow_budget;
 pub mod infrastructure;
 pub mod mock_effects;
 pub mod mock_runtime_bridge;

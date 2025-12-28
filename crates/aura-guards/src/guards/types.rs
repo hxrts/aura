@@ -193,10 +193,21 @@ impl GuardOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GuardOperationId {
     AmpSend,
-    SyncRequestDigest { peer: uuid::Uuid },
-    SyncRequestOps { peer: uuid::Uuid, count: usize },
-    SyncAnnounceOp { peer: uuid::Uuid, cid: aura_core::Hash32 },
-    SyncPushOp { peer: uuid::Uuid, cid: aura_core::Hash32 },
+    SyncRequestDigest {
+        peer: uuid::Uuid,
+    },
+    SyncRequestOps {
+        peer: uuid::Uuid,
+        count: usize,
+    },
+    SyncAnnounceOp {
+        peer: uuid::Uuid,
+        cid: aura_core::Hash32,
+    },
+    SyncPushOp {
+        peer: uuid::Uuid,
+        cid: aura_core::Hash32,
+    },
     Custom(String),
 }
 

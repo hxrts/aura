@@ -61,8 +61,8 @@ mod tests {
     use super::*;
     use crate::tui::screens::Screen;
     use crate::tui::state::commands::DispatchCommand;
-    use crate::tui::state::{DetailFocus, NeighborhoodMode};
     use crate::tui::state::ModalType;
+    use crate::tui::state::{DetailFocus, NeighborhoodMode};
     use aura_core::effects::terminal::events;
 
     #[test]
@@ -244,8 +244,8 @@ mod tests {
     #[test]
     fn test_mfa_modal_escape_preserves_settings_focus() {
         use crate::tui::navigation::TwoPanelFocus;
-        use crate::tui::state::views::GuardianSetupModalState;
         use crate::tui::state::modal_queue::QueuedModal;
+        use crate::tui::state::views::GuardianSetupModalState;
         use crate::tui::types::SettingsSection;
 
         // Start on Settings screen, Authority section, focus on List
@@ -256,7 +256,9 @@ mod tests {
 
         // Enqueue MFA setup modal (simulates shell's OpenMfaSetup dispatch)
         let modal_state = GuardianSetupModalState::default();
-        state.modal_queue.enqueue(QueuedModal::MfaSetup(modal_state));
+        state
+            .modal_queue
+            .enqueue(QueuedModal::MfaSetup(modal_state));
         assert!(state.has_queued_modal());
 
         // Press Escape to dismiss the modal

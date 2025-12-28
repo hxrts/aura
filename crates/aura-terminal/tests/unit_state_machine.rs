@@ -32,7 +32,8 @@ use aura_terminal::tui::navigation::TwoPanelFocus;
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state_machine::{
     ChatFocus, ChatMemberCandidate, ChatMemberSelectModalState, ContactSelectModalState,
-    CreateChannelModalState, CreateChannelStep, DispatchCommand, ModalType, QueuedModal, TuiCommand,
+    CreateChannelModalState, CreateChannelStep, DispatchCommand, ModalType, QueuedModal,
+    TuiCommand,
 };
 use aura_terminal::tui::types::SettingsSection;
 use proptest::prelude::*;
@@ -522,13 +523,7 @@ fn test_long_text_input_deterministic() {
 
 /// Strategy for generating valid screen numbers (1-5, Invitations merged into Contacts)
 fn screen_key_strategy() -> impl Strategy<Value = char> {
-    prop_oneof![
-        Just('1'),
-        Just('2'),
-        Just('3'),
-        Just('4'),
-        Just('5'),
-    ]
+    prop_oneof![Just('1'), Just('2'), Just('3'), Just('4'), Just('5'),]
 }
 
 /// Strategy for generating terminal events

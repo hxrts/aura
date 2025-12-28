@@ -34,11 +34,13 @@
 //! ```
 
 use crate::core::IntentError;
+use crate::ReactiveHandler;
 use async_trait::async_trait;
 use aura_core::effects::amp::{
     AmpCiphertext, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
     ChannelSendParams,
 };
+use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{
     ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
@@ -47,7 +49,6 @@ use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::FrostThreshold;
 use aura_core::DeviceId;
 use aura_effects::PhysicalTimeHandler;
-use crate::ReactiveHandler;
 use aura_journal::fact::RelationalFact;
 use std::sync::Arc;
 
@@ -314,6 +315,20 @@ pub trait RuntimeBridge: Send + Sync {
     /// driven by the ReactiveScheduler. Frontends should subscribe/read from
     /// this handler rather than maintaining parallel state.
     fn reactive_handler(&self) -> ReactiveHandler;
+
+    /// Optional runtime task spawner for background work.
+    ///
+    /// Runtime implementations can provide a portable task spawner so
+    /// `aura-app` can schedule background work without binding to tokio.
+    fn task_spawner(&self) -> Option<Arc<dyn TaskSpawner>> {
+        None
+    }
+
+    /// Optional runtime cancellation token for background work.
+    fn cancellation_token(&self) -> Option<Arc<dyn CancellationToken>> {
+        self.task_spawner()
+            .map(|spawner| spawner.cancellation_token())
+    }
 
     // =========================================================================
     // Typed Fact Commit (Canonical)

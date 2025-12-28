@@ -462,7 +462,6 @@ where
         }
         self.inner.list_keys(prefix).await
     }
-
 }
 
 #[async_trait]
@@ -563,7 +562,9 @@ where
 mod tests {
     use super::*;
     use aura_core::effects::storage::StorageStats;
-    use aura_core::effects::{CryptoCoreEffects, CryptoExtendedEffects, StorageCoreEffects, StorageExtendedEffects};
+    use aura_core::effects::{
+        CryptoCoreEffects, CryptoExtendedEffects, StorageCoreEffects, StorageExtendedEffects,
+    };
     use aura_core::time::PhysicalTime;
     use std::sync::RwLock;
 
@@ -607,7 +608,6 @@ mod tests {
 
     #[async_trait]
     impl StorageExtendedEffects for MockStorage {
-
         async fn exists(&self, key: &str) -> Result<bool, StorageError> {
             Ok(self.data.read().unwrap().contains_key(key))
         }
@@ -730,7 +730,6 @@ mod tests {
 
     #[async_trait]
     impl CryptoExtendedEffects for MockCrypto {
-
         async fn generate_signing_keys(
             &self,
             _threshold: u16,
@@ -880,7 +879,6 @@ mod tests {
             self.frost_generate_keys(new_threshold, new_max_signers)
                 .await
         }
-
     }
 
     struct MockSecureStorage {
@@ -1170,8 +1168,6 @@ mod tests {
         assert_eq!(retrieved, b"legacy-data");
 
         let raw = encrypted.inner().retrieve("legacy").await.unwrap().unwrap();
-        assert!(EncryptedStorage::<MockStorage, MockCrypto, MockSecureStorage>::is_encrypted(
-            &raw
-        ));
+        assert!(EncryptedStorage::<MockStorage, MockCrypto, MockSecureStorage>::is_encrypted(&raw));
     }
 }

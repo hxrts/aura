@@ -48,11 +48,11 @@
 //! relationship invitations (contacts/guardian/channel).
 
 use aura_core::domain::FactValue;
-use aura_journal::DomainFact;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::ThresholdSignature;
 use aura_core::{AuraError, AuraResult, Hash32};
+use aura_journal::DomainFact;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

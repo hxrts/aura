@@ -109,8 +109,8 @@
 pub mod chain; // SendGuardChain (guard chain orchestration)
 pub mod config;
 pub mod deltas;
-pub mod executor;
 pub mod execution;
+pub mod executor;
 pub mod flow;
 pub mod journal; // JournalCoupler
 pub mod policy; // Effect policy guards
@@ -124,13 +124,13 @@ pub mod biscuit_evaluator;
 pub mod capability_guard;
 
 // Core re-exports
-pub use traits::GuardContextProvider;
-pub use flow::FlowGuard;
 pub use aura_core::effects::{FlowBudgetEffects, FlowHint};
+pub use chain::{create_send_guard, create_send_guard_op, SendGuardChain, SendGuardResult};
+pub use flow::FlowGuard;
 pub use journal::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
-pub use chain::{create_send_guard, create_send_guard_op, SendGuardChain, SendGuardResult};
+pub use traits::GuardContextProvider;
 pub use types::{GuardOperation, GuardOperationId};
 
 use aura_core::effects::{
@@ -409,9 +409,7 @@ pub use biscuit_evaluator::{BiscuitGuardEvaluator, GuardError, GuardResult};
 pub use capability_guard::{CapabilityGuard, CapabilityGuardExt};
 
 // Re-export policy guard types
-pub use policy::{
-    EffectPolicyError, EffectPolicyExt, EffectPolicyGuard, EffectPolicyResult,
-};
+pub use policy::{EffectPolicyError, EffectPolicyExt, EffectPolicyGuard, EffectPolicyResult};
 
 // Re-export executor functions for choreography integration
 pub use executor::{

@@ -1,15 +1,15 @@
 use super::config::AntiEntropyRuntimeConfig;
 use super::effects::{AntiEntropyConfig, BloomDigest, SyncError};
 use super::pure;
-use aura_guards::chain::create_send_guard_op;
-use aura_guards::traits::GuardContextProvider;
-use aura_guards::GuardEffects;
-use aura_guards::{GuardOperation, GuardOperationId};
 use async_lock::RwLock;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::TransportEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{tree::AttestedOp, Hash32};
+use aura_guards::chain::create_send_guard_op;
+use aura_guards::traits::GuardContextProvider;
+use aura_guards::GuardEffects;
+use aura_guards::{GuardOperation, GuardOperationId};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -125,7 +125,9 @@ impl AntiEntropyHandler {
 
     /// Compute which CIDs we should pull from peer
     fn compute_cids_to_pull(&self, local: &BloomDigest, remote: &BloomDigest) -> Vec<Hash32> {
-        pure::compute_cids_to_pull(local, remote).into_iter().collect()
+        pure::compute_cids_to_pull(local, remote)
+            .into_iter()
+            .collect()
     }
 
     /// Verify operation before storing

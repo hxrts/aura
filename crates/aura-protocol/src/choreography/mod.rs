@@ -52,11 +52,11 @@ pub mod handler_bridge;
 pub use crdt_sync::{CrdtOperation, CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 
 // Re-export the clean handler bridge traits
+pub use executor::MpstExecutor;
 pub use handler_bridge::{
     ChoreographicAdapter, ChoreographicEndpoint, ChoreographicHandler, DefaultEndpoint,
     EffectsChoreographicAdapter, SendGuardProfile,
 };
-pub use executor::MpstExecutor;
 
 // NOTE: Epoch management has been moved to aura-sync (Layer 5)
 // Import aura-sync directly if you need epoch coordination protocols

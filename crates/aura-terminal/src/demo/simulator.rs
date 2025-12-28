@@ -13,8 +13,8 @@ use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 
 use aura_agent::core::{AgentBuilder, AgentConfig};
-use aura_agent::{AuraAgent, EffectContext, SharedTransport};
 use aura_agent::handlers::InvitationType;
+use aura_agent::{AuraAgent, EffectContext, SharedTransport};
 use aura_core::effects::{ExecutionMode, TransportEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
@@ -218,44 +218,45 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
             .is_some_and(|v| v == "application/aura-guardian-proposal")
         {
             if let Some(ceremony_id) = envelope.metadata.get("ceremony-id").cloned() {
-            let mut response_metadata = std::collections::HashMap::new();
-            response_metadata.insert(
-                "content-type".to_string(),
-                "application/aura-guardian-acceptance".to_string(),
-            );
-            response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
-            response_metadata.insert("guardian-id".to_string(), agent.authority_id().to_string());
-            if let Ok(bob_device_id) = std::env::var("AURA_DEMO_BOB_DEVICE_ID") {
+                let mut response_metadata = std::collections::HashMap::new();
+                response_metadata.insert(
+                    "content-type".to_string(),
+                    "application/aura-guardian-acceptance".to_string(),
+                );
+                response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
                 response_metadata
-                    .insert("aura-destination-device-id".to_string(), bob_device_id);
+                    .insert("guardian-id".to_string(), agent.authority_id().to_string());
+                if let Ok(bob_device_id) = std::env::var("AURA_DEMO_BOB_DEVICE_ID") {
+                    response_metadata
+                        .insert("aura-destination-device-id".to_string(), bob_device_id);
+                }
+
+                let acceptance = GuardianAcceptance {
+                    guardian_id: agent.authority_id(),
+                    setup_id: ceremony_id,
+                    accepted: true,
+                    public_key: agent.authority_id().to_bytes().to_vec(),
+                    timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                        ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
+                        uncertainty: None,
+                    }),
+                };
+
+                let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
+
+                let response = aura_core::effects::TransportEnvelope {
+                    destination: envelope.source,
+                    source: agent.authority_id(),
+                    context: envelope.context,
+                    payload,
+                    metadata: response_metadata,
+                    receipt: None,
+                };
+
+                if let Err(e) = effects.send_envelope(response).await {
+                    tracing::warn!("{name} failed to send guardian acceptance: {e}");
+                }
             }
-
-            let acceptance = GuardianAcceptance {
-                guardian_id: agent.authority_id(),
-                setup_id: ceremony_id,
-                accepted: true,
-                public_key: agent.authority_id().to_bytes().to_vec(),
-                timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                    ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
-                    uncertainty: None,
-                }),
-            };
-
-            let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
-
-            let response = aura_core::effects::TransportEnvelope {
-                destination: envelope.source,
-                source: agent.authority_id(),
-                context: envelope.context,
-                payload,
-                metadata: response_metadata,
-                receipt: None,
-            };
-
-            if let Err(e) = effects.send_envelope(response).await {
-                tracing::warn!("{name} failed to send guardian acceptance: {e}");
-            }
-        }
         }
     }
 

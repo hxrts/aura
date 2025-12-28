@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use aura_core::{Fact, FactValue, Journal};
 use aura_sync::protocols::{AntiEntropyConfig, AntiEntropyProtocol, JournalDigest};
 
@@ -26,7 +27,6 @@ fn anti_entropy_digest_is_stable_for_identical_inputs() {
     assert_eq!(digest_first, digest_second);
 
     let encoded = serde_json::to_vec(&digest_first).expect("digest serializes");
-    let decoded: JournalDigest =
-        serde_json::from_slice(&encoded).expect("digest deserializes");
+    let decoded: JournalDigest = serde_json::from_slice(&encoded).expect("digest deserializes");
     assert_eq!(digest_first, decoded);
 }

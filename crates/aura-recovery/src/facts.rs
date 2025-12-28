@@ -75,7 +75,11 @@ pub struct RecoveryFactKey {
 /// **Note**: Core binding facts (`GuardianBinding`, `RecoveryGrant`) are protocol-level
 /// facts in `aura-journal`. This enum tracks operational lifecycle only.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "recovery", schema_version = 1, context_fn = "get_context_id")]
+#[domain_fact(
+    type_id = "recovery",
+    schema_version = 1,
+    context_fn = "get_context_id"
+)]
 pub enum RecoveryFact {
     // ========================================================================
     // Guardian Setup Lifecycle
@@ -410,8 +414,12 @@ impl RecoveryFact {
                 data.extend_from_slice(&voter_id.to_bytes());
                 data
             }
-            RecoveryFact::MembershipChangeCompleted { proposal_hash, .. } => proposal_hash.0.to_vec(),
-            RecoveryFact::MembershipChangeRejected { proposal_hash, .. } => proposal_hash.0.to_vec(),
+            RecoveryFact::MembershipChangeCompleted { proposal_hash, .. } => {
+                proposal_hash.0.to_vec()
+            }
+            RecoveryFact::MembershipChangeRejected { proposal_hash, .. } => {
+                proposal_hash.0.to_vec()
+            }
             RecoveryFact::RecoveryInitiated {
                 account_id,
                 request_hash,

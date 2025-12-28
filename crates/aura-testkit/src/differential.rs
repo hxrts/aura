@@ -83,24 +83,48 @@ pub struct DivergenceReport {
 
 impl std::fmt::Display for DivergenceReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "╔══════════════════════════════════════════════════════════════╗")?;
-        writeln!(f, "║ DIVERGENCE DETECTED                                          ║")?;
-        writeln!(f, "╠══════════════════════════════════════════════════════════════╣")?;
+        writeln!(
+            f,
+            "╔══════════════════════════════════════════════════════════════╗"
+        )?;
+        writeln!(
+            f,
+            "║ DIVERGENCE DETECTED                                          ║"
+        )?;
+        writeln!(
+            f,
+            "╠══════════════════════════════════════════════════════════════╣"
+        )?;
         writeln!(f, "║ Command: {:<52} ║", self.command)?;
         if let Some(field) = &self.diverged_field {
             writeln!(f, "║ Field: {:<54} ║", field)?;
         }
-        writeln!(f, "╠──────────────────────────────────────────────────────────────╣")?;
-        writeln!(f, "║ Rust Output:                                                 ║")?;
+        writeln!(
+            f,
+            "╠──────────────────────────────────────────────────────────────╣"
+        )?;
+        writeln!(
+            f,
+            "║ Rust Output:                                                 ║"
+        )?;
         for line in self.rust_output.lines().take(5) {
             writeln!(f, "║   {:<58} ║", line)?;
         }
-        writeln!(f, "╠──────────────────────────────────────────────────────────────╣")?;
-        writeln!(f, "║ Lean Output:                                                 ║")?;
+        writeln!(
+            f,
+            "╠──────────────────────────────────────────────────────────────╣"
+        )?;
+        writeln!(
+            f,
+            "║ Lean Output:                                                 ║"
+        )?;
         for line in self.lean_output.lines().take(5) {
             writeln!(f, "║   {:<58} ║", line)?;
         }
-        writeln!(f, "╚══════════════════════════════════════════════════════════════╝")
+        writeln!(
+            f,
+            "╚══════════════════════════════════════════════════════════════╝"
+        )
     }
 }
 
@@ -130,7 +154,9 @@ impl LeanOracle {
         let output = Command::new(&self.binary_path)
             .arg("version")
             .output()
-            .map_err(|e| DifferentialError::OracleNotFound(format!("{}: {}", self.binary_path, e)))?;
+            .map_err(|e| {
+                DifferentialError::OracleNotFound(format!("{}: {}", self.binary_path, e))
+            })?;
 
         if !output.status.success() {
             return Err(DifferentialError::OracleInvocationFailed(

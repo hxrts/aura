@@ -26,8 +26,8 @@ use std::sync::Arc;
 use aura_app::signal_defs::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::workflows::settings::refresh_settings_from_runtime;
 use aura_app::workflows::{
-    cancel_key_rotation_ceremony, monitor_key_rotation_ceremony,
-    start_device_threshold_ceremony, start_guardian_ceremony,
+    cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_device_threshold_ceremony,
+    start_guardian_ceremony,
 };
 use aura_app::AppError;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -292,6 +292,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Get AppCoreContext for IoContext access
     let app_ctx = hooks.use_context::<AppCoreContext>();
+    let tasks = app_ctx.tasks();
 
     // =========================================================================
     // NavBar status: derive from reactive signals (no blocking awaits at startup).
@@ -311,8 +312,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // by a reactive subscription. Dispatch handler closures capture the Arc,
     // not the data, so they always read current contacts.
     // Also sends ContactCountChanged updates to keep TuiState in sync for navigation.
-    let shared_contacts =
-        use_contacts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    let shared_contacts = use_contacts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Messages subscription: SharedMessages for dispatch handlers to read
@@ -478,6 +478,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // the appropriate State<T> values, triggering automatic re-renders.
     // Only runs if update_rx was provided via props.
     // =========================================================================
+    let tasks_for_updates = tasks.clone();
     if let Some(rx_holder) = update_rx_holder {
         hooks.use_future({
             let mut display_name_state = display_name_state.clone();
@@ -612,7 +613,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
                                                 let app_core = app_core.raw().clone();
-                                                let tasks = app_ctx.tasks();
+                                                let tasks = tasks_for_updates.clone();
                                                 tasks.spawn(async move {
                                                     let _ = refresh_settings_from_runtime(&app_core).await;
                                                 });
@@ -703,7 +704,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         | aura_app::runtime_bridge::CeremonyKind::DeviceRotation
                                                 ) {
                                                     let app_core = app_core.raw().clone();
-                                                    let tasks = app_ctx.tasks();
+                                                    let tasks = tasks_for_updates.clone();
                                                     tasks.spawn(async move {
                                                         let _ = refresh_settings_from_runtime(&app_core).await;
                                                     });
@@ -789,7 +790,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 && (is_complete || has_failed)
                             {
                                 let app_core = app_core.raw().clone();
-                                let tasks = app_ctx.tasks();
+                                let tasks = tasks_for_updates.clone();
                                 tasks.spawn(async move {
                                     let _ = refresh_settings_from_runtime(&app_core).await;
                                 });
@@ -1351,16 +1352,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("i", "Insert"),
             KeyHint::new("n", "New"),
         ],
-        Screen::Notifications => vec![
-            KeyHint::new("j/k", "Move"),
-            KeyHint::new("h/l", "Focus"),
-        ],
+        Screen::Notifications => vec![KeyHint::new("j/k", "Move"), KeyHint::new("h/l", "Focus")],
         Screen::Settings => vec![
             KeyHint::new("Enter", "Select"),
             KeyHint::new("Space", "Toggle"),
         ],
     };
 
+    let tasks_for_events = tasks.clone();
     hooks.use_terminal_events({
         let mut screen = screen.clone();
         let mut should_exit = should_exit.clone();
@@ -1825,8 +1824,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
-                                        let tasks = app_ctx.tasks();
-                                        tasks.spawn(async move {
+                                        let tasks = tasks_for_events.clone();
+                                        let tasks_handle = tasks.clone();
+                                        tasks_handle.spawn(async move {
                                             let app = app_core.raw();
 
                                             match start_guardian_ceremony(app, threshold, n, ids.clone())
@@ -1869,8 +1869,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     // Spawn a task to monitor ceremony progress.
                                                     let app_core_monitor = app.clone();
                                                     let update_tx_monitor = update_tx.clone();
-                                                    let tasks = app_ctx.tasks();
-                                                    tasks.spawn(async move {
+                                                    let tasks = tasks.clone();
+                                                    let tasks_handle = tasks.clone();
+                                                    tasks_handle.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
                                                             ceremony_id.clone(),
@@ -1941,8 +1942,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
-                                        let tasks = app_ctx.tasks();
-                                        tasks.spawn(async move {
+                                        let tasks = tasks_for_events.clone();
+                                        let tasks_handle = tasks.clone();
+                                        tasks_handle.spawn(async move {
                                             let app = app_core.raw();
 
                                             match start_device_threshold_ceremony(
@@ -1989,8 +1991,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                     let app_core_monitor = app.clone();
                                                     let update_tx_monitor = update_tx.clone();
-                                                    let tasks = app_ctx.tasks();
-                                                    tasks.spawn(async move {
+                                                    let tasks = tasks.clone();
+                                                    let tasks_handle = tasks.clone();
+                                                    tasks_handle.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
                                                             ceremony_id.clone(),
@@ -2038,7 +2041,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
-                                        let tasks = app_ctx.tasks();
+                                        let tasks = tasks_for_events.clone();
                                         tasks.spawn(async move {
                                             let app = app_core.raw();
 
@@ -2069,7 +2072,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
-                                        let tasks = app_ctx.tasks();
+                                        let tasks = tasks_for_events.clone();
                                         tasks.spawn(async move {
                                             let app = app_core.raw();
 

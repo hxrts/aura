@@ -255,7 +255,11 @@ pub const GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID: &str = "guardian_binding_detail
 
 /// Stored guardian binding details for a relational context.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "guardian_binding_details", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "guardian_binding_details",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct GuardianBindingDetailsFact {
     pub context_id: ContextId,
     pub account_id: AuthorityId,
@@ -324,7 +328,11 @@ pub const RECOVERY_GRANT_DETAILS_FACT_TYPE_ID: &str = "recovery_grant_details";
 
 /// Stored recovery grant details for a relational context.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "recovery_grant_details", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "recovery_grant_details",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct RecoveryGrantDetailsFact {
     pub context_id: ContextId,
     pub account_id: AuthorityId,

@@ -33,7 +33,11 @@ pub struct RendezvousFactKey {
 
 /// Rendezvous domain facts stored in context journals
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "rendezvous", schema_version = 1, context_fn = "context_id_for_fact")]
+#[domain_fact(
+    type_id = "rendezvous",
+    schema_version = 1,
+    context_fn = "context_id_for_fact"
+)]
 pub enum RendezvousFact {
     /// Transport descriptor advertisement
     Descriptor(RendezvousDescriptor),

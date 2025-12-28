@@ -7,7 +7,9 @@
 use super::{TransportConfig, TransportConnection, TransportError, TransportResult};
 use async_trait::async_trait;
 use aura_core::{
-    effects::{NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream},
+    effects::{
+        NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream,
+    },
     hash,
 };
 use std::collections::HashMap;
@@ -259,7 +261,6 @@ impl NetworkCoreEffects for TcpTransportHandler {
 
 #[async_trait]
 impl NetworkExtendedEffects for TcpTransportHandler {
-
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         Err(NetworkError::ReceiveFailed {
             reason: "TCP receive_from requires connection management".to_string(),

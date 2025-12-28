@@ -104,7 +104,7 @@ pub async fn run_consensus_with_effects<T: Serialize>(
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<ConsensusProof> {
     // Run the unified consensus protocol
-    let params = crate::consensus::protocol::ConsensusParams {
+    let params = crate::protocol::ConsensusParams {
         witnesses: config.witness_set.clone(),
         threshold: config.threshold,
         key_packages,

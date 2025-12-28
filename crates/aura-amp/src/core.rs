@@ -24,8 +24,8 @@ pub fn ratchet_from_epoch_state(state: &ChannelEpochState) -> AmpRatchetState {
 mod tests {
     use super::*;
     use aura_journal::fact::ChannelBumpReason;
-    use aura_journal::ChannelEpochState;
     use aura_journal::reduction::PendingBump;
+    use aura_journal::ChannelEpochState;
 
     #[test]
     fn ratchet_from_epoch_state_preserves_fields() {

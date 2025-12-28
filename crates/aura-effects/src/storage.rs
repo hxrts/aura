@@ -120,7 +120,6 @@ impl StorageCoreEffects for FilesystemStorageHandler {
         keys.sort();
         Ok(keys)
     }
-
 }
 
 #[async_trait]

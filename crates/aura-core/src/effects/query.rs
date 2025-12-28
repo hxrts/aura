@@ -288,7 +288,10 @@ pub trait QuerySignalEffects: QueryEffects + ReactiveEffects {
     }
 
     /// Read query dependencies for a signal id.
-    fn query_dependencies_for(&self, signal_id: &SignalId) -> Option<Vec<crate::query::FactPredicate>> {
+    fn query_dependencies_for(
+        &self,
+        signal_id: &SignalId,
+    ) -> Option<Vec<crate::query::FactPredicate>> {
         self.query_dependencies(signal_id)
     }
 }

@@ -4,9 +4,9 @@
 //! This provides the interface that choreographic protocols need without
 //! depending on concrete runtime implementations.
 
-use aura_guards::LeakageBudget;
 use aura_core::identifiers::{ContextId, DeviceId};
 use aura_core::util::serialization::{from_slice, to_vec};
+use aura_guards::LeakageBudget;
 use biscuit_auth::Biscuit;
 use rumpsteak_aura_choreography::effects::ChoreoHandler;
 use rumpsteak_aura_choreography::{ChoreographyError, Label};
@@ -18,6 +18,16 @@ use std::sync::Arc;
 use crate::effects::choreographic::{ChoreographicEffects, ChoreographicRole};
 
 type ChoreoResult<T> = Result<T, ChoreographyError>;
+
+fn encode_label(label: Label) -> Vec<u8> {
+    label.0.as_bytes().to_vec()
+}
+
+fn decode_label(payload: Vec<u8>) -> ChoreoResult<Label> {
+    let label = String::from_utf8(payload)
+        .map_err(|e| ChoreographyError::Transport(format!("Label decode failed: {}", e)))?;
+    Ok(Label(Box::leak(label.into_boxed_str())))
+}
 
 /// Guard profile for message sending operations
 #[derive(Debug, Clone)]
@@ -211,19 +221,31 @@ where
 
     async fn choose(
         &mut self,
-        endpoint: &mut Self::Endpoint,
+        _endpoint: &mut Self::Endpoint,
         who: Self::Role,
         label: Label,
     ) -> ChoreoResult<()> {
-        self.send(endpoint, who, &label).await
+        let role = self.to_choreo_role(&who)?;
+        let payload = encode_label(label);
+        self.effects
+            .send_to_role_bytes(role, payload)
+            .await
+            .map_err(|e| ChoreographyError::Transport(e.to_string()))?;
+        Ok(())
     }
 
     async fn offer(
         &mut self,
-        endpoint: &mut Self::Endpoint,
+        _endpoint: &mut Self::Endpoint,
         from: Self::Role,
     ) -> ChoreoResult<Label> {
-        self.recv(endpoint, from).await
+        let role = self.to_choreo_role(&from)?;
+        let payload = self
+            .effects
+            .receive_from_role_bytes(role)
+            .await
+            .map_err(|e| ChoreographyError::Transport(e.to_string()))?;
+        decode_label(payload)
     }
 
     async fn with_timeout<F, T>(

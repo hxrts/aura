@@ -94,9 +94,10 @@ pub use messages::{
 // Convenience functions
 pub use authority::verify_signature;
 
-/// Authentication errors
 aura_error_types! {
+    /// Authentication errors
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    #[allow(missing_docs)]
     pub enum AuthenticationError {
         #[category = "authorization"]
         InvalidAuthoritySignature { details: String } =>
@@ -293,7 +294,8 @@ impl SimpleIdentityVerifier {
         authority_id: aura_core::AuthorityId,
         public_key: Ed25519VerifyingKey,
     ) {
-        self.key_material.add_authority_key(authority_id, public_key);
+        self.key_material
+            .add_authority_key(authority_id, public_key);
     }
 
     /// Add a guardian key for verification

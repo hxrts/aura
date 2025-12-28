@@ -31,6 +31,8 @@ aura-recovery = { path = "../aura-recovery" }
 aura-authorization = { path = "../aura-authorization" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
+aura-signature = { path = "../aura-signature" }
+aura-store = { path = "../aura-store" }
 
 # Cryptography dependencies
 ed25519-dalek = { workspace = true }

@@ -337,11 +337,7 @@ impl ConnectionPool {
     fn derive_session_id(&self, peer_id: DeviceId, now: u64) -> SessionId {
         let mut material = Vec::with_capacity(41);
         material.extend_from_slice(b"aura-sync-session");
-        material.extend_from_slice(
-            &peer_id
-                .to_bytes()
-                .unwrap_or([0u8; 32]),
-        );
+        material.extend_from_slice(&peer_id.to_bytes().unwrap_or([0u8; 32]));
         material.extend_from_slice(&now.to_le_bytes());
         material.extend_from_slice(&self.total_connections.to_le_bytes());
         SessionId::new_from_entropy(hash::hash(&material))

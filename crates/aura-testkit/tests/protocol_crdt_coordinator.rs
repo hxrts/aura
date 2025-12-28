@@ -1,15 +1,15 @@
-use aura_protocol::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
-use aura_protocol::effects::crdt::CvHandler;
-use aura_protocol::effects::crdt::CrdtCoordinator;
+#![allow(missing_docs)]
 use aura_core::{
     semilattice::{
-        Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, JoinSemilattice, MvState,
-        Top,
+        Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, JoinSemilattice, MvState, Top,
     },
     time::VectorClock,
     AuraResult, AuthorityId, DeviceId, SessionId,
 };
 use aura_journal::CausalContext;
+use aura_protocol::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
+use aura_protocol::effects::crdt::CrdtCoordinator;
+use aura_protocol::effects::crdt::CvHandler;
 use aura_testkit::TestFixture;
 use serde::{Deserialize, Serialize};
 

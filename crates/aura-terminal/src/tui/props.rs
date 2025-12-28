@@ -87,42 +87,41 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
         create_threshold_n,
         create_status,
         create_error,
-    ) =
-        match state.modal_queue.current() {
-            Some(QueuedModal::ChatCreate(s)) => (
-                true,
-                s.name.clone(),
-                s.topic.clone(),
-                s.active_field,
-                s.selected_indices.len(),
-                s.step.clone(),
-                s.contacts
-                    .iter()
-                    .map(|c| (c.id.clone(), c.name.clone()))
-                    .collect(),
-                s.selected_indices.clone(),
-                s.focused_index,
-                s.threshold_k,
-                s.total_participants(),
-                s.status.clone().unwrap_or_default(),
-                s.error.clone().unwrap_or_default(),
-            ),
-            _ => (
-                false,
-                String::new(),
-                String::new(),
-                0,
-                0,
-                crate::tui::state::CreateChannelStep::default(),
-                vec![],
-                vec![],
-                0,
-                1,
-                1,
-                String::new(),
-                String::new(),
-            ),
-        };
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::ChatCreate(s)) => (
+            true,
+            s.name.clone(),
+            s.topic.clone(),
+            s.active_field,
+            s.selected_indices.len(),
+            s.step.clone(),
+            s.contacts
+                .iter()
+                .map(|c| (c.id.clone(), c.name.clone()))
+                .collect(),
+            s.selected_indices.clone(),
+            s.focused_index,
+            s.threshold_k,
+            s.total_participants(),
+            s.status.clone().unwrap_or_default(),
+            s.error.clone().unwrap_or_default(),
+        ),
+        _ => (
+            false,
+            String::new(),
+            String::new(),
+            0,
+            0,
+            crate::tui::state::CreateChannelStep::default(),
+            vec![],
+            vec![],
+            0,
+            1,
+            1,
+            String::new(),
+            String::new(),
+        ),
+    };
 
     let (topic_visible, topic_value) = match state.modal_queue.current() {
         Some(QueuedModal::ChatTopic(s)) => (true, s.value.clone()),
@@ -276,9 +275,13 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
 
     let (code_visible, code_invitation_id, code_code, code_loading, code_copied) =
         match state.modal_queue.current() {
-            Some(QueuedModal::ContactsCode(s)) => {
-                (true, s.invitation_id.clone(), s.code.clone(), s.loading, s.copied)
-            }
+            Some(QueuedModal::ContactsCode(s)) => (
+                true,
+                s.invitation_id.clone(),
+                s.code.clone(),
+                s.loading,
+                s.copied,
+            ),
             _ => (false, String::new(), String::new(), false, false),
         };
 
@@ -461,11 +464,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     // Authority picker modal
     let (authority_picker_visible, authority_picker_contacts, authority_picker_selected) =
         match state.modal_queue.current() {
-            Some(QueuedModal::AuthorityPicker(s)) => (
-                true,
-                s.contacts.clone(),
-                s.selected_index,
-            ),
+            Some(QueuedModal::AuthorityPicker(s)) => (true, s.contacts.clone(), s.selected_index),
             _ => (false, vec![], 0),
         };
 

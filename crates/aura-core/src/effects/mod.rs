@@ -74,10 +74,11 @@ pub mod storage;
 pub mod supertraits;
 pub mod sync; // Anti-entropy synchronization
 pub mod system;
-pub mod trace;
+pub mod task;
 pub mod terminal; // Terminal I/O for deterministic TUI/CLI testing
 pub mod threshold; // Unified threshold signing
 pub mod time;
+pub mod trace;
 pub mod transport;
 pub mod tree; // Commitment tree operations
 
@@ -139,13 +140,8 @@ pub use leakage::{
 #[allow(deprecated)]
 // Migration utilities removed - middleware transition complete
 pub use network::{
-    NetworkAddress,
-    NetworkCoreEffects,
-    NetworkEffects,
-    NetworkError,
-    NetworkExtendedEffects,
-    PeerEvent,
-    PeerEventStream,
+    NetworkAddress, NetworkCoreEffects, NetworkEffects, NetworkError, NetworkExtendedEffects,
+    PeerEvent, PeerEventStream,
 };
 pub use query::{QueryEffects, QueryError, QuerySubscription};
 #[cfg(feature = "simulation")]
@@ -204,11 +200,7 @@ pub use simulation::{
     StorageFault, TimeFault,
 };
 pub use storage::{
-    StorageCoreEffects,
-    StorageEffects,
-    StorageError,
-    StorageExtendedEffects,
-    StorageLocation,
+    StorageCoreEffects, StorageEffects, StorageError, StorageExtendedEffects, StorageLocation,
     StorageStats,
 };
 pub use supertraits::{
@@ -216,7 +208,6 @@ pub use supertraits::{
     SnapshotEffects, TreeEffects,
 };
 pub use system::{SystemEffects, SystemError};
-pub use trace::{TraceEffects, TraceEvent, TraceSpanId};
 pub use terminal::{
     Cell, Color, CursorPosition, CursorShape, KeyCode, KeyEvent, KeyEventKind, Modifiers,
     MouseButton, MouseEvent, MouseEventKind, Style, TerminalEffects, TerminalError, TerminalEvent,
@@ -228,6 +219,7 @@ pub use time::{
     LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeComparison, TimeEffects,
     TimeError, TimeoutHandle, WakeCondition,
 };
+pub use trace::{TraceEffects, TraceEvent, TraceSpanId};
 pub use transport::{
     TransportEffects, TransportEnvelope, TransportError, TransportReceipt, TransportStats,
 };
@@ -317,21 +309,16 @@ pub enum EffectType {
     EffectApi,
     /// Journal operations (event log, snapshots)
     Journal,
-
     /// Fact operations (temporal database mutations)
     Fact,
-
     /// Tree operations (commitment tree, MLS)
     Tree,
-
     /// Choreographic protocol coordination
     Choreographic,
-
     /// System monitoring, logging, and configuration
     System,
     /// Structured tracing and instrumentation
     Trace,
-
     /// Device-local storage
     DeviceStorage,
     /// Device authentication and sessions
@@ -340,7 +327,6 @@ pub enum EffectType {
     Configuration,
     /// Session lifecycle management
     SessionManagement,
-
     /// Fault injection for testing
     FaultInjection,
     /// Time control for simulation
@@ -351,10 +337,8 @@ pub enum EffectType {
     PropertyChecking,
     /// Chaos coordination for resilience testing
     ChaosCoordination,
-
     /// Datalog query execution and subscriptions
     Query,
-
     /// Terminal I/O for TUI/CLI
     Terminal,
 }

@@ -15,7 +15,7 @@ use crate::{BiscuitAuthorizationBridge, ContextOp, ResourceScope};
 use aura_core::AuthorizationOp;
 
 /// Flow budget handler that persists budgets via JournalEffects.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct JournalBackedFlowBudgetHandler<J: JournalEffects> {
     authority: AuthorityId,
     journal: J,
@@ -52,11 +52,9 @@ impl<J: JournalEffects> JournalBackedFlowBudgetHandler<J> {
     fn authorize_scope(&self, scope: &ResourceScope) -> AuraResult<()> {
         match (&self.policy_token, &self.policy_bridge) {
             (Some(token), Some(bridge)) => {
-                let now = self
-                    .time_provider
-                    .as_ref()
-                    .ok_or_else(|| AuraError::invalid("flow budget time provider not configured"))?
-                    ();
+                let now = self.time_provider.as_ref().ok_or_else(|| {
+                    AuraError::invalid("flow budget time provider not configured")
+                })?();
                 let result = bridge
                     .authorize_with_time(token, AuthorizationOp::FlowCharge, scope, Some(now))
                     .map_err(|e| {

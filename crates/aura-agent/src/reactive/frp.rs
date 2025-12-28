@@ -20,8 +20,8 @@ use tokio::task::JoinHandle;
 /// ## Example
 /// ```ignore
 /// let count = Dynamic::new(0);
-    /// let doubled = count.map(|x| x * 2).await;
-    /// let is_positive = count.map(|x| x > 0).await;
+/// let doubled = count.map(|x| x * 2).await;
+/// let is_positive = count.map(|x| x > 0).await;
 /// ```
 pub struct Dynamic<T: Clone + Send + Sync + 'static> {
     state: Arc<RwLock<T>>,
@@ -438,9 +438,7 @@ mod tests {
     async fn test_combine_strings() {
         let first = Dynamic::new("Hello");
         let second = Dynamic::new("World");
-        let combined = first
-            .combine(&second, |a, b| format!("{} {}", a, b))
-            .await;
+        let combined = first.combine(&second, |a, b| format!("{} {}", a, b)).await;
 
         sleep(Duration::from_millis(10)).await;
         assert_eq!(combined.get().await, "Hello World");

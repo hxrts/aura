@@ -165,8 +165,6 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
         _session_id: &str,
         signature: &[u8],
     ) -> crate::RecoveryResult<bool> {
-        
-
         // Reconstruct the message that was signed
         let operation = SignableOperation::RecoveryApproval {
             target: *target_authority,

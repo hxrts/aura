@@ -5,15 +5,15 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use crate::tui::layout::dim;
 use crate::tui::components::{
     contact_multi_select, labeled_input, modal_footer, modal_header, status_message,
     threshold_selector, ContactMultiSelectItem, ContactMultiSelectProps, LabeledInputProps,
     ModalFooterProps, ModalHeaderProps, ModalStatus, ThresholdSelectorProps,
 };
+use crate::tui::layout::dim;
+use crate::tui::state::CreateChannelStep;
 use crate::tui::theme::{Borders, Spacing, Theme};
 use crate::tui::types::KeyHint;
-use crate::tui::state::CreateChannelStep;
 
 /// Callback type for modal cancel
 pub type CancelCallback = Arc<dyn Fn() + Send + Sync>;

@@ -494,7 +494,6 @@ impl NetworkCoreEffects for SimulationEffectSystem {
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), NetworkError> {
         self.network.receive().await
     }
-
 }
 
 #[async_trait]

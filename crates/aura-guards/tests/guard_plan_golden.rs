@@ -1,8 +1,9 @@
-use aura_guards::guards::pure::GuardRequest;
-use aura_guards::executor::GuardPlan;
-use aura_guards::chain::create_send_guard_op;
-use aura_guards::GuardOperation;
+#![allow(missing_docs)]
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_guards::chain::create_send_guard_op;
+use aura_guards::executor::GuardPlan;
+use aura_guards::guards::pure::GuardRequest;
+use aura_guards::GuardOperation;
 
 #[test]
 fn guard_plan_matches_choreography_request() {

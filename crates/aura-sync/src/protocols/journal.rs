@@ -41,11 +41,11 @@ use serde::{Deserialize, Serialize};
 use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::RetryPolicy;
 use crate::protocols::anti_entropy::{AntiEntropyConfig, AntiEntropyProtocol, JournalDigest};
+use aura_authorization::BiscuitTokenManager;
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::time::PhysicalTime;
 use aura_core::{AccountId, AttestedOp, DeviceId};
 use aura_guards::BiscuitGuardEvaluator;
-use aura_authorization::BiscuitTokenManager;
 use futures;
 
 // =============================================================================

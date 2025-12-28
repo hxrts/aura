@@ -10,8 +10,8 @@ mod logging;
 mod random;
 mod storage;
 mod time;
-mod transport;
 mod trace;
+mod transport;
 
 pub use console::ConsoleHandlerAdapter;
 pub use crypto::CryptoHandlerAdapter;
@@ -19,8 +19,8 @@ pub use logging::LoggingSystemHandlerAdapter;
 pub use random::RandomHandlerAdapter;
 pub use storage::StorageHandlerAdapter;
 pub use time::TimeHandlerAdapter;
-pub use transport::TransportHandlerAdapter;
 pub use trace::TraceHandlerAdapter;
+pub use transport::TransportHandlerAdapter;
 
 use aura_core::effects::registry as effect_registry;
 use aura_core::EffectType;
@@ -132,8 +132,8 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let trace_ops = TraceHandlerAdapter::new(TraceHandler::new())
-            .supported_operations(EffectType::Trace);
+        let trace_ops =
+            TraceHandlerAdapter::new(TraceHandler::new()).supported_operations(EffectType::Trace);
         assert_eq!(
             trace_ops,
             operations_for(EffectType::Trace)

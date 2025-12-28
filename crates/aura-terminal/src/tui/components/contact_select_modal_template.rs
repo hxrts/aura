@@ -6,7 +6,9 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 
 use super::modal::ModalContent;
-use super::{modal_footer, modal_header, status_message, ModalFooterProps, ModalHeaderProps, ModalStatus};
+use super::{
+    modal_footer, modal_header, status_message, ModalFooterProps, ModalHeaderProps, ModalStatus,
+};
 use crate::tui::theme::{Borders, Spacing, Theme};
 use crate::tui::types::{Contact, KeyHint};
 
@@ -74,7 +76,10 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     if multi_select {
         footer_hints.push(KeyHint::new("Space", "Toggle"));
     }
-    footer_hints.push(KeyHint::new("Enter", if multi_select { "Done" } else { "Select" }));
+    footer_hints.push(KeyHint::new(
+        "Enter",
+        if multi_select { "Done" } else { "Select" },
+    ));
     let footer_props = ModalFooterProps::new(footer_hints);
 
     // Error status

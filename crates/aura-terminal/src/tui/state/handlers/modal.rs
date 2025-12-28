@@ -1087,9 +1087,7 @@ fn handle_mfa_setup_key_queue(
                     let mut found = false;
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::MfaSetup(ref mut s) = modal {
-                            if let Some(idx) =
-                                s.contacts.iter().position(|c| c.id == mobile_id)
-                            {
+                            if let Some(idx) = s.contacts.iter().position(|c| c.id == mobile_id) {
                                 found = true;
                                 if !s.selected_indices.contains(&idx) {
                                     s.selected_indices.push(idx);
@@ -1118,46 +1116,46 @@ fn handle_mfa_setup_key_queue(
             }
 
             match key.code {
-            KeyCode::Esc => {
-                state.modal_queue.dismiss();
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                state.modal_queue.update_active(|modal| {
-                    if let QueuedModal::MfaSetup(ref mut s) = modal {
-                        if s.focused_index > 0 {
-                            s.focused_index -= 1;
-                        }
-                    }
-                });
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                state.modal_queue.update_active(|modal| {
-                    if let QueuedModal::MfaSetup(ref mut s) = modal {
-                        if s.focused_index + 1 < s.contacts.len() {
-                            s.focused_index += 1;
-                        }
-                    }
-                });
-            }
-            KeyCode::Char(' ') => {
-                state.modal_queue.update_active(|modal| {
-                    if let QueuedModal::MfaSetup(ref mut s) = modal {
-                        s.toggle_selection();
-                    }
-                });
-            }
-            KeyCode::Enter => {
-                if modal_state.can_proceed_to_threshold() {
+                KeyCode::Esc => {
+                    state.modal_queue.dismiss();
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::MfaSetup(ref mut s) = modal {
-                            s.step = GuardianSetupStep::ChooseThreshold;
+                            if s.focused_index > 0 {
+                                s.focused_index -= 1;
+                            }
                         }
                     });
                 }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::MfaSetup(ref mut s) = modal {
+                            if s.focused_index + 1 < s.contacts.len() {
+                                s.focused_index += 1;
+                            }
+                        }
+                    });
+                }
+                KeyCode::Char(' ') => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::MfaSetup(ref mut s) = modal {
+                            s.toggle_selection();
+                        }
+                    });
+                }
+                KeyCode::Enter => {
+                    if modal_state.can_proceed_to_threshold() {
+                        state.modal_queue.update_active(|modal| {
+                            if let QueuedModal::MfaSetup(ref mut s) = modal {
+                                s.step = GuardianSetupStep::ChooseThreshold;
+                            }
+                        });
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
-        },
         GuardianSetupStep::ChooseThreshold => match key.code {
             KeyCode::Esc => {
                 state.modal_queue.update_active(|modal| {

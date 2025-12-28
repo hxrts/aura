@@ -460,7 +460,12 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         let upgrade_hash = proposal.compute_hash();
 
         // Generate nonce from current time
-        let nonce = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        let nonce = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
 
         // Create ceremony ID
         let ceremony_id = OTACeremonyId::new(&prestate_hash, &upgrade_hash, nonce);
@@ -495,7 +500,12 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     ) -> AuraResult<bool> {
         // Get current prestate and time before borrowing
         let current_prestate = self.compute_prestate_hash().await?;
-        let now = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        let now = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
 
         // Track if we need to emit threshold reached
         let threshold_reached;
@@ -669,7 +679,12 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     ) -> AuraResult<ReadinessCommitment> {
         // Get current prestate
         let prestate_hash = self.compute_prestate_hash().await?;
-        let committed_at_ms = self.effects.physical_time().await.map_err(|e| AuraError::internal(format!("Time error: {}", e)))?.ts_ms;
+        let committed_at_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .ts_ms;
 
         // Get the upgrade hash from the ceremony
         let ceremony = self

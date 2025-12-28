@@ -247,7 +247,11 @@ impl SystemEffects for MetricsSystemHandler {
 
         metrics.insert(
             "enable_histograms".to_string(),
-            if self.config.enable_histograms { 1.0 } else { 0.0 },
+            if self.config.enable_histograms {
+                1.0
+            } else {
+                0.0
+            },
         );
         metrics.insert("active_counters".to_string(), 0.0);
         metrics.insert("active_gauges".to_string(), 0.0);

@@ -428,8 +428,8 @@ impl Journal {
 
         match storage.retrieve(&storage_key).await {
             Ok(Some(data)) => {
-                let state: JournalPersistState =
-                    aura_core::util::serialization::from_slice(&data).map_err(|e| {
+                let state: JournalPersistState = aura_core::util::serialization::from_slice(&data)
+                    .map_err(|e| {
                         AuraError::internal(format!("Failed to deserialize journal: {}", e))
                     })?;
 

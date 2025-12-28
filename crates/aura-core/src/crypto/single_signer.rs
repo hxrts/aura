@@ -156,7 +156,9 @@ impl SingleSignerKeyPackage {
     }
 
     /// Deserialize from bytes.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, crate::util::serialization::SerializationError> {
+    pub fn from_bytes(
+        bytes: &[u8],
+    ) -> Result<Self, crate::util::serialization::SerializationError> {
         crate::util::serialization::from_slice(bytes)
     }
 }
@@ -224,7 +226,9 @@ impl SingleSignerPublicKeyPackage {
     }
 
     /// Deserialize from bytes.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, crate::util::serialization::SerializationError> {
+    pub fn from_bytes(
+        bytes: &[u8],
+    ) -> Result<Self, crate::util::serialization::SerializationError> {
         crate::util::serialization::from_slice(bytes)
     }
 }

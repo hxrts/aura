@@ -58,13 +58,14 @@ impl RegistrableHandler for StorageHandlerAdapter {
 
         match operation {
             "store" => {
-                let params: (String, Vec<u8>) = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
+                let params: (String, Vec<u8>) =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
                 self.core.store(&params.0, params.1).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -73,96 +74,112 @@ impl RegistrableHandler for StorageHandlerAdapter {
                 Ok(Vec::new()) // store returns void
             }
             "retrieve" => {
-                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                let key: String =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result =
+                    self.core
+                        .retrieve(&key)
+                        .await
+                        .map_err(|e| HandlerError::ExecutionFailed {
+                            source: Box::new(e),
+                        })?;
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
-                let result = self.core.retrieve(&key).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
                 })
             }
             "remove" => {
-                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                let key: String =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result =
+                    self.core
+                        .remove(&key)
+                        .await
+                        .map_err(|e| HandlerError::ExecutionFailed {
+                            source: Box::new(e),
+                        })?;
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
-                let result = self.core.remove(&key).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
                 })
             }
             "list_keys" => {
-                let prefix: Option<String> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                let prefix: Option<String> = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
-                let result = self
-                    .core
-                    .list_keys(prefix.as_deref())
-                    .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "exists" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
-                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
-                let result = handler.exists(&key).await.map_err(|e| {
+                let result = self.core.list_keys(prefix.as_deref()).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })
+            }
+            "exists" => {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                let key: String =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                let result =
+                    handler
+                        .exists(&key)
+                        .await
+                        .map_err(|e| HandlerError::ExecutionFailed {
+                            source: Box::new(e),
+                        })?;
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "store_batch" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let pairs: std::collections::HashMap<String, Vec<u8>> =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -171,68 +188,77 @@ impl RegistrableHandler for StorageHandlerAdapter {
                             source: Box::new(e),
                         }
                     })?;
-                handler.store_batch(pairs).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
+                handler
+                    .store_batch(pairs)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
-                    }
-                })?;
+                    })?;
                 Ok(Vec::new())
             }
             "retrieve_batch" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
-                let keys: Vec<String> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                let keys: Vec<String> = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
-                    }
-                })?;
+                    })?;
                 let result = handler.retrieve_batch(&keys).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "clear_all" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
-                handler.clear_all().await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                handler
+                    .clear_all()
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
-                    }
-                })?;
+                    })?;
                 Ok(Vec::new())
             }
             "stats" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                let result = handler
+                    .stats()
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
-                    }
-                })?;
-                let result = handler.stats().await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
-                })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
                 })
             }
             _ => Err(HandlerError::UnknownOperation {

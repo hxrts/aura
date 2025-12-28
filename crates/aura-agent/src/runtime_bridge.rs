@@ -14,6 +14,7 @@ use aura_app::runtime_bridge::{
 use aura_app::signal_defs::INVITATIONS_SIGNAL;
 use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
+use aura_app::ReactiveHandler;
 use aura_core::effects::{
     amp::{
         AmpChannelEffects, AmpChannelError, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
@@ -21,6 +22,7 @@ use aura_core::effects::{
     },
     random::RandomCoreEffects,
     reactive::ReactiveEffects,
+    task::TaskSpawner,
     time::PhysicalTimeEffects,
     StorageCoreEffects, ThresholdSigningEffects, TransportEffects,
 };
@@ -30,7 +32,6 @@ use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::types::FrostThreshold;
 use aura_core::DeviceId;
 use aura_core::EffectContext;
-use aura_app::ReactiveHandler;
 use aura_journal::fact::{CommittedChannelEpochBump, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
@@ -141,6 +142,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         self.agent.runtime().effects().reactive_handler()
     }
 
+    fn task_spawner(&self) -> Option<Arc<dyn TaskSpawner>> {
+        Some(self.agent.runtime().task_spawner())
+    }
+
     // =========================================================================
     // Fact Persistence
     // =========================================================================
@@ -234,14 +239,24 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let reactive = effects.reactive_handler();
         let agent = self.agent.clone();
         let tasks = self.agent.runtime().tasks();
+        let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(120));
 
-        tasks.spawn_cancellable(async move {
-            for _ in 0..120 {
-                let _ = effects.sleep_ms(1000).await;
+        tasks.spawn_interval_until(std::time::Duration::from_millis(1000), move || {
+            let _effects = effects.clone();
+            let reactive = reactive.clone();
+            let agent = agent.clone();
+            let invitation_ids = invitation_ids.clone();
+            let remaining = remaining.clone();
+
+            async move {
+                let remaining_now = remaining.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                if remaining_now == 0 {
+                    return false;
+                }
 
                 let invitations = match reactive.read(&INVITATIONS_SIGNAL).await {
                     Ok(state) => state,
-                    Err(_) => continue,
+                    Err(_) => return true,
                 };
 
                 let mut all_accepted = true;
@@ -263,7 +278,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 }
 
                 if has_failure {
-                    break;
+                    return false;
                 }
 
                 if all_accepted {
@@ -275,8 +290,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                             "All invitations accepted".to_string(),
                         )
                         .await;
-                    break;
+                    return false;
                 }
+
+                true
             }
         });
 
@@ -524,7 +541,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     .await
                     .map(|time| time.ts_ms)
                     .ok();
-                (false, 0, now_ms.filter(|_| transport_stats.active_channels > 0))
+                (
+                    false,
+                    0,
+                    now_ms.filter(|_| transport_stats.active_channels > 0),
+                )
             };
 
         SyncStatus {
@@ -951,10 +972,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let mut parsed_devices: Vec<aura_core::DeviceId> = Vec::with_capacity(device_ids.len());
         for id_str in device_ids {
             let device_id: aura_core::DeviceId = id_str.parse().map_err(|_| {
-                IntentError::validation_failed(format!(
-                    "Failed to parse device id: {}",
-                    id_str
-                ))
+                IntentError::validation_failed(format!("Failed to parse device id: {}", id_str))
             })?;
             if parsed_devices.contains(&device_id) {
                 return Err(IntentError::validation_failed(format!(
@@ -1043,11 +1061,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
             std::collections::HashMap::new();
-        for (device_id, key_package) in parsed_devices
-            .iter()
-            .copied()
-            .zip(key_packages.iter())
-        {
+        for (device_id, key_package) in parsed_devices.iter().copied().zip(key_packages.iter()) {
             key_package_by_device.insert(device_id, key_package.clone());
         }
 
@@ -1066,8 +1080,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
         let prestate_hash = aura_core::Hash32(hash(&prestate_input));
 
-        let op_input = serde_json::to_vec(&(pending_epoch, threshold_value, total_n, &parsed_devices))
-            .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
+        let op_input =
+            serde_json::to_vec(&(pending_epoch, threshold_value, total_n, &parsed_devices))
+                .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         let nonce_bytes = effects.random_bytes(8).await;
@@ -1097,10 +1112,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Mark the initiator as accepted (their key package is already local).
         let _ = tracker
-            .mark_accepted(
-                &ceremony_id,
-                ParticipantIdentity::device(current_device_id),
-            )
+            .mark_accepted(&ceremony_id, ParticipantIdentity::device(current_device_id))
             .await;
 
         // Send key packages to other devices.
@@ -1398,16 +1410,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let config_b64 = if threshold_config.is_empty() {
                 None
             } else {
-                Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-                    &threshold_config,
-                ))
+                Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config))
             };
             let pubkey_b64 = if public_key_package.is_empty() {
                 None
             } else {
-                Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-                    &public_key_package,
-                ))
+                Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package))
             };
             let context_entropy = {
                 let mut h = aura_core::hash::hasher();

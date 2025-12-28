@@ -233,7 +233,9 @@ impl RendezvousService {
             context_id,
             authority_id,
         };
-        self.descriptor_cache.get(&key).filter(|d| d.is_valid(now_ms))
+        self.descriptor_cache
+            .get(&key)
+            .filter(|d| d.is_valid(now_ms))
     }
 
     /// Iterate over all cached descriptors in a context.
@@ -303,8 +305,7 @@ impl RendezvousService {
     ///
     /// Call periodically to prevent unbounded cache growth.
     pub fn evict_expired_descriptors(&mut self, now_ms: u64) {
-        self.descriptor_cache
-            .retain(|_, d| d.is_valid(now_ms));
+        self.descriptor_cache.retain(|_, d| d.is_valid(now_ms));
     }
 
     /// Clear all cached descriptors for a context.
@@ -333,8 +334,7 @@ impl RendezvousService {
         }
 
         // Check flow budget
-        if let Some(outcome) = types::check_flow_budget(snapshot, guards::DESCRIPTOR_PUBLISH_COST)
-        {
+        if let Some(outcome) = types::check_flow_budget(snapshot, guards::DESCRIPTOR_PUBLISH_COST) {
             return outcome;
         }
 
@@ -427,7 +427,9 @@ impl RendezvousService {
             ));
         }
         if !peer_descriptor.is_valid(now_ms) {
-            return Err(AuraError::invalid("Peer descriptor is expired or not yet valid"));
+            return Err(AuraError::invalid(
+                "Peer descriptor is expired or not yet valid",
+            ));
         }
 
         // Select transport
@@ -741,7 +743,6 @@ mod tests {
         assert!(outcome.decision.is_denied());
     }
 
-
     #[test]
     fn test_psk_commitment() {
         let psk = [42u8; 32];
@@ -823,5 +824,4 @@ mod tests {
 
         assert!(outcome.decision.is_denied());
     }
-
 }

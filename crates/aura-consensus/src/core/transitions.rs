@@ -18,9 +18,7 @@
 
 use std::collections::BTreeSet;
 
-use super::state::{
-    ConsensusPhase, ConsensusState, PathSelection, PureCommitFact, ShareProposal,
-};
+use super::state::{ConsensusPhase, ConsensusState, PathSelection, PureCommitFact, ShareProposal};
 
 /// Result of a state transition.
 ///
@@ -120,18 +118,12 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
 
     // Quint: notVoted = not(hasProposal(inst.proposals, witness))
     if state.has_proposal(&proposal.witness) {
-        return TransitionResult::NotEnabled(format!(
-            "witness {} already voted",
-            proposal.witness
-        ));
+        return TransitionResult::NotEnabled(format!("witness {} already voted", proposal.witness));
     }
 
     // Quint: isActive = inst.phase == FastPathActive or inst.phase == FallbackActive
     if !state.is_active() {
-        return TransitionResult::NotEnabled(format!(
-            "consensus not active: {:?}",
-            state.phase
-        ));
+        return TransitionResult::NotEnabled(format!("consensus not active: {:?}", state.phase));
     }
 
     // Quint: not(inst.equivocators.contains(witness))
@@ -199,10 +191,7 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
 pub fn trigger_fallback(state: &ConsensusState) -> TransitionResult {
     // Quint: isFastPath = inst.phase == FastPathActive
     if state.phase != ConsensusPhase::FastPathActive {
-        return TransitionResult::NotEnabled(format!(
-            "not in fast path: {:?}",
-            state.phase
-        ));
+        return TransitionResult::NotEnabled(format!("not in fast path: {:?}", state.phase));
     }
 
     let mut new_state = state.clone();
@@ -226,10 +215,7 @@ pub fn trigger_fallback(state: &ConsensusState) -> TransitionResult {
 pub fn gossip_shares(state: &ConsensusState, shares: Vec<ShareProposal>) -> TransitionResult {
     // Quint: isFallback = inst.phase == FallbackActive
     if state.phase != ConsensusPhase::FallbackActive {
-        return TransitionResult::NotEnabled(format!(
-            "not in fallback: {:?}",
-            state.phase
-        ));
+        return TransitionResult::NotEnabled(format!("not in fallback: {:?}", state.phase));
     }
 
     // Filter valid shares
@@ -275,10 +261,7 @@ pub fn gossip_shares(state: &ConsensusState, shares: Vec<ShareProposal>) -> Tran
 pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &str) -> TransitionResult {
     // Quint: isFallback = inst.phase == FallbackActive
     if state.phase != ConsensusPhase::FallbackActive {
-        return TransitionResult::NotEnabled(format!(
-            "not in fallback: {:?}",
-            state.phase
-        ));
+        return TransitionResult::NotEnabled(format!("not in fallback: {:?}", state.phase));
     }
 
     // Quint: reachedThreshold = matchingCount >= inst.threshold
@@ -340,8 +323,8 @@ pub fn fail_consensus(state: &ConsensusState) -> TransitionResult {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::state::ShareData;
+    use super::*;
 
     fn make_share(witness: &str, result_id: &str) -> ShareProposal {
         ShareProposal {

@@ -35,7 +35,11 @@ pub struct GuardianRequestPayload {
 
 /// Guardian request lifecycle fact.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "guardian_request", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "guardian_request",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub enum GuardianRequestFact {
     Requested {
         context_id: ContextId,

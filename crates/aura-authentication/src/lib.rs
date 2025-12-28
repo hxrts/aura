@@ -110,13 +110,9 @@ pub use aura_signature::{
 };
 
 // Re-export Biscuit authorization types
-pub use aura_guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
 pub use aura_authorization::{BiscuitTokenManager, ResourceScope, TokenAuthority};
+pub use aura_guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
 
-// Deprecated alias for backward compatibility
-#[deprecated(since = "0.2.0", note = "Use TokenAuthority instead")]
-#[allow(deprecated)]
-pub use aura_authorization::AccountAuthority;
 
 // Re-export DKD types
 pub use dkd::{

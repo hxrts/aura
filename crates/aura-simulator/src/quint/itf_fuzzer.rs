@@ -2225,7 +2225,6 @@ impl StorageCoreEffects for PathStorageAdapter {
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         self.handler.list_keys(prefix).await
     }
-
 }
 
 #[async_trait]

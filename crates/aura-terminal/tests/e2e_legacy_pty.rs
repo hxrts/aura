@@ -4220,7 +4220,9 @@ async fn test_tui_freeze_diagnostic() {
         );
 
         // Operation 1: Navigate to Neighborhood screen
-        match timed_op("goto Neighborhood (1)", freeze_timeout_secs, || tui.goto_screen(1)) {
+        match timed_op("goto Neighborhood (1)", freeze_timeout_secs, || {
+            tui.goto_screen(1)
+        }) {
             Ok((_, ms)) => {
                 total_operations += 1;
                 if ms > 1000 {

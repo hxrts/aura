@@ -11,8 +11,7 @@ use std::sync::Arc;
 use tokio::runtime::Runtime;
 
 use aura_core::effects::{
-    CryptoCoreEffects, RandomCoreEffects, RandomEffects, RandomExtendedEffects,
-    StorageCoreEffects,
+    CryptoCoreEffects, RandomCoreEffects, RandomEffects, RandomExtendedEffects, StorageCoreEffects,
 };
 use aura_effects::{RealCryptoHandler, RealRandomHandler};
 use aura_testkit::stateful_effects::{

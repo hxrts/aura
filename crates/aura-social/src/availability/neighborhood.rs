@@ -180,7 +180,10 @@ where
                 match self.network.send_to_peer(rep.uuid(), serialized).await {
                     Ok(()) => match self.network.receive_from(rep.uuid()).await {
                         Ok(response) => {
-                            if let Ok(data) = aura_core::util::serialization::from_slice::<RetrieveResponse>(&response) {
+                            if let Ok(data) = aura_core::util::serialization::from_slice::<
+                                RetrieveResponse,
+                            >(&response)
+                            {
                                 if let Some(content) = data.content {
                                     // Verify hash
                                     let computed = Hash32::from_bytes(&content);

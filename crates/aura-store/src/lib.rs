@@ -59,7 +59,6 @@ pub mod crdt;
 /// Unified storage error types
 pub mod errors;
 
-
 // Biscuit-based storage authorization moved to aura-authorization (proper domain)
 
 // Re-export core types from aura-core

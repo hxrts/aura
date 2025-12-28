@@ -76,10 +76,12 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "derive_key" => {
@@ -98,10 +100,12 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "ed25519_generate_keypair" => {
@@ -110,20 +114,23 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "ed25519_sign" => {
-                let params: (Vec<u8>, Vec<u8>) = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
+                })
+            }
+            "ed25519_sign" => {
+                let params: (Vec<u8>, Vec<u8>) =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
                 let result = self
                     .core
                     .ed25519_sign(&params.0, &params.1)
@@ -131,18 +138,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "ed25519_verify" => {
-                let params: (Vec<u8>, Vec<u8>, Vec<u8>) = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
+                    }
+                })
+            }
+            "ed25519_verify" => {
+                let params: (Vec<u8>, Vec<u8>, Vec<u8>) =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
                     })?;
                 let result = self
                     .core
@@ -151,25 +162,27 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "ed25519_public_key" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
-                let private_key: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
+                })
+            }
+            "ed25519_public_key" => {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                let private_key: Vec<u8> = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
                 })?;
                 let result = handler
                     .ed25519_public_key(&private_key)
@@ -177,19 +190,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "generate_signing_keys" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let (threshold, max_signers): (u16, u16) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -204,19 +220,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "sign_with_key" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (Vec<u8>, Vec<u8>, SigningMode) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -231,19 +250,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "verify_signature" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (Vec<u8>, Vec<u8>, Vec<u8>, SigningMode) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -258,19 +280,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "frost_generate_keys" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let (threshold, max_signers): (u16, u16) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -285,25 +310,27 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "frost_generate_nonces" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
-                let key_package: Vec<u8> = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
+                })
+            }
+            "frost_generate_nonces" => {
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
+                let key_package: Vec<u8> = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
                 })?;
                 let result = handler
                     .frost_generate_nonces(&key_package)
@@ -311,19 +338,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "frost_create_signing_package" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (Vec<u8>, Vec<Vec<u8>>, Vec<u16>, Vec<u8>) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -338,19 +368,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "frost_sign_share" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (FrostSigningPackage, Vec<u8>, Vec<u8>) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -365,19 +398,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "frost_aggregate_signatures" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (FrostSigningPackage, Vec<Vec<u8>>) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -392,19 +428,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "frost_verify" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (Vec<u8>, Vec<u8>, Vec<u8>) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -419,19 +458,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "aes_gcm_encrypt" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -446,19 +488,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "aes_gcm_decrypt" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -473,19 +518,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "chacha20_encrypt" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -500,19 +548,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "chacha20_decrypt" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -527,19 +578,22 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "frost_rotate_keys" => {
-                let handler = self.extended.as_ref().ok_or_else(|| {
-                    HandlerError::UnknownOperation {
-                        effect_type,
-                        operation: operation.to_string(),
-                    }
-                })?;
+                let handler =
+                    self.extended
+                        .as_ref()
+                        .ok_or_else(|| HandlerError::UnknownOperation {
+                            effect_type,
+                            operation: operation.to_string(),
+                        })?;
                 let params: (Vec<Vec<u8>>, u16, u16, u16) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
@@ -554,10 +608,12 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             _ => Err(HandlerError::UnknownOperation {

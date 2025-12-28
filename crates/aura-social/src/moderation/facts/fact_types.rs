@@ -1,15 +1,17 @@
 //! Moderation fact type definitions
 
-use super::constants::*;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::PhysicalTime;
-use aura_journal::DomainFact;
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 /// Fact representing a block-wide mute or channel-specific mute.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "moderation:block-mute", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "moderation:block-mute",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct BlockMuteFact {
     /// Context where the mute applies
     pub context_id: ContextId,
@@ -68,7 +70,11 @@ impl BlockMuteFact {
 
 /// Fact representing the removal of a block mute.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "moderation:block-unmute", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "moderation:block-unmute",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct BlockUnmuteFact {
     /// Context where the unmute applies
     pub context_id: ContextId,
@@ -111,7 +117,11 @@ impl BlockUnmuteFact {
 
 /// Fact representing a block-wide ban or channel-specific ban.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "moderation:block-ban", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "moderation:block-ban",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct BlockBanFact {
     /// Context where the ban applies
     pub context_id: ContextId,
@@ -170,7 +180,11 @@ impl BlockBanFact {
 
 /// Fact representing the removal of a block ban.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "moderation:block-unban", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "moderation:block-unban",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct BlockUnbanFact {
     /// Context where the unban applies
     pub context_id: ContextId,
@@ -213,7 +227,11 @@ impl BlockUnbanFact {
 
 /// Fact representing a kick from a channel (audit log entry).
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "moderation:block-kick", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "moderation:block-kick",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct BlockKickFact {
     /// Context where the kick occurred
     pub context_id: ContextId,
@@ -260,7 +278,11 @@ impl BlockKickFact {
 
 /// Fact representing a pinned message in a block/channel.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "moderation:block-pin", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "moderation:block-pin",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct BlockPinFact {
     /// Context where the pin applies
     pub context_id: ContextId,
@@ -298,7 +320,11 @@ impl BlockPinFact {
 
 /// Fact representing an unpinned message in a block/channel.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "moderation:block-unpin", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "moderation:block-unpin",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct BlockUnpinFact {
     /// Context where the unpin applies
     pub context_id: ContextId,
@@ -336,7 +362,11 @@ impl BlockUnpinFact {
 
 /// Fact representing granting steward (admin) privileges to a user.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "moderation:block-grant-steward", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "moderation:block-grant-steward",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct BlockGrantStewardFact {
     /// Block context where steward is being granted
     pub context_id: ContextId,
@@ -375,7 +405,11 @@ impl BlockGrantStewardFact {
 
 /// Fact representing revoking steward (admin) privileges from a user.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "moderation:block-revoke-steward", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "moderation:block-revoke-steward",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub struct BlockRevokeStewardFact {
     /// Block context where steward is being revoked
     pub context_id: ContextId,

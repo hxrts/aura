@@ -9,9 +9,9 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_guards::chain::create_send_guard;
 use aura_journal::DomainFact;
 use aura_protocol::effects::EffectApiEffects;
-use aura_guards::chain::create_send_guard;
 use aura_rendezvous::{
     EffectCommand, GuardSnapshot, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
     RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
@@ -132,9 +132,12 @@ impl RendezvousHandler {
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
         // Prepare the descriptor through the service
-        let outcome =
-            self.service
-                .prepare_publish_descriptor(&snapshot, context_id, transport_hints, current_time);
+        let outcome = self.service.prepare_publish_descriptor(
+            &snapshot,
+            context_id,
+            transport_hints,
+            current_time,
+        );
 
         // Check guard outcome and execute effects via the bridge
         if !outcome.decision.is_allowed() {

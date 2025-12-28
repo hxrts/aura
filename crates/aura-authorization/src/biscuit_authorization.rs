@@ -81,9 +81,9 @@ impl BiscuitAuthorizationBridge {
         // The authorizer creation already verifies the signature chain
 
         // Phase 2: Add ambient facts for authorization context
-        let operation = operation.as_str();
+        let operation_str = operation.as_str();
         authorizer
-            .add_fact(fact!("operation({operation})"))
+            .add_fact(fact!("operation({operation_str})"))
             .map_err(BiscuitError::BiscuitLib)?;
 
         let authority = self.authority_id.to_string();
@@ -186,10 +186,9 @@ impl BiscuitAuthorizationBridge {
             }
             _ => {
                 // For unknown operations, require explicit capability
-                let operation = operation.as_str();
-                validate_capability_name(operation)?;
+                validate_capability_name(operation_str)?;
                 authorizer
-                    .add_policy(policy!("allow if capability({operation})"))
+                    .add_policy(policy!("allow if capability({operation_str})"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
         }

@@ -2,11 +2,13 @@
 
 #![allow(dead_code)]
 
-use tokio::sync::RwLock;
-use aura_core::effects::{PhysicalTimeEffects, RandomExtendedEffects, TimeoutHandle, WakeCondition};
+use aura_core::effects::{
+    PhysicalTimeEffects, RandomExtendedEffects, TimeoutHandle, WakeCondition,
+};
 use aura_core::{AuraError, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Timeout task information

@@ -341,7 +341,11 @@ impl EffectInterpreter for SimulationEffectInterpreter {
                 Ok(EffectResult::Success)
             }
 
-            EffectCommand::SendEnvelope { to, peer_id: _, envelope } => {
+            EffectCommand::SendEnvelope {
+                to,
+                peer_id: _,
+                envelope,
+            } => {
                 debug!(
                     ?to,
                     envelope_len = envelope.len(),

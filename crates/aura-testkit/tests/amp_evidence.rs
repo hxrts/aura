@@ -121,18 +121,29 @@ fn test_evidence_record_merge_accumulates() {
 #[test]
 fn test_evidence_record_serialization_roundtrip() {
     let mut record = EvidenceRecord::default();
-    record.entries.insert("consensus:abc123".to_string(), vec![0xDE, 0xAD, 0xBE, 0xEF]);
-    record.entries.insert("witness:xyz789".to_string(), vec![0xCA, 0xFE]);
+    record
+        .entries
+        .insert("consensus:abc123".to_string(), vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    record
+        .entries
+        .insert("witness:xyz789".to_string(), vec![0xCA, 0xFE]);
 
     // Serialize
     let bytes = serde_json::to_vec(&record).expect("serialization should succeed");
 
     // Deserialize
-    let recovered: EvidenceRecord = serde_json::from_slice(&bytes).expect("deserialization should succeed");
+    let recovered: EvidenceRecord =
+        serde_json::from_slice(&bytes).expect("deserialization should succeed");
 
     assert_eq!(recovered.entries.len(), 2);
-    assert_eq!(recovered.entries.get("consensus:abc123"), Some(&vec![0xDE, 0xAD, 0xBE, 0xEF]));
-    assert_eq!(recovered.entries.get("witness:xyz789"), Some(&vec![0xCA, 0xFE]));
+    assert_eq!(
+        recovered.entries.get("consensus:abc123"),
+        Some(&vec![0xDE, 0xAD, 0xBE, 0xEF])
+    );
+    assert_eq!(
+        recovered.entries.get("witness:xyz789"),
+        Some(&vec![0xCA, 0xFE])
+    );
 }
 
 // =============================================================================
@@ -165,7 +176,8 @@ fn test_evidence_delta_serialization_roundtrip() {
     let bytes = serde_json::to_vec(&delta).expect("serialization should succeed");
 
     // Deserialize
-    let recovered: EvidenceDelta = serde_json::from_slice(&bytes).expect("deserialization should succeed");
+    let recovered: EvidenceDelta =
+        serde_json::from_slice(&bytes).expect("deserialization should succeed");
 
     assert_eq!(recovered.entries.len(), 2);
 }
@@ -180,7 +192,10 @@ async fn test_evidence_for_missing() {
 
     let result = effects.evidence_for(test_consensus_id()).await;
     assert!(result.is_ok());
-    assert!(result.unwrap().is_none(), "should return None for missing evidence");
+    assert!(
+        result.unwrap().is_none(),
+        "should return None for missing evidence"
+    );
 }
 
 #[tokio::test]
@@ -190,17 +205,28 @@ async fn test_merge_evidence_delta_and_retrieve() {
 
     // Create and merge a delta
     let mut delta = EvidenceDelta::default();
-    delta.entries.insert("witness:alice".to_string(), b"participated".to_vec());
+    delta
+        .entries
+        .insert("witness:alice".to_string(), b"participated".to_vec());
 
-    effects.merge_evidence_delta(cid, delta).await.expect("merge should succeed");
+    effects
+        .merge_evidence_delta(cid, delta)
+        .await
+        .expect("merge should succeed");
 
     // Retrieve the evidence
-    let result = effects.evidence_for(cid).await.expect("retrieval should succeed");
+    let result = effects
+        .evidence_for(cid)
+        .await
+        .expect("retrieval should succeed");
     assert!(result.is_some());
 
     let record = result.unwrap();
     assert_eq!(record.entries.len(), 1);
-    assert_eq!(record.entries.get("witness:alice"), Some(&b"participated".to_vec()));
+    assert_eq!(
+        record.entries.get("witness:alice"),
+        Some(&b"participated".to_vec())
+    );
 }
 
 #[tokio::test]
@@ -210,12 +236,16 @@ async fn test_merge_multiple_evidence_deltas() {
 
     // First delta
     let mut delta1 = EvidenceDelta::default();
-    delta1.entries.insert("witness:alice".to_string(), b"vote1".to_vec());
+    delta1
+        .entries
+        .insert("witness:alice".to_string(), b"vote1".to_vec());
     effects.merge_evidence_delta(cid, delta1).await.unwrap();
 
     // Second delta (different key)
     let mut delta2 = EvidenceDelta::default();
-    delta2.entries.insert("witness:bob".to_string(), b"vote2".to_vec());
+    delta2
+        .entries
+        .insert("witness:bob".to_string(), b"vote2".to_vec());
     effects.merge_evidence_delta(cid, delta2).await.unwrap();
 
     // Verify both entries exist
@@ -233,12 +263,16 @@ async fn test_evidence_isolation_between_consensus_ids() {
 
     // Add evidence to first consensus
     let mut delta1 = EvidenceDelta::default();
-    delta1.entries.insert("data".to_string(), b"consensus1".to_vec());
+    delta1
+        .entries
+        .insert("data".to_string(), b"consensus1".to_vec());
     effects.merge_evidence_delta(cid1, delta1).await.unwrap();
 
     // Add evidence to second consensus
     let mut delta2 = EvidenceDelta::default();
-    delta2.entries.insert("data".to_string(), b"consensus2".to_vec());
+    delta2
+        .entries
+        .insert("data".to_string(), b"consensus2".to_vec());
     effects.merge_evidence_delta(cid2, delta2).await.unwrap();
 
     // Verify isolation
@@ -257,7 +291,9 @@ async fn test_insert_evidence_delta() {
     let context = test_context();
 
     // Insert evidence delta for a witness
-    effects.insert_evidence_delta(witness, cid, context).await
+    effects
+        .insert_evidence_delta(witness, cid, context)
+        .await
         .expect("insert_evidence_delta should succeed");
 
     // Verify evidence was recorded
@@ -268,8 +304,11 @@ async fn test_insert_evidence_delta() {
     assert_eq!(entries.len(), 1);
 
     // Check that the entry key contains the consensus ID (hex encoded)
-    let expected_key = hex::encode(cid.0.0);
-    assert!(entries.contains_key(&expected_key), "should contain consensus ID key");
+    let expected_key = hex::encode(cid.0 .0);
+    assert!(
+        entries.contains_key(&expected_key),
+        "should contain consensus ID key"
+    );
 }
 
 #[tokio::test]
@@ -282,8 +321,14 @@ async fn test_insert_multiple_witness_evidence() {
     let witness2 = test_authority_2();
 
     // Insert evidence for two witnesses
-    effects.insert_evidence_delta(witness1, cid, context).await.unwrap();
-    effects.insert_evidence_delta(witness2, cid, context).await.unwrap();
+    effects
+        .insert_evidence_delta(witness1, cid, context)
+        .await
+        .unwrap();
+    effects
+        .insert_evidence_delta(witness2, cid, context)
+        .await
+        .unwrap();
 
     // Verify evidence was recorded
     let record = effects.evidence_for(cid).await.unwrap().unwrap();
@@ -304,7 +349,10 @@ async fn test_evidence_store_accessor() {
     // Add evidence via store
     let mut delta = EvidenceDelta::default();
     delta.entries.insert("test".to_string(), vec![1, 2, 3]);
-    store.merge_delta(cid, delta).await.expect("merge via store should succeed");
+    store
+        .merge_delta(cid, delta)
+        .await
+        .expect("merge via store should succeed");
 
     // Retrieve via store
     let record = store.current(cid).await.expect("current should succeed");

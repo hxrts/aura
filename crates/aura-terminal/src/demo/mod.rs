@@ -313,10 +313,7 @@ impl SimulatedAgent {
     }
 
     /// Set the response channel for outgoing events
-    pub fn set_response_channel(
-        &mut self,
-        tx: mpsc::Sender<(AuthorityId, AgentResponse)>,
-    ) {
+    pub fn set_response_channel(&mut self, tx: mpsc::Sender<(AuthorityId, AgentResponse)>) {
         self.response_tx = Some(tx);
     }
 

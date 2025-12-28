@@ -76,10 +76,12 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "get_system_info" => {
@@ -88,10 +90,12 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "set_config" => {
@@ -111,22 +115,25 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                 Ok(Vec::new())
             }
             "get_config" => {
-                let key: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
+                let key: String =
+                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
                 let value = self.handler.get_config(&key).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&value).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
+                aura_core::util::serialization::to_vec(&value).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
                 })
             }
             "get_metrics" => {
@@ -135,20 +142,21 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "restart_component" => {
-                let component: String = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
+                aura_core::util::serialization::to_vec(&result).map_err(|e| {
+                    HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: Box::new(e),
                     }
-                })?;
+                })
+            }
+            "restart_component" => {
+                let component: String = aura_core::util::serialization::from_slice(parameters)
+                    .map_err(|e| HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    })?;
                 self.handler
                     .restart_component(&component)
                     .await

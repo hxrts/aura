@@ -9,12 +9,8 @@
 //! - Duplicate commitment rejection
 //! - WitnessState nonce lifecycle
 
-use aura_consensus::consensus::witness::{WitnessSet, WitnessState, WitnessTracker};
-use aura_core::{
-    epochs::Epoch,
-    frost::NonceCommitment,
-    AuthorityId,
-};
+use aura_consensus::witness::{WitnessSet, WitnessState, WitnessTracker};
+use aura_core::{epochs::Epoch, frost::NonceCommitment, AuthorityId};
 use aura_testkit::builders::keys::helpers::test_frost_key_shares;
 use rand::SeedableRng;
 
@@ -56,7 +52,8 @@ async fn test_steady_state_single_rtt() {
         let signer_id = (i + 1) as u16;
         let commitment = NonceCommitment {
             signer: signer_id,
-            commitment: nonces.commitments()
+            commitment: nonces
+                .commitments()
                 .serialize()
                 .expect("commitment serialization")
                 .to_vec(),
@@ -78,10 +75,7 @@ async fn test_steady_state_single_rtt() {
 
     // Collect cached commitments
     let cached = witness_set.collect_cached_commitments(epoch).await;
-    assert_eq!(
-        cached.len(), 3,
-        "Should have 3 cached commitments"
-    );
+    assert_eq!(cached.len(), 3, "Should have 3 cached commitments");
 
     // Verify we can use the cached commitments (threshold = 2, we have 3)
     assert!(
@@ -125,7 +119,11 @@ async fn test_epoch_rotation_invalidation() {
 
     // Verify nonce is cached in epoch 1
     let cached_epoch1 = witness_set.collect_cached_commitments(epoch1).await;
-    assert_eq!(cached_epoch1.len(), 1, "Should have cached commitment in epoch 1");
+    assert_eq!(
+        cached_epoch1.len(),
+        1,
+        "Should have cached commitment in epoch 1"
+    );
 
     // Epoch change - cached commitments should not be available in new epoch
     let cached_epoch2 = witness_set.collect_cached_commitments(epoch2).await;
@@ -170,7 +168,8 @@ async fn test_adversarial_duplicate_commitments() {
     // Add second commitment from same witness (should replace, not add)
     tracker.add_nonce(witness, commitment2.clone());
     assert_eq!(
-        tracker.nonce_commitments.len(), 1,
+        tracker.nonce_commitments.len(),
+        1,
         "Duplicate from same witness should replace, not add"
     );
 
@@ -209,8 +208,8 @@ async fn test_witness_state_lifecycle() {
         commitment: vec![5u8; 32],
     };
 
-    let signing_share = frost_ed25519::keys::SigningShare::deserialize([5u8; 32])
-        .expect("signing share");
+    let signing_share =
+        frost_ed25519::keys::SigningShare::deserialize([5u8; 32]).expect("signing share");
     let mut rng = rand_chacha::ChaCha20Rng::from_seed([5u8; 32]);
     let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
     let token = aura_core::crypto::tree_signing::NonceToken::from(nonces);
@@ -252,8 +251,8 @@ async fn test_witness_state_lifecycle() {
     );
 
     // Invalidation
-    let signing_share2 = frost_ed25519::keys::SigningShare::deserialize([6u8; 32])
-        .expect("signing share");
+    let signing_share2 =
+        frost_ed25519::keys::SigningShare::deserialize([6u8; 32]).expect("signing share");
     let mut rng2 = rand_chacha::ChaCha20Rng::from_seed([6u8; 32]);
     let nonces2 = frost_ed25519::round1::SigningNonces::new(&signing_share2, &mut rng2);
     let token2 = aura_core::crypto::tree_signing::NonceToken::from(nonces2);
@@ -279,30 +278,42 @@ async fn test_witness_tracker_threshold() {
     assert!(!tracker.has_signature_threshold(threshold));
 
     // Add first witness
-    tracker.add_nonce(authority(1), NonceCommitment {
-        signer: 1,
-        commitment: vec![1u8; 32],
-    });
+    tracker.add_nonce(
+        authority(1),
+        NonceCommitment {
+            signer: 1,
+            commitment: vec![1u8; 32],
+        },
+    );
     assert!(!tracker.has_nonce_threshold(threshold));
 
     // Add second witness - now at threshold
-    tracker.add_nonce(authority(2), NonceCommitment {
-        signer: 2,
-        commitment: vec![2u8; 32],
-    });
+    tracker.add_nonce(
+        authority(2),
+        NonceCommitment {
+            signer: 2,
+            commitment: vec![2u8; 32],
+        },
+    );
     assert!(tracker.has_nonce_threshold(threshold));
 
     // Add signatures
-    tracker.add_signature(authority(1), aura_core::frost::PartialSignature {
-        signer: 1,
-        signature: vec![1u8; 64],
-    });
+    tracker.add_signature(
+        authority(1),
+        aura_core::frost::PartialSignature {
+            signer: 1,
+            signature: vec![1u8; 64],
+        },
+    );
     assert!(!tracker.has_signature_threshold(threshold));
 
-    tracker.add_signature(authority(2), aura_core::frost::PartialSignature {
-        signer: 2,
-        signature: vec![2u8; 64],
-    });
+    tracker.add_signature(
+        authority(2),
+        aura_core::frost::PartialSignature {
+            signer: 2,
+            signature: vec![2u8; 64],
+        },
+    );
     assert!(tracker.has_signature_threshold(threshold));
 
     // Verify participants
@@ -323,7 +334,10 @@ async fn test_witness_set_validation() {
 
     // Threshold > witnesses should fail
     let result = WitnessSet::new(3, vec![authority(1), authority(2)]);
-    assert!(result.is_err(), "Threshold exceeding witness count should fail");
+    assert!(
+        result.is_err(),
+        "Threshold exceeding witness count should fail"
+    );
 
     // Valid configuration should succeed
     let result = WitnessSet::new(2, vec![authority(1), authority(2), authority(3)]);

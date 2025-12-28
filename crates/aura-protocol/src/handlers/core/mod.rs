@@ -31,7 +31,9 @@ pub use erased::{AuraHandler, BoxedHandler, HandlerUtils};
 
 // Re-export factory types
 pub use builder::AuraHandlerBuilder;
-pub use config::{AuraHandlerConfig, MiddlewareConfig, MiddlewareSpec, PlatformConfig, SimulationConfig};
+pub use config::{
+    AuraHandlerConfig, MiddlewareConfig, MiddlewareSpec, PlatformConfig, SimulationConfig,
+};
 pub use error::FactoryError;
 pub use platform::{PlatformDetector, PlatformInfo};
 pub use traits::AuraHandlerFactory;
@@ -39,8 +41,8 @@ pub use traits::AuraHandlerFactory;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::DeviceId;
     use crate::handlers::ExecutionMode;
+    use aura_core::identifiers::DeviceId;
 
     #[test]
     fn test_platform_detection() {

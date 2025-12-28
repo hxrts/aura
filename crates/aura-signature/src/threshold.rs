@@ -46,10 +46,7 @@ pub fn verify_threshold_signature(
     let valid =
         aura_core::ed25519_verify(message, threshold_sig, group_public_key).map_err(|e| {
             AuthenticationError::InvalidThresholdSignature {
-                details: format!(
-                    "FROST threshold signature verification failed: {}",
-                    e
-                ),
+                details: format!("FROST threshold signature verification failed: {}", e),
             }
         })?;
 
@@ -93,10 +90,7 @@ pub fn verify_threshold_signature_with_signers(
     let valid =
         aura_core::ed25519_verify(message, threshold_sig, group_public_key).map_err(|e| {
             AuthenticationError::InvalidThresholdSignature {
-                details: format!(
-                    "FROST threshold signature verification failed: {}",
-                    e
-                ),
+                details: format!("FROST threshold signature verification failed: {}", e),
             }
         })?;
 

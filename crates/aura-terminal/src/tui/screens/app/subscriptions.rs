@@ -424,14 +424,13 @@ pub fn use_notifications_subscription(
     let invite_count = Arc::new(AtomicUsize::new(0));
     let recovery_count = Arc::new(AtomicUsize::new(0));
 
-    let send_total = |tx: &Option<UiUpdateSender>,
-                      invites: &Arc<AtomicUsize>,
-                      recovery: &Arc<AtomicUsize>| {
-        if let Some(ref tx) = tx {
-            let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
-            let _ = tx.try_send(UiUpdate::NotificationsCountChanged(total));
-        }
-    };
+    let send_total =
+        |tx: &Option<UiUpdateSender>, invites: &Arc<AtomicUsize>, recovery: &Arc<AtomicUsize>| {
+            if let Some(ref tx) = tx {
+                let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
+                let _ = tx.try_send(UiUpdate::NotificationsCountChanged(total));
+            }
+        };
 
     // Invitations
     hooks.use_future({

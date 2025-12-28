@@ -94,9 +94,9 @@ impl AuthPolicy {
 }
 
 fn derive_auth_context_id(snapshot: &GuardSnapshot) -> ContextId {
-    snapshot.context_id.unwrap_or_else(|| {
-        ContextId::new_from_entropy(hash(&snapshot.authority_id.to_bytes()))
-    })
+    snapshot
+        .context_id
+        .unwrap_or_else(|| ContextId::new_from_entropy(hash(&snapshot.authority_id.to_bytes())))
 }
 
 // =============================================================================

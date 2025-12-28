@@ -6,11 +6,11 @@
 //!
 //! Uses the new consensus protocol for executing channel epoch bumps.
 
+use crate::{AmpEvidenceEffects, AmpJournalEffects};
 use aura_consensus::protocol::run_consensus;
 use aura_consensus::types::CommitFact;
-use crate::{AmpEvidenceEffects, AmpJournalEffects};
-use aura_core::effects::RandomEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
+use aura_core::effects::RandomEffects;
 use aura_core::epochs::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::{AuthorityId, Prestate, Result};

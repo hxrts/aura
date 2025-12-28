@@ -39,12 +39,10 @@ pub fn BlockCreateModal(props: &BlockCreateModalProps) -> impl Into<AnyElement<'
         .with_subtitle("Blocks are shared spaces where you and others can communicate.");
 
     // Input field props
-    let name_input = crate::tui::components::LabeledInputProps::new(
-        "Block Name:",
-        "Enter block name...",
-    )
-        .with_value(name)
-        .with_focused(active_field == 0);
+    let name_input =
+        crate::tui::components::LabeledInputProps::new("Block Name:", "Enter block name...")
+            .with_value(name)
+            .with_focused(active_field == 0);
     let description_input = crate::tui::components::LabeledInputProps::new(
         "Description (optional):",
         "Enter description...",

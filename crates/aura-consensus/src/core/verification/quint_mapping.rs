@@ -278,9 +278,9 @@ impl QuintMappable for ConsensusState {
     }
 
     fn from_quint(value: &Value) -> Result<Self> {
-        let obj = value
-            .as_object()
-            .ok_or_else(|| aura_core::AuraError::invalid("expected object for ConsensusInstance"))?;
+        let obj = value.as_object().ok_or_else(|| {
+            aura_core::AuraError::invalid("expected object for ConsensusInstance")
+        })?;
 
         let cid = obj
             .get("cid")

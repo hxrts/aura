@@ -105,9 +105,9 @@ pub mod transport;
 pub use biometric::FallbackBiometricHandler;
 pub use console::RealConsoleHandler;
 pub use context::{ExecutionContext, StandardContextHandler};
-pub use error::Layer3Error;
 pub use crypto::RealCryptoHandler;
 pub use database::query::{AuraQuery, FactTerm, QueryError, QueryResult};
+pub use error::Layer3Error;
 pub use query::{
     format_rule, format_value, parse_arg_to_value, parse_fact_to_row, CapabilityPolicy,
     QueryHandler,

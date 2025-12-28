@@ -107,7 +107,9 @@ impl CommitFact {
     pub fn verify(&self) -> Result<()> {
         // Check threshold was met
         if self.participants.len() < self.threshold as usize {
-            return Err(AuraError::invalid("Insufficient participants for threshold"));
+            return Err(AuraError::invalid(
+                "Insufficient participants for threshold",
+            ));
         }
 
         // Check participants are unique
@@ -125,16 +127,18 @@ impl CommitFact {
             .ok_or_else(|| AuraError::invalid("Missing group public key for verification"))?;
 
         let frost_pkg: frost_ed25519::keys::PublicKeyPackage =
-            group_pkg
-                .try_into()
-                .map_err(|e: String| AuraError::invalid(format!("Invalid group public key package: {}", e)))?;
+            group_pkg.try_into().map_err(|e: String| {
+                AuraError::invalid(format!("Invalid group public key package: {}", e))
+            })?;
 
         frost_verify_aggregate(
             frost_pkg.verifying_key(),
             &self.operation_bytes,
             &self.threshold_signature.signature,
         )
-        .map_err(|e| AuraError::crypto(format!("Threshold signature verification failed: {}", e)))?;
+        .map_err(|e| {
+            AuraError::crypto(format!("Threshold signature verification failed: {}", e))
+        })?;
 
         Ok(())
     }
@@ -188,7 +192,7 @@ impl ConsensusConfig {
             ));
         }
 
-        let runtime = crate::consensus::config::ConsensusRuntimeConfig::default();
+        let runtime = crate::config::ConsensusRuntimeConfig::default();
         Ok(Self {
             threshold,
             witness_set,

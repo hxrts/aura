@@ -37,10 +37,10 @@
 //! between production handlers, mocks, and simulation handlers without changes to
 //! core handler interfaces or effect trait definitions.
 
+pub mod config;
 pub mod typed_bridge;
 pub mod unified_bridge;
-pub mod config;
 
+pub use config::BridgeRuntimeConfig;
 pub use typed_bridge::TypedHandlerBridge;
 pub use unified_bridge::{UnifiedAuraHandlerBridge, UnifiedHandlerBridgeFactory};
-pub use config::BridgeRuntimeConfig;

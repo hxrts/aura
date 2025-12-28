@@ -59,7 +59,11 @@ pub struct InvitationFactKey {
 /// These facts represent invitation-related state changes in the journal.
 /// They are stored as `RelationalFact::Generic` and reduced by `InvitationFactReducer`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "invitation", schema_version = 1, context_fn = "context_id_or_default")]
+#[domain_fact(
+    type_id = "invitation",
+    schema_version = 1,
+    context_fn = "context_id_or_default"
+)]
 pub enum InvitationFact {
     /// Invitation sent from one authority to another
     Sent {
@@ -473,11 +477,7 @@ mod tests {
 
     #[test]
     fn test_binding_key_derivation() {
-        let fact = InvitationFact::declined_ms(
-            "inv-42".to_string(),
-            test_authority_id(4),
-            1234,
-        );
+        let fact = InvitationFact::declined_ms("inv-42".to_string(), test_authority_id(4), 1234);
 
         let key = fact.binding_key();
         assert_eq!(key.sub_type, "invitation-declined");

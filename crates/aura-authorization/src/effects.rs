@@ -9,7 +9,7 @@ use crate::biscuit_authorization::BiscuitAuthorizationBridge;
 use async_trait::async_trait;
 use aura_core::effects::{AuthorizationEffects, AuthorizationError, CryptoEffects};
 use aura_core::scope::{AuthorizationOp, ResourceScope};
-use aura_core::{AuthorityId, AuraError, Cap, MeetSemiLattice};
+use aura_core::{AuraError, AuthorityId, Cap, MeetSemiLattice};
 use biscuit_auth::PublicKey;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -53,10 +53,7 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
     }
 
     /// Provide a time source for Biscuit authorization checks.
-    pub fn with_time_provider(
-        mut self,
-        provider: Arc<dyn Fn() -> u64 + Send + Sync>,
-    ) -> Self {
+    pub fn with_time_provider(mut self, provider: Arc<dyn Fn() -> u64 + Send + Sync>) -> Self {
         self.time_provider = Some(provider);
         self
     }
@@ -89,15 +86,11 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
             .map_err(|e| AuthorizationError::InvalidToken {
                 reason: e.to_string(),
             })?;
-        let now = self
-            .time_provider
-            .as_ref()
-            .ok_or_else(|| {
-                AuthorizationError::SystemError(AuraError::invalid(
-                    "authorization time provider not configured",
-                ))
-            })?
-            ();
+        let now = self.time_provider.as_ref().ok_or_else(|| {
+            AuthorizationError::SystemError(AuraError::invalid(
+                "authorization time provider not configured",
+            ))
+        })?();
         let result = self
             .biscuit_bridge
             .authorize_with_time(&token, operation, scope, Some(now))

@@ -22,9 +22,9 @@ use aura_app::views::{
     },
     recovery::{Guardian, GuardianStatus, RecoveryState},
 };
+use aura_app::ReactiveHandler;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::AuthorityId;
-use aura_app::ReactiveHandler;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use tokio::sync::Mutex;
@@ -33,6 +33,8 @@ use super::scheduler::ReactiveView;
 
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
+use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
+use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use aura_social::moderation::facts::{
     BlockPinFact, BlockUnpinFact, BLOCK_PIN_FACT_TYPE_ID, BLOCK_UNPIN_FACT_TYPE_ID,
 };
@@ -41,8 +43,6 @@ use aura_social::moderation::{
     BLOCK_BAN_FACT_TYPE_ID, BLOCK_KICK_FACT_TYPE_ID, BLOCK_MUTE_FACT_TYPE_ID,
     BLOCK_UNBAN_FACT_TYPE_ID, BLOCK_UNMUTE_FACT_TYPE_ID,
 };
-use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
-use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
     let _ = reactive
@@ -415,7 +415,9 @@ impl ReactiveView for RecoverySignalView {
 
         for fact in facts {
             match &fact.content {
-                FactContent::Relational(RelationalFact::GuardianBinding { guardian_id, .. }) => {
+                FactContent::Relational(RelationalFact::GuardianBinding {
+                    guardian_id, ..
+                }) => {
                     Self::ensure_guardian(&mut state, *guardian_id);
                     Self::update_guardian_count(&mut state);
                     changed = true;

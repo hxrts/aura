@@ -319,7 +319,8 @@ fn test_channel_checkpoint_serialization() {
     assert!(!json.is_empty());
 
     // Deserialize back
-    let recovered: RelationalFact = serde_json::from_str(&json).expect("deserialization should succeed");
+    let recovered: RelationalFact =
+        serde_json::from_str(&json).expect("deserialization should succeed");
 
     if let RelationalFact::AmpChannelCheckpoint(cp) = recovered {
         assert_eq!(cp.chan_epoch, 42);
@@ -346,7 +347,8 @@ fn test_channel_policy_serialization() {
     assert!(!json.is_empty());
 
     // Deserialize back
-    let recovered: RelationalFact = serde_json::from_str(&json).expect("deserialization should succeed");
+    let recovered: RelationalFact =
+        serde_json::from_str(&json).expect("deserialization should succeed");
 
     if let RelationalFact::AmpChannelPolicy(p) = recovered {
         assert_eq!(p.skip_window, Some(2048));
@@ -366,7 +368,8 @@ fn test_channel_policy_none_skip_window() {
     let fact = RelationalFact::AmpChannelPolicy(policy);
 
     let json = serde_json::to_string(&fact).expect("serialization should succeed");
-    let recovered: RelationalFact = serde_json::from_str(&json).expect("deserialization should succeed");
+    let recovered: RelationalFact =
+        serde_json::from_str(&json).expect("deserialization should succeed");
 
     if let RelationalFact::AmpChannelPolicy(p) = recovered {
         assert_eq!(p.skip_window, None);

@@ -21,8 +21,8 @@
 //! ```
 
 use aura_core::context::EffectContext;
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::effects::ExecutionMode;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 
 /// ExecutionContext alias for backwards compatibility within Layer 3.
@@ -91,11 +91,7 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
         let context_id = ContextId::new_from_entropy([2u8; 32]);
 
-        let context = EffectContext::new(
-            authority_id,
-            context_id,
-            ExecutionMode::Testing,
-        );
+        let context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
 
         assert_eq!(context.authority_id(), authority_id);
         assert_eq!(context.context_id(), context_id);
@@ -106,8 +102,7 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([3u8; 32]);
         let context_id = ContextId::new_from_entropy([4u8; 32]);
 
-        let mut context =
-            EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
+        let mut context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
         context.set_metadata("key1", "value1");
         context.set_metadata("key2", "value2");
 
@@ -121,11 +116,8 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([5u8; 32]);
         let context_id = ContextId::new_from_entropy([6u8; 32]);
 
-        let context = handler.create_effect_context(
-            authority_id,
-            context_id,
-            ExecutionMode::Testing,
-        );
+        let context =
+            handler.create_effect_context(authority_id, context_id, ExecutionMode::Testing);
 
         assert_eq!(context.authority_id(), authority_id);
         assert_eq!(context.context_id(), context_id);
@@ -137,8 +129,7 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([7u8; 32]);
         let context_id = ContextId::new_from_entropy([8u8; 32]);
 
-        let mut context =
-            EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
+        let mut context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
         context.set_metadata("custom_field", "value");
 
         assert!(handler.validate_context(&context, &["custom_field"]));
@@ -151,13 +142,11 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
         let context_id = ContextId::new_from_entropy([10u8; 32]);
 
-        let mut context1 =
-            EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
+        let mut context1 = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
         context1.set_metadata("key1", "value1");
         context1.set_metadata("shared", "from_context1");
 
-        let mut context2 =
-            EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
+        let mut context2 = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
         context2.set_metadata("key2", "value2");
         context2.set_metadata("shared", "from_context2");
 

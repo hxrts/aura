@@ -316,8 +316,7 @@ fn test_partition_minority_cannot_commit() {
     let witnesses = vec!["w1", "w2", "w3", "w4", "w5"];
     let partition = NetworkPartition::split(vec!["w1", "w2"], vec!["w3", "w4", "w5"]);
 
-    let mut sim = ConsensusSimulation::new(witnesses.clone(), 3, 42)
-        .with_partition(partition);
+    let mut sim = ConsensusSimulation::new(witnesses.clone(), 3, 42).with_partition(partition);
 
     // All propose same result
     for w in &witnesses {
@@ -327,10 +326,17 @@ fn test_partition_minority_cannot_commit() {
     let result = sim.run_to_completion(100);
 
     // Partition should cause message drops
-    assert!(result.messages_dropped > 0, "Expected dropped messages due to partition");
+    assert!(
+        result.messages_dropped > 0,
+        "Expected dropped messages due to partition"
+    );
 
     // No safety violations
-    assert!(result.is_ok(), "Unexpected violations: {:?}", result.violations);
+    assert!(
+        result.is_ok(),
+        "Unexpected violations: {:?}",
+        result.violations
+    );
 }
 
 /// Deterministic test: Equivocating witness is handled safely
@@ -339,8 +345,7 @@ fn test_equivocator_handled_safely() {
     let witnesses = vec!["w1", "w2", "w3", "w4", "w5"];
     let byzantine = ByzantineConfig::equivocating(vec!["w1"]);
 
-    let mut sim = ConsensusSimulation::new(witnesses.clone(), 3, 42)
-        .with_byzantine(byzantine);
+    let mut sim = ConsensusSimulation::new(witnesses.clone(), 3, 42).with_byzantine(byzantine);
 
     // Byzantine w1 equivocates
     sim.propose_share("w1", "result1");
@@ -354,8 +359,14 @@ fn test_equivocator_handled_safely() {
     let result = sim.run_to_completion(100);
 
     // Safety must hold
-    let safety_violations: Vec<_> = result.violations.iter()
+    let safety_violations: Vec<_> = result
+        .violations
+        .iter()
         .filter(|v| v.invariant == "AgreementOnCommit")
         .collect();
-    assert!(safety_violations.is_empty(), "Safety violated: {:?}", safety_violations);
+    assert!(
+        safety_violations.is_empty(),
+        "Safety violated: {:?}",
+        safety_violations
+    );
 }

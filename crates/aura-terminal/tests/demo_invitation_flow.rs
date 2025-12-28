@@ -17,7 +17,7 @@
 
 use async_lock::RwLock;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use aura_agent::core::{AgentBuilder, AgentConfig, AuraAgent};
 use aura_agent::handlers::ShareableInvitation;
@@ -168,6 +168,60 @@ async fn wait_for_contact(app_core: &Arc<RwLock<AppCore>>, contact_id: Authority
                 "Timed out waiting for contact {} ({} contacts present)",
                 contact_id,
                 state.contacts.len()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+async fn wait_for_channel_members(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    expected_members: u32,
+) {
+    let start = Instant::now();
+    loop {
+        let core = app_core.read().await;
+        if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
+            if let Some(channel) = chat_state.channels.iter().find(|c| c.name == channel_name) {
+                if channel.member_count >= expected_members {
+                    return;
+                }
+            }
+        }
+        drop(core);
+        if start.elapsed() > Duration::from_secs(2) {
+            panic!(
+                "Timed out waiting for {} members in channel {}",
+                expected_members, channel_name
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+async fn wait_for_message(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    content_snippet: &str,
+) {
+    let start = Instant::now();
+    loop {
+        let core = app_core.read().await;
+        if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
+            if let Some(channel) = chat_state.channels.iter().find(|c| c.name == channel_name) {
+                if chat_state.messages.iter().any(|m| {
+                    m.channel_id == channel.id && m.content.contains(content_snippet)
+                }) {
+                    return;
+                }
+            }
+        }
+        drop(core);
+        if start.elapsed() > Duration::from_secs(2) {
+            panic!(
+                "Timed out waiting for message containing '{}' in {} channel",
+                content_snippet, channel_name
             );
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -429,6 +483,14 @@ async fn test_complete_demo_invitation_flow() {
 
     // Phase 5: Verify state via signals
     println!("\nPhase 5: Verify state via signals");
+
+    wait_for_channel_members(&env.app_core, "Guardians", 3).await;
+    wait_for_message(
+        &env.app_core,
+        "Guardians",
+        "Hello Alice and Carol!",
+    )
+    .await;
 
     let core = env.app_core.read().await;
 

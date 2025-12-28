@@ -8,6 +8,7 @@
 //! the same source of truth for tree operations.
 
 use super::effects::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
+use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::storage::StorageEffects;
 use aura_core::tree::AttestedOp;
@@ -15,7 +16,6 @@ use aura_core::Hash32;
 use aura_journal::commitment_tree::storage as tree_storage;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use async_lock::RwLock;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -53,9 +53,7 @@ impl PersistentSyncHandler {
     }
 
     /// Create a new persistent sync handler with eager loading (async).
-    pub async fn new_eager(
-        storage: Arc<dyn StorageEffects>,
-    ) -> Result<Self, aura_core::AuraError> {
+    pub async fn new_eager(storage: Arc<dyn StorageEffects>) -> Result<Self, aura_core::AuraError> {
         let ops_cache = Self::load_ops_from_storage(&*storage).await?;
         Ok(Self {
             storage,
@@ -210,8 +208,8 @@ impl SyncEffects for PersistentSyncHandler {
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
         for op in ops {
-            let op_hash =
-                tree_storage::op_hash(&op).map_err(|e| SyncError::VerificationFailed(e.to_string()))?;
+            let op_hash = tree_storage::op_hash(&op)
+                .map_err(|e| SyncError::VerificationFailed(e.to_string()))?;
 
             // Check for duplicate
             let already = {

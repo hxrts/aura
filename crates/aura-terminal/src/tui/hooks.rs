@@ -62,9 +62,9 @@ use std::time::Duration;
 
 use aura_app::signal_defs::ERROR_SIGNAL;
 use aura_app::AppError;
+use aura_app::ReactiveHandler;
 use aura_app::{ReactiveState, ReactiveVec};
 use aura_core::effects::reactive::{ReactiveEffects, ReactiveError, Signal};
-use aura_app::ReactiveHandler;
 
 use crate::tui::context::{InitializedAppCore, IoContext};
 use crate::tui::tasks::UiTaskRegistry;

@@ -6,9 +6,7 @@
 
 use async_lock::RwLock;
 use async_trait::async_trait;
-use aura_core::effects::{
-    StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats,
-};
+use aura_core::effects::{StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -85,7 +83,6 @@ impl StorageCoreEffects for MemoryStorageHandler {
         };
         Ok(keys)
     }
-
 }
 
 #[async_trait]

@@ -40,7 +40,9 @@ pub async fn generate_compensation_fact<E: TimeEffects>(
                             effects
                                 .physical_time()
                                 .await
-                                .map_err(|e| aura_core::AuraError::internal(format!("time error: {e}")))?
+                                .map_err(|e| {
+                                    aura_core::AuraError::internal(format!("time error: {e}"))
+                                })?
                                 .ts_ms,
                         )),
                     ),

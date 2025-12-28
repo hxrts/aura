@@ -2,9 +2,7 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::util::test_utils::test_authority_id;
-use aura_invitation::{
-    guards::GuardSnapshot, InvitationConfig, InvitationService, InvitationType,
-};
+use aura_invitation::{guards::GuardSnapshot, InvitationConfig, InvitationService, InvitationType};
 
 fn snapshot_with_caps(auth: AuthorityId, ctx: ContextId, caps: &[&str]) -> GuardSnapshot {
     GuardSnapshot::new(

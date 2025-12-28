@@ -33,7 +33,6 @@ use aura_authentication::{AuthFact, AuthFactReducer, AUTH_FACT_TYPE_ID};
 use aura_chat::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 use aura_invitation::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
 use aura_journal::FactRegistry;
-use aura_social::moderation::register_moderation_facts;
 use aura_recovery::{RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
     ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
@@ -42,6 +41,7 @@ use aura_relational::{
     GUARDIAN_REQUEST_FACT_TYPE_ID, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
 };
 use aura_rendezvous::{RendezvousFact, RendezvousFactReducer, RENDEZVOUS_FACT_TYPE_ID};
+use aura_social::moderation::register_moderation_facts;
 
 /// Assembles the journal fact registry with all domain reducers.
 ///
@@ -79,7 +79,7 @@ pub fn build_fact_registry() -> FactRegistry {
 mod tests {
     use super::*;
     use crate::fact_types::FACT_TYPE_IDS;
-    use aura_journal::validate_type_ids;
+    use aura_journal::extensibility::validate_type_ids;
 
     #[test]
     fn registry_contains_domain_fact_types() {

@@ -29,14 +29,15 @@ pub fn verify_authority_signature(
     authority_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
     // Verify the cryptographic signature
-    let valid = aura_core::ed25519_verify(message, signature, authority_public_key).map_err(|e| {
-        AuthenticationError::InvalidAuthoritySignature {
-            details: format!(
-                "Authority {} signature verification failed: {}",
-                authority_id, e
-            ),
-        }
-    })?;
+    let valid =
+        aura_core::ed25519_verify(message, signature, authority_public_key).map_err(|e| {
+            AuthenticationError::InvalidAuthoritySignature {
+                details: format!(
+                    "Authority {} signature verification failed: {}",
+                    authority_id, e
+                ),
+            }
+        })?;
 
     if !valid {
         return Err(AuthenticationError::InvalidAuthoritySignature {

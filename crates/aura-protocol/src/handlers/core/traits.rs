@@ -5,8 +5,8 @@
 
 use aura_core::identifiers::DeviceId;
 
-use crate::handlers::EffectType;
 use super::{AuraHandlerConfig, FactoryError};
+use crate::handlers::EffectType;
 
 /// Core factory trait for creating Aura handlers
 ///
@@ -117,16 +117,12 @@ pub trait AuraHandlerFactory {
     ) -> Result<super::erased::BoxedHandler, FactoryError>;
 
     /// Create a testing handler with minimal configuration
-    fn for_testing(
-        device_id: DeviceId,
-    ) -> Result<super::erased::BoxedHandler, FactoryError> {
+    fn for_testing(device_id: DeviceId) -> Result<super::erased::BoxedHandler, FactoryError> {
         Self::create_handler(AuraHandlerConfig::for_testing(device_id))
     }
 
     /// Create a production handler with full capabilities
-    fn for_production(
-        device_id: DeviceId,
-    ) -> Result<super::erased::BoxedHandler, FactoryError> {
+    fn for_production(device_id: DeviceId) -> Result<super::erased::BoxedHandler, FactoryError> {
         // Production handler assembly is owned by aura-agent.
         Self::create_handler(AuraHandlerConfig::for_production(device_id))
     }

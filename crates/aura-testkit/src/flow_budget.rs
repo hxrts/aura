@@ -3,12 +3,13 @@
 #![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
-use aura_authorization::{AuraResult, BiscuitAuthorizationBridge, ContextOp, ResourceScope};
+use aura_authorization::{BiscuitAuthorizationBridge, ContextOp, ResourceScope};
 use aura_core::effects::FlowBudgetEffects;
 use aura_core::epochs::Epoch;
 use aura_core::flow::{FlowBudget, FlowBudgetKey, Receipt};
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::{AuraError, Hash32};
+use aura_core::{AuraError, AuraResult, Hash32};
+use aura_core::scope::AuthorizationOp;
 use biscuit_auth::Biscuit;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -96,7 +97,7 @@ impl FlowBudgetHandler {
             (Some(token), Some(bridge)) => {
                 let now = (self.time_provider)();
                 let result = bridge
-                    .authorize_with_time(token, "flow_charge", scope, Some(now))
+                    .authorize_with_time(token, AuthorizationOp::FlowCharge, scope, Some(now))
                     .map_err(|e| {
                         AuraError::permission_denied(format!("flow budget policy failed: {e}"))
                     })?;

@@ -58,7 +58,8 @@ impl<E: JournalEffects + OrderClockEffects> AmpJournalEffects for E {
             .await
             .map_err(|e| AuraError::internal(e.to_string()))?;
         let content = FactContent::Relational(fact);
-        let bytes = serde_json::to_vec(&content).map_err(|e| AuraError::serialization(e.to_string()))?;
+        let bytes =
+            serde_json::to_vec(&content).map_err(|e| AuraError::serialization(e.to_string()))?;
         let key = format!("relational:{}:{}", context, hex::encode(order.0));
 
         let mut delta = Journal::new();

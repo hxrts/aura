@@ -831,17 +831,23 @@ impl InvitationHandler {
         }
 
         // Fall back to persistent storage for created invitations
-        if let Some(inv) =
-            Self::load_created_invitation(effects, self.context.authority.authority_id, invitation_id)
-                .await
+        if let Some(inv) = Self::load_created_invitation(
+            effects,
+            self.context.authority.authority_id,
+            invitation_id,
+        )
+        .await
         {
             return Some(inv);
         }
 
         // Check imported invitations and reconstruct if found
-        if let Some(shareable) =
-            Self::load_imported_invitation(effects, self.context.authority.authority_id, invitation_id)
-                .await
+        if let Some(shareable) = Self::load_imported_invitation(
+            effects,
+            self.context.authority.authority_id,
+            invitation_id,
+        )
+        .await
         {
             // Reconstruct Invitation from ShareableInvitation
             return Some(Invitation {

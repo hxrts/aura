@@ -20,13 +20,11 @@ impl IdentityValidator {
     ) -> Result<()> {
         // Verify signature
         let valid = aura_core::ed25519_verify(event_hash, signature, authority_public_key)
-            .map_err(|e| {
-                AuthenticationError::InvalidAuthoritySignature {
-                    details: format!(
-                        "Authority signature verification failed for {}: {}",
-                        authority_id, e
-                    ),
-                }
+            .map_err(|e| AuthenticationError::InvalidAuthoritySignature {
+                details: format!(
+                    "Authority signature verification failed for {}: {}",
+                    authority_id, e
+                ),
             })?;
 
         if !valid {
@@ -114,13 +112,8 @@ impl IdentityValidator {
     ) -> Result<()> {
         // FROST signatures are compatible with standard Ed25519 verification
         let valid = aura_core::ed25519_verify(message, &threshold_sig.signature, group_public_key)
-            .map_err(|e| {
-                AuthenticationError::InvalidThresholdSignature {
-                    details: format!(
-                        "FROST threshold signature verification failed: {}",
-                        e
-                    ),
-                }
+            .map_err(|e| AuthenticationError::InvalidThresholdSignature {
+                details: format!("FROST threshold signature verification failed: {}", e),
             })?;
 
         if !valid {

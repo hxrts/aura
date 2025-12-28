@@ -20,7 +20,7 @@ use aura_core::identifiers::ChannelId;
 
 use super::types::*;
 
-fn spawn_ctx<F>(ctx: &Arc<IoContext>, fut: F)
+fn spawn_ctx<F>(ctx: Arc<IoContext>, fut: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
@@ -65,7 +65,7 @@ impl ChatCallbacks {
             let channel_id_clone = channel_id.clone();
             let content_clone = content.clone();
 
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 let trimmed = content_clone.trim_start();
                 if trimmed.starts_with("/") {
                     // IRC-style command path
@@ -194,7 +194,7 @@ impl ChatCallbacks {
                     channel,
                     content,
                 };
-                spawn_ctx(&ctx, async move {
+                spawn_ctx(ctx.clone(), async move {
                     match ctx.dispatch(cmd).await {
                         Ok(_) => {
                             let _ = tx.try_send(UiUpdate::MessageRetried { message_id: msg_id });
@@ -218,7 +218,7 @@ impl ChatCallbacks {
             let app_core = app_core.clone();
             let tx = tx.clone();
             let channel_id_clone = channel_id.clone();
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 // Parse channel_id string to ChannelId
                 let channel_id_typed = channel_id.parse::<ChannelId>().ok();
                 let core = app_core.read().await;
@@ -240,7 +240,7 @@ impl ChatCallbacks {
                     members,
                     threshold_k,
                 };
-                spawn_ctx(&ctx, async move {
+                spawn_ctx(ctx.clone(), async move {
                     match ctx.dispatch(cmd).await {
                         Ok(_) => {
                             let _ = tx.try_send(UiUpdate::ChannelCreated(channel_name));
@@ -264,7 +264,7 @@ impl ChatCallbacks {
                 channel: channel_id,
                 text: topic,
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::TopicSet {
@@ -287,7 +287,7 @@ impl ChatCallbacks {
             let cmd = EffectCommand::CloseChannel {
                 channel: channel_id,
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 let _ = ctx.dispatch(cmd).await;
             });
         })
@@ -329,7 +329,7 @@ impl ContactsCallbacks {
                 contact_id,
                 nickname: new_nickname,
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::NicknameUpdated {
@@ -351,7 +351,7 @@ impl ContactsCallbacks {
             let tx = tx.clone();
             let contact_id_clone = contact_id.clone();
             let cmd = EffectCommand::StartDirectChat { contact_id };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::ChatStarted {
@@ -372,7 +372,7 @@ impl ContactsCallbacks {
             let tx = tx.clone();
             let code_clone = code.clone();
             let cmd = EffectCommand::ImportInvitation { code };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::InvitationImported {
@@ -392,7 +392,7 @@ impl ContactsCallbacks {
             let ctx = ctx.clone();
             let _tx = tx.clone();
             let cmd = EffectCommand::RemoveContact { contact_id };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 let _ = ctx.dispatch(cmd).await;
             });
         })
@@ -410,7 +410,7 @@ impl ContactsCallbacks {
                 authority_id,
                 address,
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         ctx.mark_peer_invited(&authority_id_clone).await;
@@ -460,7 +460,7 @@ impl InvitationsCallbacks {
             let tx = tx.clone();
             let inv_id = invitation_id.clone();
             let cmd = EffectCommand::AcceptInvitation { invitation_id };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::InvitationAccepted {
@@ -481,7 +481,7 @@ impl InvitationsCallbacks {
             let tx = tx.clone();
             let inv_id = invitation_id.clone();
             let cmd = EffectCommand::DeclineInvitation { invitation_id };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::InvitationDeclined {
@@ -501,7 +501,7 @@ impl InvitationsCallbacks {
             let ctx = ctx.clone();
             let _tx = tx.clone();
             let cmd = EffectCommand::CancelInvitation { invitation_id };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 let _ = ctx.dispatch(cmd).await;
             });
         })
@@ -515,7 +515,7 @@ impl InvitationsCallbacks {
                   ttl_secs: Option<u64>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
-                spawn_ctx(&ctx, async move {
+                spawn_ctx(ctx.clone(), async move {
                     match ctx
                         .create_invitation_code(&receiver_id, &invitation_type, message, ttl_secs)
                         .await
@@ -534,7 +534,7 @@ impl InvitationsCallbacks {
         Arc::new(move |invitation_id: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.export_invitation_code(&invitation_id).await {
                     Ok(code) => {
                         let _ = tx.try_send(UiUpdate::InvitationExported { code });
@@ -553,7 +553,7 @@ impl InvitationsCallbacks {
             let tx = tx.clone();
             let code_clone = code.clone();
             let cmd = EffectCommand::ImportInvitation { code };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::InvitationImported {
@@ -597,7 +597,7 @@ impl RecoveryCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let cmd = EffectCommand::StartRecovery;
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::RecoveryStarted);
@@ -615,7 +615,7 @@ impl RecoveryCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let cmd = EffectCommand::InviteGuardian { contact_id: None };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::GuardianAdded {
@@ -638,7 +638,7 @@ impl RecoveryCallbacks {
             let cmd = EffectCommand::InviteGuardian {
                 contact_id: Some(contact_id),
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::GuardianSelected {
@@ -661,7 +661,7 @@ impl RecoveryCallbacks {
             let cmd = EffectCommand::SubmitGuardianApproval {
                 guardian_id: request_id,
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::ApprovalSubmitted {
@@ -714,7 +714,7 @@ impl SettingsCallbacks {
             let cmd = EffectCommand::UpdateMfaPolicy {
                 require_mfa: policy.requires_mfa(),
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::MfaPolicyChanged(policy));
@@ -736,7 +736,7 @@ impl SettingsCallbacks {
             let tx = tx.clone();
             let name_clone = name.clone();
             let cmd = EffectCommand::UpdateNickname { name: name.clone() };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::DisplayNameChanged(name_clone));
@@ -757,7 +757,7 @@ impl SettingsCallbacks {
                 threshold_k,
                 threshold_n,
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::ThresholdChanged {
@@ -777,7 +777,7 @@ impl SettingsCallbacks {
         Arc::new(move |device_name: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 let start = match ctx.start_device_enrollment(&device_name).await {
                     Ok(start) => start,
                     Err(_e) => {
@@ -819,7 +819,7 @@ impl SettingsCallbacks {
                 let app = ctx.app_core_raw().clone();
                 let tx_monitor = tx.clone();
                 let ceremony_id = start.ceremony_id.clone();
-                spawn_ctx(&ctx, async move {
+                spawn_ctx(ctx.clone(), async move {
                     let _ = aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
                         &app,
                         ceremony_id,
@@ -852,7 +852,7 @@ impl SettingsCallbacks {
             let tx = tx.clone();
             let device_id_clone = device_id.clone();
 
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 let ceremony_id = match ctx.start_device_removal(&device_id_clone).await {
                     Ok(id) => id,
                     Err(_e) => {
@@ -869,7 +869,7 @@ impl SettingsCallbacks {
                 // Best-effort: monitor completion and toast success/failure.
                 let app = ctx.app_core_raw().clone();
                 let tx_monitor = tx.clone();
-                spawn_ctx(&ctx, async move {
+                spawn_ctx(ctx.clone(), async move {
                     match aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
                         &app,
                         ceremony_id,
@@ -880,10 +880,11 @@ impl SettingsCallbacks {
                     .await
                     {
                         Ok(status) if status.is_complete => {
-                            let _ = tx_monitor.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                                "device-removal-complete",
-                                "Device removal complete",
-                            )));
+                            let _ =
+                                tx_monitor.try_send(UiUpdate::ToastAdded(ToastMessage::success(
+                                    "device-removal-complete",
+                                    "Device removal complete",
+                                )));
                         }
                         Ok(status) if status.has_failed => {
                             let msg = status
@@ -912,7 +913,7 @@ impl SettingsCallbacks {
         Arc::new(move |code: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.import_invitation_on_mobile(&code).await {
                     Ok(()) => {
                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
@@ -921,10 +922,8 @@ impl SettingsCallbacks {
                         )));
                     }
                     Err(e) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                            "devices",
-                            e,
-                        )));
+                        let _ =
+                            tx.try_send(UiUpdate::ToastAdded(ToastMessage::error("devices", e)));
                     }
                 }
             });
@@ -963,7 +962,7 @@ impl BlockCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let content_clone = content.clone();
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 let block_id = {
                     use aura_app::signal_defs::{BLOCKS_SIGNAL, BLOCK_SIGNAL};
                     use aura_core::effects::reactive::ReactiveEffects;
@@ -1101,7 +1100,6 @@ impl BlockCallbacks {
             });
         })
     }
-
 }
 
 // =============================================================================
@@ -1144,7 +1142,7 @@ impl NeighborhoodCallbacks {
                 block_id,
                 depth: depth_str,
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::BlockEntered {
@@ -1168,7 +1166,7 @@ impl NeighborhoodCallbacks {
                 block_id: "home".to_string(),
                 depth: "Interior".to_string(),
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::NavigatedHome);
@@ -1190,7 +1188,7 @@ impl NeighborhoodCallbacks {
                 block_id: "current".to_string(),
                 depth: "Street".to_string(),
             };
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::NavigatedToStreet);
@@ -1225,7 +1223,7 @@ impl AppCallbacks {
         Arc::new(move |display_name: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            spawn_ctx(&ctx, async move {
+            spawn_ctx(ctx.clone(), async move {
                 // Create the account file via async storage effects.
                 match ctx.create_account(&display_name).await {
                     Ok(()) => {

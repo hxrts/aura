@@ -84,12 +84,8 @@ pub mod peers {
 /// Transport protocol implementations
 ///
 /// This module contains protocol-specific implementations for STUN, hole punching,
-/// and WebSocket communication, all designed with privacy preservation in mind.
-pub mod protocols {
-    pub mod hole_punch;
-    pub mod stun;
-    pub mod websocket;
-}
+/// WebSocket communication, and internal rendezvous constants.
+pub mod protocols;
 
 /// Context-aware transport for authority-centric model
 pub mod context_transport;

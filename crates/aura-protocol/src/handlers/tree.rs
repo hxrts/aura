@@ -215,8 +215,11 @@ impl TreeEffects for PersistentTreeHandler {
                 .ops_cache
                 .read()
                 .expect("PersistentTreeHandler lock poisoned");
-            ops.iter()
-                .any(|existing| Self::op_hash(existing).map(|h| h == op_hash).unwrap_or(false))
+            ops.iter().any(|existing| {
+                Self::op_hash(existing)
+                    .map(|h| h == op_hash)
+                    .unwrap_or(false)
+            })
         };
 
         if already {
@@ -345,10 +348,7 @@ impl TreeEffects for PersistentTreeHandler {
         }
 
         // Clear the index
-        let _ = self
-            .storage
-            .remove(tree_storage::TREE_OPS_INDEX_KEY)
-            .await;
+        let _ = self.storage.remove(tree_storage::TREE_OPS_INDEX_KEY).await;
 
         // Snapshot application replaces history; we store no additional ops
         let _ = snapshot;

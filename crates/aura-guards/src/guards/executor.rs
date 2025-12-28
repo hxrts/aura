@@ -27,13 +27,13 @@ use aura_core::{
 };
 
 // Re-export key types for easier use by macro-generated code
+use aura_authorization::ResourceScope;
 pub use aura_core::effects::guard::{
     EffectCommand as ChoreographyCommand, EffectResult as ChoreographyResult,
 };
-use std::{collections::HashMap, sync::Arc};
-use aura_authorization::ResourceScope;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use biscuit_auth::{Biscuit, PublicKey};
+use std::{collections::HashMap, sync::Arc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -207,7 +207,11 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
             .await;
         metadata_map.insert(
             authz_key,
-            if authz_ok { "allow".to_string() } else { "deny".to_string() },
+            if authz_ok {
+                "allow".to_string()
+            } else {
+                "deny".to_string()
+            },
         );
         let metadata = MetadataView::new(metadata_map);
 

@@ -94,13 +94,13 @@ pub use aura_core::effects::{LogicalClockEffects, OrderClockEffects, PhysicalTim
 // Crypto types (convenience re-export)
 pub use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
 
-pub use effect_api::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
-pub use params::*; // Re-export all parameter types
 pub use crdt::{
     CausalContext, CmHandler, CvHandler, DeliveryConfig, DeliveryEffect, DeliveryGuarantee,
     DeltaHandler, GossipStrategy, TopicId,
 };
-// Sync effects re-exported from consolidated module
+pub use effect_api::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
+pub use params::*; // Re-export all parameter types
+                   // Sync effects re-exported from consolidated module
 pub use crate::sync::effects::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
 pub use tree::TreeEffects;
 

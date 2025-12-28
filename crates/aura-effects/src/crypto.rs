@@ -13,7 +13,9 @@
 use async_trait::async_trait;
 use aura_core::crypto::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyContext};
 use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
-use aura_core::effects::{CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects};
+use aura_core::effects::{
+    CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
+};
 use aura_core::hash;
 use zeroize::Zeroize;
 
@@ -205,7 +207,6 @@ impl RandomCoreEffects for RealCryptoHandler {
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ])
     }
-
 }
 
 // (MockCryptoHandler implementation moved to aura-testkit)
@@ -381,8 +382,12 @@ impl CryptoExtendedEffects for RealCryptoHandler {
             let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
 
             Ok(SigningKeyGenResult {
-                key_packages: vec![key_package.to_bytes().map_err(|e| CryptoError::invalid(format!("key package serialization: {}", e)))?],
-                public_key_package: public_package.to_bytes().map_err(|e| CryptoError::invalid(format!("public package serialization: {}", e)))?,
+                key_packages: vec![key_package.to_bytes().map_err(|e| {
+                    CryptoError::invalid(format!("key package serialization: {}", e))
+                })?],
+                public_key_package: public_package.to_bytes().map_err(|e| {
+                    CryptoError::invalid(format!("public package serialization: {}", e))
+                })?,
                 mode: SigningMode::SingleSigner,
             })
         } else if threshold >= 2 {
@@ -899,7 +904,6 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         self.frost_generate_keys(new_threshold, new_max_signers)
             .await
     }
-
 }
 
 #[cfg(test)]

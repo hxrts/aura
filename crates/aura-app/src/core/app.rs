@@ -16,6 +16,7 @@ use super::{Intent, IntentError, StateSnapshot};
 use crate::runtime_bridge::{LanPeerInfo, RuntimeBridge, SyncStatus as RuntimeSyncStatus};
 use crate::views::ViewState;
 
+use crate::ReactiveHandler;
 use async_trait::async_trait;
 use aura_core::effects::reactive::{
     ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
@@ -27,7 +28,6 @@ use aura_core::query::{FactPredicate, Query};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::FrostThreshold;
 use aura_core::AccountId;
-use crate::ReactiveHandler;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

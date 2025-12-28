@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 
+use aura_app::ReactiveHandler;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
-use aura_app::ReactiveHandler;
 use aura_journal::fact::Fact;
 use aura_journal::FactRegistry;
 use tokio::sync::{broadcast, mpsc};
@@ -30,7 +30,7 @@ pub struct ReactivePipeline {
     fact_tx: mpsc::Sender<FactSource>,
     shutdown_tx: mpsc::Sender<()>,
     updates: broadcast::Receiver<ViewUpdate>,
-    scheduler_task: JoinHandle<()>,
+    scheduler_task: Option<JoinHandle<()>>,
 }
 
 impl ReactivePipeline {
@@ -63,7 +63,7 @@ impl ReactivePipeline {
 
         let updates = scheduler.subscribe();
 
-        let scheduler_task = tokio::spawn(async move { scheduler.run().await });
+        let scheduler_task = Some(tokio::spawn(async move { scheduler.run().await }));
 
         Self {
             fact_tx,
@@ -89,12 +89,13 @@ impl ReactivePipeline {
     }
 
     /// Shutdown the scheduler.
-    pub async fn shutdown(self) {
+    pub async fn shutdown(mut self) {
         let _ = self.shutdown_tx.send(()).await;
-        let mut handle = self.scheduler_task;
-        let timeout = tokio::time::Duration::from_secs(2);
-        if tokio::time::timeout(timeout, &mut handle).await.is_err() {
-            handle.abort();
+        if let Some(mut handle) = self.scheduler_task.take() {
+            let timeout = tokio::time::Duration::from_secs(2);
+            if tokio::time::timeout(timeout, &mut handle).await.is_err() {
+                handle.abort();
+            }
         }
     }
 }
@@ -102,6 +103,8 @@ impl ReactivePipeline {
 impl Drop for ReactivePipeline {
     fn drop(&mut self) {
         let _ = self.shutdown_tx.try_send(());
-        self.scheduler_task.abort();
+        if let Some(handle) = self.scheduler_task.as_mut() {
+            handle.abort();
+        }
     }
 }

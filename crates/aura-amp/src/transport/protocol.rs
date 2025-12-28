@@ -99,9 +99,14 @@ fn build_amp_send_guard(
     use aura_guards::chain::create_send_guard_op;
     use aura_guards::journal::JournalCoupler;
 
-    create_send_guard_op(GuardOperation::AmpSend, context, peer, config.default_flow_cost)
-        .with_operation_id(GuardOperationId::AmpSend)
-        .with_journal_coupler(JournalCoupler::new())
+    create_send_guard_op(
+        GuardOperation::AmpSend,
+        context,
+        peer,
+        config.default_flow_cost,
+    )
+    .with_operation_id(GuardOperationId::AmpSend)
+    .with_journal_coupler(JournalCoupler::new())
 }
 
 // ============================================================================
@@ -142,9 +147,9 @@ pub async fn emit_proposed_bump<E: AmpJournalEffects>(
     proposal: ProposedChannelEpochBump,
 ) -> Result<()> {
     effects
-        .insert_relational_fact(aura_journal::fact::RelationalFact::AmpProposedChannelEpochBump(
-            proposal,
-        ))
+        .insert_relational_fact(
+            aura_journal::fact::RelationalFact::AmpProposedChannelEpochBump(proposal),
+        )
         .await
 }
 
@@ -245,7 +250,13 @@ where
 
     // Log flow charge
     if let Some(receipt) = &guard_result.receipt {
-        AMP_TELEMETRY.log_flow_charge(context, peer, "amp_send", config.default_flow_cost, Some(receipt));
+        AMP_TELEMETRY.log_flow_charge(
+            context,
+            peer,
+            "amp_send",
+            config.default_flow_cost,
+            Some(receipt),
+        );
     }
 
     // Phase 5: Network broadcast
@@ -296,7 +307,12 @@ where
     let (deriv, window_validation) = validate_and_build_result(effects, context, transport_header)
         .await
         .map_err(|(e, validation)| {
-            AMP_TELEMETRY.log_receive_failure(context, Some(&transport_header), validation.as_ref(), &e);
+            AMP_TELEMETRY.log_receive_failure(
+                context,
+                Some(&transport_header),
+                validation.as_ref(),
+                &e,
+            );
             e
         })?;
 
@@ -308,12 +324,23 @@ where
         .await
         .map_err(|e| {
             let err = AuraError::crypto(format!("AMP open failed: {}", e));
-            AMP_TELEMETRY.log_receive_failure(context, Some(&transport_header), Some(&window_validation), &err);
+            AMP_TELEMETRY.log_receive_failure(
+                context,
+                Some(&transport_header),
+                Some(&window_validation),
+                &err,
+            );
             err
         })?;
 
     // Success telemetry
-    AMP_TELEMETRY.log_receive_success(context, &transport_header, wire_size, opened.len(), &window_validation);
+    AMP_TELEMETRY.log_receive_success(
+        context,
+        &transport_header,
+        wire_size,
+        opened.len(),
+        &window_validation,
+    );
 
     Ok(AmpMessage::new(to_core_header(transport_header), opened))
 }
@@ -323,16 +350,14 @@ async fn validate_and_build_result<E: AmpJournalEffects>(
     effects: &E,
     context: ContextId,
     header: TransportAmpHeader,
-) -> std::result::Result<(RatchetDerivation, WindowValidationResult), (AuraError, Option<WindowValidationResult>)> {
+) -> std::result::Result<
+    (RatchetDerivation, WindowValidationResult),
+    (AuraError, Option<WindowValidationResult>),
+> {
     match validate_header(effects, context, header).await {
         Ok((deriv, bounds)) => {
-            let validation = create_window_validation_result(
-                true,
-                true,
-                bounds,
-                header.ratchet_gen,
-                None,
-            );
+            let validation =
+                create_window_validation_result(true, true, bounds, header.ratchet_gen, None);
             Ok((deriv, validation))
         }
         Err(error) => {

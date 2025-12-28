@@ -128,4 +128,3 @@ impl Bottom for PeerView {
         Self::new()
     }
 }
-

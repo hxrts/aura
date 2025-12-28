@@ -38,10 +38,10 @@ pub use modal_queue::{
     ChatMemberSelectModalState, ConfirmAction, ContactSelectModalState, ModalQueue, ModalType,
     QueuedModal,
 };
-pub use views::{ChatMemberCandidate, CreateChannelModalState, CreateChannelStep};
 pub use toast::{QueuedToast, Toast, ToastLevel, ToastQueue};
 pub use transition::transition;
 pub use views::*;
+pub use views::{ChatMemberCandidate, CreateChannelModalState, CreateChannelStep};
 
 use crate::tui::screens::{Router, Screen};
 

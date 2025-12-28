@@ -376,7 +376,8 @@ mod tests {
         };
 
         let serialized = crate::util::serialization::to_vec(&cmd).unwrap();
-        let deserialized: EffectCommand = crate::util::serialization::from_slice(&serialized).unwrap();
+        let deserialized: EffectCommand =
+            crate::util::serialization::from_slice(&serialized).unwrap();
 
         match deserialized {
             EffectCommand::ChargeBudget { amount, .. } => assert_eq!(amount, 100),

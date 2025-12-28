@@ -1,7 +1,8 @@
+#![allow(missing_docs)]
 use async_trait::async_trait;
+use aura_core::effects::JournalEffects;
 use aura_core::effects::{NetworkCoreEffects, NetworkError, NetworkExtendedEffects};
 use aura_core::effects::{PhysicalTimeEffects, TimeError};
-use aura_core::effects::{JournalEffects};
 use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::time::PhysicalTime;
 use aura_core::{FlowBudget, Journal};
@@ -43,13 +44,21 @@ impl TestEffects {
 
 #[async_trait]
 impl JournalEffects for TestEffects {
-    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, aura_core::AuraError> {
+    async fn merge_facts(
+        &self,
+        target: &Journal,
+        delta: &Journal,
+    ) -> Result<Journal, aura_core::AuraError> {
         let mut merged = target.clone();
         merged.merge_facts(delta.facts.clone());
         Ok(merged)
     }
 
-    async fn refine_caps(&self, target: &Journal, refinement: &Journal) -> Result<Journal, aura_core::AuraError> {
+    async fn refine_caps(
+        &self,
+        target: &Journal,
+        refinement: &Journal,
+    ) -> Result<Journal, aura_core::AuraError> {
         let mut refined = target.clone();
         refined.refine_caps(refinement.caps.clone());
         Ok(refined)
@@ -123,22 +132,19 @@ impl NetworkCoreEffects for TestEffects {
     async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
         let peers = self.peers.lock().unwrap().clone();
         for (peer_id, sender) in peers {
-            sender.send((self.id, message.clone())).map_err(|_| {
-                NetworkError::SendFailed {
+            sender
+                .send((self.id, message.clone()))
+                .map_err(|_| NetworkError::SendFailed {
                     peer_id: Some(peer_id),
                     reason: "channel closed".to_string(),
-                }
-            })?;
+                })?;
         }
         Ok(())
     }
 
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
         let mut inbox = self.inbox.lock().await;
-        inbox
-            .recv()
-            .await
-            .ok_or(NetworkError::NoMessage)
+        inbox.recv().await.ok_or(NetworkError::NoMessage)
     }
 }
 

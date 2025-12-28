@@ -4,21 +4,23 @@
 //! to appropriate handlers. The registry enables dynamic composition
 //! and runtime reconfiguration of effect handlers.
 
-use async_trait::async_trait;
-use aura_core::{hash, AuthorityId, ContextId, ContextSnapshot, EffectType, ExecutionMode, SessionId};
-use aura_mpst::LocalSessionType;
-use std::collections::HashMap;
-use thiserror::Error;
-use uuid::Uuid;
 use crate::adapters::{
     ConsoleHandlerAdapter, CryptoHandlerAdapter, LoggingSystemHandlerAdapter, RandomHandlerAdapter,
     StorageHandlerAdapter, TimeHandlerAdapter, TraceHandlerAdapter, TransportHandlerAdapter,
+};
+use async_trait::async_trait;
+use aura_core::{
+    hash, AuthorityId, ContextId, ContextSnapshot, EffectType, ExecutionMode, SessionId,
 };
 use aura_effects::{
     console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
     storage::FilesystemStorageHandler, system::logging::LoggingSystemHandler,
     time::PhysicalTimeHandler, trace::TraceHandler, TcpTransportHandler as RealTransportHandler,
 };
+use aura_mpst::LocalSessionType;
+use std::collections::HashMap;
+use thiserror::Error;
+use uuid::Uuid;
 
 /// Simplified context for handler execution
 #[derive(Debug, Clone)]
@@ -81,7 +83,8 @@ impl HandlerContext {
         context_id: ContextId,
         execution_mode: ExecutionMode,
     ) -> Self {
-        let operation_id = Self::deterministic_operation_id(authority_id, context_id, execution_mode);
+        let operation_id =
+            Self::deterministic_operation_id(authority_id, context_id, execution_mode);
         Self {
             authority_id,
             context_id,
@@ -97,7 +100,8 @@ impl HandlerContext {
         let authority_id = snapshot.authority_id();
         let context_id = snapshot.context_id();
         let execution_mode = snapshot.execution_mode();
-        let operation_id = Self::deterministic_operation_id(authority_id, context_id, execution_mode);
+        let operation_id =
+            Self::deterministic_operation_id(authority_id, context_id, execution_mode);
         Self {
             authority_id,
             context_id,
@@ -140,7 +144,9 @@ impl RegisterAllOptions {
 
 impl Default for RegisterAllOptions {
     fn default() -> Self {
-        Self { allow_impure: false }
+        Self {
+            allow_impure: false,
+        }
     }
 }
 
@@ -681,13 +687,14 @@ mod tests {
         ) -> Result<Vec<u8>, HandlerError> {
             if self.effect_type == effect_type && self.operations.contains(&operation.to_string()) {
                 // Mock successful result
-                aura_core::util::serialization::to_vec(&serde_json::Value::String("mock_result".to_string())).map_err(
-                    |e| HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: e.into(),
-                    },
-                )
+                aura_core::util::serialization::to_vec(&serde_json::Value::String(
+                    "mock_result".to_string(),
+                ))
+                .map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: e.into(),
+                })
             } else {
                 Err(HandlerError::UnsupportedEffect { effect_type })
             }
@@ -723,10 +730,12 @@ mod tests {
             if self.operations.contains(&operation.to_string()) {
                 // Mock successful operation - return serialized mock result
                 let mock_result = serde_json::Value::String("mock_result".to_string());
-                aura_core::util::serialization::to_vec(&mock_result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type: self.effect_type,
-                    operation: operation.to_string(),
-                    source: e.into(),
+                aura_core::util::serialization::to_vec(&mock_result).map_err(|e| {
+                    HandlerError::EffectSerialization {
+                        effect_type: self.effect_type,
+                        operation: operation.to_string(),
+                        source: e.into(),
+                    }
                 })
             } else {
                 Err(HandlerError::UnknownOperation {

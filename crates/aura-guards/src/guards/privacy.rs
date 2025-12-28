@@ -256,7 +256,6 @@ pub async fn track_leakage_consumption<
     Ok(updated.state.consumed_budget)
 }
 
-
 const RESET_OPERATION: &str = "privacy:reset";
 
 fn default_limits() -> LeakageBudget {
@@ -308,9 +307,7 @@ async fn load_privacy_tracker<E: GuardEffects + PhysicalTimeEffects>(
     Ok(tracker)
 }
 
-async fn append_leakage_facts<
-    E: GuardEffects + PhysicalTimeEffects + GuardContextProvider,
->(
+async fn append_leakage_facts<E: GuardEffects + PhysicalTimeEffects + GuardContextProvider>(
     context_id: ContextId,
     source: AuthorityId,
     destination: AuthorityId,
@@ -350,7 +347,9 @@ async fn append_leakage_facts<
         return Ok(());
     }
 
-    let merged = effect_system.merge_facts(&effect_system.get_journal().await?, &delta).await?;
+    let merged = effect_system
+        .merge_facts(&effect_system.get_journal().await?, &delta)
+        .await?;
     effect_system.persist_journal(&merged).await?;
 
     Ok(())
@@ -404,12 +403,14 @@ pub async fn reset_privacy_budget<E: GuardEffects + PhysicalTimeEffects + GuardC
         timestamp: effect_system.physical_time().await?,
     };
     let reset_content = FactContent::Relational(RelationalFact::LeakageEvent(reset_event));
-    let reset_bytes = serde_json::to_vec(&reset_content)
-        .map_err(|e| AuraError::serialization(e.to_string()))?;
+    let reset_bytes =
+        serde_json::to_vec(&reset_content).map_err(|e| AuraError::serialization(e.to_string()))?;
     let reset_key = leakage_fact_key(context_id, LeakageObserverClass::External, 0, b"reset");
     delta.facts.insert(reset_key, FactValue::Bytes(reset_bytes));
 
-    let merged = effect_system.merge_facts(&effect_system.get_journal().await?, &delta).await?;
+    let merged = effect_system
+        .merge_facts(&effect_system.get_journal().await?, &delta)
+        .await?;
     effect_system.persist_journal(&merged).await?;
 
     info!(
@@ -449,14 +450,17 @@ fn leakage_fact_key(
 
 fn extract_limits(journal: &Journal, context_id: ContextId) -> Option<LeakageBudget> {
     let key = privacy_limits_key(context_id);
-    journal.read_facts().get(&key).and_then(|value| match value {
-        FactValue::Bytes(bytes) => serde_json::from_slice(bytes).ok(),
-        FactValue::String(text) => serde_json::from_str(text).ok(),
-        FactValue::Nested(nested) => serde_json::to_vec(nested)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok()),
-        _ => None,
-    })
+    journal
+        .read_facts()
+        .get(&key)
+        .and_then(|value| match value {
+            FactValue::Bytes(bytes) => serde_json::from_slice(bytes).ok(),
+            FactValue::String(text) => serde_json::from_str(text).ok(),
+            FactValue::Nested(nested) => serde_json::to_vec(nested)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok()),
+            _ => None,
+        })
 }
 
 fn extract_leakage_facts(journal: &Journal, context_id: ContextId) -> Vec<LeakageFact> {
@@ -493,9 +497,15 @@ fn leakage_budget_entries(
     let mut entries = Vec::new();
     for observer in observable_by {
         match observer {
-            AdversaryClass::External => entries.push((LeakageObserverClass::External, budget.external)),
-            AdversaryClass::Neighbor => entries.push((LeakageObserverClass::Neighbor, budget.neighbor)),
-            AdversaryClass::InGroup => entries.push((LeakageObserverClass::InGroup, budget.in_group)),
+            AdversaryClass::External => {
+                entries.push((LeakageObserverClass::External, budget.external))
+            }
+            AdversaryClass::Neighbor => {
+                entries.push((LeakageObserverClass::Neighbor, budget.neighbor))
+            }
+            AdversaryClass::InGroup => {
+                entries.push((LeakageObserverClass::InGroup, budget.in_group))
+            }
         }
     }
     entries

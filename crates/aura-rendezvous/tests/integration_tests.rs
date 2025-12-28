@@ -102,7 +102,6 @@ fn test_descriptor_publication_flow() {
     assert!(has_append, "Should include journal append");
 }
 
-
 // =============================================================================
 // Channel Establishment Tests
 // =============================================================================
@@ -179,14 +178,8 @@ fn test_channel_establishment_rejects_expired_descriptor() {
     let mut expired_descriptor = test_descriptor(bob, context);
     expired_descriptor.valid_until = 900;
 
-    let result = service.prepare_establish_channel(
-        &snapshot,
-        context,
-        bob,
-        &psk,
-        1000,
-        &expired_descriptor,
-    );
+    let result =
+        service.prepare_establish_channel(&snapshot, context, bob, &psk, 1000, &expired_descriptor);
 
     assert!(result.is_err());
 }
@@ -489,7 +482,6 @@ fn test_complete_discovery_to_channel_flow() {
     assert!(alice_channels.find_by_context_peer(context, bob).is_some());
     assert!(bob_channels.find_by_context_peer(context, alice).is_some());
 }
-
 
 // =============================================================================
 // Transport Selection Tests

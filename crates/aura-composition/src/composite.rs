@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 
 use crate::registry::{
-    EffectRegistry, Handler, HandlerContext, HandlerError, RegistrableHandler, RegisterAllOptions,
+    EffectRegistry, Handler, HandlerContext, HandlerError, RegisterAllOptions, RegistrableHandler,
     RegistryError,
 };
 use aura_core::effects::registry as effect_registry;

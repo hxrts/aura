@@ -8,7 +8,9 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::transport::TransportEnvelope;
-use aura_core::effects::{RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects};
+use aura_core::effects::{
+    RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects,
+};
 use aura_core::hash;
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use aura_macros::choreography;
@@ -589,9 +591,7 @@ impl SessionOperations {
                 )),
             }
         } else {
-            aura_core::identifiers::SessionId::new_from_entropy(hash::hash(
-                session_id.as_bytes(),
-            ))
+            aura_core::identifiers::SessionId::new_from_entropy(hash::hash(session_id.as_bytes()))
         };
 
         // Implement session status lookup via effects system

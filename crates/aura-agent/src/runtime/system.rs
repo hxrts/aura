@@ -12,6 +12,7 @@ use super::{
 use crate::core::AgentConfig;
 use crate::fact_registry::build_fact_registry;
 use crate::reactive::{FactSource, ReactivePipeline, SchedulerConfig};
+use aura_core::effects::task::TaskSpawner;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
@@ -213,6 +214,11 @@ impl RuntimeSystem {
 
     /// Get the runtime task registry.
     pub fn tasks(&self) -> Arc<RuntimeTaskRegistry> {
+        self.runtime_tasks.clone()
+    }
+
+    /// Get the runtime task spawner as a trait object.
+    pub fn task_spawner(&self) -> Arc<dyn TaskSpawner> {
         self.runtime_tasks.clone()
     }
 

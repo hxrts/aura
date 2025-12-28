@@ -111,7 +111,10 @@ fn test_deserialize_truncated_message() {
     let truncated = &bytes[..bytes.len() / 2];
 
     let result = deserialize_message(truncated);
-    assert!(result.is_err(), "should fail to deserialize truncated message");
+    assert!(
+        result.is_err(),
+        "should fail to deserialize truncated message"
+    );
 }
 
 #[test]
@@ -151,7 +154,10 @@ fn test_different_headers_produce_different_bytes() {
     let bytes1 = serialize_message(&msg1).unwrap();
     let bytes2 = serialize_message(&msg2).unwrap();
 
-    assert_ne!(bytes1, bytes2, "different headers should produce different serializations");
+    assert_ne!(
+        bytes1, bytes2,
+        "different headers should produce different serializations"
+    );
 }
 
 mod proptest_wire {

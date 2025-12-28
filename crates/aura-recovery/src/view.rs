@@ -606,28 +606,12 @@ mod tests {
         };
 
         let mut deltas_ab = Vec::new();
-        deltas_ab.extend(reducer.reduce_fact(
-            RECOVERY_FACT_TYPE_ID,
-            &fact_a.to_bytes(),
-            None,
-        ));
-        deltas_ab.extend(reducer.reduce_fact(
-            RECOVERY_FACT_TYPE_ID,
-            &fact_b.to_bytes(),
-            None,
-        ));
+        deltas_ab.extend(reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &fact_a.to_bytes(), None));
+        deltas_ab.extend(reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &fact_b.to_bytes(), None));
 
         let mut deltas_ba = Vec::new();
-        deltas_ba.extend(reducer.reduce_fact(
-            RECOVERY_FACT_TYPE_ID,
-            &fact_b.to_bytes(),
-            None,
-        ));
-        deltas_ba.extend(reducer.reduce_fact(
-            RECOVERY_FACT_TYPE_ID,
-            &fact_a.to_bytes(),
-            None,
-        ));
+        deltas_ba.extend(reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &fact_b.to_bytes(), None));
+        deltas_ba.extend(reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &fact_a.to_bytes(), None));
 
         let mut keys_ab: Vec<String> = deltas_ab
             .iter()

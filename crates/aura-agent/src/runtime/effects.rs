@@ -4,8 +4,12 @@
 
 use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
+use crate::database::IndexedJournalHandler;
 use crate::fact_registry::build_fact_registry;
+use crate::handlers::logical_clock_service::LogicalClockService;
 use async_trait::async_trait;
+use aura_app::ReactiveHandler;
+use aura_authorization::BiscuitAuthorizationBridge;
 use aura_composition::{CompositeHandlerAdapter, RegisterAllOptions};
 use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::crypto::{FrostSigningPackage, SigningKeyGenResult};
@@ -27,9 +31,8 @@ use aura_effects::{
     storage::FilesystemStorageHandler,
     time::{OrderClockHandler, PhysicalTimeHandler},
 };
-use aura_app::ReactiveHandler;
-use crate::database::IndexedJournalHandler;
-use crate::handlers::logical_clock_service::LogicalClockService;
+use aura_guards::prelude::create_send_guard_op;
+use aura_guards::{GuardContextProvider, GuardOperation, JournalCoupler};
 use aura_journal::commitment_tree::state::TreeState as JournalTreeState;
 use aura_journal::extensibility::{DomainFact, FactRegistry};
 use aura_journal::fact::{Fact as TypedFact, FactContent, RelationalFact};
@@ -39,16 +42,13 @@ use aura_protocol::effects::{
     ChoreographyError, ChoreographyEvent, ChoreographyMetrics, EffectApiEffects, EffectApiError,
     EffectApiEventStream, LeakageEffects, SyncEffects, SyncError,
 };
-use aura_guards::prelude::create_send_guard_op;
-use aura_guards::{GuardContextProvider, GuardOperation, JournalCoupler};
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
-use aura_authorization::BiscuitAuthorizationBridge;
 use biscuit_auth::{Biscuit, KeyPair, PublicKey};
+use parking_lot::RwLock;
 use rand::rngs::StdRng;
 use rand::RngCore;
 use rand::SeedableRng;
 use std::collections::HashMap;
-use parking_lot::RwLock;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -72,12 +72,16 @@ pub struct AuraEffectSystem {
     time_handler: PhysicalTimeHandler,
     logical_clock: LogicalClockService,
     order_clock: OrderClockHandler,
-    authorization_handler:
-        aura_authorization::effects::WotAuthorizationHandler<aura_effects::crypto::RealCryptoHandler>,
+    authorization_handler: aura_authorization::effects::WotAuthorizationHandler<
+        aura_effects::crypto::RealCryptoHandler,
+    >,
     leakage_handler: aura_effects::leakage::ProductionLeakageHandler<
         EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
     >,
-    journal_policy: Option<(biscuit_auth::Biscuit, aura_authorization::BiscuitAuthorizationBridge)>,
+    journal_policy: Option<(
+        biscuit_auth::Biscuit,
+        aura_authorization::BiscuitAuthorizationBridge,
+    )>,
     journal_verifying_key: Option<Vec<u8>>,
     authority_id: AuthorityId,
     tree_handler: PersistentTreeHandler,
@@ -221,8 +225,7 @@ impl AuraEffectSystem {
         authority_override: Option<AuthorityId>,
     ) -> Self {
         let device_id = config.device_id();
-        let authority =
-            authority_override.unwrap_or_else(|| AuthorityId::from_uuid(device_id.0));
+        let authority = authority_override.unwrap_or_else(|| AuthorityId::from_uuid(device_id.0));
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
         let crypto_handler = match crypto_seed {
             Some(seed) => RealCryptoHandler::seeded(seed),
@@ -232,13 +235,13 @@ impl AuraEffectSystem {
             Some(seed) => StdRng::from_seed(seed),
             None => StdRng::from_entropy(),
         };
-        let authorization_handler =
-            Self::init_authorization_handler(
-                authority,
-                &crypto_handler,
-                &journal_verifying_key,
-                &time_handler,
-            );
+        let time_handler = PhysicalTimeHandler::new();
+        let authorization_handler = Self::init_authorization_handler(
+            authority,
+            &crypto_handler,
+            &journal_verifying_key,
+            &time_handler,
+        );
         let secure_storage_handler = Arc::new(RealSecureStorageHandler::with_base_path(
             config.storage.base_path.clone(),
         ));
@@ -282,7 +285,7 @@ impl AuraEffectSystem {
             crypto_handler,
             random_rng: parking_lot::Mutex::new(random_rng),
             storage_handler,
-            time_handler: PhysicalTimeHandler::new(),
+            time_handler,
             logical_clock: LogicalClockService::new(Some(device_id)),
             order_clock: OrderClockHandler,
             authorization_handler,
@@ -690,13 +693,10 @@ impl AuraEffectSystem {
             }
         }
 
-        let handler = aura_authorization::effects::WotAuthorizationHandler::new_mock(
-            crypto_handler.clone(),
-        );
+        let handler =
+            aura_authorization::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
         let time_handler = time_handler.clone();
-        handler.with_time_provider(Arc::new(move || {
-            time_handler.physical_time_now_ms() / 1000
-        }))
+        handler.with_time_provider(Arc::new(move || time_handler.physical_time_now_ms() / 1000))
     }
 
     /// Construct a journal handler with current policy hooks.
@@ -872,7 +872,6 @@ impl RandomCoreEffects for AuraEffectSystem {
     async fn random_u64(&self) -> u64 {
         self.random_rng.lock().next_u64()
     }
-
 }
 
 #[async_trait]
@@ -1108,7 +1107,6 @@ impl CryptoCoreEffects for AuraEffectSystem {
     fn secure_zero(&self, data: &mut [u8]) {
         self.crypto_handler.secure_zero(data)
     }
-
 }
 
 // Implementation of CryptoExtendedEffects
@@ -1345,7 +1343,6 @@ impl StorageCoreEffects for AuraEffectSystem {
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         self.storage_handler.list_keys(prefix).await
     }
-
 }
 
 #[async_trait]
@@ -2069,8 +2066,12 @@ impl ChoreographicEffects for AuraEffectSystem {
         let (context_id, current_role) = {
             let state = self.choreography_state.read();
             (
-                state.context_id.ok_or(ChoreographyError::SessionNotStarted)?,
-                state.current_role.ok_or(ChoreographyError::SessionNotStarted)?,
+                state
+                    .context_id
+                    .ok_or(ChoreographyError::SessionNotStarted)?,
+                state
+                    .current_role
+                    .ok_or(ChoreographyError::SessionNotStarted)?,
             )
         };
 
@@ -2086,11 +2087,13 @@ impl ChoreographicEffects for AuraEffectSystem {
             context_id, role.device_id
         ));
 
-        let guard_result = guard_chain.evaluate(self).await.map_err(|e| {
-            ChoreographyError::InternalError {
-                message: format!("Choreography send guard failed: {e}"),
-            }
-        })?;
+        let guard_result =
+            guard_chain
+                .evaluate(self)
+                .await
+                .map_err(|e| ChoreographyError::InternalError {
+                    message: format!("Choreography send guard failed: {e}"),
+                })?;
 
         if !guard_result.authorized {
             return Err(ChoreographyError::InternalError {
@@ -2107,16 +2110,19 @@ impl ChoreographicEffects for AuraEffectSystem {
                 message: format!("Choreography journal coupling failed: {e}"),
             })?;
 
-        let transport_receipt = guard_result.receipt.as_ref().map(|receipt| TransportReceipt {
-            context: receipt.ctx,
-            src: receipt.src,
-            dst: receipt.dst,
-            epoch: receipt.epoch.value(),
-            cost: receipt.cost,
-            nonce: receipt.nonce,
-            prev: receipt.prev.0,
-            sig: receipt.sig.clone(),
-        });
+        let transport_receipt = guard_result
+            .receipt
+            .as_ref()
+            .map(|receipt| TransportReceipt {
+                context: receipt.ctx,
+                src: receipt.src,
+                dst: receipt.dst,
+                epoch: receipt.epoch.value(),
+                cost: receipt.cost,
+                nonce: receipt.nonce,
+                prev: receipt.prev.0,
+                sig: receipt.sig.clone(),
+            });
 
         let envelope = TransportEnvelope {
             destination: peer,
@@ -2146,7 +2152,9 @@ impl ChoreographicEffects for AuraEffectSystem {
     ) -> Result<Vec<u8>, ChoreographyError> {
         let context_id = {
             let state = self.choreography_state.read();
-            state.context_id.ok_or(ChoreographyError::SessionNotStarted)?
+            state
+                .context_id
+                .ok_or(ChoreographyError::SessionNotStarted)?
         };
 
         let envelope = TransportEffects::receive_envelope_from(
@@ -2172,7 +2180,9 @@ impl ChoreographicEffects for AuraEffectSystem {
             let state = self.choreography_state.read();
             (
                 state.roles.clone(),
-                state.current_role.ok_or(ChoreographyError::SessionNotStarted)?,
+                state
+                    .current_role
+                    .ok_or(ChoreographyError::SessionNotStarted)?,
             )
         };
 
@@ -2225,13 +2235,6 @@ impl ChoreographicEffects for AuraEffectSystem {
         session_id: uuid::Uuid,
         roles: Vec<ChoreographicRole>,
     ) -> Result<(), ChoreographyError> {
-        let mut state = self.choreography_state.write();
-        if let Some(active) = state.session_id {
-            return Err(ChoreographyError::SessionAlreadyExists {
-                session_id: active,
-            });
-        }
-
         let current_role = roles
             .iter()
             .find(|role| role.device_id == self.authority_id.0)
@@ -2241,12 +2244,16 @@ impl ChoreographicEffects for AuraEffectSystem {
             })?;
 
         let context_id = ContextId::new_from_entropy(hash(session_id.as_bytes()));
-
         let started_at_ms = self
             .physical_time()
             .await
             .map(|time| time.ts_ms)
             .unwrap_or_default();
+
+        let mut state = self.choreography_state.write();
+        if let Some(active) = state.session_id {
+            return Err(ChoreographyError::SessionAlreadyExists { session_id: active });
+        }
 
         state.session_id = Some(session_id);
         state.context_id = Some(context_id);
@@ -2257,16 +2264,16 @@ impl ChoreographicEffects for AuraEffectSystem {
     }
 
     async fn end_session(&self) -> Result<(), ChoreographyError> {
-        let mut state = self.choreography_state.write();
-        if state.session_id.is_none() {
-            return Err(ChoreographyError::SessionNotStarted);
-        }
-
         let ended_at_ms = self
             .physical_time()
             .await
             .map(|time| time.ts_ms)
             .unwrap_or_default();
+
+        let mut state = self.choreography_state.write();
+        if state.session_id.is_none() {
+            return Err(ChoreographyError::SessionNotStarted);
+        }
 
         if let Some(started_at_ms) = state.started_at_ms {
             state.metrics.total_duration_ms = ended_at_ms.saturating_sub(started_at_ms);
@@ -2422,8 +2429,10 @@ impl FlowBudgetEffects for AuraEffectSystem {
             };
             let now = self.time_handler.physical_time_now_ms();
             let decision = bridge
-                .authorize_with_time(token, "flow_charge", &scope, Some(now))
-                .map_err(|e| AuraError::permission_denied(format!("flow budget policy failed: {e}")))?;
+                .authorize_with_time(token, AuthorizationOp::FlowCharge, &scope, Some(now))
+                .map_err(|e| {
+                    AuraError::permission_denied(format!("flow budget policy failed: {e}"))
+                })?;
             if !decision.authorized {
                 return Err(AuraError::permission_denied(
                     "flow budget charge not authorized by Biscuit policy",

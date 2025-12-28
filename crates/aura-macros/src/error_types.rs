@@ -6,7 +6,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse::Parse, Attribute, Ident, LitStr, Token, Type, Visibility};
+use syn::{parse::Parse, Attribute, Ident, LitStr, Path, Token, Type, Visibility};
 
 /// Input specification for the aura_error_types macro
 #[derive(Clone)]
@@ -14,7 +14,7 @@ pub struct ErrorTypesInput {
     pub visibility: Visibility,
     pub error_name: Ident,
     pub variants: Vec<ErrorVariant>,
-    pub derives: Vec<Ident>,
+    pub derives: Vec<Path>,
 }
 
 /// Specification for a single error variant
@@ -139,32 +139,27 @@ impl Parse for ErrorVariant {
 }
 
 /// Extract derive macros from attributes
-fn extract_derives(attributes: &[Attribute]) -> syn::Result<Vec<Ident>> {
-    let mut derives = Vec::new();
+fn extract_derives(attributes: &[Attribute]) -> syn::Result<Vec<Path>> {
+    let mut derives: Vec<Path> = Vec::new();
 
     for attr in attributes {
         if attr.path().is_ident("derive") {
-            attr.parse_args_with(|input: syn::parse::ParseStream| {
-                let content;
-                syn::parenthesized!(content in input);
-
-                while !content.is_empty() {
-                    derives.push(content.parse()?);
-                    if content.peek(Token![,]) {
-                        content.parse::<Token![,]>()?;
-                    }
-                }
-                Ok(())
-            })?;
+            let parsed = attr.parse_args_with(
+                syn::punctuated::Punctuated::<Path, Token![,]>::parse_terminated,
+            )?;
+            derives.extend(parsed);
         }
     }
 
-    // Add default derives if none specified
     if derives.is_empty() {
-        derives.extend([
-            Ident::new("Debug", proc_macro2::Span::call_site()),
-            Ident::new("Clone", proc_macro2::Span::call_site()),
-        ]);
+        derives.push(Path::from(Ident::new(
+            "Debug",
+            proc_macro2::Span::call_site(),
+        )));
+        derives.push(Path::from(Ident::new(
+            "Clone",
+            proc_macro2::Span::call_site(),
+        )));
     }
 
     Ok(derives)

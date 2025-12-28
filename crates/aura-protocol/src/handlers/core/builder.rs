@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use aura_core::identifiers::DeviceId;
 
-use crate::handlers::{EffectType, ExecutionMode};
 use super::{AuraHandlerConfig, AuraHandlerFactory, FactoryError, SimulationConfig};
+use crate::handlers::{EffectType, ExecutionMode};
 
 /// Builder for creating Aura handler configurations
 pub struct AuraHandlerBuilder {

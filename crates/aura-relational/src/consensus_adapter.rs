@@ -4,6 +4,10 @@
 //! to the aura-consensus implementation while maintaining the aura-relational
 //! API surface for backward compatibility.
 
+use aura_consensus::relational::{
+    run_consensus as run_relational_consensus,
+    run_consensus_with_config as run_relational_consensus_with_config,
+};
 use aura_core::{
     epochs::Epoch,
     frost::{PublicKeyPackage, Share},
@@ -11,10 +15,6 @@ use aura_core::{
 use aura_core::{relational::ConsensusProof, AuraError, AuthorityId, Prestate, Result};
 use aura_effects::random::RealRandomHandler;
 use aura_effects::time::PhysicalTimeHandler;
-use aura_consensus::relational::{
-    run_consensus as run_relational_consensus,
-    run_consensus_with_config as run_relational_consensus_with_config,
-};
 use serde::Serialize;
 use std::collections::HashMap;
 

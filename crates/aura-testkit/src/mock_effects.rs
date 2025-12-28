@@ -26,10 +26,9 @@ use aura_core::effects::{
         AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, ChannelCloseParams,
         ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
     },
-    BiscuitAuthorizationEffects, CryptoCoreEffects, CryptoExtendedEffects,
-    FlowBudgetEffects, JournalEffects, NetworkCoreEffects, NetworkExtendedEffects,
-    RandomCoreEffects, StorageCoreEffects,
-    StorageExtendedEffects,
+    BiscuitAuthorizationEffects, CryptoCoreEffects, CryptoExtendedEffects, FlowBudgetEffects,
+    JournalEffects, NetworkCoreEffects, NetworkExtendedEffects, RandomCoreEffects,
+    StorageCoreEffects, StorageExtendedEffects,
 };
 use aura_core::epochs::Epoch;
 use aura_core::flow::{FlowBudget, Receipt};
@@ -453,8 +452,18 @@ impl CryptoExtendedEffects for MockEffects {
             let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key.clone());
             let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
             Ok(SigningKeyGenResult {
-                key_packages: vec![key_package.to_bytes().map_err(|e| aura_core::effects::crypto::CryptoError::invalid(format!("key package serialization: {}", e)))?],
-                public_key_package: public_package.to_bytes().map_err(|e| aura_core::effects::crypto::CryptoError::invalid(format!("public package serialization: {}", e)))?,
+                key_packages: vec![key_package.to_bytes().map_err(|e| {
+                    aura_core::effects::crypto::CryptoError::invalid(format!(
+                        "key package serialization: {}",
+                        e
+                    ))
+                })?],
+                public_key_package: public_package.to_bytes().map_err(|e| {
+                    aura_core::effects::crypto::CryptoError::invalid(format!(
+                        "public package serialization: {}",
+                        e
+                    ))
+                })?,
                 mode: SigningMode::SingleSigner,
             })
         } else if threshold >= 2 {
@@ -514,7 +523,10 @@ impl CryptoExtendedEffects for MockEffects {
                 self.ed25519_verify(message, signature, package.verifying_key())
                     .await
             }
-            SigningMode::Threshold => self.frost_verify(message, signature, public_key_package).await,
+            SigningMode::Threshold => {
+                self.frost_verify(message, signature, public_key_package)
+                    .await
+            }
         }
     }
 }
@@ -549,7 +561,6 @@ impl StorageCoreEffects for MockEffects {
             None => Ok(state.storage.keys().cloned().collect()),
         }
     }
-
 }
 
 #[async_trait]

@@ -84,10 +84,8 @@ pub fn verify_session_ticket(
 
     // Verify the signature
     let valid = aura_core::ed25519_verify(&ticket_bytes, ticket_signature, issuer_public_key)
-        .map_err(|e| {
-            AuthenticationError::InvalidSessionTicket {
-                details: format!("Session ticket signature verification failed: {}", e),
-            }
+        .map_err(|e| AuthenticationError::InvalidSessionTicket {
+            details: format!("Session ticket signature verification failed: {}", e),
         })?;
 
     if !valid {
@@ -174,10 +172,8 @@ fn scope_matches(ticket_scope: &SessionScope, required_scope: &SessionScope) -> 
 
 /// Serialize a session ticket for signature verification
 fn serialize_session_ticket(ticket: &SessionTicket) -> Result<Vec<u8>> {
-    serde_json::to_vec(ticket).map_err(|e| {
-        AuthenticationError::InvalidSessionTicket {
-            details: format!("Failed to serialize session ticket: {}", e),
-        }
+    serde_json::to_vec(ticket).map_err(|e| AuthenticationError::InvalidSessionTicket {
+        details: format!("Failed to serialize session ticket: {}", e),
     })
 }
 

@@ -52,11 +52,7 @@ pub trait FactDeltaReducer<F, D: FactDelta> {
 }
 
 /// Encode a domain fact payload with a canonical envelope.
-pub fn encode_domain_fact<T: Serialize>(
-    type_id: &str,
-    schema_version: u16,
-    value: &T,
-) -> Vec<u8> {
+pub fn encode_domain_fact<T: Serialize>(type_id: &str, schema_version: u16, value: &T) -> Vec<u8> {
     let payload = crate::util::serialization::to_vec(value)
         .expect("DomainFact payload must serialize with DAG-CBOR");
     let envelope = FactEnvelope {

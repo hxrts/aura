@@ -490,7 +490,6 @@ impl InvitationService {
 
         GuardOutcome::allowed(effects)
     }
-
 }
 
 // =============================================================================

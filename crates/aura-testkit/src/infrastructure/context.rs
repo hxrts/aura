@@ -40,8 +40,8 @@ use aura_core::{
             SigningKeyGenResult,
         },
         ConsoleEffects, CryptoEffects, ExecutionMode, JournalEffects, NetworkCoreEffects,
-        NetworkEffects, NetworkExtendedEffects,
-        PhysicalTimeEffects, RandomCoreEffects, RandomEffects, StorageEffects,
+        NetworkEffects, NetworkExtendedEffects, PhysicalTimeEffects, RandomCoreEffects,
+        RandomEffects, StorageEffects,
     },
     AuraResult, DeviceId,
 };
@@ -434,7 +434,6 @@ impl StorageCoreEffects for CompositeTestHandler {
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         self.storage.list_keys(prefix).await
     }
-
 }
 
 #[async_trait]

@@ -10,11 +10,11 @@ pub mod protocol;
 pub mod telemetry;
 
 // Re-export main transport functions
+pub use crate::wire::AmpMessage;
 pub use protocol::{
     amp_recv, amp_recv_with_receipt, amp_send, commit_bump_with_consensus, emit_proposed_bump,
     prepare_send, validate_header, AmpDelivery, AmpReceipt,
 };
-pub use crate::wire::AmpMessage;
 
 // Re-export telemetry for observability
 pub use telemetry::{AmpTelemetry, WindowValidationResult, AMP_TELEMETRY};

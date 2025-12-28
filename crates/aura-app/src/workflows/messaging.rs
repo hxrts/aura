@@ -5,9 +5,7 @@
 
 use crate::{
     signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL},
-    views::{
-        chat::{Channel, ChannelType, ChatState, Message},
-    },
+    views::chat::{Channel, ChannelType, ChatState, Message},
     AppCore,
 };
 use async_lock::RwLock;
@@ -267,7 +265,11 @@ pub async fn create_channel(
     let total_n = (members.len() + 1) as u8;
     let f = total_n.saturating_sub(1) / 3;
     let default_k = (2 * f) + 1;
-    let threshold_k = if threshold_k == 0 { default_k } else { threshold_k };
+    let threshold_k = if threshold_k == 0 {
+        default_k
+    } else {
+        threshold_k
+    };
     let threshold_k = threshold_k.clamp(1, total_n.max(1));
     let invitation_message = Some(format!(
         "Group threshold: {}-of-{} (keys rotate after everyone accepts)",

@@ -55,9 +55,7 @@ where
         };
 
         let config = AmpRuntimeConfig::default();
-        let window = params
-            .skip_window
-            .unwrap_or(config.default_skip_window);
+        let window = params.skip_window.unwrap_or(config.default_skip_window);
 
         let checkpoint = ChannelCheckpoint {
             context: params.context,
@@ -222,7 +220,11 @@ pub enum ChannelParticipantEvent {
 
 /// Domain fact that records AMP channel membership events.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "amp-channel-membership", schema_version = 1, context = "context")]
+#[domain_fact(
+    type_id = "amp-channel-membership",
+    schema_version = 1,
+    context = "context"
+)]
 pub struct ChannelMembershipFact {
     #[serde(default = "channel_membership_schema_version")]
     schema_version: u16,

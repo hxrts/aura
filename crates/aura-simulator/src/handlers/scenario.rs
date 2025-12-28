@@ -572,13 +572,16 @@ impl SimulationScenarioHandler {
                 self.execute_frost_keygen(&participants, &params).await
             }
             "frost_commitment" | "commitment" | "commit" => {
-                self.execute_frost_commitment_phase(&participants, &params).await
+                self.execute_frost_commitment_phase(&participants, &params)
+                    .await
             }
             "frost_signing" | "signing" | "sign_only" => {
-                self.execute_frost_signing_phase(&participants, &params).await
+                self.execute_frost_signing_phase(&participants, &params)
+                    .await
             }
             "commit_reveal" | "frost_commit_reveal" => {
-                self.execute_frost_commit_reveal(&participants, &params).await
+                self.execute_frost_commit_reveal(&participants, &params)
+                    .await
             }
             "coordinator_failure_recovery" | "frost_recovery" => {
                 self.execute_frost_recovery(&participants, &params)

@@ -26,8 +26,8 @@
 
 use aura_core::identifiers::AuthorityId;
 use aura_core::{ContextId, DeviceId};
-use aura_journal::{DomainFact, FactReducer};
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
+use aura_journal::{DomainFact, FactReducer};
 use aura_macros::DomainFact;
 use aura_signature::session::SessionScope;
 use serde::{Deserialize, Serialize};
@@ -52,7 +52,11 @@ pub struct AuthFactKey {
 /// These facts capture all state-changing events in the authentication system.
 /// They are designed to be immutable and append-only.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
-#[domain_fact(type_id = "aura.authenticate.v1", schema_version = 1, context_fn = "context_id")]
+#[domain_fact(
+    type_id = "aura.authenticate.v1",
+    schema_version = 1,
+    context_fn = "context_id"
+)]
 pub enum AuthFact {
     /// An authentication challenge was generated
     ChallengeGenerated {

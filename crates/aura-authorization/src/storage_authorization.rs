@@ -631,7 +631,6 @@ impl<S: StorageCoreEffects + StorageExtendedEffects + Send + Sync> StorageCoreEf
             .await?;
         self.inner.list_keys(prefix).await
     }
-
 }
 
 #[async_trait]
