@@ -1,16 +1,16 @@
 //! Threshold signature verification
 //!
-//! This module handles verifying that a threshold of devices (M-of-N)
+//! This module handles verifying that a threshold of authorities (M-of-N)
 //! signed a message, proving collective identity.
 
 use crate::{AuthenticationError, Result};
-use aura_core::identifiers::DeviceId;
+use aura_core::AuthorityId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 
-/// Verify that a threshold of devices signed a message
+/// Verify that a threshold of authorities signed a message
 ///
-/// This function proves that at least M out of N devices signed the given message
-/// using FROST threshold signatures, proving collective device identity.
+/// This function proves that at least M out of N authorities signed the given message
+/// using FROST threshold signatures, proving collective authority identity.
 ///
 /// # Arguments
 ///
@@ -21,7 +21,7 @@ use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 ///
 /// # Returns
 ///
-/// `Ok(())` if the threshold signature is valid and proves enough devices signed,
+/// `Ok(())` if the threshold signature is valid and proves enough authorities signed,
 /// `Err(AuthenticationError)` otherwise.
 pub fn verify_threshold_signature(
     message: &[u8],
@@ -33,26 +33,30 @@ pub fn verify_threshold_signature(
     // This function provides a fallback for simple Ed25519 verification
     // Check if we have enough signers
     if min_signers > 1 {
-        return Err(AuthenticationError::InvalidThresholdSignature(format!(
-            "Insufficient signers: single signature provided, required {}",
-            min_signers
-        )));
+        return Err(AuthenticationError::InvalidThresholdSignature {
+            details: format!(
+                "Insufficient signers: single signature provided, required {}",
+                min_signers
+            ),
+        });
     }
 
     // Verify using FROST-compatible signature verification
     // FROST signatures are compatible with standard Ed25519 verification
     let valid =
         aura_core::ed25519_verify(message, threshold_sig, group_public_key).map_err(|e| {
-            AuthenticationError::InvalidThresholdSignature(format!(
-                "FROST threshold signature verification failed: {}",
-                e
-            ))
+            AuthenticationError::InvalidThresholdSignature {
+                details: format!(
+                    "FROST threshold signature verification failed: {}",
+                    e
+                ),
+            }
         })?;
 
     if !valid {
-        return Err(AuthenticationError::InvalidThresholdSignature(
-            "FROST threshold signature invalid".to_string(),
-        ));
+        return Err(AuthenticationError::InvalidThresholdSignature {
+            details: "FROST threshold signature invalid".to_string(),
+        });
     }
 
     tracing::debug!(
@@ -63,16 +67,16 @@ pub fn verify_threshold_signature(
     Ok(())
 }
 
-/// Verify that specific devices contributed to a threshold signature
+/// Verify that specific authorities contributed to a threshold signature
 ///
-/// This function proves that a specific set of devices contributed to the
-/// threshold signature, providing device-level accountability.
+/// This function proves that a specific set of authorities contributed to the
+/// threshold signature, providing authority-level accountability.
 ///
 /// # Arguments
 ///
 /// * `message` - The message that was signed
 /// * `threshold_sig` - The threshold signature to verify
-/// * `expected_signers` - The devices expected to have signed
+/// * `expected_signers` - The authorities expected to have signed
 /// * `group_public_key` - The group's public key
 ///
 /// # Returns
@@ -82,22 +86,24 @@ pub fn verify_threshold_signature(
 pub fn verify_threshold_signature_with_signers(
     message: &[u8],
     threshold_sig: &Ed25519Signature,
-    expected_signers: &[DeviceId],
+    expected_signers: &[AuthorityId],
     group_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
     // First verify the signature itself using FROST-compatible verification
     let valid =
         aura_core::ed25519_verify(message, threshold_sig, group_public_key).map_err(|e| {
-            AuthenticationError::InvalidThresholdSignature(format!(
-                "FROST threshold signature verification failed: {}",
-                e
-            ))
+            AuthenticationError::InvalidThresholdSignature {
+                details: format!(
+                    "FROST threshold signature verification failed: {}",
+                    e
+                ),
+            }
         })?;
 
     if !valid {
-        return Err(AuthenticationError::InvalidThresholdSignature(
-            "FROST threshold signature invalid".to_string(),
-        ));
+        return Err(AuthenticationError::InvalidThresholdSignature {
+            details: "FROST threshold signature invalid".to_string(),
+        });
     }
 
     tracing::debug!(
@@ -141,13 +147,13 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            AuthenticationError::InvalidThresholdSignature(_)
+            AuthenticationError::InvalidThresholdSignature { .. }
         ));
     }
 
     #[test]
     fn test_verify_threshold_signature_with_signers() {
-        let expected_signers = vec![DeviceId::deterministic_test_id()];
+        let expected_signers = vec![AuthorityId::new_from_entropy([55u8; 32])];
 
         let signing_key = Ed25519SigningKey::from_bytes(&[11u8; 32]);
         let verifying_key = signing_key.verifying_key().unwrap();

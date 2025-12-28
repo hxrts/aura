@@ -61,18 +61,22 @@ pub fn verify_session_ticket(
 ) -> Result<()> {
     // Check if ticket has expired
     if current_time > ticket.expires_at {
-        return Err(AuthenticationError::InvalidSessionTicket(format!(
-            "Session ticket expired: current_time={}, expires_at={}",
-            current_time, ticket.expires_at
-        )));
+        return Err(AuthenticationError::InvalidSessionTicket {
+            details: format!(
+                "Session ticket expired: current_time={}, expires_at={}",
+                current_time, ticket.expires_at
+            ),
+        });
     }
 
     // Check if ticket is not yet valid
     if current_time < ticket.issued_at {
-        return Err(AuthenticationError::InvalidSessionTicket(format!(
-            "Session ticket not yet valid: current_time={}, issued_at={}",
-            current_time, ticket.issued_at
-        )));
+        return Err(AuthenticationError::InvalidSessionTicket {
+            details: format!(
+                "Session ticket not yet valid: current_time={}, issued_at={}",
+                current_time, ticket.issued_at
+            ),
+        });
     }
 
     // Serialize the ticket for signature verification
@@ -81,16 +85,15 @@ pub fn verify_session_ticket(
     // Verify the signature
     let valid = aura_core::ed25519_verify(&ticket_bytes, ticket_signature, issuer_public_key)
         .map_err(|e| {
-            AuthenticationError::InvalidSessionTicket(format!(
-                "Session ticket signature verification failed: {}",
-                e
-            ))
+            AuthenticationError::InvalidSessionTicket {
+                details: format!("Session ticket signature verification failed: {}", e),
+            }
         })?;
 
     if !valid {
-        return Err(AuthenticationError::InvalidSessionTicket(
-            "Session ticket signature invalid".to_string(),
-        ));
+        return Err(AuthenticationError::InvalidSessionTicket {
+            details: "Session ticket signature invalid".to_string(),
+        });
     }
 
     tracing::debug!(
@@ -121,10 +124,12 @@ pub fn verify_session_authorization(
     required_scope: &SessionScope,
 ) -> Result<()> {
     if !scope_matches(&ticket.scope, required_scope) {
-        return Err(AuthenticationError::InvalidSessionTicket(format!(
-            "Session ticket scope mismatch: ticket has {:?}, required {:?}",
-            ticket.scope, required_scope
-        )));
+        return Err(AuthenticationError::InvalidSessionTicket {
+            details: format!(
+                "Session ticket scope mismatch: ticket has {:?}, required {:?}",
+                ticket.scope, required_scope
+            ),
+        });
     }
 
     Ok(())
@@ -170,10 +175,9 @@ fn scope_matches(ticket_scope: &SessionScope, required_scope: &SessionScope) -> 
 /// Serialize a session ticket for signature verification
 fn serialize_session_ticket(ticket: &SessionTicket) -> Result<Vec<u8>> {
     serde_json::to_vec(ticket).map_err(|e| {
-        AuthenticationError::InvalidSessionTicket(format!(
-            "Failed to serialize session ticket: {}",
-            e
-        ))
+        AuthenticationError::InvalidSessionTicket {
+            details: format!("Failed to serialize session ticket: {}", e),
+        }
     })
 }
 
@@ -242,7 +246,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            AuthenticationError::InvalidSessionTicket(_)
+            AuthenticationError::InvalidSessionTicket { .. }
         ));
     }
 
@@ -272,7 +276,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            AuthenticationError::InvalidSessionTicket(_)
+            AuthenticationError::InvalidSessionTicket { .. }
         ));
     }
 

@@ -8,6 +8,8 @@ Formal definitions live in [Theoretical Model](002_theoretical_model.md) and the
 
 Aura's system architecture implements the mathematical foundations through practical patterns that avoid deadlocks and ensure distributed correctness. The architecture centers on authorities and their commitment tree-based internal state, journals as CRDT fact stores per authority and per relational context, relational contexts for cross-authority relationships, and Aura Consensus for single-operation strong agreement where CRDT alone is insufficient.
 
+Journal state is **hybrid**: the fact journal (join-semilattice) is tracked separately from the capability frontier (meet-semilattice). Runtime effects use a composite `JournalState` view that bundles both dimensions without conflating them.
+
 The architecture consists of five integrated systems. The async effect system provides isolated services and deadlock-free execution. The authority and relational identity system manages contextual identities and cross-authority relationships. The guard chain and flow budget system enforces authorization and privacy constraints. The choreographic protocol system enables session-typed distributed coordination. The crate organization maintains clean layering and zero circular dependencies.
 
 ## 1. Authority and Relational Identity System
@@ -401,6 +403,16 @@ The consensus identifier derives from prestate hash, operation hash, and nonce. 
 The codebase follows strict 8-layer architecture with zero circular dependencies. Each layer builds on lower layers without reaching back down. This enables independent testing, reusability, and clear responsibility boundaries.
 
 Layer 1 Foundation contains `aura-core` with effect traits, domain types, cryptographic utilities (including FROST primitives in `crypto::tree_signing`), semilattice traits, and unified errors. Layer 2 Specification contains domain crates, `aura-mpst`, and `aura-macros` that define semantics without implementations. Layer 3 Implementation contains `aura-effects` and `aura-composition` for stateless handlers and composition infrastructure. The legacy `aura-frost` crate has been removed; higher-level ceremonies should be colocated with their callers and use the core primitives via adapters/effects.
+
+#### Layer 2 Invariants (Architecture Diff)
+
+Layer 2 is strictly *specification*: it defines domain semantics, not runtime behavior.
+
+- No runtime/handler composition, no UI dependencies, no OS access.
+- Domain facts are versioned and serialized with canonical DAG-CBOR.
+- All domain facts register through `FactRegistry` (no hard-coded wiring).
+- Authorization uses typed operations and `ResourceScope` from `aura-core`.
+- Stateful handlers are allowed only in `aura-testkit` (tests).
 
 Layer 4 Orchestration contains `aura-protocol` plus focused crates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`) for guard enforcement, consensus, AMP, sync, and bridge adapters. Tests and examples for these components live alongside their owning crates (for example, `crates/aura-consensus/tests/` and `crates/aura-guards/examples/`). Layer 5 Feature contains protocol crates for authentication, recovery, rendezvous, and storage. Layer 6 Runtime contains `aura-agent`, `aura-simulator`, and `aura-app` for system assembly and portable application core. Layer 7 Interface contains `aura-terminal` for user applications. Layer 8 Testing contains `aura-testkit` and `aura-quint` for shared fixtures and verification.
 

@@ -61,6 +61,7 @@ pub struct FrameHeader {
 
 /// Simple enum with necessary privacy-aware frame variants
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum FrameType {
     /// Clear text message frame
     Clear,
@@ -74,6 +75,7 @@ pub enum FrameType {
 
 /// Privacy levels for transport operations
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum PrivacyLevel {
     /// Clear transmission - no privacy protection
     Clear,

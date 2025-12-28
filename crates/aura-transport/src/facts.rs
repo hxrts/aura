@@ -5,6 +5,7 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
+use aura_core::types::facts::{FactDelta, FactDeltaReducer};
 use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use serde::{Deserialize, Serialize};
 
@@ -379,6 +380,20 @@ pub struct TransportFactDelta {
     pub flow_budget_charged: u64,
 }
 
+impl FactDelta for TransportFactDelta {
+    fn merge(&mut self, other: &Self) {
+        self.sessions_established
+            .extend(other.sessions_established.iter().cloned());
+        self.sessions_closed
+            .extend(other.sessions_closed.iter().cloned());
+        self.messages_sent += other.messages_sent;
+        self.messages_received += other.messages_received;
+        self.peers_discovered
+            .extend(other.peers_discovered.iter().cloned());
+        self.flow_budget_charged += other.flow_budget_charged;
+    }
+}
+
 /// Reducer for transport facts
 #[derive(Debug, Clone, Default)]
 pub struct TransportFactReducer;
@@ -388,9 +403,10 @@ impl TransportFactReducer {
     pub fn new() -> Self {
         Self
     }
+}
 
-    /// Apply a fact to produce a delta
-    pub fn apply(&self, fact: &TransportFact) -> TransportFactDelta {
+impl FactDeltaReducer<TransportFact, TransportFactDelta> for TransportFactReducer {
+    fn apply(&self, fact: &TransportFact) -> TransportFactDelta {
         let mut delta = TransportFactDelta::default();
 
         match fact {
@@ -425,6 +441,7 @@ impl TransportFactReducer {
 mod tests {
     use super::*;
     use crate::types::endpoint::EndpointAddress;
+    use aura_core::types::facts::FactDeltaReducer;
 
     #[test]
     fn test_transport_fact_context_id() {

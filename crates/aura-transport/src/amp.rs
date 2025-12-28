@@ -5,7 +5,8 @@
 //! has been moved to aura-protocol (Layer 4) where it belongs.
 
 use aura_core::identifiers::{ChannelId, ContextId};
-use aura_core::{AuraError, Hash32};
+use aura_core::Hash32;
+use aura_macros::aura_error_types;
 use serde::{Deserialize, Serialize};
 
 /// AMP message header used as AEAD associated data
@@ -55,33 +56,21 @@ pub struct RatchetDerivation {
 }
 
 /// Error categories for AMP ratchet operations
-#[derive(Debug, thiserror::Error)]
-pub enum AmpError {
-    /// Channel epoch mismatch error
-    #[error("Channel epoch mismatch: got {got}, current {current}, pending {pending:?}")]
-    EpochMismatch {
-        /// Epoch in the message header
-        got: u64,
-        /// Current epoch in channel state
-        current: u64,
-        /// Pending epoch (if any)
-        pending: Option<u64>,
-    },
+aura_error_types! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub enum AmpError {
+        #[category = "protocol"]
+        EpochMismatch { got: u64, current: u64, pending: Option<u64> } =>
+            "Channel epoch mismatch: got {got}, current {current}, pending {pending:?}",
 
-    /// Ratchet generation outside acceptable window
-    #[error("Generation {gen} outside window [{min}, {max}]")]
-    GenerationOutOfWindow {
-        /// Generation in the message
-        gen: u64,
-        /// Minimum acceptable generation
-        min: u64,
-        /// Maximum acceptable generation
-        max: u64,
-    },
+        #[category = "protocol"]
+        GenerationOutOfWindow { gen: u64, min: u64, max: u64 } =>
+            "Generation {gen} outside window [{min}, {max}]",
 
-    /// Core system error
-    #[error("Core error: {0}")]
-    Core(#[from] AuraError),
+        #[category = "system"]
+        Core { details: String } =>
+            "Core error: {details}",
+    }
 }
 
 /// Calculate the valid generation window for message acceptance

@@ -6,9 +6,11 @@
 //! This module provides UI-agnostic reactive programming infrastructure
 //! that can be used by CLI, webapp, or other UI layers.
 
-use std::sync::Arc;
+use std::future::Future;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, watch, RwLock};
+use tokio::task::JoinHandle;
 
 /// FRP primitive for reactive values
 ///
@@ -24,6 +26,7 @@ use tokio::sync::{broadcast, RwLock};
 pub struct Dynamic<T: Clone + Send + Sync + 'static> {
     state: Arc<RwLock<T>>,
     updates: broadcast::Sender<T>,
+    tasks: Arc<DynamicTaskRegistry>,
 }
 
 impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
@@ -33,6 +36,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         Self {
             state: Arc::new(RwLock::new(initial)),
             updates: tx,
+            tasks: Arc::new(DynamicTaskRegistry::new()),
         }
     }
 
@@ -97,7 +101,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         // Use a oneshot channel to signal when the task is ready
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
 
-        tokio::spawn(async move {
+        let tasks = mapped.tasks.clone();
+        tasks.spawn_cancellable(async move {
             // Signal that we're ready to receive
             let _ = ready_tx.send(());
 
@@ -152,7 +157,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let other_state = other.state.clone();
         let f = Arc::new(f);
 
-        tokio::spawn(async move {
+        let tasks = combined.tasks.clone();
+        tasks.spawn_cancellable(async move {
             loop {
                 tokio::select! {
                     res = rx_self.recv() => {
@@ -206,7 +212,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let state = self.state.clone();
         let predicate = Arc::new(predicate);
 
-        tokio::spawn(async move {
+        let tasks = filtered.tasks.clone();
+        tasks.spawn_cancellable(async move {
             loop {
                 match rx.recv().await {
                     Ok(value) => {
@@ -249,7 +256,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let state = self.state.clone();
         let f = Arc::new(f);
 
-        tokio::spawn(async move {
+        let tasks = folded.tasks.clone();
+        tasks.spawn_cancellable(async move {
             loop {
                 match rx.recv().await {
                     Ok(value) => {
@@ -277,6 +285,56 @@ impl<T: Clone + Send + Sync + 'static> Clone for Dynamic<T> {
         Self {
             state: self.state.clone(),
             updates: self.updates.clone(),
+            tasks: self.tasks.clone(),
+        }
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> Drop for Dynamic<T> {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.tasks) == 1 {
+            self.tasks.shutdown();
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DynamicTaskRegistry {
+    shutdown_tx: watch::Sender<bool>,
+    handles: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl DynamicTaskRegistry {
+    fn new() -> Self {
+        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
+        Self {
+            shutdown_tx,
+            handles: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn spawn_cancellable<F>(&self, fut: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let handle = tokio::spawn(async move {
+            tokio::select! {
+                _ = shutdown_rx.changed() => {}
+                _ = fut => {}
+            }
+        });
+        if let Ok(mut handles) = self.handles.lock() {
+            handles.push(handle);
+        }
+    }
+
+    fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(true);
+        if let Ok(mut handles) = self.handles.lock() {
+            for handle in handles.drain(..) {
+                handle.abort();
+            }
         }
     }
 }

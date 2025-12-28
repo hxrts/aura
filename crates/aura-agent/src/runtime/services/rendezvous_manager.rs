@@ -10,7 +10,6 @@
 
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_effects::time::PhysicalTimeHandler;
 use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
     RendezvousService, TransportHint,
@@ -149,6 +148,9 @@ pub struct RendezvousManager {
     /// Authority ID
     authority_id: AuthorityId,
 
+    /// Time effects (simulator-controllable)
+    time: Arc<dyn PhysicalTimeEffects>,
+
     /// Background cleanup task handle
     cleanup_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
@@ -170,13 +172,18 @@ pub struct RendezvousManager {
 
 impl RendezvousManager {
     /// Create a new rendezvous manager
-    pub fn new(authority_id: AuthorityId, config: RendezvousManagerConfig) -> Self {
+    pub fn new(
+        authority_id: AuthorityId,
+        config: RendezvousManagerConfig,
+        time: Arc<dyn PhysicalTimeEffects>,
+    ) -> Self {
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
         Self {
             service: Arc::new(RwLock::new(None)),
             config,
             state: Arc::new(RwLock::new(RendezvousManagerState::Stopped)),
             authority_id,
+            time,
             cleanup_task: Arc::new(RwLock::new(None)),
             shutdown_tx,
             lan_discovery: Arc::new(RwLock::new(None)),
@@ -187,8 +194,8 @@ impl RendezvousManager {
     }
 
     /// Create with default configuration
-    pub fn with_defaults(authority_id: AuthorityId) -> Self {
-        Self::new(authority_id, RendezvousManagerConfig::default())
+    pub fn with_defaults(authority_id: AuthorityId, time: Arc<dyn PhysicalTimeEffects>) -> Self {
+        Self::new(authority_id, RendezvousManagerConfig::default(), time)
     }
 
     /// Get the current state
@@ -274,12 +281,10 @@ impl RendezvousManager {
         let interval = self.config.cleanup_interval;
         let state = self.state.clone();
         let descriptor_cache = self.descriptor_cache.clone();
-        let clock = PhysicalTimeHandler::new();
         let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let time = self.time.clone();
 
         let handle = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(interval);
-            let clock = clock;
             loop {
                 tokio::select! {
                     _ = shutdown_rx.changed() => {
@@ -287,14 +292,17 @@ impl RendezvousManager {
                             break;
                         }
                     }
-                    _ = ticker.tick() => {
+                    _ = time.sleep_ms(interval.as_millis() as u64) => {
                         // Check if still running
                         if *state.read().await != RendezvousManagerState::Running {
                             break;
                         }
 
                         // Perform cleanup
-                        let now_ms = clock.physical_time_now_ms();
+                        let now_ms = match time.physical_time().await {
+                            Ok(t) => t.ts_ms,
+                            Err(_) => continue,
+                        };
                         descriptor_cache
                             .write()
                             .await
@@ -506,7 +514,7 @@ impl RendezvousManager {
         }
 
         // Create LAN discovery service
-        let time: Arc<dyn PhysicalTimeEffects> = Arc::new(PhysicalTimeHandler::new());
+        let time: Arc<dyn PhysicalTimeEffects> = self.time.clone();
         let lan_service =
             LanDiscoveryService::new(self.config.lan_discovery.clone(), self.authority_id, time)
                 .await
@@ -615,7 +623,10 @@ impl RendezvousManager {
     ///
     /// Removes peers that haven't been seen for longer than the specified duration.
     pub async fn prune_lan_peers(&self, max_age_ms: u64) {
-        let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
+        let now_ms = match self.time.physical_time().await {
+            Ok(t) => t.ts_ms,
+            Err(_) => return,
+        };
 
         let mut peers = self.lan_discovered_peers.write().await;
         peers.retain(|_, peer| now_ms.saturating_sub(peer.discovered_at_ms) < max_age_ms);
@@ -688,6 +699,7 @@ impl RendezvousManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_effects::time::PhysicalTimeHandler;
     use aura_rendezvous::GuardSnapshot;
 
     fn test_authority() -> AuthorityId {
@@ -715,10 +727,14 @@ mod tests {
         }
     }
 
+    fn test_time() -> Arc<dyn PhysicalTimeEffects> {
+        Arc::new(PhysicalTimeHandler::new())
+    }
+
     #[tokio::test]
     async fn test_manager_creation() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config);
+        let manager = RendezvousManager::new(test_authority(), config, test_time());
 
         assert_eq!(manager.state().await, RendezvousManagerState::Stopped);
         assert!(!manager.is_running().await);
@@ -727,7 +743,7 @@ mod tests {
     #[tokio::test]
     async fn test_manager_lifecycle() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config);
+        let manager = RendezvousManager::new(test_authority(), config, test_time());
 
         // Start
         manager.start().await.unwrap();
@@ -741,7 +757,7 @@ mod tests {
     #[tokio::test]
     async fn test_descriptor_caching() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config);
+        let manager = RendezvousManager::new(test_authority(), config, test_time());
         manager.start().await.unwrap();
 
         let descriptor = RendezvousDescriptor {
@@ -771,7 +787,7 @@ mod tests {
     #[tokio::test]
     async fn test_publish_descriptor() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config);
+        let manager = RendezvousManager::new(test_authority(), config, test_time());
         manager.start().await.unwrap();
 
         let snapshot = test_snapshot(test_authority(), test_context());
@@ -795,7 +811,7 @@ mod tests {
     #[tokio::test]
     async fn test_needs_refresh() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config);
+        let manager = RendezvousManager::new(test_authority(), config, test_time());
         manager.start().await.unwrap();
 
         // No descriptor cached - should need refresh

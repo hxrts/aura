@@ -106,6 +106,22 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 
 **Purpose**: Define domain semantics and protocol specifications.
 
+### Layer 2 Architecture Diff (Invariants)
+
+Layer 2 is the *specification* layer: pure domain semantics with zero runtime coupling.
+
+**Must hold:**
+- No handler composition, runtime assembly, or UI dependencies.
+- Domain facts are versioned and encoded via canonical DAG-CBOR.
+- Fact reducers register through `FactRegistry`; no direct wiring in `aura-journal`.
+- Authorization scopes use `aura-core` `ResourceScope` and typed operations.
+- No in-memory production state; stateful test handlers live in `aura-testkit`.
+
+**Forbidden:**
+- Direct OS access (time, fs, network) outside effect traits.
+- Tokio/async-std usage in domain protocols.
+- State-bearing singletons or process-wide caches.
+
 ### Domain Crates
 
 | Crate | Domain | Responsibility |
@@ -1310,6 +1326,8 @@ Signature verification and identity validation interfaces.
 
 ### aura-journal
 CRDT semantics for fact-based journals and commitment trees. Implements tree state machine, deterministic reduction, and domain validation. Re-exports tree types from `aura-core` for convenience.
+
+**Hybrid model**: Journal state is fact journal + capability frontier, combined at runtime as a composite `JournalState` view for effects and queries.
 
 **Extensibility**: Provides `FactType` and `FactReducer` traits plus `FactRegistry` for domain crates to register their own fact types. Domain-specific facts (chat, invitations, contacts) should use `RelationalFact::Generic` with registered reducers rather than hardcoded enum variants. Only core journal facts (`AttestedOp`, `Snapshot`, `RendezvousReceipt`) remain hardcoded.
 

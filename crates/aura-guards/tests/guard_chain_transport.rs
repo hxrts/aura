@@ -264,8 +264,8 @@ impl AuthorizationEffects for TestEffects {
     async fn verify_capability(
         &self,
         _capabilities: &Cap,
-        _operation: &str,
-        _resource: &str,
+        _operation: aura_core::AuthorizationOp,
+        _scope: &aura_core::ResourceScope,
     ) -> Result<bool, AuthorizationError> {
         Ok(true)
     }

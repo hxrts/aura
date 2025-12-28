@@ -196,7 +196,11 @@ impl EffectSystemBuilder {
 
         // Create optional rendezvous manager
         let rendezvous_manager = self.rendezvous_config.map(|rendezvous_config| {
-            super::services::RendezvousManager::new(authority_id, rendezvous_config)
+            super::services::RendezvousManager::new(
+                authority_id,
+                rendezvous_config,
+                Arc::new(effect_system.time_effects().clone()),
+            )
         });
 
         // Create optional social manager

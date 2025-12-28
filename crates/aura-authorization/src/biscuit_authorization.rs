@@ -11,7 +11,8 @@
 //! **Integration Point**: CapGuard in aura-protocol/guards evaluates Biscuit tokens at message
 //! entry point (first guard in chain); enables delegation without trusted intermediaries.
 
-use crate::{BiscuitError, ResourceScope};
+use crate::BiscuitError;
+use aura_core::scope::{AuthorizationOp, ResourceScope};
 use aura_core::{hash::hash, identifiers::AuthorityId};
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 
@@ -59,7 +60,7 @@ impl BiscuitAuthorizationBridge {
     pub fn authorize(
         &self,
         token: &Biscuit,
-        operation: &str,
+        operation: AuthorizationOp,
         resource: &ResourceScope,
     ) -> Result<AuthorizationResult, BiscuitError> {
         self.authorize_with_time(token, operation, resource, None)
@@ -69,7 +70,7 @@ impl BiscuitAuthorizationBridge {
     pub fn authorize_with_time(
         &self,
         token: &Biscuit,
-        operation: &str,
+        operation: AuthorizationOp,
         resource: &ResourceScope,
         current_time_seconds: Option<u64>,
     ) -> Result<AuthorizationResult, BiscuitError> {
@@ -80,6 +81,7 @@ impl BiscuitAuthorizationBridge {
         // The authorizer creation already verifies the signature chain
 
         // Phase 2: Add ambient facts for authorization context
+        let operation = operation.as_str();
         authorizer
             .add_fact(fact!("operation({operation})"))
             .map_err(BiscuitError::BiscuitLib)?;
@@ -151,22 +153,22 @@ impl BiscuitAuthorizationBridge {
 
         // Phase 3: Add authorization policies for specific operations
         match operation {
-            "read" => {
+            AuthorizationOp::Read | AuthorizationOp::List => {
                 authorizer
                     .add_policy(policy!("allow if capability(\"read\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
-            "write" => {
+            AuthorizationOp::Write | AuthorizationOp::Update | AuthorizationOp::Append => {
                 authorizer
                     .add_policy(policy!("allow if capability(\"write\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
-            "execute" => {
+            AuthorizationOp::Execute => {
                 authorizer
                     .add_policy(policy!("allow if capability(\"execute\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
-            "admin" => {
+            AuthorizationOp::Admin => {
                 authorizer
                     .add_policy(policy!("allow if capability(\"admin\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
@@ -177,13 +179,15 @@ impl BiscuitAuthorizationBridge {
                     .add_policy(policy!("allow if role(\"admin\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
-            "delegate" => {
+            AuthorizationOp::Delegate => {
                 authorizer
                     .add_policy(policy!("allow if capability(\"delegate\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
             _ => {
                 // For unknown operations, require explicit capability
+                let operation = operation.as_str();
+                validate_capability_name(operation)?;
                 authorizer
                     .add_policy(policy!("allow if capability({operation})"))
                     .map_err(BiscuitError::BiscuitLib)?;
@@ -218,6 +222,7 @@ impl BiscuitAuthorizationBridge {
         capability: &str,
         current_time_seconds: Option<u64>,
     ) -> Result<bool, BiscuitError> {
+        validate_capability_name(capability)?;
         // Create authorizer and verify token signature
         let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
 
@@ -300,6 +305,23 @@ impl BiscuitAuthorizationBridge {
     pub fn root_public_key(&self) -> PublicKey {
         self._root_public_key
     }
+}
+
+fn validate_capability_name(capability: &str) -> Result<(), BiscuitError> {
+    if capability.is_empty() {
+        return Err(BiscuitError::InvalidCapability(
+            "capability cannot be empty".to_string(),
+        ));
+    }
+    if !capability
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    {
+        return Err(BiscuitError::InvalidCapability(format!(
+            "invalid capability token: {capability}"
+        )));
+    }
+    Ok(())
 }
 
 // ============================================================================

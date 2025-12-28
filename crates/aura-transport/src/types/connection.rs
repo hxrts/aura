@@ -39,6 +39,7 @@ pub struct ScopedConnectionId {
 
 /// Essential lifecycle states with privacy context
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum ConnectionState {
     /// Connection being established
     Connecting {

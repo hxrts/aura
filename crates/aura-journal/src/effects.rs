@@ -1,10 +1,11 @@
 //! Journal Effects Implementation (Layer 2 - Clean Architecture)
 use crate::extensibility::FactRegistry;
 use async_trait::async_trait;
-use aura_core::effects::{BiscuitAuthorizationEffects, FlowBudgetEffects};
+use aura_core::effects::BiscuitAuthorizationEffects;
 use aura_core::effects::{CryptoEffects, JournalEffects, StorageEffects};
 use aura_core::flow::{FlowBudget, Receipt};
 use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
+use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{
     hash::hash,
     identifiers::{AuthorityId, ContextId},
@@ -14,6 +15,8 @@ use aura_core::{
 // Flow budget handling moved to effects system
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
+
+const DEFAULT_FLOW_BUDGET_LIMIT: u64 = 1024;
 
 /// Storage envelope for persisted journal state
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,12 +80,10 @@ pub struct JournalHandler<
     C: CryptoEffects,
     S: StorageEffects,
     A: BiscuitAuthorizationEffects,
-    F: FlowBudgetEffects,
 > {
     crypto: C,
     storage: S,
     authorization: Option<A>,
-    flow_budget: Option<F>,
     policy_token: Option<Vec<u8>>, // Raw Biscuit token bytes
     authority_id: AuthorityId,
     verifying_key: Option<Vec<u8>>,
@@ -90,8 +91,8 @@ pub struct JournalHandler<
     _phantom: PhantomData<()>,
 }
 
-impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects, F: FlowBudgetEffects>
-    JournalHandler<C, S, A, F>
+impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects>
+    JournalHandler<C, S, A>
 {
     /// Creates a new journal handler with a fresh authority ID.
     pub fn new(crypto: C, storage: S) -> Self {
@@ -104,19 +105,12 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects, F: Flo
             crypto,
             storage,
             authorization: None,
-            flow_budget: None,
             policy_token: None,
             authority_id,
             verifying_key: None,
             fact_registry: None,
             _phantom: PhantomData,
         }
-    }
-
-    /// Attach flow budget effects for flow budget operations.
-    pub fn with_flow_budget(mut self, flow_effects: F) -> Self {
-        self.flow_budget = Some(flow_effects);
-        self
     }
 
     /// Attach authorization effects and Biscuit policy token for fact authorization.
@@ -141,13 +135,6 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects, F: Flo
     fn with_authorization_if(mut self, auth: Option<(Vec<u8>, A)>) -> Self {
         if let Some((token_data, auth_effects)) = auth {
             self = self.with_authorization(token_data, auth_effects);
-        }
-        self
-    }
-
-    fn with_flow_budget_if(mut self, flow_effects: Option<F>) -> Self {
-        if let Some(flow) = flow_effects {
-            self = self.with_flow_budget(flow);
         }
         self
     }
@@ -279,8 +266,7 @@ impl<
         C: CryptoEffects,
         S: StorageEffects,
         A: BiscuitAuthorizationEffects + Send + Sync,
-        F: FlowBudgetEffects + Send + Sync,
-    > JournalEffects for JournalHandler<C, S, A, F>
+    > JournalEffects for JournalHandler<C, S, A>
 {
     async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
         for content in self.extract_fact_contents(delta) {
@@ -339,11 +325,22 @@ impl<
 
     async fn get_flow_budget(
         &self,
-        _context: &ContextId,
-        _peer: &AuthorityId,
+        context: &ContextId,
+        peer: &AuthorityId,
     ) -> Result<FlowBudget, AuraError> {
-        // Flow budget retrieval will eventually read from journal facts; until then use default.
-        Ok(FlowBudget::default())
+        let key = self.flow_budget_key(context, peer);
+        if let Some(bytes) = self
+            .storage
+            .retrieve(&key)
+            .await
+            .map_err(|e| AuraError::storage(e.to_string()))?
+        {
+            let budget: FlowBudget =
+                from_slice(&bytes).map_err(|e| AuraError::serialization(e.to_string()))?;
+            return Ok(budget);
+        }
+
+        Ok(FlowBudget::new(DEFAULT_FLOW_BUDGET_LIMIT, Epoch::initial()))
     }
 
     async fn update_flow_budget(
@@ -352,9 +349,15 @@ impl<
         peer: &AuthorityId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, AuraError> {
-        // Default behavior: merge with current budget
         let current = self.get_flow_budget(context, peer).await?;
-        Ok(current.join(budget))
+        let merged = current.join(budget);
+        let bytes = to_vec(&merged).map_err(|e| AuraError::serialization(e.to_string()))?;
+        let key = self.flow_budget_key(context, peer);
+        self.storage
+            .store(&key, bytes)
+            .await
+            .map_err(|e| AuraError::storage(e.to_string()))?;
+        Ok(merged)
     }
 
     async fn charge_flow_budget(
@@ -363,23 +366,31 @@ impl<
         peer: &AuthorityId,
         cost: u32,
     ) -> Result<FlowBudget, AuraError> {
-        if let Some(flow_budget) = &self.flow_budget {
-            // Use the FlowBudgetEffects charge_flow method and convert receipt to budget
-            let current = self.get_flow_budget(context, peer).await?;
-            let receipt = flow_budget.charge_flow(context, peer, cost).await?;
-            Ok(budget_after_charge(current, &receipt))
-        } else {
-            // Default behavior: return current budget without charging
-            self.get_flow_budget(context, peer).await
+        let mut current = self.get_flow_budget(context, peer).await?;
+        if current.limit > 0 && !current.can_charge(cost as u64) {
+            return Err(AuraError::budget_exceeded(format!(
+                "insufficient flow budget: remaining={}, cost={}",
+                current.remaining(),
+                cost
+            )));
         }
+        current.spent = current.spent.saturating_add(cost as u64);
+        self.update_flow_budget(context, peer, &current).await
     }
 }
 
-fn budget_after_charge(current: FlowBudget, receipt: &Receipt) -> FlowBudget {
-    FlowBudget {
-        limit: current.limit,
-        spent: current.spent.saturating_add(receipt.cost as u64),
-        epoch: receipt.epoch,
+impl<
+        C: CryptoEffects,
+        S: StorageEffects,
+        A: BiscuitAuthorizationEffects,
+    > JournalHandler<C, S, A>
+{
+    fn flow_budget_key(&self, context: &ContextId, peer: &AuthorityId) -> String {
+        format!(
+            "journal/flow-budget/{}/{}",
+            hex::encode(context.to_bytes()),
+            hex::encode(peer.to_bytes())
+        )
     }
 }
 
@@ -387,14 +398,49 @@ impl<
         C: CryptoEffects,
         S: StorageEffects,
         A: BiscuitAuthorizationEffects + Send + Sync,
-        F: FlowBudgetEffects + Send + Sync,
-    > Default for JournalHandler<C, S, A, F>
+    > Default for JournalHandler<C, S, A>
 where
     C: Default,
     S: Default,
 {
     fn default() -> Self {
         Self::new(C::default(), S::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aura_core::domain::content::Hash32;
+    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::types::epochs::Epoch;
+    use aura_core::types::flow::{FlowBudget, Receipt};
+
+    #[test]
+    fn flow_budget_charge_uses_cost_not_nonce() {
+        let current = FlowBudget {
+            limit: 100,
+            spent: 20,
+            epoch: Epoch::new(1),
+        };
+        let receipt = Receipt::new(
+            ContextId::new_from_entropy([1u8; 32]),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            AuthorityId::new_from_entropy([3u8; 32]),
+            Epoch::new(2),
+            7,
+            99,
+            Hash32::zero(),
+            Vec::new(),
+        );
+
+        let updated = FlowBudget {
+            limit: current.limit,
+            spent: current.spent.saturating_add(receipt.cost as u64),
+            epoch: receipt.epoch,
+        };
+        assert_eq!(updated.spent, 27);
+        assert_eq!(updated.limit, 100);
+        assert_eq!(updated.epoch, receipt.epoch);
     }
 }
 
@@ -407,19 +453,16 @@ impl JournalHandlerFactory {
         C: CryptoEffects,
         S: StorageEffects,
         A: BiscuitAuthorizationEffects + Send + Sync,
-        F: FlowBudgetEffects + Send + Sync,
     >(
         authority_id: AuthorityId,
         crypto: C,
         storage: S,
         authorization: Option<(Vec<u8>, A)>,
-        flow_budget: Option<F>,
         verifying_key: Option<Vec<u8>>,
         fact_registry: Option<FactRegistry>,
-    ) -> JournalHandler<C, S, A, F> {
+    ) -> JournalHandler<C, S, A> {
         JournalHandler::with_authority(authority_id, crypto, storage)
             .with_authorization_if(authorization)
-            .with_flow_budget_if(flow_budget)
             .with_verifying_key_if(verifying_key)
             .with_fact_registry_if(fact_registry)
     }

@@ -118,6 +118,7 @@ pub mod effect_api;
 pub mod fixtures;
 pub mod foundation;
 pub mod handlers; // Test and mock handlers moved from aura-protocol
+pub mod flow_budget;
 pub mod infrastructure;
 pub mod mock_effects;
 pub mod mock_runtime_bridge;

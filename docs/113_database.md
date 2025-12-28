@@ -8,6 +8,8 @@ This document specifies the architecture for Aura's query system. The journal is
 
 Aura's fact-based journal functions as the database. There is no separate database layer. The equivalence maps traditional database concepts to Aura components.
 
+Aura treats database state as a composite of the **fact journal** and the **capability frontier**. Query execution always combines the reduced fact state with the current capability lattice (the `JournalState` composite) to enforce authorization and isolate contexts.
+
 | Traditional Database | Aura Component |
 |---------------------|----------------|
 | Table | Journal reduction view |

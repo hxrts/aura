@@ -14,7 +14,7 @@
 //! infrastructure effects with authorization-specific logic.
 
 use crate::types::identifiers::AuthorityId;
-use crate::types::scope::ResourceScope;
+use crate::types::scope::{AuthorizationOp, ResourceScope};
 use crate::{AuraError, Cap};
 use async_trait::async_trait;
 
@@ -39,8 +39,8 @@ pub trait AuthorizationEffects {
     async fn verify_capability(
         &self,
         capabilities: &Cap,
-        operation: &str,
-        resource: &str,
+        operation: AuthorizationOp,
+        scope: &ResourceScope,
     ) -> Result<bool, AuthorizationError>;
 
     /// Delegate a subset of capabilities to another entity
@@ -115,7 +115,7 @@ pub trait BiscuitAuthorizationEffects {
     async fn authorize_biscuit(
         &self,
         token_data: &[u8],
-        operation: &str,
+        operation: AuthorizationOp,
         scope: &ResourceScope,
     ) -> Result<AuthorizationDecision, AuthorizationError>;
 
@@ -145,11 +145,11 @@ where
     async fn verify_capability(
         &self,
         capabilities: &Cap,
-        operation: &str,
-        resource: &str,
+        operation: AuthorizationOp,
+        scope: &ResourceScope,
     ) -> Result<bool, AuthorizationError> {
         (**self)
-            .verify_capability(capabilities, operation, resource)
+            .verify_capability(capabilities, operation, scope)
             .await
     }
 
@@ -178,7 +178,7 @@ where
     async fn authorize_biscuit(
         &self,
         token_data: &[u8],
-        operation: &str,
+        operation: AuthorizationOp,
         scope: &ResourceScope,
     ) -> Result<AuthorizationDecision, AuthorizationError> {
         (**self)

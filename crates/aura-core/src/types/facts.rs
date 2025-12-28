@@ -24,6 +24,33 @@ pub struct FactEnvelope {
     pub payload: Vec<u8>,
 }
 
+/// Delta produced by applying domain facts during reduction.
+pub trait FactDelta: Default + Clone {
+    /// Merge another delta into this one.
+    fn merge(&mut self, other: &Self);
+}
+
+/// Reducer that maps domain facts to typed deltas.
+pub trait FactDeltaReducer<F, D: FactDelta> {
+    /// Apply a single fact and return its delta.
+    fn apply(&self, fact: &F) -> D;
+
+    /// Apply a fact into an existing delta.
+    fn apply_into(&self, fact: &F, delta: &mut D) {
+        let update = self.apply(fact);
+        delta.merge(&update);
+    }
+
+    /// Reduce a batch of facts into a single delta.
+    fn reduce_batch(&self, facts: &[F]) -> D {
+        let mut delta = D::default();
+        for fact in facts {
+            self.apply_into(fact, &mut delta);
+        }
+        delta
+    }
+}
+
 /// Encode a domain fact payload with a canonical envelope.
 pub fn encode_domain_fact<T: Serialize>(
     type_id: &str,

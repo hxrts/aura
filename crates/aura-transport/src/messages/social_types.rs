@@ -6,6 +6,8 @@
 use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
+use crate::protocols::rendezvous_constants::SOCIAL_PROTOCOL_RENDEZVOUS;
+
 // Re-export social message types
 pub use crate::messages::social_rendezvous::*;
 
@@ -24,6 +26,7 @@ pub struct SocialMessage {
 
 /// Union of all social protocol payloads
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SocialPayload {
     /// Rendezvous and peer discovery messages
     Rendezvous(RendezvousMessage),
@@ -43,7 +46,7 @@ impl SocialMessage {
     /// Get the protocol type for this message
     pub fn protocol_type(&self) -> &'static str {
         match &self.payload {
-            SocialPayload::Rendezvous(_) => "rendezvous",
+            SocialPayload::Rendezvous(_) => SOCIAL_PROTOCOL_RENDEZVOUS,
         }
     }
 }

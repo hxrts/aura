@@ -1,19 +1,32 @@
-//! Unified storage error handling using core error system
+//! Unified storage error handling using macro-generated error types.
 //!
-//! **CLEANUP**: Replaced custom StorageError enum (300+ lines with 30+ variants) with
-//! unified AuraError from aura-core. This eliminates redundant error definitions while
-//! preserving essential error information through structured messages.
-//!
-//! Following the pattern established by aura-journal, all storage errors now use
-//! AuraError with appropriate variant selection and rich error messages.
+//! This module uses aura-macros to standardize error categories and messages
+//! without relying on ad-hoc type aliases.
 
-pub use aura_core::{AuraError, AuraResult};
+use aura_macros::aura_error_types;
 
-/// Storage result type alias using unified error system
-pub type StorageResult<T> = AuraResult<T>;
+aura_error_types! {
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub enum StorageError {
+        #[category = "storage"]
+        NotFound { key: String } => "Storage key not found: {key}",
 
-/// Convenience type alias for backward compatibility
-pub type StorageError = AuraError;
+        #[category = "storage"]
+        ReadFailed { details: String } => "Storage read failed: {details}",
 
-/// Result type for storage operations (backward compatibility)
-pub type Result<T> = AuraResult<T>;
+        #[category = "storage"]
+        WriteFailed { details: String } => "Storage write failed: {details}",
+
+        #[category = "storage"]
+        DeleteFailed { details: String } => "Storage delete failed: {details}",
+
+        #[category = "storage"]
+        ListFailed { details: String } => "Storage list failed: {details}",
+
+        #[category = "storage"]
+        InvalidInput { details: String } => "Storage invalid input: {details}",
+    }
+}
+
+/// Storage result type alias using macro-generated error
+pub type StorageResult<T> = Result<T, StorageError>;

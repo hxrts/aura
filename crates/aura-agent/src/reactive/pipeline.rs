@@ -91,7 +91,11 @@ impl ReactivePipeline {
     /// Shutdown the scheduler.
     pub async fn shutdown(self) {
         let _ = self.shutdown_tx.send(()).await;
-        self.scheduler_task.abort();
+        let mut handle = self.scheduler_task;
+        let timeout = tokio::time::Duration::from_secs(2);
+        if tokio::time::timeout(timeout, &mut handle).await.is_err() {
+            handle.abort();
+        }
     }
 }
 

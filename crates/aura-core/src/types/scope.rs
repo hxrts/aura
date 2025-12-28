@@ -6,6 +6,7 @@
 
 use crate::{AuthorityId, ContextId};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Resource scope for authority-based authorization
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -25,6 +26,23 @@ pub enum ResourceScope {
         authority_id: AuthorityId,
         path: String,
     },
+}
+
+/// Canonical authorization operations used across guards and Biscuit policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AuthorizationOp {
+    Read,
+    Write,
+    Update,
+    Append,
+    Delete,
+    Execute,
+    Admin,
+    Attest,
+    Delegate,
+    Revoke,
+    List,
+    FlowCharge,
 }
 
 /// Operations that can be performed on an authority
@@ -120,6 +138,33 @@ impl ResourceScope {
             }
         }
     }
+
+    /// Parse a string resource into a ResourceScope.
+    ///
+    /// Accepts formats like "authority:<uuid>/path" and falls back to
+    /// storage scope with a deterministic authority id derived from the path.
+    pub fn parse(resource: &str) -> Self {
+        if let Some(rest) = resource.strip_prefix("authority:") {
+            let mut parts = rest.splitn(2, '/');
+            if let Some(id_str) = parts.next() {
+                if let Ok(uuid) = Uuid::parse_str(id_str) {
+                    let path = parts.next().unwrap_or_default().to_string();
+                    return ResourceScope::Storage {
+                        authority_id: AuthorityId::from_uuid(uuid),
+                        path,
+                    };
+                }
+            }
+        }
+
+        ResourceScope::Storage {
+            authority_id: AuthorityId::from_uuid(Uuid::new_v5(
+                &Uuid::NAMESPACE_URL,
+                resource.as_bytes(),
+            )),
+            path: resource.to_string(),
+        }
+    }
 }
 
 impl AuthorityOp {
@@ -149,6 +194,26 @@ impl ContextOp {
             ContextOp::RecoverAccountAccess => "recover_account_access",
             ContextOp::UpdateGuardianSet => "update_guardian_set",
             ContextOp::EmergencyFreeze => "emergency_freeze",
+        }
+    }
+}
+
+impl AuthorizationOp {
+    /// Get string representation of the authorization operation.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AuthorizationOp::Read => "read",
+            AuthorizationOp::Write => "write",
+            AuthorizationOp::Update => "update",
+            AuthorizationOp::Append => "append",
+            AuthorizationOp::Delete => "delete",
+            AuthorizationOp::Execute => "execute",
+            AuthorizationOp::Admin => "admin",
+            AuthorizationOp::Attest => "attest",
+            AuthorizationOp::Delegate => "delegate",
+            AuthorizationOp::Revoke => "revoke",
+            AuthorizationOp::List => "list",
+            AuthorizationOp::FlowCharge => "flow_charge",
         }
     }
 }

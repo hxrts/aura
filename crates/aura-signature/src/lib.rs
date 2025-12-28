@@ -3,16 +3,16 @@
 //! **Purpose**: Define identity semantics and signature verification logic.
 //!
 //! Complete identity verification system combining cryptographic signature verification
-//! with device lifecycle management.
+//! with authority lifecycle management.
 //!
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
 //! - YES Identity semantics and signature verification logic
-//! - YES Device lifecycle management (active, suspended, revoked)
+//! - YES Authority lifecycle management (active, suspended, revoked)
 //! - YES Session management and validation
 //! - YES Pure domain logic for authentication checks
-//! - YES Fact-based device lifecycle state changes
+//! - YES Fact-based authority lifecycle state changes
 //! - NO cryptographic signing/verification operations (use CryptoEffects from aura-effects)
 //! - NO handler composition (that's aura-composition)
 //! - NO multi-party protocol logic (that's aura-protocol)
@@ -25,29 +25,28 @@
 //!
 //! # Core Modules
 //!
-//! - **Cryptographic Verification**: Signature verification (device, guardian, threshold)
-//! - **Device Registry**: Device lifecycle management (active, suspended, revoked)
+//! - **Cryptographic Verification**: Signature verification (authority, guardian, threshold)
+//! - **Authority Registry**: Authority lifecycle management (active, suspended, revoked)
 //! - **Session Management**: Session ticket validation
-//! - **Facts**: Pure fact types for device lifecycle state changes
+//! - **Facts**: Pure fact types for authority lifecycle state changes
 //!
 //! # Core Types
 //!
-//! - **IdentityProof**: WHO signed something (Device, Guardian, Authority, or Threshold)
-//! - **KeyMaterial**: Public keys for verification (device, guardian, group)
+//! - **IdentityProof**: WHO signed something (Guardian, Authority, or Threshold)
+//! - **KeyMaterial**: Public keys for verification (authority, guardian, group)
 //! - **VerifiedIdentity**: Successful verification result with proof and message hash
-//! - **IdentityVerifier**: Device registry and lifecycle management
-//! - **DeviceInfo**: Device registration with status tracking
-//! - **VerifyFact**: Fact types for device lifecycle events
+//! - **AuthorityRegistry**: Authority registry and lifecycle management
+//! - **VerifyFact**: Fact types for authority lifecycle events
 //! - **AuthenticationError**: Signature validation failures
 
 #![allow(missing_docs)]
 
-pub mod device;
+pub(crate) mod authority;
 pub mod event_validation;
 pub mod facts;
 pub mod guardian;
 pub mod messages;
-pub mod registry;
+pub(crate) mod registry;
 pub mod session;
 pub mod threshold;
 
@@ -61,14 +60,15 @@ pub use session::verify_session_ticket;
 
 // Re-export identity validation functions
 pub use event_validation::{
-    validate_device_signature, validate_guardian_signature, validate_threshold_signature,
+    validate_authority_signature, validate_guardian_signature, validate_threshold_signature,
     IdentityValidator,
 };
 
 use aura_core::hash::hash;
+use aura_macros::aura_error_types;
 
 // Internal imports for SimpleIdentityVerifier implementation
-use device::verify_device_signature;
+use authority::verify_authority_signature;
 use guardian::verify_guardian_signature;
 use threshold::verify_threshold_signature;
 
@@ -76,7 +76,7 @@ use threshold::verify_threshold_signature;
 pub use aura_core::relationships::*;
 
 // Re-export registry types (from merged aura-identity)
-pub use registry::{DeviceInfo, DeviceStatus, IdentityVerifier, VerificationResult};
+pub use registry::{AuthorityRegistry, AuthorityStatus, VerificationResult};
 
 // Re-export fact types
 pub use facts::{
@@ -92,25 +92,32 @@ pub use messages::{
 };
 
 // Convenience functions
-pub use device::verify_signature;
+pub use authority::verify_signature;
 
 /// Authentication errors
-#[derive(Debug, thiserror::Error)]
-pub enum AuthenticationError {
-    #[error("Invalid device signature: {0}")]
-    InvalidDeviceSignature(String),
+aura_error_types! {
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub enum AuthenticationError {
+        #[category = "authorization"]
+        InvalidAuthoritySignature { details: String } =>
+            "Invalid authority signature: {details}",
 
-    #[error("Invalid threshold signature: {0}")]
-    InvalidThresholdSignature(String),
+        #[category = "authorization"]
+        InvalidThresholdSignature { details: String } =>
+            "Invalid threshold signature: {details}",
 
-    #[error("Invalid guardian signature: {0}")]
-    InvalidGuardianSignature(String),
+        #[category = "authorization"]
+        InvalidGuardianSignature { details: String } =>
+            "Invalid guardian signature: {details}",
 
-    #[error("Invalid session ticket: {0}")]
-    InvalidSessionTicket(String),
+        #[category = "authorization"]
+        InvalidSessionTicket { details: String } =>
+            "Invalid session ticket: {details}",
 
-    #[error("Crypto error: {0}")]
-    CryptoError(String),
+        #[category = "crypto"]
+        CryptoError { details: String } =>
+            "Crypto error: {details}",
+    }
 }
 
 pub type Result<T> = std::result::Result<T, AuthenticationError>;
@@ -124,14 +131,13 @@ pub type Result<T> = std::result::Result<T, AuthenticationError>;
 /// This provides access to public keys needed for signature verification.
 /// No policies or authorization data - pure cryptographic material only.
 ///
-/// **Authority Model Note**: Device keys are indexed by `DeviceId` for internal
-/// verification purposes, but cross-authority protocol messages should use
-/// `AuthorityId` as the participant identifier.
+/// **Authority Model Note**: Authority keys are indexed by `AuthorityId` and
+/// used for cross-authority protocol messages.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KeyMaterial {
-    /// Device public keys indexed by DeviceId
-    device_keys:
-        std::collections::HashMap<aura_core::identifiers::DeviceId, aura_core::Ed25519VerifyingKey>,
+    /// Authority public keys indexed by AuthorityId
+    authority_keys:
+        std::collections::HashMap<aura_core::AuthorityId, aura_core::Ed25519VerifyingKey>,
 
     /// Guardian public keys indexed by GuardianId
     guardian_keys: std::collections::HashMap<aura_core::GuardianId, aura_core::Ed25519VerifyingKey>,
@@ -144,29 +150,31 @@ impl KeyMaterial {
     /// Create new key material store
     pub fn new() -> Self {
         Self {
-            device_keys: std::collections::HashMap::new(),
+            authority_keys: std::collections::HashMap::new(),
             guardian_keys: std::collections::HashMap::new(),
             group_keys: std::collections::HashMap::new(),
         }
     }
 
-    /// Get the public key for a device
-    pub fn get_device_public_key(
+    /// Get the public key for an authority
+    pub fn get_authority_public_key(
         &self,
-        device_id: &aura_core::identifiers::DeviceId,
+        authority_id: &aura_core::AuthorityId,
     ) -> Result<&Ed25519VerifyingKey> {
-        self.device_keys.get(device_id).ok_or_else(|| {
-            AuthenticationError::InvalidDeviceSignature(format!("Unknown device: {}", device_id))
+        self.authority_keys.get(authority_id).ok_or_else(|| {
+            AuthenticationError::InvalidAuthoritySignature {
+                details: format!("Unknown authority: {}", authority_id),
+            }
         })
     }
 
-    /// Add a device public key
-    pub fn add_device_key(
+    /// Add an authority public key
+    pub fn add_authority_key(
         &mut self,
-        device_id: aura_core::identifiers::DeviceId,
+        authority_id: aura_core::AuthorityId,
         public_key: Ed25519VerifyingKey,
     ) {
-        self.device_keys.insert(device_id, public_key);
+        self.authority_keys.insert(authority_id, public_key);
     }
 
     /// Get the guardian public key
@@ -175,10 +183,9 @@ impl KeyMaterial {
         guardian_id: &aura_core::GuardianId,
     ) -> Result<&Ed25519VerifyingKey> {
         self.guardian_keys.get(guardian_id).ok_or_else(|| {
-            AuthenticationError::InvalidGuardianSignature(format!(
-                "Unknown guardian: {}",
-                guardian_id
-            ))
+            AuthenticationError::InvalidGuardianSignature {
+                details: format!("Unknown guardian: {}", guardian_id),
+            }
         })
     }
 
@@ -197,10 +204,9 @@ impl KeyMaterial {
         account_id: &aura_core::AccountId,
     ) -> Result<&Ed25519VerifyingKey> {
         self.group_keys.get(account_id).ok_or_else(|| {
-            AuthenticationError::InvalidThresholdSignature(format!(
-                "No group key for account: {}",
-                account_id
-            ))
+            AuthenticationError::InvalidThresholdSignature {
+                details: format!("No group key for account: {}", account_id),
+            }
         })
     }
 
@@ -220,21 +226,9 @@ impl Default for KeyMaterial {
     }
 }
 
-/// Pure identity proof that proves WHO signed something
-///
-/// **Migration Note**: The `Device` variant is maintained for backward compatibility
-/// with existing device-level verification. For cross-authority protocol messages,
-/// prefer using `Authority` which aligns with the authority-centric identity model.
+/// Pure identity proof that proves WHO signed something.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum IdentityProof {
-    /// Single device identity proof
-    ///
-    /// **Note**: This variant is primarily for internal device verification.
-    /// For cross-authority protocol messages, consider using `Authority` instead.
-    Device {
-        device_id: aura_core::identifiers::DeviceId,
-        signature: Ed25519Signature,
-    },
     /// Guardian identity proof
     Guardian {
         guardian_id: aura_core::GuardianId,
@@ -257,7 +251,7 @@ pub enum IdentityProof {
 pub struct ThresholdSig {
     /// The aggregated Ed25519 signature
     pub signature: Ed25519Signature,
-    /// Indices of devices that participated in signing
+    /// Indices of participants that participated in signing
     pub signers: Vec<u8>,
     /// Individual signature shares (for auditing)
     pub signature_shares: Vec<Vec<u8>>,
@@ -293,13 +287,13 @@ impl SimpleIdentityVerifier {
         Self { key_material }
     }
 
-    /// Add a device key for verification
-    pub fn add_device_key(
+    /// Add an authority key for verification
+    pub fn add_authority_key(
         &mut self,
-        device_id: aura_core::identifiers::DeviceId,
+        authority_id: aura_core::AuthorityId,
         public_key: Ed25519VerifyingKey,
     ) {
-        self.key_material.add_device_key(device_id, public_key);
+        self.key_material.add_authority_key(authority_id, public_key);
     }
 
     /// Add a guardian key for verification
@@ -320,26 +314,26 @@ impl SimpleIdentityVerifier {
         self.key_material.add_group_key(account_id, group_key);
     }
 
-    /// Verify a device signature
-    pub fn verify_device_signature(&self, proof: &IdentityProof) -> Result<VerifiedIdentity> {
+    /// Verify an authority signature
+    pub fn verify_authority_signature(&self, proof: &IdentityProof) -> Result<VerifiedIdentity> {
         match proof {
-            IdentityProof::Device {
-                device_id,
+            IdentityProof::Authority {
+                authority_id,
                 signature,
             } => {
-                // For device signatures, we use the device_id as the message
-                let message = device_id.0.as_bytes();
+                // For authority signatures, we use the authority_id as the message
+                let message = authority_id.0.as_bytes();
                 let message_hash = hash(message);
-                let public_key = self.key_material.get_device_public_key(device_id)?;
-                verify_device_signature(*device_id, message, signature, public_key)?;
+                let public_key = self.key_material.get_authority_public_key(authority_id)?;
+                verify_authority_signature(*authority_id, message, signature, public_key)?;
                 Ok(VerifiedIdentity {
                     proof: proof.clone(),
                     message_hash,
                 })
             }
-            _ => Err(AuthenticationError::InvalidDeviceSignature(
-                "Proof is not a device signature".to_string(),
-            )),
+            _ => Err(AuthenticationError::InvalidAuthoritySignature {
+                details: "Proof is not an authority signature".to_string(),
+            }),
         }
     }
 
@@ -370,9 +364,9 @@ impl SimpleIdentityVerifier {
                     message_hash,
                 })
             }
-            _ => Err(AuthenticationError::InvalidThresholdSignature(
-                "Proof is not a threshold signature".to_string(),
-            )),
+            _ => Err(AuthenticationError::InvalidThresholdSignature {
+                details: "Proof is not a threshold signature".to_string(),
+            }),
         }
     }
 
@@ -395,9 +389,9 @@ impl SimpleIdentityVerifier {
                     message_hash,
                 })
             }
-            _ => Err(AuthenticationError::InvalidGuardianSignature(
-                "Proof is not a guardian signature".to_string(),
-            )),
+            _ => Err(AuthenticationError::InvalidGuardianSignature {
+                details: "Proof is not a guardian signature".to_string(),
+            }),
         }
     }
 

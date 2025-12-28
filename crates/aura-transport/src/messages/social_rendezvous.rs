@@ -12,8 +12,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::protocols::rendezvous_constants::{
+    META_ALPN, META_CANDIDATES, META_ONION, META_PWD, META_SERVICE_UUID, META_UFRAG,
+    RENDEZVOUS_PROTOCOL_VERSION,
+};
+
 /// Transport type enumeration for rendezvous
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TransportKind {
     /// QUIC protocol transport with ALPN support
     Quic,
@@ -44,7 +50,7 @@ impl TransportDescriptor {
     /// Create a QUIC transport descriptor with ALPN protocol specification
     pub fn quic(local_addr: String, alpn: String) -> Self {
         let mut metadata = BTreeMap::new();
-        metadata.insert("alpn".to_string(), alpn);
+        metadata.insert(META_ALPN.to_string(), alpn);
         Self {
             kind: TransportKind::Quic,
             metadata,
@@ -56,7 +62,7 @@ impl TransportDescriptor {
     /// Create a QUIC transport descriptor with both local and STUN-discovered reflexive addresses
     pub fn quic_with_stun(local_addr: String, reflexive_addr: String, alpn: String) -> Self {
         let mut metadata = BTreeMap::new();
-        metadata.insert("alpn".to_string(), alpn);
+        metadata.insert(META_ALPN.to_string(), alpn);
         Self {
             kind: TransportKind::Quic,
             metadata,
@@ -79,9 +85,9 @@ impl TransportDescriptor {
     /// Create a WebRTC transport descriptor with ICE credentials and candidates
     pub fn webrtc(ufrag: String, pwd: String, candidates: Vec<String>) -> Self {
         let mut metadata = BTreeMap::new();
-        metadata.insert("ufrag".to_string(), ufrag);
-        metadata.insert("pwd".to_string(), pwd);
-        metadata.insert("candidates".to_string(), candidates.join(","));
+        metadata.insert(META_UFRAG.to_string(), ufrag);
+        metadata.insert(META_PWD.to_string(), pwd);
+        metadata.insert(META_CANDIDATES.to_string(), candidates.join(","));
         Self {
             kind: TransportKind::WebRtc,
             metadata,
@@ -93,7 +99,7 @@ impl TransportDescriptor {
     /// Create a Tor transport descriptor with onion service address
     pub fn tor(onion: String) -> Self {
         let mut metadata = BTreeMap::new();
-        metadata.insert("onion".to_string(), onion.clone());
+        metadata.insert(META_ONION.to_string(), onion.clone());
         Self {
             kind: TransportKind::Tor,
             metadata,
@@ -105,7 +111,7 @@ impl TransportDescriptor {
     /// Create a Bluetooth Low Energy transport descriptor with service UUID
     pub fn ble(service_uuid: String) -> Self {
         let mut metadata = BTreeMap::new();
-        metadata.insert("service_uuid".to_string(), service_uuid);
+        metadata.insert(META_SERVICE_UUID.to_string(), service_uuid);
         Self {
             kind: TransportKind::Ble,
             metadata,
@@ -138,6 +144,7 @@ impl TransportDescriptor {
 
 /// Message type enumeration for rendezvous payloads
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PayloadKind {
     /// Initial offer with available transports
     Offer,
@@ -182,7 +189,7 @@ impl AuthenticationPayload {
     ) -> Self {
         Self {
             kind,
-            ver: 1,
+            ver: RENDEZVOUS_PROTOCOL_VERSION,
             device_cert,
             channel_binding,
             expires,

@@ -8,7 +8,7 @@
 use crate::core::AgentConfig;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
-use std::sync::RwLock;
+use tokio::sync::RwLock;
 
 /// A flow budget for a context-peer pair
 #[derive(Debug, Clone, Default)]
@@ -77,12 +77,12 @@ impl FlowBudgetManager {
     }
 
     /// Get budget for a context-peer pair
-    pub fn get_budget(
+    pub async fn get_budget(
         &self,
         context: ContextId,
         peer: AuthorityId,
     ) -> Result<FlowBudget, BudgetError> {
-        let budgets = self.budgets.read().map_err(|_| BudgetError::LockError)?;
+        let budgets = self.budgets.read().await;
         Ok(budgets
             .get(&(context, peer))
             .cloned()
@@ -90,13 +90,13 @@ impl FlowBudgetManager {
     }
 
     /// Charge a cost against the budget
-    pub fn charge(
+    pub async fn charge(
         &self,
         context: ContextId,
         peer: AuthorityId,
         cost: u32,
     ) -> Result<(), BudgetError> {
-        let mut budgets = self.budgets.write().map_err(|_| BudgetError::LockError)?;
+        let mut budgets = self.budgets.write().await;
         let budget = budgets
             .entry((context, peer))
             .or_insert_with(|| FlowBudget::new(self.default_limit));
@@ -113,30 +113,28 @@ impl FlowBudgetManager {
     }
 
     /// Replenish budget for a context-peer pair
-    pub fn replenish(&self, context: ContextId, peer: AuthorityId, amount: u32) {
-        if let Ok(mut budgets) = self.budgets.write() {
-            if let Some(budget) = budgets.get_mut(&(context, peer)) {
-                budget.spent = budget.spent.saturating_sub(amount);
-            }
+    pub async fn replenish(&self, context: ContextId, peer: AuthorityId, amount: u32) {
+        let mut budgets = self.budgets.write().await;
+        if let Some(budget) = budgets.get_mut(&(context, peer)) {
+            budget.spent = budget.spent.saturating_sub(amount);
         }
     }
 
     /// Set the limit for a context-peer pair
-    pub fn set_limit(&self, context: ContextId, peer: AuthorityId, limit: u32) {
-        if let Ok(mut budgets) = self.budgets.write() {
-            let budget = budgets
-                .entry((context, peer))
-                .or_insert_with(|| FlowBudget::new(limit));
-            budget.limit = limit;
-        }
+    pub async fn set_limit(&self, context: ContextId, peer: AuthorityId, limit: u32) {
+        let mut budgets = self.budgets.write().await;
+        let budget = budgets
+            .entry((context, peer))
+            .or_insert_with(|| FlowBudget::new(limit));
+        budget.limit = limit;
     }
 
     /// List all budgets for a context
-    pub fn list_budgets_for_context(
+    pub async fn list_budgets_for_context(
         &self,
         context: ContextId,
     ) -> Result<Vec<(AuthorityId, FlowBudget)>, BudgetError> {
-        let budgets = self.budgets.read().map_err(|_| BudgetError::LockError)?;
+        let budgets = self.budgets.read().await;
         Ok(budgets
             .iter()
             .filter(|((ctx, _), _)| *ctx == context)
@@ -145,12 +143,11 @@ impl FlowBudgetManager {
     }
 
     /// Reset all budgets for a new epoch
-    pub fn reset_epoch(&self, new_epoch: u64) {
-        if let Ok(mut budgets) = self.budgets.write() {
-            for budget in budgets.values_mut() {
-                budget.spent = 0;
-                budget.epoch = new_epoch;
-            }
+    pub async fn reset_epoch(&self, new_epoch: u64) {
+        let mut budgets = self.budgets.write().await;
+        for budget in budgets.values_mut() {
+            budget.spent = 0;
+            budget.epoch = new_epoch;
         }
     }
 }

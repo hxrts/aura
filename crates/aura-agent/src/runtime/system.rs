@@ -4,7 +4,7 @@
 
 use super::services::{
     CeremonyTracker, ContextManager, FlowBudgetManager, ReceiptManager, RendezvousManager,
-    SocialManager, SyncServiceManager,
+    RuntimeTaskRegistry, SocialManager, SyncServiceManager,
 };
 use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
@@ -53,6 +53,9 @@ pub struct RuntimeSystem {
     /// Ceremony tracker (for guardian ceremony coordination)
     ceremony_tracker: CeremonyTracker,
 
+    /// Runtime task registry for background work
+    runtime_tasks: Arc<RuntimeTaskRegistry>,
+
     /// Configuration
     #[allow(dead_code)] // Will be used for runtime configuration
     config: AgentConfig,
@@ -93,6 +96,7 @@ impl RuntimeSystem {
             rendezvous_manager: None,
             social_manager: None,
             ceremony_tracker: CeremonyTracker::new(),
+            runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
             reactive_pipeline: None,
@@ -126,6 +130,7 @@ impl RuntimeSystem {
             rendezvous_manager: None,
             social_manager: None,
             ceremony_tracker: CeremonyTracker::new(),
+            runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
             reactive_pipeline: None,
@@ -159,6 +164,7 @@ impl RuntimeSystem {
             rendezvous_manager: Some(rendezvous_manager),
             social_manager: None,
             ceremony_tracker: CeremonyTracker::new(),
+            runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
             reactive_pipeline: None,
@@ -193,6 +199,7 @@ impl RuntimeSystem {
             rendezvous_manager,
             social_manager,
             ceremony_tracker: CeremonyTracker::new(),
+            runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
             reactive_pipeline: None,
@@ -202,6 +209,11 @@ impl RuntimeSystem {
     /// Get the ceremony tracker
     pub fn ceremony_tracker(&self) -> &CeremonyTracker {
         &self.ceremony_tracker
+    }
+
+    /// Get the runtime task registry.
+    pub fn tasks(&self) -> Arc<RuntimeTaskRegistry> {
+        self.runtime_tasks.clone()
     }
 
     /// Get the authority ID
@@ -331,6 +343,7 @@ impl RuntimeSystem {
             sync_manager,
             rendezvous_manager,
             reactive_pipeline,
+            runtime_tasks,
             ..
         } = self;
 
@@ -338,6 +351,9 @@ impl RuntimeSystem {
         if let Some(pipeline) = reactive_pipeline {
             pipeline.shutdown().await;
         }
+
+        // Stop background runtime tasks (invitation monitors, subscriptions).
+        runtime_tasks.shutdown();
 
         // Stop rendezvous service if running
         if let Some(rendezvous_manager) = &rendezvous_manager {

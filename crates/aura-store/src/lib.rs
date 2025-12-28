@@ -59,8 +59,6 @@ pub mod crdt;
 /// Unified storage error types
 pub mod errors;
 
-/// Encrypted local storage for CLI/TUI preferences
-pub mod local;
 
 // Biscuit-based storage authorization moved to aura-authorization (proper domain)
 
@@ -76,9 +74,6 @@ pub use chunk::{
 pub use crdt::{StorageIndex, StorageOpLog, StorageOpType, StorageOperation, StorageState};
 pub use errors::StorageError;
 pub use facts::{StorageFact, StorageFactDelta, StorageFactReducer, STORAGE_FACT_TYPE_ID};
-pub use local::{
-    ContactCache, LocalData, LocalStore, LocalStoreConfig, LocalStoreError, ThemePreference,
-};
 pub use search::{SearchIndexEntry, SearchQuery, SearchResults, SearchScope};
 
 // Biscuit authorization APIs now available from aura-authorization

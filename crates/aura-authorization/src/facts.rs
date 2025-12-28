@@ -9,6 +9,7 @@
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::epochs::Epoch;
+use aura_core::types::facts::{FactDelta, FactDeltaReducer};
 use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use serde::{Deserialize, Serialize};
 
@@ -220,6 +221,17 @@ pub struct WotFactDelta {
     pub tokens_attenuated: u64,
 }
 
+impl FactDelta for WotFactDelta {
+    fn merge(&mut self, other: &Self) {
+        self.flow_charges += other.flow_charges;
+        self.epoch_rotations += other.epoch_rotations;
+        self.capabilities_delegated += other.capabilities_delegated;
+        self.capabilities_revoked += other.capabilities_revoked;
+        self.tokens_issued += other.tokens_issued;
+        self.tokens_attenuated += other.tokens_attenuated;
+    }
+}
+
 /// Reducer for WoT facts
 #[derive(Debug, Clone, Default)]
 pub struct WotFactReducer;
@@ -229,9 +241,10 @@ impl WotFactReducer {
     pub fn new() -> Self {
         Self
     }
+}
 
-    /// Apply a fact to produce a delta
-    pub fn apply(&self, fact: &WotFact) -> WotFactDelta {
+impl FactDeltaReducer<WotFact, WotFactDelta> for WotFactReducer {
+    fn apply(&self, fact: &WotFact) -> WotFactDelta {
         let mut delta = WotFactDelta::default();
 
         match fact {
@@ -262,6 +275,7 @@ impl WotFactReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::types::facts::FactDeltaReducer;
 
     fn pt(ts_ms: u64) -> PhysicalTime {
         PhysicalTime {

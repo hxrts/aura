@@ -13,7 +13,7 @@
 //! ## Usage
 //!
 //! ```ignore
-//! use aura_store::local::{LocalStore, LocalStoreConfig, ThemePreference};
+//! use aura_terminal::local_store::{LocalStore, LocalStoreConfig, ThemePreference};
 //! use aura_core::effects::StorageEffects;
 //!
 //! // Create store

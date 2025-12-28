@@ -233,8 +233,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let effects = self.agent.runtime().effects();
         let reactive = effects.reactive_handler();
         let agent = self.agent.clone();
+        let tasks = self.agent.runtime().tasks();
 
-        tokio::spawn(async move {
+        tasks.spawn_cancellable(async move {
             for _ in 0..120 {
                 let _ = effects.sleep_ms(1000).await;
 

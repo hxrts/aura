@@ -11,10 +11,11 @@ use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::crypto::{FrostSigningPackage, SigningKeyGenResult};
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
-use aura_core::effects::transport::{TransportEnvelope, TransportStats};
+use aura_core::effects::transport::{TransportEnvelope, TransportReceipt, TransportStats};
 use aura_core::effects::TransportEffects;
 use aura_core::effects::*;
 use aura_core::hash::hash;
+use aura_core::scope::{AuthorizationOp, ContextOp, ResourceScope};
 use aura_core::Journal;
 use aura_core::{
     AttestedOp, AuraError, AuthorityId, ChannelId, ContextId, DeviceId, FlowBudget, Hash32,
@@ -38,9 +39,10 @@ use aura_protocol::effects::{
     ChoreographyError, ChoreographyEvent, ChoreographyMetrics, EffectApiEffects, EffectApiError,
     EffectApiEventStream, LeakageEffects, SyncEffects, SyncError,
 };
-use aura_guards::GuardContextProvider;
+use aura_guards::prelude::create_send_guard_op;
+use aura_guards::{GuardContextProvider, GuardOperation, JournalCoupler};
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
-use aura_authorization::{BiscuitAuthorizationBridge, FlowBudgetHandler};
+use aura_authorization::BiscuitAuthorizationBridge;
 use biscuit_auth::{Biscuit, KeyPair, PublicKey};
 use rand::rngs::StdRng;
 use rand::RngCore;
@@ -54,6 +56,7 @@ use super::shared_transport::SharedTransport;
 
 const DEFAULT_WINDOW: u32 = 1024;
 const TYPED_FACT_STORAGE_PREFIX: &str = "journal/facts";
+const DEFAULT_CHOREO_FLOW_COST: u32 = 1;
 
 /// Concrete effect system combining all effects for runtime usage
 ///
@@ -61,7 +64,6 @@ const TYPED_FACT_STORAGE_PREFIX: &str = "journal/facts";
 pub struct AuraEffectSystem {
     config: AgentConfig,
     composite: CompositeHandlerAdapter,
-    flow_budget: FlowBudgetHandler,
     crypto_handler: aura_effects::crypto::RealCryptoHandler,
     random_rng: parking_lot::Mutex<StdRng>,
     storage_handler: Arc<
@@ -101,6 +103,40 @@ pub struct AuraEffectSystem {
     /// When configured, committed typed facts are sent to the reactive scheduler
     /// so UI signals can be updated via the canonical scheduler pipeline.
     fact_publish_tx: parking_lot::Mutex<Option<mpsc::Sender<crate::reactive::FactSource>>>,
+    /// In-memory choreography session state for runtime coordination.
+    choreography_state: parking_lot::RwLock<ChoreographyRuntimeState>,
+}
+
+#[derive(Debug, Clone)]
+struct ChoreographyRuntimeState {
+    session_id: Option<uuid::Uuid>,
+    context_id: Option<ContextId>,
+    roles: Vec<ChoreographicRole>,
+    current_role: Option<ChoreographicRole>,
+    timeout_ms: Option<u64>,
+    started_at_ms: Option<u64>,
+    metrics: ChoreographyMetrics,
+}
+
+impl Default for ChoreographyRuntimeState {
+    fn default() -> Self {
+        Self {
+            session_id: None,
+            context_id: None,
+            roles: Vec::new(),
+            current_role: None,
+            timeout_ms: None,
+            started_at_ms: None,
+            metrics: ChoreographyMetrics {
+                messages_sent: 0,
+                messages_received: 0,
+                avg_latency_ms: 0.0,
+                timeout_count: 0,
+                retry_count: 0,
+                total_duration_ms: 0,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -111,7 +147,7 @@ impl BiscuitAuthorizationEffects for NoopBiscuitAuthorizationHandler {
     async fn authorize_biscuit(
         &self,
         _token_data: &[u8],
-        _operation: &str,
+        _operation: AuthorizationOp,
         _scope: &aura_core::scope::ResourceScope,
     ) -> Result<AuthorizationDecision, AuthorizationError> {
         Ok(AuthorizationDecision {
@@ -197,7 +233,12 @@ impl AuraEffectSystem {
             None => StdRng::from_entropy(),
         };
         let authorization_handler =
-            Self::init_authorization_handler(authority, &crypto_handler, &journal_verifying_key);
+            Self::init_authorization_handler(
+                authority,
+                &crypto_handler,
+                &journal_verifying_key,
+                &time_handler,
+            );
         let secure_storage_handler = Arc::new(RealSecureStorageHandler::with_base_path(
             config.storage.base_path.clone(),
         ));
@@ -238,7 +279,6 @@ impl AuraEffectSystem {
         Self {
             config,
             composite,
-            flow_budget: FlowBudgetHandler::new(authority),
             crypto_handler,
             random_rng: parking_lot::Mutex::new(random_rng),
             storage_handler,
@@ -262,6 +302,7 @@ impl AuraEffectSystem {
             indexed_journal,
             test_mode,
             fact_publish_tx: parking_lot::Mutex::new(None),
+            choreography_state: parking_lot::RwLock::new(ChoreographyRuntimeState::default()),
         }
     }
 
@@ -633,18 +674,29 @@ impl AuraEffectSystem {
         authority: AuthorityId,
         crypto_handler: &RealCryptoHandler,
         verifying_key: &Option<Vec<u8>>,
+        time_handler: &PhysicalTimeHandler,
     ) -> aura_authorization::effects::WotAuthorizationHandler<RealCryptoHandler> {
         if let Some(bytes) = verifying_key {
             if let Ok(public_key) = PublicKey::from_bytes(bytes) {
-                return aura_authorization::effects::WotAuthorizationHandler::new(
+                let handler = aura_authorization::effects::WotAuthorizationHandler::new(
                     crypto_handler.clone(),
                     public_key,
                     authority,
                 );
+                let time_handler = time_handler.clone();
+                return handler.with_time_provider(Arc::new(move || {
+                    time_handler.physical_time_now_ms() / 1000
+                }));
             }
         }
 
-        aura_authorization::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone())
+        let handler = aura_authorization::effects::WotAuthorizationHandler::new_mock(
+            crypto_handler.clone(),
+        );
+        let time_handler = time_handler.clone();
+        handler.with_time_provider(Arc::new(move || {
+            time_handler.physical_time_now_ms() / 1000
+        }))
     }
 
     /// Construct a journal handler with current policy hooks.
@@ -656,7 +708,6 @@ impl AuraEffectSystem {
             EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
         >,
         NoopBiscuitAuthorizationHandler,
-        FlowBudgetHandler,
     > {
         let authorization = self
             .journal_policy
@@ -669,7 +720,6 @@ impl AuraEffectSystem {
             self.crypto_handler.clone(),
             self.storage_handler.clone(),
             authorization,
-            Some(self.flow_budget.clone()),
             self.journal_verifying_key.clone(),
             None, // Fact registry is accessed via AuraEffectSystem::fact_registry() instead
         )
@@ -687,6 +737,9 @@ impl PhysicalTimeEffects for AuraEffectSystem {
         self.time_handler.sleep_ms(ms).await
     }
 }
+
+#[async_trait]
+impl TimeEffects for AuraEffectSystem {}
 
 #[async_trait]
 impl LogicalClockEffects for AuraEffectSystem {
@@ -2010,75 +2063,237 @@ impl SystemEffects for AuraEffectSystem {
 impl ChoreographicEffects for AuraEffectSystem {
     async fn send_to_role_bytes(
         &self,
-        _role: ChoreographicRole,
-        _message: Vec<u8>,
+        role: ChoreographicRole,
+        message: Vec<u8>,
     ) -> Result<(), ChoreographyError> {
-        // Mock implementation
+        let (context_id, current_role) = {
+            let state = self.choreography_state.read();
+            (
+                state.context_id.ok_or(ChoreographyError::SessionNotStarted)?,
+                state.current_role.ok_or(ChoreographyError::SessionNotStarted)?,
+            )
+        };
+
+        let peer = AuthorityId::from_uuid(role.device_id);
+        let guard_chain = create_send_guard_op(
+            GuardOperation::Custom("choreography:send".to_string()),
+            context_id,
+            peer,
+            DEFAULT_CHOREO_FLOW_COST,
+        )
+        .with_operation_id(format!(
+            "choreography_send_{:?}_{:?}",
+            context_id, role.device_id
+        ));
+
+        let guard_result = guard_chain.evaluate(self).await.map_err(|e| {
+            ChoreographyError::InternalError {
+                message: format!("Choreography send guard failed: {e}"),
+            }
+        })?;
+
+        if !guard_result.authorized {
+            return Err(ChoreographyError::InternalError {
+                message: guard_result
+                    .denial_reason
+                    .unwrap_or_else(|| "Choreography send denied by guard chain".to_string()),
+            });
+        }
+
+        JournalCoupler::new()
+            .couple_with_send(self, &guard_result.receipt)
+            .await
+            .map_err(|e| ChoreographyError::InternalError {
+                message: format!("Choreography journal coupling failed: {e}"),
+            })?;
+
+        let transport_receipt = guard_result.receipt.as_ref().map(|receipt| TransportReceipt {
+            context: receipt.ctx,
+            src: receipt.src,
+            dst: receipt.dst,
+            epoch: receipt.epoch.value(),
+            cost: receipt.cost,
+            nonce: receipt.nonce,
+            prev: receipt.prev.0,
+            sig: receipt.sig.clone(),
+        });
+
+        let envelope = TransportEnvelope {
+            destination: peer,
+            source: AuthorityId::from_uuid(current_role.device_id),
+            context: context_id,
+            payload: message,
+            metadata: HashMap::new(),
+            receipt: transport_receipt,
+        };
+
+        TransportEffects::send_envelope(self, envelope)
+            .await
+            .map_err(|e| ChoreographyError::Transport {
+                source: Box::new(e),
+            })?;
+
+        {
+            let mut state = self.choreography_state.write();
+            state.metrics.messages_sent = state.metrics.messages_sent.saturating_add(1);
+        }
         Ok(())
     }
 
     async fn receive_from_role_bytes(
         &self,
-        _role: ChoreographicRole,
+        role: ChoreographicRole,
     ) -> Result<Vec<u8>, ChoreographyError> {
-        // Mock implementation
-        Ok(vec![])
+        let context_id = {
+            let state = self.choreography_state.read();
+            state.context_id.ok_or(ChoreographyError::SessionNotStarted)?
+        };
+
+        let envelope = TransportEffects::receive_envelope_from(
+            self,
+            AuthorityId::from_uuid(role.device_id),
+            context_id,
+        )
+        .await
+        .map_err(|e| ChoreographyError::Transport {
+            source: Box::new(e),
+        })?;
+
+        {
+            let mut state = self.choreography_state.write();
+            state.metrics.messages_received = state.metrics.messages_received.saturating_add(1);
+        }
+
+        Ok(envelope.payload)
     }
 
-    async fn broadcast_bytes(&self, _message: Vec<u8>) -> Result<(), ChoreographyError> {
-        // Mock implementation
+    async fn broadcast_bytes(&self, message: Vec<u8>) -> Result<(), ChoreographyError> {
+        let (roles, current_role) = {
+            let state = self.choreography_state.read();
+            (
+                state.roles.clone(),
+                state.current_role.ok_or(ChoreographyError::SessionNotStarted)?,
+            )
+        };
+
+        for role in roles {
+            if role.device_id == current_role.device_id {
+                continue;
+            }
+            self.send_to_role_bytes(role, message.clone()).await?;
+        }
+
         Ok(())
     }
 
     #[allow(clippy::disallowed_methods)]
     fn current_role(&self) -> ChoreographicRole {
-        // Mock implementation
-        ChoreographicRole::new(uuid::Uuid::new_v4(), 0)
+        let state = self.choreography_state.read();
+        state
+            .current_role
+            .unwrap_or_else(|| ChoreographicRole::new(self.authority_id.0, 0))
     }
 
     fn all_roles(&self) -> Vec<ChoreographicRole> {
-        // Mock implementation
-        vec![]
+        let state = self.choreography_state.read();
+        if state.roles.is_empty() {
+            vec![self.current_role()]
+        } else {
+            state.roles.clone()
+        }
     }
 
-    async fn is_role_active(&self, _role: ChoreographicRole) -> bool {
-        // Mock implementation
-        true
+    async fn is_role_active(&self, role: ChoreographicRole) -> bool {
+        let context_id = {
+            let state = self.choreography_state.read();
+            match state.context_id {
+                Some(context_id) => context_id,
+                None => return false,
+            }
+        };
+
+        TransportEffects::is_channel_established(
+            self,
+            context_id,
+            AuthorityId::from_uuid(role.device_id),
+        )
+        .await
     }
 
     async fn start_session(
         &self,
-        _session_id: uuid::Uuid,
-        _roles: Vec<ChoreographicRole>,
+        session_id: uuid::Uuid,
+        roles: Vec<ChoreographicRole>,
     ) -> Result<(), ChoreographyError> {
-        // Mock implementation
+        let mut state = self.choreography_state.write();
+        if let Some(active) = state.session_id {
+            return Err(ChoreographyError::SessionAlreadyExists {
+                session_id: active,
+            });
+        }
+
+        let current_role = roles
+            .iter()
+            .find(|role| role.device_id == self.authority_id.0)
+            .copied()
+            .ok_or_else(|| ChoreographyError::RoleNotFound {
+                role: ChoreographicRole::new(self.authority_id.0, 0),
+            })?;
+
+        let context_id = ContextId::new_from_entropy(hash(session_id.as_bytes()));
+
+        let started_at_ms = self
+            .physical_time()
+            .await
+            .map(|time| time.ts_ms)
+            .unwrap_or_default();
+
+        state.session_id = Some(session_id);
+        state.context_id = Some(context_id);
+        state.roles = roles;
+        state.current_role = Some(current_role);
+        state.started_at_ms = Some(started_at_ms);
         Ok(())
     }
 
     async fn end_session(&self) -> Result<(), ChoreographyError> {
-        // Mock implementation
+        let mut state = self.choreography_state.write();
+        if state.session_id.is_none() {
+            return Err(ChoreographyError::SessionNotStarted);
+        }
+
+        let ended_at_ms = self
+            .physical_time()
+            .await
+            .map(|time| time.ts_ms)
+            .unwrap_or_default();
+
+        if let Some(started_at_ms) = state.started_at_ms {
+            state.metrics.total_duration_ms = ended_at_ms.saturating_sub(started_at_ms);
+        }
+
+        state.session_id = None;
+        state.context_id = None;
+        state.roles.clear();
+        state.current_role = None;
+        state.timeout_ms = None;
+        state.started_at_ms = None;
         Ok(())
     }
 
-    async fn emit_choreo_event(&self, _event: ChoreographyEvent) -> Result<(), ChoreographyError> {
-        // Mock implementation
+    async fn emit_choreo_event(&self, event: ChoreographyEvent) -> Result<(), ChoreographyError> {
+        tracing::debug!(?event, "choreography event");
         Ok(())
     }
 
-    async fn set_timeout(&self, _timeout_ms: u64) {
-        // Mock implementation - no return value
+    async fn set_timeout(&self, timeout_ms: u64) {
+        let mut state = self.choreography_state.write();
+        state.timeout_ms = Some(timeout_ms);
     }
 
     async fn get_metrics(&self) -> ChoreographyMetrics {
-        // Mock implementation
-        ChoreographyMetrics {
-            messages_sent: 0,
-            messages_received: 0,
-            avg_latency_ms: 0.0,
-            timeout_count: 0,
-            retry_count: 0,
-            total_duration_ms: 0,
-        }
+        let state = self.choreography_state.read();
+        state.metrics.clone()
     }
 }
 
@@ -2200,7 +2415,33 @@ impl FlowBudgetEffects for AuraEffectSystem {
         peer: &AuthorityId,
         cost: u32,
     ) -> aura_core::AuraResult<aura_core::Receipt> {
-        self.flow_budget.charge_flow(context, peer, cost).await
+        if let Some((token, bridge)) = &self.journal_policy {
+            let scope = ResourceScope::Context {
+                context_id: *context,
+                operation: ContextOp::UpdateParams,
+            };
+            let now = self.time_handler.physical_time_now_ms();
+            let decision = bridge
+                .authorize_with_time(token, "flow_charge", &scope, Some(now))
+                .map_err(|e| AuraError::permission_denied(format!("flow budget policy failed: {e}")))?;
+            if !decision.authorized {
+                return Err(AuraError::permission_denied(
+                    "flow budget charge not authorized by Biscuit policy",
+                ));
+            }
+        }
+
+        let budget = JournalEffects::charge_flow_budget(self, context, peer, cost).await?;
+        Ok(aura_core::Receipt::new(
+            *context,
+            self.authority_id,
+            *peer,
+            budget.epoch,
+            cost,
+            budget.spent,
+            Hash32::default(),
+            Vec::new(),
+        ))
     }
 }
 
@@ -2400,11 +2641,11 @@ impl AuthorizationEffects for AuraEffectSystem {
     async fn verify_capability(
         &self,
         capabilities: &aura_core::Cap,
-        operation: &str,
-        resource: &str,
+        operation: AuthorizationOp,
+        scope: &ResourceScope,
     ) -> Result<bool, aura_core::effects::AuthorizationError> {
         self.authorization_handler
-            .verify_capability(capabilities, operation, resource)
+            .verify_capability(capabilities, operation, scope)
             .await
     }
 

@@ -5,7 +5,7 @@
 
 use aura_core::effects::StorageEffects;
 use aura_core::AuthorityId;
-use aura_store::local::{ContactCache, LocalData, LocalStore, LocalStoreConfig, LocalStoreError};
+use crate::local_store::{ContactCache, LocalData, LocalStore, LocalStoreConfig, LocalStoreError};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -93,12 +93,12 @@ impl<S: StorageEffects> TuiLocalStore<S> {
     // ─── Convenience Methods ─────────────────────────────────────────────────
 
     /// Get theme preference
-    pub fn theme(&self) -> aura_store::local::ThemePreference {
+    pub fn theme(&self) -> crate::local_store::ThemePreference {
         self.data().theme
     }
 
     /// Set theme preference
-    pub fn set_theme(&mut self, theme: aura_store::local::ThemePreference) {
+    pub fn set_theme(&mut self, theme: crate::local_store::ThemePreference) {
         self.data_mut().theme = theme;
         self.dirty = true;
     }
@@ -184,7 +184,7 @@ mod tests {
 
         assert!(!store.is_dirty());
 
-        store.set_theme(aura_store::local::ThemePreference::Light);
+        store.set_theme(crate::local_store::ThemePreference::Light);
         assert!(store.is_dirty());
 
         store.save().await.unwrap();

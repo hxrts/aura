@@ -3,12 +3,13 @@
 //! Pure fact types for identity verification state changes.
 //! These facts are defined here (Layer 2) and committed by higher layers.
 //!
-//! **Authority Model**: Facts reference authorities and devices using the
+//! **Authority Model**: Facts reference authorities using the
 //! authority-centric model where authorities hide internal device structure.
 
-use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_core::AuthorityId;
 use aura_core::time::PhysicalTime;
 use aura_core::types::epochs::Epoch;
+use aura_core::types::facts::{FactDelta, FactDeltaReducer};
 use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use aura_core::{AccountId, Cap};
 use serde::{Deserialize, Serialize};
@@ -16,81 +17,71 @@ use serde::{Deserialize, Serialize};
 /// Unique type identifier for verification facts
 pub const VERIFY_FACT_TYPE_ID: &str = "verify/v1";
 /// Schema version for verification fact encoding
-pub const VERIFY_FACT_SCHEMA_VERSION: u16 = 1;
+pub const VERIFY_FACT_SCHEMA_VERSION: u16 = 2;
 
 /// Verification domain facts for identity state changes.
 ///
-/// These facts capture device lifecycle events and are used by the
-/// journal system to derive device registry state.
+/// These facts capture authority lifecycle events and are used by the
+/// journal system to derive authority registry state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VerifyFact {
-    /// Device registered with an authority
-    DeviceRegistered {
-        /// Authority that owns this device
+    /// Authority registered
+    AuthorityRegistered {
+        /// Authority being registered
         authority_id: AuthorityId,
-        /// Device being registered
-        device_id: DeviceId,
-        /// Device public key (serialized)
+        /// Authority public key (serialized)
         public_key: Vec<u8>,
         /// Initial capabilities granted
         capabilities: Cap,
-        /// Epoch when device was registered
+        /// Epoch when authority was registered
         registered_epoch: Epoch,
-        /// Timestamp when device was registered (uses unified time system)
+        /// Timestamp when authority was registered (uses unified time system)
         registered_at: PhysicalTime,
     },
 
-    /// Device suspended (temporarily disabled)
-    DeviceSuspended {
-        /// Device being suspended
-        device_id: DeviceId,
-        /// Authority that owns this device
+    /// Authority suspended (temporarily disabled)
+    AuthoritySuspended {
+        /// Authority being suspended
         authority_id: AuthorityId,
         /// Reason for suspension
         reason: String,
-        /// Epoch when device was suspended
+        /// Epoch when authority was suspended
         suspended_epoch: Epoch,
-        /// Timestamp when device was suspended (uses unified time system)
+        /// Timestamp when authority was suspended (uses unified time system)
         suspended_at: PhysicalTime,
     },
 
-    /// Device revoked (permanently disabled)
-    DeviceRevoked {
-        /// Device being revoked
-        device_id: DeviceId,
-        /// Authority that owns this device
+    /// Authority revoked (permanently disabled)
+    AuthorityRevoked {
+        /// Authority being revoked
         authority_id: AuthorityId,
         /// Reason for revocation
         reason: String,
-        /// Epoch when device was revoked
+        /// Epoch when authority was revoked
         revoked_epoch: Epoch,
-        /// Timestamp when device was revoked (uses unified time system)
+        /// Timestamp when authority was revoked (uses unified time system)
         revoked_at: PhysicalTime,
     },
 
-    /// Device reactivated after suspension
-    DeviceReactivated {
-        /// Device being reactivated
-        device_id: DeviceId,
-        /// Authority that owns this device
+    /// Authority reactivated after suspension
+    AuthorityReactivated {
+        /// Authority being reactivated
         authority_id: AuthorityId,
-        /// Epoch when device was reactivated
+        /// Epoch when authority was reactivated
         reactivated_epoch: Epoch,
-        /// Timestamp when device was reactivated (uses unified time system)
+        /// Timestamp when authority was reactivated (uses unified time system)
         reactivated_at: PhysicalTime,
     },
 
-    /// Device capabilities updated
-    DeviceCapabilitiesUpdated {
-        /// Device being updated
-        device_id: DeviceId,
-        /// Authority that owns this device
+    /// Authority capabilities updated
+    AuthorityCapabilitiesUpdated {
+        /// Authority being updated
         authority_id: AuthorityId,
         /// New capabilities
         new_capabilities: Cap,
-        /// Epoch when capabilities were updated
+        /// Epoch when authority capabilities were updated
         updated_epoch: Epoch,
-        /// Timestamp when capabilities were updated (uses unified time system)
+        /// Timestamp when authority capabilities were updated (uses unified time system)
         updated_at: PhysicalTime,
     },
 
@@ -140,8 +131,6 @@ pub enum VerifyFact {
 /// Type of identity verification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VerificationType {
-    /// Device signature verification
-    Device,
     /// Guardian signature verification
     Guardian,
     /// Authority signature verification
@@ -158,39 +147,25 @@ impl VerifyFact {
     /// Get the authority ID associated with this fact, if applicable
     pub fn authority_id(&self) -> Option<AuthorityId> {
         match self {
-            VerifyFact::DeviceRegistered { authority_id, .. } => Some(*authority_id),
-            VerifyFact::DeviceSuspended { authority_id, .. } => Some(*authority_id),
-            VerifyFact::DeviceRevoked { authority_id, .. } => Some(*authority_id),
-            VerifyFact::DeviceReactivated { authority_id, .. } => Some(*authority_id),
-            VerifyFact::DeviceCapabilitiesUpdated { authority_id, .. } => Some(*authority_id),
+            VerifyFact::AuthorityRegistered { authority_id, .. } => Some(*authority_id),
+            VerifyFact::AuthoritySuspended { authority_id, .. } => Some(*authority_id),
+            VerifyFact::AuthorityRevoked { authority_id, .. } => Some(*authority_id),
+            VerifyFact::AuthorityReactivated { authority_id, .. } => Some(*authority_id),
+            VerifyFact::AuthorityCapabilitiesUpdated { authority_id, .. } => Some(*authority_id),
             VerifyFact::AccountPolicySet { .. } => None,
             VerifyFact::IdentityVerified { authority_id, .. } => Some(*authority_id),
             VerifyFact::ThresholdSignatureVerified { .. } => None,
         }
     }
 
-    /// Get the device ID associated with this fact, if applicable
-    pub fn device_id(&self) -> Option<DeviceId> {
-        match self {
-            VerifyFact::DeviceRegistered { device_id, .. } => Some(*device_id),
-            VerifyFact::DeviceSuspended { device_id, .. } => Some(*device_id),
-            VerifyFact::DeviceRevoked { device_id, .. } => Some(*device_id),
-            VerifyFact::DeviceReactivated { device_id, .. } => Some(*device_id),
-            VerifyFact::DeviceCapabilitiesUpdated { device_id, .. } => Some(*device_id),
-            VerifyFact::AccountPolicySet { .. } => None,
-            VerifyFact::IdentityVerified { .. } => None,
-            VerifyFact::ThresholdSignatureVerified { .. } => None,
-        }
-    }
-
-    /// Get the timestamp for this fact in milliseconds (backward compatibility)
+    /// Get the timestamp for this fact in milliseconds
     pub fn timestamp_ms(&self) -> u64 {
         match self {
-            VerifyFact::DeviceRegistered { registered_at, .. } => registered_at.ts_ms,
-            VerifyFact::DeviceSuspended { suspended_at, .. } => suspended_at.ts_ms,
-            VerifyFact::DeviceRevoked { revoked_at, .. } => revoked_at.ts_ms,
-            VerifyFact::DeviceReactivated { reactivated_at, .. } => reactivated_at.ts_ms,
-            VerifyFact::DeviceCapabilitiesUpdated { updated_at, .. } => updated_at.ts_ms,
+            VerifyFact::AuthorityRegistered { registered_at, .. } => registered_at.ts_ms,
+            VerifyFact::AuthoritySuspended { suspended_at, .. } => suspended_at.ts_ms,
+            VerifyFact::AuthorityRevoked { revoked_at, .. } => revoked_at.ts_ms,
+            VerifyFact::AuthorityReactivated { reactivated_at, .. } => reactivated_at.ts_ms,
+            VerifyFact::AuthorityCapabilitiesUpdated { updated_at, .. } => updated_at.ts_ms,
             VerifyFact::AccountPolicySet { set_at, .. } => set_at.ts_ms,
             VerifyFact::IdentityVerified { verified_at, .. } => verified_at.ts_ms,
             VerifyFact::ThresholdSignatureVerified { verified_at, .. } => verified_at.ts_ms,
@@ -213,18 +188,16 @@ impl VerifyFact {
         Some(message.payload)
     }
 
-    /// Create a DeviceRegistered fact with millisecond timestamp (backward compatibility)
-    pub fn device_registered_ms(
+    /// Create an AuthorityRegistered fact with millisecond timestamp
+    pub fn authority_registered_ms(
         authority_id: AuthorityId,
-        device_id: DeviceId,
         public_key: Vec<u8>,
         capabilities: Cap,
         registered_epoch: Epoch,
         registered_at_ms: u64,
     ) -> Self {
-        Self::DeviceRegistered {
+        Self::AuthorityRegistered {
             authority_id,
-            device_id,
             public_key,
             capabilities,
             registered_epoch,
@@ -235,16 +208,14 @@ impl VerifyFact {
         }
     }
 
-    /// Create a DeviceSuspended fact with millisecond timestamp (backward compatibility)
-    pub fn device_suspended_ms(
-        device_id: DeviceId,
+    /// Create an AuthoritySuspended fact with millisecond timestamp
+    pub fn authority_suspended_ms(
         authority_id: AuthorityId,
         reason: String,
         suspended_epoch: Epoch,
         suspended_at_ms: u64,
     ) -> Self {
-        Self::DeviceSuspended {
-            device_id,
+        Self::AuthoritySuspended {
             authority_id,
             reason,
             suspended_epoch,
@@ -255,16 +226,14 @@ impl VerifyFact {
         }
     }
 
-    /// Create a DeviceRevoked fact with millisecond timestamp (backward compatibility)
-    pub fn device_revoked_ms(
-        device_id: DeviceId,
+    /// Create an AuthorityRevoked fact with millisecond timestamp
+    pub fn authority_revoked_ms(
         authority_id: AuthorityId,
         reason: String,
         revoked_epoch: Epoch,
         revoked_at_ms: u64,
     ) -> Self {
-        Self::DeviceRevoked {
-            device_id,
+        Self::AuthorityRevoked {
             authority_id,
             reason,
             revoked_epoch,
@@ -275,15 +244,13 @@ impl VerifyFact {
         }
     }
 
-    /// Create a DeviceReactivated fact with millisecond timestamp (backward compatibility)
-    pub fn device_reactivated_ms(
-        device_id: DeviceId,
+    /// Create an AuthorityReactivated fact with millisecond timestamp
+    pub fn authority_reactivated_ms(
         authority_id: AuthorityId,
         reactivated_epoch: Epoch,
         reactivated_at_ms: u64,
     ) -> Self {
-        Self::DeviceReactivated {
-            device_id,
+        Self::AuthorityReactivated {
             authority_id,
             reactivated_epoch,
             reactivated_at: PhysicalTime {
@@ -293,16 +260,14 @@ impl VerifyFact {
         }
     }
 
-    /// Create a DeviceCapabilitiesUpdated fact with millisecond timestamp (backward compatibility)
-    pub fn device_capabilities_updated_ms(
-        device_id: DeviceId,
+    /// Create an AuthorityCapabilitiesUpdated fact with millisecond timestamp
+    pub fn authority_capabilities_updated_ms(
         authority_id: AuthorityId,
         new_capabilities: Cap,
         updated_epoch: Epoch,
         updated_at_ms: u64,
     ) -> Self {
-        Self::DeviceCapabilitiesUpdated {
-            device_id,
+        Self::AuthorityCapabilitiesUpdated {
             authority_id,
             new_capabilities,
             updated_epoch,
@@ -313,7 +278,7 @@ impl VerifyFact {
         }
     }
 
-    /// Create an AccountPolicySet fact with millisecond timestamp (backward compatibility)
+    /// Create an AccountPolicySet fact with millisecond timestamp
     pub fn account_policy_set_ms(
         account_id: AccountId,
         threshold: u16,
@@ -331,7 +296,7 @@ impl VerifyFact {
         }
     }
 
-    /// Create an IdentityVerified fact with millisecond timestamp (backward compatibility)
+    /// Create an IdentityVerified fact with millisecond timestamp
     pub fn identity_verified_ms(
         authority_id: AuthorityId,
         verification_type: VerificationType,
@@ -351,7 +316,7 @@ impl VerifyFact {
         }
     }
 
-    /// Create a ThresholdSignatureVerified fact with millisecond timestamp (backward compatibility)
+    /// Create a ThresholdSignatureVerified fact with millisecond timestamp
     pub fn threshold_signature_verified_ms(
         account_id: AccountId,
         signer_count: u16,
@@ -376,17 +341,17 @@ impl VerifyFact {
     /// Get the epoch for this fact
     pub fn epoch(&self) -> Option<Epoch> {
         match self {
-            VerifyFact::DeviceRegistered {
+            VerifyFact::AuthorityRegistered {
                 registered_epoch, ..
             } => Some(*registered_epoch),
-            VerifyFact::DeviceSuspended {
+            VerifyFact::AuthoritySuspended {
                 suspended_epoch, ..
             } => Some(*suspended_epoch),
-            VerifyFact::DeviceRevoked { revoked_epoch, .. } => Some(*revoked_epoch),
-            VerifyFact::DeviceReactivated {
+            VerifyFact::AuthorityRevoked { revoked_epoch, .. } => Some(*revoked_epoch),
+            VerifyFact::AuthorityReactivated {
                 reactivated_epoch, ..
             } => Some(*reactivated_epoch),
-            VerifyFact::DeviceCapabilitiesUpdated { updated_epoch, .. } => Some(*updated_epoch),
+            VerifyFact::AuthorityCapabilitiesUpdated { updated_epoch, .. } => Some(*updated_epoch),
             VerifyFact::AccountPolicySet { set_epoch, .. } => Some(*set_epoch),
             VerifyFact::IdentityVerified { .. } => None,
             VerifyFact::ThresholdSignatureVerified { .. } => None,
@@ -396,11 +361,11 @@ impl VerifyFact {
     /// Get the fact type name for journal keying
     pub fn fact_type(&self) -> &'static str {
         match self {
-            VerifyFact::DeviceRegistered { .. } => "device_registered",
-            VerifyFact::DeviceSuspended { .. } => "device_suspended",
-            VerifyFact::DeviceRevoked { .. } => "device_revoked",
-            VerifyFact::DeviceReactivated { .. } => "device_reactivated",
-            VerifyFact::DeviceCapabilitiesUpdated { .. } => "device_capabilities_updated",
+            VerifyFact::AuthorityRegistered { .. } => "authority_registered",
+            VerifyFact::AuthoritySuspended { .. } => "authority_suspended",
+            VerifyFact::AuthorityRevoked { .. } => "authority_revoked",
+            VerifyFact::AuthorityReactivated { .. } => "authority_reactivated",
+            VerifyFact::AuthorityCapabilitiesUpdated { .. } => "authority_capabilities_updated",
             VerifyFact::AccountPolicySet { .. } => "account_policy_set",
             VerifyFact::IdentityVerified { .. } => "identity_verified",
             VerifyFact::ThresholdSignatureVerified { .. } => "threshold_signature_verified",
@@ -411,18 +376,33 @@ impl VerifyFact {
 /// Delta type for verification fact application
 #[derive(Debug, Clone, Default)]
 pub struct VerifyFactDelta {
-    /// Devices registered in this delta
-    pub devices_registered: Vec<DeviceId>,
-    /// Devices suspended in this delta
-    pub devices_suspended: Vec<DeviceId>,
-    /// Devices revoked in this delta
-    pub devices_revoked: Vec<DeviceId>,
-    /// Devices reactivated in this delta
-    pub devices_reactivated: Vec<DeviceId>,
+    /// Authorities registered in this delta
+    pub authorities_registered: Vec<AuthorityId>,
+    /// Authorities suspended in this delta
+    pub authorities_suspended: Vec<AuthorityId>,
+    /// Authorities revoked in this delta
+    pub authorities_revoked: Vec<AuthorityId>,
+    /// Authorities reactivated in this delta
+    pub authorities_reactivated: Vec<AuthorityId>,
     /// Verifications performed in this delta
     pub verifications_performed: u64,
     /// Successful verifications in this delta
     pub verifications_successful: u64,
+}
+
+impl FactDelta for VerifyFactDelta {
+    fn merge(&mut self, other: &Self) {
+        self.authorities_registered
+            .extend(other.authorities_registered.iter().cloned());
+        self.authorities_suspended
+            .extend(other.authorities_suspended.iter().cloned());
+        self.authorities_revoked
+            .extend(other.authorities_revoked.iter().cloned());
+        self.authorities_reactivated
+            .extend(other.authorities_reactivated.iter().cloned());
+        self.verifications_performed += other.verifications_performed;
+        self.verifications_successful += other.verifications_successful;
+    }
 }
 
 /// Reducer for verification facts
@@ -434,23 +414,24 @@ impl VerifyFactReducer {
     pub fn new() -> Self {
         Self
     }
+}
 
-    /// Apply a fact to produce a delta
-    pub fn apply(&self, fact: &VerifyFact) -> VerifyFactDelta {
+impl FactDeltaReducer<VerifyFact, VerifyFactDelta> for VerifyFactReducer {
+    fn apply(&self, fact: &VerifyFact) -> VerifyFactDelta {
         let mut delta = VerifyFactDelta::default();
 
         match fact {
-            VerifyFact::DeviceRegistered { device_id, .. } => {
-                delta.devices_registered.push(*device_id);
+            VerifyFact::AuthorityRegistered { authority_id, .. } => {
+                delta.authorities_registered.push(*authority_id);
             }
-            VerifyFact::DeviceSuspended { device_id, .. } => {
-                delta.devices_suspended.push(*device_id);
+            VerifyFact::AuthoritySuspended { authority_id, .. } => {
+                delta.authorities_suspended.push(*authority_id);
             }
-            VerifyFact::DeviceRevoked { device_id, .. } => {
-                delta.devices_revoked.push(*device_id);
+            VerifyFact::AuthorityRevoked { authority_id, .. } => {
+                delta.authorities_revoked.push(*authority_id);
             }
-            VerifyFact::DeviceReactivated { device_id, .. } => {
-                delta.devices_reactivated.push(*device_id);
+            VerifyFact::AuthorityReactivated { authority_id, .. } => {
+                delta.authorities_reactivated.push(*authority_id);
             }
             VerifyFact::IdentityVerified { success, .. } => {
                 delta.verifications_performed += 1;
@@ -464,8 +445,9 @@ impl VerifyFactReducer {
                     delta.verifications_successful += 1;
                 }
             }
-            VerifyFact::DeviceCapabilitiesUpdated { .. } | VerifyFact::AccountPolicySet { .. } => {
-                // These don't produce cumulative deltas for device lifecycle
+            VerifyFact::AuthorityCapabilitiesUpdated { .. }
+            | VerifyFact::AccountPolicySet { .. } => {
+                // These don't produce cumulative deltas for authority lifecycle
             }
         }
 
@@ -476,15 +458,14 @@ impl VerifyFactReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::types::facts::FactDeltaReducer;
 
     #[test]
-    fn test_verify_fact_device_id() {
+    fn test_verify_fact_authority_id() {
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
-        let device_id = DeviceId::new_from_entropy([2u8; 32]);
 
-        let fact = VerifyFact::device_registered_ms(
+        let fact = VerifyFact::authority_registered_ms(
             authority_id,
-            device_id,
             vec![1, 2, 3, 4],
             Cap::top(),
             Epoch(1),
@@ -492,21 +473,18 @@ mod tests {
         );
 
         assert_eq!(fact.authority_id(), Some(authority_id));
-        assert_eq!(fact.device_id(), Some(device_id));
         assert_eq!(fact.timestamp_ms(), 1000);
         assert_eq!(fact.epoch(), Some(Epoch(1)));
-        assert_eq!(fact.fact_type(), "device_registered");
+        assert_eq!(fact.fact_type(), "authority_registered");
     }
 
     #[test]
     fn test_verify_fact_reducer() {
         let reducer = VerifyFactReducer::new();
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
-        let device_id = DeviceId::new_from_entropy([2u8; 32]);
 
-        let fact = VerifyFact::device_registered_ms(
+        let fact = VerifyFact::authority_registered_ms(
             authority_id,
-            device_id,
             vec![1, 2, 3, 4],
             Cap::top(),
             Epoch(1),
@@ -514,8 +492,8 @@ mod tests {
         );
 
         let delta = reducer.apply(&fact);
-        assert_eq!(delta.devices_registered.len(), 1);
-        assert_eq!(delta.devices_registered[0], device_id);
+        assert_eq!(delta.authorities_registered.len(), 1);
+        assert_eq!(delta.authorities_registered[0], authority_id);
     }
 
     #[test]
@@ -541,12 +519,10 @@ mod tests {
     }
 
     #[test]
-    fn test_timestamp_ms_backward_compat() {
+    fn test_timestamp_ms() {
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
-        let device_id = DeviceId::new_from_entropy([2u8; 32]);
 
-        let fact = VerifyFact::device_suspended_ms(
-            device_id,
+        let fact = VerifyFact::authority_suspended_ms(
             authority_id,
             "test reason".to_string(),
             Epoch(1),

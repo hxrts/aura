@@ -1,11 +1,11 @@
 //! Identity Verification Service
 //!
-//! Provides identity verification logic and validation for tree operations
-//! and device management. Tracks device lifecycle and organizational status.
+//! Provides identity verification logic for attested tree operations
+//! and authority management. Tracks authority lifecycle and organizational status.
 
 use aura_core::{
-    identifiers::DeviceId,
-    tree::{verify_attested_op, AttestedOp, BranchSigningKey, TreeOp, TreeOpKind},
+    AuthorityId,
+    tree::{verify_attested_op, AttestedOp, BranchSigningKey},
     AccountId, AuraError, AuraResult, Cap, Epoch, Hash32, Policy,
 };
 use std::collections::HashMap;
@@ -13,36 +13,36 @@ use std::collections::HashMap;
 /// Type alias for identity operation results
 pub type IdentityResult<T> = AuraResult<T>;
 
-/// Identity verification service
+/// Authority verification service
 #[derive(Debug)]
-pub struct IdentityVerifier {
-    /// Known device identities
-    known_devices: HashMap<DeviceId, DeviceInfo>,
+pub struct AuthorityRegistry {
+    /// Known authority identities
+    known_authorities: HashMap<AuthorityId, AuthorityInfo>,
     /// Account policies for authorization enforcement
     account_policies: HashMap<AccountId, Policy>,
 }
 
-/// Information about a known device
+/// Information about a known authority
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DeviceInfo {
-    /// Device identifier
-    pub device_id: DeviceId,
-    /// Device public key
+pub struct AuthorityInfo {
+    /// Authority identifier
+    pub authority_id: AuthorityId,
+    /// Authority public key
     pub public_key: Vec<u8>,
-    /// Device capabilities
+    /// Authority capabilities
     pub capabilities: Cap,
-    /// Device status
-    pub status: DeviceStatus,
+    /// Authority status
+    pub status: AuthorityStatus,
 }
 
-/// Device status
+/// Authority status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum DeviceStatus {
-    /// Device is active and trusted
+pub enum AuthorityStatus {
+    /// Authority is active and trusted
     Active,
-    /// Device is suspended
+    /// Authority is suspended
     Suspended,
-    /// Device is revoked
+    /// Authority is revoked
     Revoked,
 }
 
@@ -57,101 +57,55 @@ pub struct VerificationResult {
     pub confidence: f64,
 }
 
-impl IdentityVerifier {
-    /// Create a new identity verifier
+impl AuthorityRegistry {
+    /// Create a new authority registry
     pub fn new() -> Self {
         Self {
-            known_devices: HashMap::new(),
+            known_authorities: HashMap::new(),
             account_policies: HashMap::new(),
         }
     }
 
-    /// Register a device
-    pub fn register_device(&mut self, device_info: DeviceInfo) -> IdentityResult<()> {
-        if self.known_devices.contains_key(&device_info.device_id) {
-            return Err(AuraError::invalid("Device already registered"));
+    /// Register an authority
+    pub fn register_authority(&mut self, authority_info: AuthorityInfo) -> IdentityResult<()> {
+        if self
+            .known_authorities
+            .contains_key(&authority_info.authority_id)
+        {
+            return Err(AuraError::invalid("Authority already registered"));
         }
 
-        self.known_devices
-            .insert(device_info.device_id, device_info);
+        self.known_authorities
+            .insert(authority_info.authority_id, authority_info);
         Ok(())
     }
 
-    /// Verify a device identity
-    pub fn verify_device(&self, device_id: DeviceId) -> IdentityResult<VerificationResult> {
-        let device_info = self
-            .known_devices
-            .get(&device_id)
-            .ok_or_else(|| AuraError::not_found("Unknown device"))?;
+    /// Verify an authority identity
+    pub fn verify_authority(
+        &self,
+        authority_id: AuthorityId,
+    ) -> IdentityResult<VerificationResult> {
+        let authority_info = self
+            .known_authorities
+            .get(&authority_id)
+            .ok_or_else(|| AuraError::not_found("Unknown authority"))?;
 
-        let verified = match device_info.status {
-            DeviceStatus::Active => true,
-            DeviceStatus::Suspended => false,
-            DeviceStatus::Revoked => false,
+        let verified = match authority_info.status {
+            AuthorityStatus::Active => true,
+            AuthorityStatus::Suspended => false,
+            AuthorityStatus::Revoked => false,
         };
 
-        let confidence = match device_info.status {
-            DeviceStatus::Active => 1.0,
-            DeviceStatus::Suspended => 0.5,
-            DeviceStatus::Revoked => 0.0,
+        let confidence = match authority_info.status {
+            AuthorityStatus::Active => 1.0,
+            AuthorityStatus::Suspended => 0.5,
+            AuthorityStatus::Revoked => 0.0,
         };
 
         Ok(VerificationResult {
             verified,
-            details: format!("Device status: {:?}", device_info.status),
+            details: format!("Authority status: {:?}", authority_info.status),
             confidence,
-        })
-    }
-
-    /// Verify a tree operation
-    pub fn verify_tree_operation(
-        &self,
-        operation: &TreeOp,
-        requester: DeviceId,
-    ) -> IdentityResult<VerificationResult> {
-        // Verify the requesting device
-        let device_verification = self.verify_device(requester)?;
-        if !device_verification.verified {
-            return Ok(VerificationResult {
-                verified: false,
-                details: format!(
-                    "Requesting device verification failed: {}",
-                    device_verification.details
-                ),
-                confidence: device_verification.confidence,
-            });
-        }
-
-        // Check if device has appropriate capabilities for the operation
-        let device_info = self
-            .known_devices
-            .get(&requester)
-            .ok_or_else(|| AuraError::not_found("Device not found"))?;
-        let has_required_caps =
-            self.check_operation_capabilities(operation, &device_info.capabilities)?;
-
-        if !has_required_caps {
-            return Ok(VerificationResult {
-                verified: false,
-                details: "Insufficient capabilities for operation".to_string(),
-                confidence: 0.0,
-            });
-        }
-
-        // Validate operation structure
-        let structure_valid = self.validate_operation_structure(operation)?;
-        if !structure_valid {
-            return Ok(VerificationResult {
-                verified: false,
-                details: "Invalid operation structure".to_string(),
-                confidence: 0.0,
-            });
-        }
-
-        Ok(VerificationResult {
-            verified: true,
-            details: "Operation verification successful".to_string(),
-            confidence: device_verification.confidence,
         })
     }
 
@@ -163,6 +117,8 @@ impl IdentityVerifier {
         current_epoch: Epoch,
         child_count: usize,
     ) -> IdentityResult<VerificationResult> {
+        // Structural validation and policy evaluation are handled by TreeState in aura-journal.
+        // This method focuses on signature verification and policy-derived thresholds.
         // Convert the witness into the signing material required by the
         // cryptographic verifier. The witness is produced by TreeState in
         // aura-journal and contains the group public key plus the threshold
@@ -221,96 +177,9 @@ impl IdentityVerifier {
         })
     }
 
-    /// Check if a device has required capabilities for an operation
-    fn check_operation_capabilities(
-        &self,
-        operation: &TreeOp,
-        capabilities: &Cap,
-    ) -> IdentityResult<bool> {
-        // Map operation to a capability scope string for tracing/debugging only.
-        let required_capability = match &operation.op {
-            TreeOpKind::AddLeaf { .. } => "tree:add_leaf",
-            TreeOpKind::RemoveLeaf { .. } => "tree:remove_leaf",
-            TreeOpKind::ChangePolicy { .. } => "tree:change_policy",
-            TreeOpKind::RotateEpoch { .. } => "tree:rotate_epoch",
-        };
-
-        // Minimal guard: require a non-empty Biscuit token and a known root key so
-        // attenuation checks are meaningful. Full Biscuit evaluation happens in
-        // the guard chain (AuthorizationEffects) at higher layers; here we only
-        // ensure the caller supplied scoped capability material.
-        let authorized = !capabilities.is_empty() && capabilities.has_root_key();
-
-        tracing::debug!(
-            operation_type = required_capability,
-            authorized = authorized,
-            has_root_key = capabilities.has_root_key(),
-            "Capability presence check for tree operation"
-        );
-
-        Ok(authorized)
-    }
-
-    /// Validate the structure of a tree operation
-    fn validate_operation_structure(&self, operation: &TreeOp) -> IdentityResult<bool> {
-        // Validate operation format and fields
-        match &operation.op {
-            TreeOpKind::AddLeaf { leaf: _, under } => {
-                // Basic validation for leaf addition
-                if under.0 > 10000 {
-                    return Ok(false);
-                }
-            }
-            TreeOpKind::RemoveLeaf { leaf: _, reason } => {
-                // Validate reason code is reasonable
-                if *reason > 10 {
-                    return Ok(false);
-                }
-            }
-            TreeOpKind::RotateEpoch { affected } => {
-                // Validate affected nodes list is reasonable
-                if affected.len() > 1000 {
-                    return Ok(false);
-                }
-            }
-            TreeOpKind::ChangePolicy {
-                node,
-                new_policy: _,
-            } => {
-                // Validate policy structure
-                if node.0 > 10000 {
-                    return Ok(false);
-                }
-            }
-        }
-
-        tracing::debug!("Tree operation structure validation passed");
-        Ok(true)
-    }
-
-    /// Verify that the signers are authorized for the operation using policy-derived threshold.
-    fn _verify_signer_authorization(
-        &self,
-        operation: &TreeOp,
-        witness: &aura_core::tree::verification::SigningWitness,
-        child_count: usize,
-    ) -> IdentityResult<bool> {
-        // Policy-derived thresholds are enforced during aggregate signature
-        // verification (see verify_attested_operation). This helper remains to
-        // highlight intent and future per-signer attestation checks.
-        let required = match &operation.op {
-            TreeOpKind::AddLeaf { .. }
-            | TreeOpKind::RemoveLeaf { .. }
-            | TreeOpKind::ChangePolicy { .. }
-            | TreeOpKind::RotateEpoch { .. } => witness.threshold,
-        };
-
-        Ok(required > 0 && witness.threshold <= child_count as u16)
-    }
-
-    /// Get known devices
-    pub fn known_devices(&self) -> &HashMap<DeviceId, DeviceInfo> {
-        &self.known_devices
+    /// Get known authorities
+    pub fn known_authorities(&self) -> &HashMap<AuthorityId, AuthorityInfo> {
+        &self.known_authorities
     }
 
     /// Get account policies
@@ -328,24 +197,28 @@ impl IdentityVerifier {
         self.account_policies.get(account_id)
     }
 
-    /// Update device status
-    pub fn update_device_status(
+    /// Update authority status
+    pub fn update_authority_status(
         &mut self,
-        device_id: DeviceId,
-        status: DeviceStatus,
+        authority_id: AuthorityId,
+        status: AuthorityStatus,
     ) -> IdentityResult<()> {
-        let device_info = self
-            .known_devices
-            .get_mut(&device_id)
-            .ok_or_else(|| AuraError::not_found("Unknown device"))?;
+        let authority_info = self
+            .known_authorities
+            .get_mut(&authority_id)
+            .ok_or_else(|| AuraError::not_found("Unknown authority"))?;
 
-        device_info.status = status;
-        tracing::info!("Updated device {} status to {:?}", device_id, status);
+        authority_info.status = status;
+        tracing::info!(
+            "Updated authority {} status to {:?}",
+            authority_id,
+            status
+        );
         Ok(())
     }
 }
 
-impl Default for IdentityVerifier {
+impl Default for AuthorityRegistry {
     fn default() -> Self {
         Self::new()
     }
@@ -354,63 +227,63 @@ impl Default for IdentityVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{identifiers::DeviceId, Cap};
+    use aura_core::Cap;
 
     #[test]
-    fn test_device_registration() {
-        let mut verifier = IdentityVerifier::new();
-        let device_id = DeviceId::new_from_entropy([1u8; 32]);
+    fn test_authority_registration() {
+        let mut verifier = AuthorityRegistry::new();
+        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
 
-        let device_info = DeviceInfo {
-            device_id,
+        let authority_info = AuthorityInfo {
+            authority_id,
             public_key: vec![1, 2, 3, 4],
             capabilities: Cap::top(),
-            status: DeviceStatus::Active,
+            status: AuthorityStatus::Active,
         };
 
-        assert!(verifier.register_device(device_info).is_ok());
-        assert!(verifier.known_devices().contains_key(&device_id));
+        assert!(verifier.register_authority(authority_info).is_ok());
+        assert!(verifier.known_authorities().contains_key(&authority_id));
     }
 
     #[test]
-    fn test_device_verification() {
-        let mut verifier = IdentityVerifier::new();
-        let device_id = DeviceId::new_from_entropy([2u8; 32]);
+    fn test_authority_verification() {
+        let mut verifier = AuthorityRegistry::new();
+        let authority_id = AuthorityId::new_from_entropy([2u8; 32]);
 
-        let device_info = DeviceInfo {
-            device_id,
+        let authority_info = AuthorityInfo {
+            authority_id,
             public_key: vec![1, 2, 3, 4],
             capabilities: Cap::top(),
-            status: DeviceStatus::Active,
+            status: AuthorityStatus::Active,
         };
 
-        verifier.register_device(device_info).unwrap();
+        verifier.register_authority(authority_info).unwrap();
 
-        let result = verifier.verify_device(device_id).unwrap();
+        let result = verifier.verify_authority(authority_id).unwrap();
         assert!(result.verified);
         assert_eq!(result.confidence, 1.0);
     }
 
     #[test]
-    fn test_device_status_update() {
-        let mut verifier = IdentityVerifier::new();
-        let device_id = DeviceId::new_from_entropy([3u8; 32]);
+    fn test_authority_status_update() {
+        let mut verifier = AuthorityRegistry::new();
+        let authority_id = AuthorityId::new_from_entropy([3u8; 32]);
 
-        let device_info = DeviceInfo {
-            device_id,
+        let authority_info = AuthorityInfo {
+            authority_id,
             public_key: vec![1, 2, 3, 4],
             capabilities: Cap::top(),
-            status: DeviceStatus::Active,
+            status: AuthorityStatus::Active,
         };
 
-        verifier.register_device(device_info).unwrap();
+        verifier.register_authority(authority_info).unwrap();
 
-        // Suspend the device
+        // Suspend the authority
         assert!(verifier
-            .update_device_status(device_id, DeviceStatus::Suspended)
+            .update_authority_status(authority_id, AuthorityStatus::Suspended)
             .is_ok());
 
-        let result = verifier.verify_device(device_id).unwrap();
+        let result = verifier.verify_authority(authority_id).unwrap();
         assert!(!result.verified);
         assert_eq!(result.confidence, 0.5);
     }

@@ -103,6 +103,7 @@ Aura now models identity via opaque authorities (`AuthorityId`) and relational c
 - Aura Consensus is the sole strong-agreement mechanism (`docs/104_consensus.md`). Fast path + fallback gossip integrate with the guard chain.
 - Guard chain sequence: `AuthorizationEffects` (Biscuit/capabilities) → `FlowBudgetEffects` (charge-before-send) → `LeakageEffects` (`docs/003_information_flow_contract.md`) → `JournalEffects` (fact commit) → `TransportEffects`.
 - Flow budgets: only the `spent` counters are facts; limits are derived at runtime from Biscuit + policy.
+- **Hybrid journal model**: fact journal (join) + capability frontier (meet) combined as `JournalState` for effects/runtime use.
 - **Transaction Model**: Database operations coordinate via two orthogonal dimensions: (1) Authority Scope (Single vs Cross-authority) and (2) Agreement Level (Monotone/CRDT vs Consensus). Monotone operations use CRDT merge (0 RTT). Non-monotone operations use consensus (1-3 RTT). Cross-authority operations work with both. Consensus is NOT linearizable - use session types for operation sequencing. See `docs/113_database.md` §8 and `work/reactive.md` §7.4.
 
 ## Distributed Systems Contract

@@ -6,7 +6,7 @@
 use crate::core::AgentConfig;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
-use std::sync::RwLock;
+use tokio::sync::RwLock;
 
 /// Context status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +89,7 @@ impl ContextManager {
     }
 
     /// Create a new context for an authority
-    pub fn create_context(
+    pub async fn create_context(
         &self,
         authority: AuthorityId,
         timestamp: u64,
@@ -101,44 +101,34 @@ impl ContextManager {
         let context = Context::new(context_id, authority, timestamp);
 
         // Store the context
-        {
-            let mut contexts = self.contexts.write().map_err(|_| ContextError::LockError)?;
-            if contexts.contains_key(&context_id) {
-                return Err(ContextError::AlreadyExists(context_id));
-            }
-            contexts.insert(context_id, context);
+        let mut contexts = self.contexts.write().await;
+        if contexts.contains_key(&context_id) {
+            return Err(ContextError::AlreadyExists(context_id));
         }
+        contexts.insert(context_id, context);
 
         // Update the authority index
-        {
-            let mut authority_contexts = self
-                .authority_contexts
-                .write()
-                .map_err(|_| ContextError::LockError)?;
-            authority_contexts
-                .entry(authority)
-                .or_default()
-                .push(context_id);
-        }
+        let mut authority_contexts = self.authority_contexts.write().await;
+        authority_contexts
+            .entry(authority)
+            .or_default()
+            .push(context_id);
 
         Ok(context_id)
     }
 
     /// Get a context by ID
-    pub fn get_context(&self, id: ContextId) -> Result<Option<Context>, ContextError> {
-        let contexts = self.contexts.read().map_err(|_| ContextError::LockError)?;
+    pub async fn get_context(&self, id: ContextId) -> Result<Option<Context>, ContextError> {
+        let contexts = self.contexts.read().await;
         Ok(contexts.get(&id).cloned())
     }
 
     /// List all contexts for an authority
-    pub fn list_contexts_for_authority(
+    pub async fn list_contexts_for_authority(
         &self,
         authority: AuthorityId,
     ) -> Result<Vec<ContextId>, ContextError> {
-        let authority_contexts = self
-            .authority_contexts
-            .read()
-            .map_err(|_| ContextError::LockError)?;
+        let authority_contexts = self.authority_contexts.read().await;
         Ok(authority_contexts
             .get(&authority)
             .cloned()
@@ -146,8 +136,8 @@ impl ContextManager {
     }
 
     /// Suspend a context
-    pub fn suspend_context(&self, id: ContextId) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().map_err(|_| ContextError::LockError)?;
+    pub async fn suspend_context(&self, id: ContextId) -> Result<(), ContextError> {
+        let mut contexts = self.contexts.write().await;
         let context = contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
 
         if context.status != ContextStatus::Active {
@@ -162,8 +152,8 @@ impl ContextManager {
     }
 
     /// Resume a suspended context
-    pub fn resume_context(&self, id: ContextId) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().map_err(|_| ContextError::LockError)?;
+    pub async fn resume_context(&self, id: ContextId) -> Result<(), ContextError> {
+        let mut contexts = self.contexts.write().await;
         let context = contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
 
         if context.status != ContextStatus::Suspended {
@@ -178,8 +168,8 @@ impl ContextManager {
     }
 
     /// Terminate a context
-    pub fn terminate_context(&self, id: ContextId) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().map_err(|_| ContextError::LockError)?;
+    pub async fn terminate_context(&self, id: ContextId) -> Result<(), ContextError> {
+        let mut contexts = self.contexts.write().await;
         let context = contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
 
         if context.status == ContextStatus::Terminated {
@@ -191,8 +181,12 @@ impl ContextManager {
     }
 
     /// Add a peer to a context
-    pub fn add_peer(&self, context_id: ContextId, peer: AuthorityId) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().map_err(|_| ContextError::LockError)?;
+    pub async fn add_peer(
+        &self,
+        context_id: ContextId,
+        peer: AuthorityId,
+    ) -> Result<(), ContextError> {
+        let mut contexts = self.contexts.write().await;
         let context = contexts
             .get_mut(&context_id)
             .ok_or(ContextError::NotFound(context_id))?;
@@ -204,8 +198,8 @@ impl ContextManager {
     }
 
     /// Update last activity timestamp
-    pub fn touch(&self, context_id: ContextId, timestamp: u64) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().map_err(|_| ContextError::LockError)?;
+    pub async fn touch(&self, context_id: ContextId, timestamp: u64) -> Result<(), ContextError> {
+        let mut contexts = self.contexts.write().await;
         if let Some(context) = contexts.get_mut(&context_id) {
             context.last_activity = timestamp;
         }
@@ -213,8 +207,8 @@ impl ContextManager {
     }
 
     /// List all active contexts
-    pub fn list_active_contexts(&self) -> Result<Vec<ContextId>, ContextError> {
-        let contexts = self.contexts.read().map_err(|_| ContextError::LockError)?;
+    pub async fn list_active_contexts(&self) -> Result<Vec<ContextId>, ContextError> {
+        let contexts = self.contexts.read().await;
         Ok(contexts
             .iter()
             .filter(|(_, ctx)| ctx.status == ContextStatus::Active)

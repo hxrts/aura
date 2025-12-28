@@ -5,19 +5,18 @@
 //! depending on concrete runtime implementations.
 
 use aura_guards::LeakageBudget;
-use aura_core::identifiers::ContextId;
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::{ContextId, DeviceId};
+use aura_core::util::serialization::{from_slice, to_vec};
 use biscuit_auth::Biscuit;
 use rumpsteak_aura_choreography::effects::ChoreoHandler;
+use rumpsteak_aura_choreography::{ChoreographyError, Label};
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
 
-#[cfg(test)]
-use {
-    rumpsteak_aura_choreography::{ChoreographyError, Label},
-    serde::{de::DeserializeOwned, Serialize},
-};
+use crate::effects::choreographic::{ChoreographicEffects, ChoreographicRole};
 
-#[cfg(test)]
 type ChoreoResult<T> = Result<T, ChoreographyError>;
 
 /// Guard profile for message sending operations
@@ -89,6 +88,164 @@ impl ChoreographicEndpoint for DefaultEndpoint {
     fn device_id(&self) -> DeviceId {
         self.device_id
     }
+}
+
+/// Runtime-backed adapter that bridges ChoreographicEffects to rumpsteak handlers.
+#[derive(Clone)]
+pub struct EffectsChoreographicAdapter<E> {
+    effects: Arc<E>,
+    device_id: DeviceId,
+    role_mappings: HashMap<String, DeviceId>,
+    role_order: Vec<DeviceId>,
+    flow_contexts: HashMap<DeviceId, ContextId>,
+    guard_profiles: HashMap<&'static str, SendGuardProfile>,
+}
+
+impl<E> EffectsChoreographicAdapter<E>
+where
+    E: ChoreographicEffects + Send + Sync + 'static,
+{
+    pub fn new(effects: Arc<E>, device_id: DeviceId) -> Self {
+        Self {
+            effects,
+            device_id,
+            role_mappings: HashMap::new(),
+            role_order: Vec::new(),
+            flow_contexts: HashMap::new(),
+            guard_profiles: HashMap::new(),
+        }
+    }
+
+    /// Start a choreography session using the current role mappings.
+    pub async fn start_session(
+        &mut self,
+        session_id: uuid::Uuid,
+        roles: Vec<DeviceId>,
+    ) -> Result<(), crate::effects::choreographic::ChoreographyError> {
+        self.role_order = roles.clone();
+        let choreo_roles = roles
+            .into_iter()
+            .enumerate()
+            .map(|(idx, device_id)| ChoreographicRole::new(device_id.0, idx))
+            .collect();
+        self.effects.start_session(session_id, choreo_roles).await
+    }
+
+    fn role_index(&self, device_id: &DeviceId) -> Option<usize> {
+        self.role_order.iter().position(|id| id == device_id)
+    }
+
+    fn to_choreo_role(&self, device_id: &DeviceId) -> Result<ChoreographicRole, ChoreographyError> {
+        let idx = self.role_index(device_id).ok_or_else(|| {
+            ChoreographyError::Transport(format!("Unknown role for device {}", device_id))
+        })?;
+        Ok(ChoreographicRole::new(device_id.0, idx))
+    }
+}
+
+impl<E> ChoreographicHandler for EffectsChoreographicAdapter<E>
+where
+    E: ChoreographicEffects + Send + Sync + 'static,
+{
+    fn device_id(&self) -> DeviceId {
+        self.device_id
+    }
+
+    fn add_role_mapping(&mut self, role_name: String, device_id: DeviceId) {
+        self.role_mappings.insert(role_name, device_id);
+        if !self.role_order.contains(&device_id) {
+            self.role_order.push(device_id);
+        }
+    }
+
+    fn set_flow_context(&mut self, device_id: DeviceId, context_id: ContextId) {
+        self.flow_contexts.insert(device_id, context_id);
+    }
+
+    fn configure_guard(&mut self, message_type: &'static str, profile: SendGuardProfile) {
+        self.guard_profiles.insert(message_type, profile);
+    }
+}
+
+#[async_trait::async_trait]
+impl<E> ChoreoHandler for EffectsChoreographicAdapter<E>
+where
+    E: ChoreographicEffects + Send + Sync + 'static,
+{
+    type Role = DeviceId;
+    type Endpoint = DefaultEndpoint;
+
+    async fn send<M: Serialize + Send + Sync>(
+        &mut self,
+        _endpoint: &mut Self::Endpoint,
+        to: Self::Role,
+        msg: &M,
+    ) -> ChoreoResult<()> {
+        let role = self.to_choreo_role(&to)?;
+        let payload = to_vec(msg).map_err(|e| {
+            ChoreographyError::Transport(format!("Choreography encode failed: {}", e))
+        })?;
+        self.effects
+            .send_to_role_bytes(role, payload)
+            .await
+            .map_err(|e| ChoreographyError::Transport(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn recv<M: DeserializeOwned + Send>(
+        &mut self,
+        _endpoint: &mut Self::Endpoint,
+        from: Self::Role,
+    ) -> ChoreoResult<M> {
+        let role = self.to_choreo_role(&from)?;
+        let payload = self
+            .effects
+            .receive_from_role_bytes(role)
+            .await
+            .map_err(|e| ChoreographyError::Transport(e.to_string()))?;
+        let message = from_slice(&payload).map_err(|e| {
+            ChoreographyError::Transport(format!("Choreography decode failed: {}", e))
+        })?;
+        Ok(message)
+    }
+
+    async fn choose(
+        &mut self,
+        endpoint: &mut Self::Endpoint,
+        who: Self::Role,
+        label: Label,
+    ) -> ChoreoResult<()> {
+        self.send(endpoint, who, &label).await
+    }
+
+    async fn offer(
+        &mut self,
+        endpoint: &mut Self::Endpoint,
+        from: Self::Role,
+    ) -> ChoreoResult<Label> {
+        self.recv(endpoint, from).await
+    }
+
+    async fn with_timeout<F, T>(
+        &mut self,
+        _endpoint: &mut Self::Endpoint,
+        _at: Self::Role,
+        dur: std::time::Duration,
+        body: F,
+    ) -> ChoreoResult<T>
+    where
+        F: std::future::Future<Output = ChoreoResult<T>> + Send,
+    {
+        self.effects.set_timeout(dur.as_millis() as u64).await;
+        body.await
+    }
+}
+
+impl<E> ChoreographicAdapter for EffectsChoreographicAdapter<E>
+where
+    E: ChoreographicEffects + Send + Sync + 'static,
+{
+    type Endpoint = DefaultEndpoint;
 }
 
 /// Test-only mock implementation

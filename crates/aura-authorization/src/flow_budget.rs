@@ -1,63 +1,38 @@
-//! Flow budget handler backed by Web-of-Trust policy defaults.
+//! Journal-backed flow budget handler.
 //!
-//! This places flow budget accounting in the Layer 2 domain crate so that
-//! capability and privacy policy live alongside WoT authorization semantics.
-// Flow budget handler uses std sync primitives for simple in-memory state.
-#![allow(clippy::disallowed_types)]
+//! This handler delegates budget persistence to the JournalEffects surface,
+//! keeping Layer 2 free of in-memory mutable state.
 
-use crate::{AuraResult, BiscuitAuthorizationBridge, ContextOp, ResourceScope};
 use async_trait::async_trait;
-use aura_core::effects::FlowBudgetEffects;
-use aura_core::epochs::Epoch;
-use aura_core::flow::{FlowBudget, FlowBudgetKey, Receipt};
+use aura_core::effects::{FlowBudgetEffects, JournalEffects};
+use aura_core::flow::Receipt;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::{AuraError, Hash32};
+use aura_core::{AuraError, AuraResult, Hash32};
 use biscuit_auth::Biscuit;
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-/// Simple in-memory flow budget handler with authority-scoped accounting.
-#[derive(Clone)]
-pub struct FlowBudgetHandler {
+use crate::{BiscuitAuthorizationBridge, ContextOp, ResourceScope};
+use aura_core::AuthorizationOp;
+
+/// Flow budget handler that persists budgets via JournalEffects.
+#[derive(Debug, Clone)]
+pub struct JournalBackedFlowBudgetHandler<J: JournalEffects> {
     authority: AuthorityId,
-    default_limit: u64,
-    budgets: Arc<Mutex<BTreeMap<FlowBudgetKey, FlowBudget>>>,
-    scope_overrides: Arc<Mutex<BTreeMap<ContextId, ResourceScope>>>,
+    journal: J,
     policy_token: Option<Biscuit>,
     policy_bridge: Option<BiscuitAuthorizationBridge>,
-    time_provider: Arc<dyn Fn() -> u64 + Send + Sync>,
+    time_provider: Option<Arc<dyn Fn() -> u64 + Send + Sync>>,
 }
 
-impl std::fmt::Debug for FlowBudgetHandler {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FlowBudgetHandler")
-            .field("authority", &self.authority)
-            .field("default_limit", &self.default_limit)
-            .field("budgets", &self.budgets)
-            .field("scope_overrides", &self.scope_overrides)
-            .field("policy_token", &self.policy_token)
-            .field("policy_bridge", &self.policy_bridge)
-            .field("time_provider", &"<function>")
-            .finish()
-    }
-}
-
-impl FlowBudgetHandler {
-    /// Create a handler with a default per-peer budget limit.
-    pub fn new(authority: AuthorityId) -> Self {
-        Self::with_limit(authority, 1024)
-    }
-
-    /// Create a handler with a custom default limit.
-    pub fn with_limit(authority: AuthorityId, default_limit: u64) -> Self {
+impl<J: JournalEffects> JournalBackedFlowBudgetHandler<J> {
+    /// Create a new handler scoped to the given authority.
+    pub fn new(authority: AuthorityId, journal: J) -> Self {
         Self {
             authority,
-            default_limit,
-            budgets: Arc::new(Mutex::new(BTreeMap::new())),
-            scope_overrides: Arc::new(Mutex::new(BTreeMap::new())),
+            journal,
             policy_token: None,
             policy_bridge: None,
-            time_provider: Arc::new(|| 0),
+            time_provider: None,
         }
     }
 
@@ -70,36 +45,20 @@ impl FlowBudgetHandler {
 
     /// Provide a time source for Biscuit authorization checks.
     pub fn with_time_provider(mut self, provider: Arc<dyn Fn() -> u64 + Send + Sync>) -> Self {
-        self.time_provider = provider;
+        self.time_provider = Some(provider);
         self
-    }
-
-    /// Override the resource scope used for a specific context.
-    pub fn set_scope_for_context(&self, context: ContextId, scope: ResourceScope) {
-        if let Ok(mut scopes) = self.scope_overrides.lock() {
-            scopes.insert(context, scope);
-        }
-    }
-
-    fn scope_for_context(&self, context: &ContextId) -> ResourceScope {
-        if let Ok(scopes) = self.scope_overrides.lock() {
-            if let Some(scope) = scopes.get(context) {
-                return scope.clone();
-            }
-        }
-
-        ResourceScope::Context {
-            context_id: *context,
-            operation: ContextOp::UpdateParams,
-        }
     }
 
     fn authorize_scope(&self, scope: &ResourceScope) -> AuraResult<()> {
         match (&self.policy_token, &self.policy_bridge) {
             (Some(token), Some(bridge)) => {
-                let now = (self.time_provider)();
+                let now = self
+                    .time_provider
+                    .as_ref()
+                    .ok_or_else(|| AuraError::invalid("flow budget time provider not configured"))?
+                    ();
                 let result = bridge
-                    .authorize_with_time(token, "flow_charge", scope, Some(now))
+                    .authorize_with_time(token, AuthorizationOp::FlowCharge, scope, Some(now))
                     .map_err(|e| {
                         AuraError::permission_denied(format!("flow budget policy failed: {e}"))
                     })?;
@@ -111,58 +70,48 @@ impl FlowBudgetHandler {
                     ))
                 }
             }
-            _ => Ok(()), // no policy attached, allow
+            _ => Ok(()),
         }
-    }
-
-    fn record_charge(
-        &self,
-        context: &ContextId,
-        peer: &AuthorityId,
-        cost: u32,
-    ) -> AuraResult<FlowBudget> {
-        let key = FlowBudgetKey::new(*context, *peer);
-        let mut budgets = self
-            .budgets
-            .lock()
-            .map_err(|_| AuraError::internal("flow budget state poisoned"))?;
-
-        let budget = budgets
-            .entry(key)
-            .or_insert_with(|| FlowBudget::new(self.default_limit, Epoch::initial()));
-
-        if !budget.record_charge(cost as u64) {
-            return Err(AuraError::budget_exceeded(format!(
-                "insufficient flow budget: remaining={}, cost={}",
-                budget.remaining(),
-                cost
-            )));
-        }
-
-        Ok(*budget)
     }
 }
 
 #[async_trait]
-impl FlowBudgetEffects for FlowBudgetHandler {
+impl<J: JournalEffects + Send + Sync> FlowBudgetEffects for JournalBackedFlowBudgetHandler<J> {
     async fn charge_flow(
         &self,
         context: &ContextId,
         peer: &AuthorityId,
         cost: u32,
     ) -> AuraResult<Receipt> {
-        let scope = self.scope_for_context(context);
+        let scope = ResourceScope::Context {
+            context_id: *context,
+            operation: ContextOp::UpdateParams,
+        };
         self.authorize_scope(&scope)?;
 
-        let budget = self.record_charge(context, peer, cost)?;
+        let current = self.journal.get_flow_budget(context, peer).await?;
+        if current.limit > 0 && !current.can_charge(cost as u64) {
+            return Err(AuraError::budget_exceeded(format!(
+                "insufficient flow budget: remaining={}, cost={}",
+                current.remaining(),
+                cost
+            )));
+        }
+
+        let mut updated = current;
+        updated.spent = updated.spent.saturating_add(cost as u64);
+        let updated = self
+            .journal
+            .update_flow_budget(context, peer, &updated)
+            .await?;
 
         Ok(Receipt::new(
             *context,
             self.authority,
             *peer,
-            budget.epoch,
+            updated.epoch,
             cost,
-            budget.spent,
+            updated.spent,
             Hash32::default(),
             Vec::new(),
         ))

@@ -9,6 +9,7 @@
 //! - Messages flow through guard chain (aura-protocol/guards) for authorization/flow control
 
 pub mod hole_punch;
+pub(crate) mod rendezvous_constants;
 pub mod stun;
 pub mod websocket;
 

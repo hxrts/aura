@@ -6,13 +6,13 @@
 //! using business logic combined with infrastructure effect composition.
 
 use crate::biscuit_authorization::BiscuitAuthorizationBridge;
-use crate::resource_scope::ResourceScope;
 use async_trait::async_trait;
 use aura_core::effects::{AuthorizationEffects, AuthorizationError, CryptoEffects};
-use aura_core::{AuthorityId, Cap, MeetSemiLattice};
+use aura_core::scope::{AuthorizationOp, ResourceScope};
+use aura_core::{AuthorityId, AuraError, Cap, MeetSemiLattice};
 use biscuit_auth::PublicKey;
 use std::marker::PhantomData;
-use uuid::Uuid;
+use std::sync::Arc;
 
 /// Domain-specific authorization handler that uses Web-of-Trust Biscuit tokens
 ///
@@ -27,6 +27,7 @@ use uuid::Uuid;
 pub struct WotAuthorizationHandler<C: CryptoEffects> {
     crypto: C,
     biscuit_bridge: BiscuitAuthorizationBridge,
+    time_provider: Option<Arc<dyn Fn() -> u64 + Send + Sync>>,
     _phantom: PhantomData<()>,
 }
 
@@ -36,6 +37,7 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
         Self {
             crypto,
             biscuit_bridge: BiscuitAuthorizationBridge::new(root_public_key, authority_id),
+            time_provider: None,
             _phantom: PhantomData,
         }
     }
@@ -45,8 +47,18 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
         Self {
             crypto,
             biscuit_bridge: BiscuitAuthorizationBridge::new_mock(),
+            time_provider: None,
             _phantom: PhantomData,
         }
+    }
+
+    /// Provide a time source for Biscuit authorization checks.
+    pub fn with_time_provider(
+        mut self,
+        provider: Arc<dyn Fn() -> u64 + Send + Sync>,
+    ) -> Self {
+        self.time_provider = Some(provider);
+        self
     }
 
     /// Validate capability structure and temporal bounds
@@ -69,20 +81,26 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
     fn apply_wot_authorization(
         &self,
         cap: &Cap,
-        operation: &str,
-        resource: &str,
+        operation: AuthorizationOp,
+        scope: &ResourceScope,
     ) -> Result<bool, AuthorizationError> {
         let token = cap
             .to_biscuit(&self.biscuit_bridge.root_public_key())
             .map_err(|e| AuthorizationError::InvalidToken {
                 reason: e.to_string(),
             })?;
-
-        let scope = self.resource_scope_from_str(resource);
-
+        let now = self
+            .time_provider
+            .as_ref()
+            .ok_or_else(|| {
+                AuthorizationError::SystemError(AuraError::invalid(
+                    "authorization time provider not configured",
+                ))
+            })?
+            ();
         let result = self
             .biscuit_bridge
-            .authorize(&token, operation, &scope)
+            .authorize_with_time(&token, operation, scope, Some(now))
             .map_err(|e| AuthorizationError::InvalidToken {
                 reason: e.to_string(),
             })?;
@@ -94,45 +112,24 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
     ///
     /// This implements the Web-of-Trust specific operation-to-permission mapping.
     #[allow(dead_code)] // Reserved for future WoT-specific permission mapping
-    fn map_operation_to_permission(&self, operation: &str, scope: &ResourceScope) -> String {
+    fn map_operation_to_permission(
+        &self,
+        operation: AuthorizationOp,
+        _scope: &ResourceScope,
+    ) -> AuthorizationOp {
         // Normalize operations to the canonical WoT permission vocabulary.
-        match (operation, scope) {
-            ("read", _) | ("list", _) => "read".into(),
-            ("write", _) | ("update", _) | ("append", _) => "write".into(),
-            ("delete", _) => "delete".into(),
-            ("execute", _) => "execute".into(),
-            ("admin", _) => "admin".into(),
-            // WoT-specific operations
-            ("attest", _) => "attest".into(),
-            ("delegate", _) => "delegate".into(),
-            ("revoke", _) => "revoke".into(),
-            // Default: pass through untouched for forward compatibility
-            _ => operation.to_string(),
-        }
-    }
-
-    fn resource_scope_from_str(&self, resource: &str) -> ResourceScope {
-        // Parse formats like "authority:<uuid>/path" or plain paths as storage scopes.
-        if let Some(rest) = resource.strip_prefix("authority:") {
-            let mut parts = rest.splitn(2, '/');
-            if let Some(id_str) = parts.next() {
-                if let Ok(uuid) = Uuid::parse_str(id_str) {
-                    let path = parts.next().unwrap_or_default().to_string();
-                    return ResourceScope::Storage {
-                        authority_id: AuthorityId::from_uuid(uuid),
-                        path,
-                    };
-                }
+        match operation {
+            AuthorizationOp::Read | AuthorizationOp::List => AuthorizationOp::Read,
+            AuthorizationOp::Write | AuthorizationOp::Update | AuthorizationOp::Append => {
+                AuthorizationOp::Write
             }
-        }
-
-        ResourceScope::Storage {
-            // Deterministic, non-nil fallback derived from resource path
-            authority_id: AuthorityId::from_uuid(Uuid::new_v5(
-                &Uuid::NAMESPACE_URL,
-                resource.as_bytes(),
-            )),
-            path: resource.to_string(),
+            AuthorizationOp::Delete => AuthorizationOp::Delete,
+            AuthorizationOp::Execute => AuthorizationOp::Execute,
+            AuthorizationOp::Admin => AuthorizationOp::Admin,
+            AuthorizationOp::Attest => AuthorizationOp::Attest,
+            AuthorizationOp::Delegate => AuthorizationOp::Delegate,
+            AuthorizationOp::Revoke => AuthorizationOp::Revoke,
+            AuthorizationOp::FlowCharge => AuthorizationOp::FlowCharge,
         }
     }
 }
@@ -142,8 +139,8 @@ impl<C: CryptoEffects> AuthorizationEffects for WotAuthorizationHandler<C> {
     async fn verify_capability(
         &self,
         capabilities: &Cap,
-        operation: &str,
-        resource: &str,
+        operation: AuthorizationOp,
+        scope: &ResourceScope,
     ) -> Result<bool, AuthorizationError> {
         // 1. Domain validation using aura-authorization business logic
         self.validate_capability_semantics(capabilities)?;
@@ -157,9 +154,8 @@ impl<C: CryptoEffects> AuthorizationEffects for WotAuthorizationHandler<C> {
         }
 
         // 2. Apply Web-of-Trust authorization using domain logic
-        let scope = self.resource_scope_from_str(resource);
-        let permission = self.map_operation_to_permission(operation, &scope);
-        let authorized = self.apply_wot_authorization(capabilities, &permission, resource)?;
+        let permission = self.map_operation_to_permission(operation, scope);
+        let authorized = self.apply_wot_authorization(capabilities, permission, scope)?;
 
         if !authorized {
             return Ok(false);

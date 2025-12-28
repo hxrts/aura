@@ -58,7 +58,7 @@ pub mod facts;
 pub mod resource_scope; // Authority-based resource scopes
 pub mod storage_authorization; // Storage authorization logic (moved from aura-store)
 
-pub use errors::{AuraError, AuraResult, WotError, WotResult};
+pub use errors::{WotError, WotResult};
 
 // Application effect handler re-export
 pub use effects::WotAuthorizationHandler;
@@ -71,10 +71,8 @@ pub use aura_core::semilattice::{MeetSemiLattice, Top};
 
 // Re-export Biscuit types
 pub use biscuit_auth::{Biscuit, KeyPair, PublicKey};
-#[allow(deprecated)]
-pub use biscuit_token::AccountAuthority; // Deprecated alias for TokenAuthority
 pub use biscuit_token::{BiscuitError, BiscuitTokenManager, SerializableBiscuit, TokenAuthority};
-pub use flow_budget::FlowBudgetHandler;
+pub use flow_budget::JournalBackedFlowBudgetHandler;
 
 // Re-export fact types for journal integration
 pub use facts::{WotFact, WotFactDelta, WotFactReducer, WOT_FACT_TYPE_ID};

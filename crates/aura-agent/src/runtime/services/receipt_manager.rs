@@ -6,7 +6,7 @@
 use crate::core::AgentConfig;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
-use std::sync::RwLock;
+use tokio::sync::RwLock;
 
 /// Unique identifier for a receipt
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -75,20 +75,20 @@ impl ReceiptManager {
     }
 
     /// Store a new receipt
-    pub fn store_receipt(&self, receipt: Receipt) -> Result<ReceiptId, ReceiptError> {
+    pub async fn store_receipt(&self, receipt: Receipt) -> Result<ReceiptId, ReceiptError> {
         let id = receipt.id;
         let context_id = receipt.context_id;
         let peer_id = receipt.peer_id;
 
         // Store the receipt
         {
-            let mut receipts = self.receipts.write().map_err(|_| ReceiptError::LockError)?;
+            let mut receipts = self.receipts.write().await;
             receipts.insert(id, receipt);
         }
 
         // Update the chain index
         {
-            let mut chains = self.chains.write().map_err(|_| ReceiptError::LockError)?;
+            let mut chains = self.chains.write().await;
             chains.entry((context_id, peer_id)).or_default().push(id);
         }
 
@@ -96,19 +96,19 @@ impl ReceiptManager {
     }
 
     /// Get a receipt by ID
-    pub fn get_receipt(&self, id: ReceiptId) -> Result<Option<Receipt>, ReceiptError> {
-        let receipts = self.receipts.read().map_err(|_| ReceiptError::LockError)?;
+    pub async fn get_receipt(&self, id: ReceiptId) -> Result<Option<Receipt>, ReceiptError> {
+        let receipts = self.receipts.read().await;
         Ok(receipts.get(&id).cloned())
     }
 
     /// Get the receipt chain for a context-peer pair
-    pub fn get_receipt_chain(
+    pub async fn get_receipt_chain(
         &self,
         context: ContextId,
         peer: AuthorityId,
     ) -> Result<Vec<Receipt>, ReceiptError> {
-        let chains = self.chains.read().map_err(|_| ReceiptError::LockError)?;
-        let receipts = self.receipts.read().map_err(|_| ReceiptError::LockError)?;
+        let chains = self.chains.read().await;
+        let receipts = self.receipts.read().await;
 
         let receipt_ids = chains.get(&(context, peer)).cloned().unwrap_or_default();
 
@@ -126,9 +126,12 @@ impl ReceiptManager {
     }
 
     /// Prune receipts older than the given timestamp
-    pub fn prune_expired_receipts(&self, before_timestamp: u64) -> Result<usize, ReceiptError> {
-        let mut receipts = self.receipts.write().map_err(|_| ReceiptError::LockError)?;
-        let mut chains = self.chains.write().map_err(|_| ReceiptError::LockError)?;
+    pub async fn prune_expired_receipts(
+        &self,
+        before_timestamp: u64,
+    ) -> Result<usize, ReceiptError> {
+        let mut receipts = self.receipts.write().await;
+        let mut chains = self.chains.write().await;
 
         // Find expired receipt IDs
         let expired_ids: Vec<ReceiptId> = receipts
@@ -169,7 +172,7 @@ impl ReceiptManager {
     }
 
     /// Create a new receipt for a charge
-    pub fn create_receipt(
+    pub async fn create_receipt(
         &self,
         context_id: ContextId,
         peer_id: AuthorityId,
@@ -178,7 +181,7 @@ impl ReceiptManager {
     ) -> Result<Receipt, ReceiptError> {
         // Get the previous receipt in the chain
         let previous = {
-            let chains = self.chains.read().map_err(|_| ReceiptError::LockError)?;
+            let chains = self.chains.read().await;
             chains
                 .get(&(context_id, peer_id))
                 .and_then(|chain| chain.last().copied())

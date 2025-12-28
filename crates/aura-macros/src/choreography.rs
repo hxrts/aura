@@ -752,7 +752,7 @@ fn choreography_impl_namespace_aware(input: TokenStream) -> Result<TokenStream, 
                     channel::Bidirectional, session, try_session,
                     Branch, End, Message, Receive, Role, Roles, Select, Send
                 };
-                use futures::channel::mpsc::{UnboundedSender, UnboundedReceiver};
+                use futures::channel::mpsc::{self, Receiver, Sender};
 
                 // Label type for message routing
                 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -761,8 +761,14 @@ fn choreography_impl_namespace_aware(input: TokenStream) -> Result<TokenStream, 
                     Pong(Pong),
                 }
 
+                const CHANNEL_BUFFER: usize = 64;
+
+                fn channel() -> (Sender<Label>, Receiver<Label>) {
+                    mpsc::channel(CHANNEL_BUFFER)
+                }
+
                 // Channel type definition
-                type Channel = Bidirectional<UnboundedSender<Label>, UnboundedReceiver<Label>>;
+                type Channel = Bidirectional<Sender<Label>, Receiver<Label>>;
             };
 
             // Generate module name using namespace
@@ -890,7 +896,7 @@ fn choreography_impl_standard(input: TokenStream) -> Result<TokenStream, syn::Er
                     channel::Bidirectional, session, try_session,
                     Branch, End, Message, Receive, Role, Roles, Select, Send
                 };
-                use futures::channel::mpsc::{UnboundedSender, UnboundedReceiver};
+                use futures::channel::mpsc::{self, Receiver, Sender};
 
                 // Label type for message routing
                 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -899,8 +905,14 @@ fn choreography_impl_standard(input: TokenStream) -> Result<TokenStream, syn::Er
                     Pong(Pong),
                 }
 
+                const CHANNEL_BUFFER: usize = 64;
+
+                fn channel() -> (Sender<Label>, Receiver<Label>) {
+                    mpsc::channel(CHANNEL_BUFFER)
+                }
+
                 // Channel type definition following external demo pattern
-                type Channel = Bidirectional<UnboundedSender<Label>, UnboundedReceiver<Label>>;
+                type Channel = Bidirectional<Sender<Label>, Receiver<Label>>;
             };
 
             Ok(quote! {

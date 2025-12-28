@@ -11,6 +11,7 @@
 
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
+use aura_core::types::facts::{FactDelta, FactDeltaReducer};
 use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use aura_core::{ChunkId, ContentId, ContextId};
 use serde::{Deserialize, Serialize};
@@ -223,6 +224,19 @@ pub struct StorageFactDelta {
     pub bytes_removed: u64,
 }
 
+impl FactDelta for StorageFactDelta {
+    fn merge(&mut self, other: &Self) {
+        self.content_additions += other.content_additions;
+        self.content_removals += other.content_removals;
+        self.chunks_stored += other.chunks_stored;
+        self.chunks_replicated += other.chunks_replicated;
+        self.chunks_collected += other.chunks_collected;
+        self.index_updates += other.index_updates;
+        self.bytes_added += other.bytes_added;
+        self.bytes_removed += other.bytes_removed;
+    }
+}
+
 impl StorageFactDelta {
     /// Create a new empty delta
     pub fn new() -> Self {
@@ -260,18 +274,6 @@ impl StorageFactDelta {
             }
         }
     }
-
-    /// Merge another delta into this one
-    pub fn merge(&mut self, other: &StorageFactDelta) {
-        self.content_additions += other.content_additions;
-        self.content_removals += other.content_removals;
-        self.chunks_stored += other.chunks_stored;
-        self.chunks_replicated += other.chunks_replicated;
-        self.chunks_collected += other.chunks_collected;
-        self.index_updates += other.index_updates;
-        self.bytes_added += other.bytes_added;
-        self.bytes_removed += other.bytes_removed;
-    }
 }
 
 /// Reducer for deriving storage state from facts
@@ -285,22 +287,6 @@ impl StorageFactReducer {
     pub fn new() -> Self {
         Self
     }
-
-    /// Process a single fact and return the delta
-    pub fn reduce(&self, fact: &StorageFact) -> StorageFactDelta {
-        let mut delta = StorageFactDelta::new();
-        delta.apply(fact);
-        delta
-    }
-
-    /// Process multiple facts and return the combined delta
-    pub fn reduce_batch(&self, facts: &[StorageFact]) -> StorageFactDelta {
-        let mut delta = StorageFactDelta::new();
-        for fact in facts {
-            delta.apply(fact);
-        }
-        delta
-    }
 }
 
 impl Default for StorageFactReducer {
@@ -309,9 +295,18 @@ impl Default for StorageFactReducer {
     }
 }
 
+impl FactDeltaReducer<StorageFact, StorageFactDelta> for StorageFactReducer {
+    fn apply(&self, fact: &StorageFact) -> StorageFactDelta {
+        let mut delta = StorageFactDelta::new();
+        delta.apply(fact);
+        delta
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::types::facts::FactDeltaReducer;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])

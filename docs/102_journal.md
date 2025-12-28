@@ -2,6 +2,15 @@
 
 This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes integration with the effect system and defines the invariants that ensure correctness. See [Maintenance](111_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
 
+## Hybrid Journal Model (Facts + Capabilities)
+
+Aura’s journal state is a composite of:
+- **Fact Journal**: the canonical, namespaced CRDT of immutable facts.
+- **Capability Frontier**: the current capability lattice for the namespace.
+- **JournalState**: a composite view used by effects/runtime to carry both together.
+
+The fact journal is stored and merged as a semilattice. Capabilities are refined via meet. The runtime always treats these as orthogonal dimensions of state.
+
 ## 1. Journal Namespaces
 
 Aura maintains a separate journal namespace for each authority and each [relational context](103_relational_contexts.md). A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` (see [Authority and Identity](100_authority_and_identity.md)) or a `ContextId`. No namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](105_identifiers_and_boundaries.md).
@@ -49,6 +58,18 @@ pub enum FactContent {
 The `order` field provides an opaque, privacy-preserving total order for deterministic fact ordering in the BTreeSet. The `timestamp` field provides semantic time information for application logic. Facts implement `Ord` via the `OrderTime` field.
 
 This model supports account operations, relational context operations, snapshots, and rendezvous receipts. Each fact is self contained. Facts are validated before insertion into a namespace.
+
+## 2.1 Domain Fact Contract (Checklist + Lint)
+
+Domain facts are the extensibility mechanism for Layer 2 crates. Every domain fact must follow this contract to ensure cross-replica determinism and schema stability:
+
+- **Type ID**: define a `*_FACT_TYPE_ID` constant (unique, registered in `crates/aura-agent/src/fact_types.rs`).
+- **Schema version**: specify a schema version (via `#[domain_fact(schema_version = N)]` or `*_FACT_SCHEMA_VERSION`).
+- **Canonical encoding**: use `#[derive(DomainFact)]` or explicit `encode_domain_fact` / `VersionedMessage` helpers.
+- **Context derivation**: declare `context` / `context_fn` for `DomainFact` or implement a stable `context_id()` derivation.
+- **Reducer registration**: provide a `FactReducer` and register it in the central registry (`crates/aura-agent/src/fact_registry.rs`).
+
+Lint: run `scripts/check-domain-fact-contract.sh` to validate these requirements.
 
 ## 3. Semilattice Structure
 

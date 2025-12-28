@@ -80,6 +80,7 @@ pub mod cli;
 pub mod error;
 pub mod handlers;
 pub mod ids;
+pub mod local_store;
 #[cfg(feature = "terminal")]
 pub mod tui;
 

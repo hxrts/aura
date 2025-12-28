@@ -1,13 +1,29 @@
-//! Web of Trust error handling using unified error system
+//! Web of Trust error handling using unified error macros.
 //!
-//! **DESIGN**: Uses unified AuraError from aura-core for consistency across crates.
-//! This eliminates redundant error definitions and provides seamless integration
-//! with the broader Aura error ecosystem.
+//! **DESIGN**: Uses aura-macros error generator for consistent error shape and categories.
 
-pub use aura_core::{AuraError, AuraResult};
+use aura_macros::aura_error_types;
 
-/// WoT result type alias using unified error system
-pub type WotResult<T> = AuraResult<T>;
+aura_error_types! {
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub enum WotError {
+        #[category = "authorization"]
+        InvalidToken { details: String } =>
+            "Invalid authorization token: {details}",
 
-/// Type alias for backward compatibility during migration from custom WotError to unified AuraError
-pub type WotError = AuraError;
+        #[category = "authorization"]
+        InvalidCapabilities { details: String } =>
+            "Invalid capabilities: {details}",
+
+        #[category = "authorization"]
+        PermissionDenied { details: String } =>
+            "Permission denied: {details}",
+
+        #[category = "system"]
+        SystemError { details: String } =>
+            "System error: {details}",
+    }
+}
+
+/// WoT result type alias using macro-generated error
+pub type WotResult<T> = Result<T, WotError>;

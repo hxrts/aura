@@ -91,32 +91,7 @@ pub mod session;
 /// Note: Extensions now handled by aura-macros; this is test compatibility
 pub mod extensions;
 
-/// Runtime factory and protocol requirements (used in integration tests)
-/// Note: Runtime composition now in aura-agent; this is test compatibility
-pub mod runtime;
-
-// ===== Deprecated Modules (Scheduled for Removal in 1.0) =====
-
-/// Context isolation for choreographies
-/// **DEPRECATED**: Use aura-core::identifiers::ContextId and context derivation instead
-/// **Removal Timeline**: Version 1.0 (Q2 2026)
-#[deprecated(
-    since = "0.1.0",
-    note = "Use aura-core::identifiers::ContextId and aura-core::context_derivation instead"
-)]
-pub mod context;
-
-// guards module REMOVED - use aura-protocol::guards::{CapGuard, SendGuard} instead
-// See docs/107_mpst_and_choreography.md for migration guidance and choreography-first guard architecture
-
-/// Leakage budget tracking for choreographies
-/// **DEPRECATED**: Use aura-protocol::guards::LeakageTracker and aura-core::effects::LeakageEffects instead
-/// **Removal Timeline**: Version 1.0 (Q2 2026)
-#[deprecated(
-    since = "0.1.0",
-    note = "Use aura-protocol::guards::LeakageTracker and aura-core::effects::LeakageEffects instead"
-)]
-pub mod leakage;
+// Deprecated runtime/context/leakage modules removed to keep MPST surface clean.
 
 /// Initialize the Aura extension system (external-demo pattern)
 ///

@@ -11,8 +11,11 @@ use aura_core::effects::reactive::{
 };
 use aura_core::query::{FactPredicate, Query};
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 use super::graph::SignalGraph;
 
@@ -35,6 +38,8 @@ pub struct ReactiveHandler {
     registered_ids: Arc<RwLock<HashSet<SignalId>>>,
     /// Maps signal IDs to their query dependencies (for query-bound signals)
     query_deps: Arc<RwLock<HashMap<SignalId, Vec<FactPredicate>>>>,
+    /// Background task registry for subscription forwarding
+    tasks: Arc<ReactiveTaskRegistry>,
 }
 
 impl ReactiveHandler {
@@ -44,6 +49,7 @@ impl ReactiveHandler {
             graph: Arc::new(SignalGraph::new()),
             registered_ids: Arc::new(RwLock::new(HashSet::new())),
             query_deps: Arc::new(RwLock::new(HashMap::new())),
+            tasks: Arc::new(ReactiveTaskRegistry::new()),
         }
     }
 
@@ -55,6 +61,7 @@ impl ReactiveHandler {
             graph,
             registered_ids: Arc::new(RwLock::new(HashSet::new())),
             query_deps: Arc::new(RwLock::new(HashMap::new())),
+            tasks: Arc::new(ReactiveTaskRegistry::new()),
         }
     }
 
@@ -67,6 +74,7 @@ impl ReactiveHandler {
             graph,
             registered_ids,
             query_deps: Arc::new(RwLock::new(HashMap::new())),
+            tasks: Arc::new(ReactiveTaskRegistry::new()),
         }
     }
 
@@ -113,6 +121,60 @@ impl Clone for ReactiveHandler {
             graph: self.graph.clone(),
             registered_ids: self.registered_ids.clone(),
             query_deps: self.query_deps.clone(),
+            tasks: self.tasks.clone(),
+        }
+    }
+}
+
+impl Drop for ReactiveHandler {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.tasks) == 1 {
+            self.tasks.shutdown();
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task registry
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+struct ReactiveTaskRegistry {
+    shutdown_tx: watch::Sender<bool>,
+    handles: std::sync::Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl ReactiveTaskRegistry {
+    fn new() -> Self {
+        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
+        Self {
+            shutdown_tx,
+            handles: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn spawn_cancellable<F>(&self, fut: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let handle = tokio::spawn(async move {
+            tokio::select! {
+                _ = shutdown_rx.changed() => {}
+                _ = fut => {}
+            }
+        });
+        if let Ok(mut handles) = self.handles.lock() {
+            handles.push(handle);
+        }
+    }
+
+    fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(true);
+        if let Ok(mut handles) = self.handles.lock() {
+            for handle in handles.drain(..) {
+                handle.abort();
+            }
         }
     }
 }
@@ -152,7 +214,7 @@ impl ReactiveEffects for ReactiveHandler {
         let graph = self.graph.clone();
         let signal_id = signal.id().clone();
 
-        tokio::spawn(async move {
+        self.tasks.spawn_cancellable(async move {
             if let Ok(mut receiver) = graph.subscribe(&signal_id).await {
                 loop {
                     match receiver.recv().await {

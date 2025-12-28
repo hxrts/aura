@@ -98,6 +98,30 @@ pub mod effect_bridge {
 }
 ```
 
+### Macro Output Contracts & Stability
+
+The `choreography!` macro emits a **stable, minimal surface** intended for runtime integration.
+Consumers should rely only on the contracts below; all other generated items are internal and
+may change without notice.
+
+**Stable contracts:**
+- `effect_bridge::EffectBridgeContext` (context, authority, peer, timestamp)
+- `effect_bridge::annotation_to_commands(...)`
+- `effect_bridge::annotations_to_commands(...)`
+- `effect_bridge::create_context(...)`
+- `effect_bridge::execute_commands(...)`
+
+**Stability rules:**
+- The above names and signatures are **stable within a minor release series**.
+- Additional helper functions may be added, but existing signatures will not change without a
+  schema/version bump in the macro output.
+- Generated role enums and protocol-specific modules are **not** part of the stable API surface.
+
+### Runtime Wiring Audit
+
+See `docs/119_choreography_runtime_audit.md` for the status of each `choreography!` usage
+(wired vs spec-only) and the migration tickets required to make them executable.
+
 ### Integration with Effect Interpreters
 
 Generated `EffectCommand` sequences execute through:

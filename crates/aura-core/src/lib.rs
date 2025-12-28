@@ -274,7 +274,7 @@ pub use types::flow::{FlowBudget, Receipt};
 #[doc = "unstable: Relationship types are under active development"]
 pub use types::relationships::*;
 #[doc = "stable: Resource scope types for authorization with semver guarantees"]
-pub use types::scope::{AuthorityOp, ContextOp, ResourceScope};
+pub use types::scope::{AuthorityOp, AuthorizationOp, ContextOp, ResourceScope};
 
 // Threshold signing types
 #[doc = "unstable: Unified threshold signing types are under active development"]

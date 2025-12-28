@@ -82,12 +82,6 @@ impl TokenAuthority {
     }
 }
 
-// Legacy type alias for backward compatibility during migration
-#[deprecated(
-    since = "0.2.0",
-    note = "Use TokenAuthority instead. AccountAuthority has been renamed to align with authority-centric model."
-)]
-pub type AccountAuthority = TokenAuthority;
 
 /// Biscuit token manager for an authority.
 ///
@@ -248,4 +242,7 @@ pub enum BiscuitError {
 
     #[error("Authorization failed: {0}")]
     AuthorizationFailed(String),
+
+    #[error("Invalid capability: {0}")]
+    InvalidCapability(String),
 }

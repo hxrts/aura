@@ -6,13 +6,18 @@
 // Example code defines types for demonstration that aren't directly called
 #![allow(dead_code)]
 
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::channel::mpsc::{Receiver, Sender};
 use rumpsteak_aura::*;
 use rumpsteak_aura_choreography::Label;
 use serde::{Deserialize, Serialize};
 
 // Required type definitions for the generated choreography
-type Channel = channel::Bidirectional<UnboundedSender<Label>, UnboundedReceiver<Label>>;
+type Channel = channel::Bidirectional<Sender<Label>, Receiver<Label>>;
+const CHANNEL_BUFFER: usize = 64;
+#[allow(dead_code)]
+fn channel() -> (Sender<Label>, Receiver<Label>) {
+    futures::channel::mpsc::channel(CHANNEL_BUFFER)
+}
 
 // Message types for the authentication protocol
 #[derive(Debug, Clone, Serialize, Deserialize)]
