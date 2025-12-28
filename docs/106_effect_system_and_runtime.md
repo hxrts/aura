@@ -6,17 +6,35 @@ This document describes the effect system and runtime architecture in Aura. It d
 
 Aura defines effect traits as abstract interfaces for system capabilities. Core traits expose essential functionality. Extended traits expose optional operations and coordinated or system-wide behaviors. Each trait is independent and does not assume global state.
 
-Core traits include `CryptoCoreEffects`, `NetworkCoreEffects`, `StorageCoreEffects`, time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`, `TimeAttestationEffects`), `RandomCoreEffects`, and `JournalEffects`. Extended traits include `CryptoExtendedEffects`, `NetworkExtendedEffects`, `StorageExtendedEffects`, `RandomExtendedEffects`, plus system-level traits such as `SystemEffects`, `LedgerEffects`, `ChoreographicEffects`, and `AgentEffects`. `TraceEffects` provides structured instrumentation as an infrastructure effect.
+Core traits include `CryptoCoreEffects`, `NetworkCoreEffects`, `StorageCoreEffects`, time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`), `RandomCoreEffects`, and `JournalEffects`. Extended traits include `CryptoExtendedEffects`, `NetworkExtendedEffects`, `StorageExtendedEffects`, `RandomExtendedEffects`, plus system-level traits such as `SystemEffects`, `EffectApiEffects`, `ChoreographicEffects`, and `AgentEffects`. `TraceEffects` provides structured instrumentation as an infrastructure effect.
 
 ```rust
 #[async_trait]
-pub trait CryptoEffects {
-    async fn hash(&self, data: &[u8]) -> [u8; 32];
-    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32];
+pub trait CryptoCoreEffects: Send + Sync {
+    async fn ed25519_sign(
+        &self,
+        private_key: &[u8],
+        message: &[u8],
+    ) -> Result<[u8; 64], CryptoError>;
+
+    async fn ed25519_verify(
+        &self,
+        public_key: &[u8],
+        message: &[u8],
+        signature: &[u8],
+    ) -> Result<bool, CryptoError>;
+
+    async fn hkdf_derive(
+        &self,
+        salt: &[u8],
+        ikm: &[u8],
+        info: &[u8],
+        length: usize,
+    ) -> Result<Vec<u8>, CryptoError>;
 }
 ```
 
-This example shows a core effect trait. Implementations provide cryptographic operations. Traits contain async methods for compatibility with async runtimes. Extension traits add optional capabilities without forcing all handlers to implement them.
+This example shows a core effect trait. Implementations provide cryptographic operations. Traits contain async methods for compatibility with async runtimes. Extension traits add optional capabilities without forcing all handlers to implement them. Note that `hash()` is intentionally a pure function in `aura-core::hash` rather than an effect, because it is deterministic and side-effect-free.
 
 ### 1.1 Unified Time Traits
 
@@ -25,11 +43,10 @@ The legacy monolithic `TimeEffects` trait is replaced by domain-specific traits:
 - `PhysicalTimeEffects` – returns `PhysicalTime { ts_ms, uncertainty }` and `sleep_ms` for wall-clock operations.
 - `LogicalClockEffects` – advances and reads causal vector clocks and Lamport scalars.
 - `OrderClockEffects` – produces opaque, privacy-preserving total order tokens without temporal meaning.
-- `TimeAttestationEffects` – wraps physical claims in provenance proofs when consensus/peer attestation is required.
 
 Callers select the domain appropriate to their semantics. Guards and transport use physical time. CRDT operations use logical clocks. Privacy-preserving ordering uses order tokens. Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`.
 
-Direct `SystemTime::now()` or chrono usage is forbidden outside effect implementations. The testkit and simulator provide deterministic handlers for all four traits.
+Direct `SystemTime::now()` or chrono usage is forbidden outside effect implementations. The testkit and simulator provide deterministic handlers for all three traits.
 
 ### 1.2 When to Create Effect Traits
 
@@ -69,17 +86,11 @@ This follows proper layer separation. The `aura-core` crate provides infrastruct
 
 ### 1.4 DatabaseEffects Organization
 
-Database operations integrate consensus transparently through coordinated effect traits.
+Database operations use existing effect traits and orchestration crates rather than a dedicated DatabaseEffects layer.
 
-`JournalEffects` in `aura-core` provides `insert_fact()` for monotone operations (0 RTT) and `insert_relational_fact()` for cross-authority facts.
+`JournalEffects` in `aura-core` provides fact insertion for monotone operations (0 RTT) and relational facts for cross-authority contexts. Non-monotone operations use `aura-consensus` protocols (1–3 RTT), driven by session types and the guard chain. Reactive queries are handled via `QueryEffects` and `ReactiveEffects`.
 
-`DatabaseWriteEffects` in `aura-core` provides `transact()` which coordinates the CRDT vs Consensus path. It returns a `TransactionReceipt` indicating which coordination was used.
-
-`DatabaseSubscriptionEffects` in `aura-core` provides `subscribe_query()` for reactive queries with isolation levels. It returns `Dynamic<T>` that updates on fact changes.
-
-The `transact()` method routes operations by two orthogonal dimensions. The first is authority scope: single vs cross-authority. The second is agreement level: monotone (CRDT, 0 RTT) vs non-monotone (Consensus, 1-3 RTT).
-
-This enables four coordination quadrants. Monotone with single authority uses direct fact insertion. Monotone with cross-authority uses CRDT merge via anti-entropy. Consensus with single authority uses single-authority consensus. Consensus with cross-authority uses federated consensus.
+The coordination pattern still follows the two orthogonal dimensions described in the database docs: authority scope (single vs cross-authority) and agreement level (monotone/CRDT vs consensus). The implementation lives in the journal, consensus, and sync layers rather than a unified `transact()` entry point.
 
 See [Database](113_database.md) and the reactive design document for details.
 
@@ -123,23 +134,7 @@ let storage = EncryptedStorage::new(
 );
 ```
 
-```rust
-pub struct RealCryptoHandler;
-
-#[async_trait]
-impl CryptoEffects for RealCryptoHandler {
-    async fn hash(&self, data: &[u8]) -> [u8; 32] {
-        aura_core::hash::hash(data)
-    }
-
-    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
-        // HMAC implementation
-        unimplemented!()
-    }
-}
-```
-
-This code block defines a stateless handler. It uses synchronous hashing from `aura_core::hash` for deterministic behavior.
+`RealCryptoHandler` lives in `aura-effects` and implements `CryptoCoreEffects`. Hashing stays a pure function (`aura_core::hash`) rather than an effect.
 
 ## 3. Context Model
 
@@ -430,14 +425,13 @@ When facts are committed, they flow through the reactive scheduler:
 
 ```rust
 // In RuntimeSystem (aura-agent)
-// Facts are published to the scheduler via attach_fact_sink()
+// Facts are published to the scheduler by wiring its sender into the effect system.
 effect_system.attach_fact_sink(pipeline.fact_sender());
 
-// The scheduler processes facts and updates signal views
-// Each view emits full state snapshots to its signal
+// The scheduler processes fact batches and updates signal views.
 ```
 
-The `ReactiveScheduler` processes facts in batches (5ms window) and drives all signal updates. This eliminates the dual-write bug class where different signal sources could desync.
+The `ReactiveScheduler` receives facts from multiple `FactSource` channels (journal commits, network receipts, timers). It batches them (5ms window) and drives all signal updates. This eliminates the dual-write bug class where different signal sources could desync.
 
 This enables TUI screens to subscribe and automatically receive updates:
 
@@ -452,20 +446,15 @@ while let Ok(state) = stream.recv().await {
 
 ## 6. Lifecycle Management
 
-Aura defines a lifecycle manager for initialization and shutdown. Each handler may perform startup tasks. Each handler may also perform cleanup on shutdown.
-
-Handlers register with a lifecycle manager. The lifecycle manager executes initialization in order. The lifecycle manager executes shutdown in reverse order.
+Aura defines a lightweight lifecycle manager for initialization and shutdown. The current implementation primarily coordinates session cleanup timeouts and shutdown behavior.
 
 ```rust
 pub struct LifecycleManager {
-    state: Arc<AtomicU8>,
-    components: Arc<RwLock<Vec<Arc<dyn LifecycleAware>>>>,
+    session_cleanup_timeout: u64,
 }
 ```
 
-This type defines the lifecycle manager. It tracks registered components. It provides explicit methods for transitioning between lifecycle phases.
-
-Lifecycle phases include initialization, ready, shutting down, and shutdown. Health checks monitor handler availability.
+If richer component-aware lifecycle orchestration becomes necessary (init ordering, explicit phase transitions), it should be introduced via a dedicated design pass rather than assuming a more complex manager by default.
 
 ## 7. Layers and Crates
 
@@ -542,11 +531,20 @@ Guards do not execute side effects directly. Instead, they return `EffectCommand
 
 ```rust
 pub enum EffectCommand {
-    ChargeBudget { authority: AuthorityId, amount: u32 },
+    ChargeBudget {
+        context: ContextId,
+        authority: AuthorityId,
+        peer: AuthorityId,
+        amount: u32
+    },
     AppendJournal { entry: JournalEntry },
     RecordLeakage { bits: u32 },
     StoreMetadata { key: String, value: String },
-    SendEnvelope { to: Address, envelope: Vec<u8> },
+    SendEnvelope {
+        to: NetworkAddress,
+        peer_id: Option<uuid::Uuid>,
+        envelope: Vec<u8>
+    },
     GenerateNonce { bytes: usize },
 }
 ```
@@ -555,12 +553,13 @@ This vocabulary keeps the guard interface simple: commands describe *what* happe
 
 ### 10.3 EffectInterpreter
 
-The `EffectInterpreter` trait encapsulates the async execution of commands. Production runtimes hook it to `aura-effects` handlers, while the simulator or tests hook deterministic interpreters that record events instead of hitting the network.
+The `EffectInterpreter` trait encapsulates the async execution of commands. Production runtimes hook it to `aura-effects` handlers, while the simulator or tests hook deterministic interpreters that record events instead of hitting the network. Implementations expose an `interpreter_type()` tag for diagnostics.
 
 ```rust
 #[async_trait]
-pub trait EffectInterpreter {
-    async fn exec(&self, cmd: EffectCommand) -> Result<EffectResult>;
+pub trait EffectInterpreter: Send + Sync {
+    async fn execute(&self, cmd: EffectCommand) -> Result<EffectResult>;
+    fn interpreter_type(&self) -> &'static str;
 }
 ```
 
@@ -587,7 +586,7 @@ This code shows the service accessor pattern. Each service provides domain-speci
 
 ### 11.1 Service Registry
 
-The `ServiceRegistry` initializes all services during agent startup. It holds references to each service and manages their lifecycle.
+The `ServiceRegistry` initializes all services during agent startup. It holds references to each service and wires shared runtime dependencies.
 
 ```rust
 pub struct ServiceRegistry {
@@ -598,7 +597,7 @@ pub struct ServiceRegistry {
 }
 ```
 
-Services register with the `LifecycleManager` for initialization and shutdown coordination. The lifecycle manager executes initialization in dependency order and shutdown in reverse order.
+If lifecycle coordination is required, the runtime system owns it; services themselves remain simple wrappers around pure handler logic plus effect interpretation.
 
 ### 11.2 Guard Chain Integration
 
@@ -728,11 +727,11 @@ Protocol-level facts (Guardian, Recovery, Consensus, AMP) use the built-in reduc
 
 ## 14. AppCore: Unified Frontend Interface
 
-The `AppCore` in `aura-app` provides a unified interface for all frontend platforms. It wraps the `AuraAgent` and provides a clean API that hides the complexity of the effect system from UI code.
+The `AppCore` in `aura-app` provides a unified, portable interface for all frontend platforms. It is headless and runtime-agnostic; it can run without a runtime bridge (offline/demo), or be wired to a concrete runtime via the `RuntimeBridge` trait. `aura-agent` is one such runtime implementation today; future runtimes (e.g. WASM-compatible) can also implement the bridge.
 
 ### 14.1 Architecture
 
-AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and the agent runtime:
+AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and a runtime bridge:
 
 ```
 ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
@@ -743,7 +742,7 @@ AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and the agent runti
                                │
                                ↓
                    ┌───────────────────────┐
-                   │       AppCore         │  ← aura-app (ONLY frontend interface)
+                   │       AppCore         │  ← aura-app (portable frontend interface)
                    │                       │
                    │  • ViewState signals  │
                    │  • Intent dispatch    │
@@ -752,14 +751,14 @@ AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and the agent runti
                                │
                                ↓ (internal, hidden from frontends)
                    ┌───────────────────────┐
-                   │      AuraAgent        │  ← aura-agent (runtime)
+                   │  RuntimeBridge impl  │  ← aura-agent or other runtime
                    │                       │
                    │  • Effect system      │
                    │  • Service handlers   │
                    └───────────────────────┘
 ```
 
-Frontends import only from `aura-app`, never from `aura-agent` directly. This maintains proper layer boundaries.
+Frontends import UI-facing types from `aura-app` and may additionally depend on a runtime crate (such as `aura-agent`) to obtain a concrete `RuntimeBridge`. This keeps `aura-app` portable while allowing multiple runtime backends.
 
 ### 14.2 Construction Modes
 
@@ -769,13 +768,13 @@ AppCore supports two construction modes for different use cases:
 // Demo/Offline mode - local state only, no network
 let app = AppCore::new(config)?;
 
-// Production mode - with agent for full functionality
+// Production mode - with a runtime bridge for full functionality
 let agent = AgentBuilder::new()
     .with_config(agent_config)
     .with_authority(authority_id)
     .build_production()
     .await?;
-let app = AppCore::with_agent(config, agent)?;
+let app = AppCore::with_runtime(config, agent.as_runtime_bridge())?;
 ```
 
 Demo mode enables offline development and testing. Production mode provides full effect system capabilities.
@@ -798,38 +797,22 @@ Services emit facts, they never directly mutate ViewState. UI subscribes to sign
 
 ### 14.4 Accessing the Agent
 
-When AppCore has an agent, it provides access to the full effect system:
+When AppCore has a runtime, it provides access to runtime-backed operations:
 
 ```rust
-// Check if agent is available
-if app.has_agent() {
-    // Get agent reference
-    let agent = app.agent().unwrap();
-
-    // Access effect system directly (no lock needed)
-    let effects = agent.runtime().effects();
-
-    // Use effects
-    let time = effects.physical_time().await?;
+// Check if runtime is available
+if app.has_runtime() {
+    let runtime = app.runtime().unwrap();
+    let status = runtime.get_sync_status().await;
+    println!("Sync status: {:?}", status);
 }
 ```
 
-The effect system uses `Arc<AuraEffectSystem>` for shared access. The effect system is immutable after construction; individual handlers manage their own internal state as needed.
+The runtime bridge exposes async capabilities (sync, signing, protocols) while keeping `aura-app` decoupled from any specific runtime implementation.
 
 ### 14.5 Re-exports
 
-`aura-app` re-exports types from `aura-agent` so frontends don't need direct dependencies:
-
-```rust
-// Agent types
-pub use aura_agent::{AgentBuilder, AgentConfig, AuraAgent, AuraEffectSystem, EffectContext};
-
-// Service types
-pub use aura_agent::{SyncManagerConfig, SyncServiceManager, ...};
-
-// Reactive types
-pub use aura_agent::reactive::{Dynamic, FactSource, ReactiveScheduler, ...};
-```
+`aura-app` does **not** re-export runtime types. Frontends import app-facing types from `aura-app`, and runtime types (e.g., `AuraAgent`, `AgentBuilder`) directly from `aura-agent` or another runtime crate.
 
 ## 15. Service Pattern for Domain Crates
 
@@ -838,46 +821,46 @@ The agent layer (Layer 6) wraps these with services that manage RwLock access.
 
 ### 15.1 Handler Layer (Domain Crates)
 
-Handlers in `aura-chat`, `aura-invitation`, etc. are stateless and take `&E` per method:
+Handlers in `aura-chat`, `aura-invitation`, etc. are stateless and return `GuardOutcome` values (pure plans describing effect commands) rather than performing I/O directly:
 
 ```rust
-// aura-chat/src/service.rs
-pub struct ChatHandler;
+// aura-chat/src/fact_service.rs
+pub struct ChatFactService;
 
-impl ChatHandler {
+impl ChatFactService {
     pub fn new() -> Self { Self }
 
-    pub async fn create_group<E>(
+    pub fn prepare_create_channel(
         &self,
-        effects: &E,  // <-- Per-call reference
-        name: &str,
-        creator_id: AuthorityId,
-        initial_members: Vec<AuthorityId>,
-    ) -> Result<ChatGroup>
-    where
-        E: StorageEffects + RandomEffects + PhysicalTimeEffects
-    {
-        let uuid = effects.random_uuid().await;
-        // ...
+        snapshot: &GuardSnapshot,
+        channel_id: ChannelId,
+        name: String,
+        topic: Option<String>,
+        is_dm: bool,
+    ) -> GuardOutcome {
+        // Pure evaluation returning effect commands.
+        GuardOutcome::authorized(vec![
+            EffectCommand::AppendJournal { entry: /* ... */ },
+        ])
     }
 }
 ```
 
 ### 15.2 Service Layer (Agent)
 
-Services in `aura-agent` wrap handlers with effect system access:
+Services in `aura-agent` wrap handlers, run guard evaluation, and interpret commands:
 
 ```rust
 // aura-agent/src/handlers/chat_service.rs
 pub struct ChatService {
-    handler: ChatHandler,
+    handler: ChatFactService,
     effects: Arc<AuraEffectSystem>,
 }
 
 impl ChatService {
     pub fn new(effects: Arc<AuraEffectSystem>) -> Self {
         Self {
-            handler: ChatHandler::new(),
+            handler: ChatFactService::new(),
             effects,
         }
     }
@@ -888,10 +871,16 @@ impl ChatService {
         creator_id: AuthorityId,
         initial_members: Vec<AuthorityId>,
     ) -> AgentResult<ChatGroup> {
-        self.handler
-            .create_group(&*self.effects, name, creator_id, initial_members)
-            .await
-            .map_err(Into::into)
+        let snapshot = /* gather GuardSnapshot via effects */;
+        let outcome = self.handler.prepare_create_channel(
+            &snapshot,
+            ChannelId::new(),
+            name.to_string(),
+            None,
+            false,
+        );
+        /* interpret GuardOutcome via effect interpreter */
+        Ok(/* created group */)
     }
 }
 ```
@@ -932,7 +921,7 @@ The agent layer provides:
 
 | Scenario | Location |
 |----------|----------|
-| Domain service logic | Domain crate `*Handler` (e.g., `aura-chat::ChatHandler`) |
+| Domain service logic | Domain crate `*FactService` (e.g., `aura-chat::ChatFactService`) |
 | Agent service wrapper | `aura-agent/src/handlers/*_service.rs` |
 | Agent API accessor | `aura-agent/src/core/api.rs` |
 
