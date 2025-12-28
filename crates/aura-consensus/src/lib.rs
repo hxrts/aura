@@ -66,6 +66,10 @@ pub mod relational;
 // Prelude
 pub mod prelude;
 
+// Legacy module layout for doc builds (maps to flattened modules).
+#[cfg(doc)]
+mod consensus;
+
 // Re-export core types
 pub use messages::{
     ConsensusError, ConsensusMessage, ConsensusPhase, ConsensusRequest, ConsensusResponse,
