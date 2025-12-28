@@ -253,10 +253,12 @@ impl SecureStorageEffects for RealSecureStorageHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[tokio::test]
     async fn test_real_secure_storage_store_and_retrieve() {
-        let handler = RealSecureStorageHandler::default();
+        let temp = tempdir().expect("create tempdir");
+        let handler = RealSecureStorageHandler::with_base_path(temp.path().to_path_buf());
         let location = SecureStorageLocation::new("test_namespace", "test_key");
         let capabilities = vec![
             SecureStorageCapability::Read,

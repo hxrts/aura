@@ -15,6 +15,7 @@ use aura_core::{
     time::{OrderTime, TimeStamp},
     Hash32, Result,
 };
+use crate::protocol_facts::ProtocolRelationalFact;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -380,13 +381,16 @@ pub struct LeakageFact {
 /// `aura-journal/src/reduction.rs`. They participate directly in state derivation
 /// and have interdependencies that require specialized handling:
 ///
-/// - `GuardianBinding` - Core guardian relationship protocol
-/// - `RecoveryGrant` - Core recovery protocol
-/// - `Consensus` - Aura Consensus results
-/// - `AmpChannelCheckpoint` - AMP ratchet window anchoring
-/// - `AmpProposedChannelEpochBump` - Optimistic epoch transitions
-/// - `AmpCommittedChannelEpochBump` - Finalized epoch transitions
-/// - `AmpChannelPolicy` - Channel-level policy overrides
+/// - `Protocol(GuardianBinding)` - Core guardian relationship protocol
+/// - `Protocol(RecoveryGrant)` - Core recovery protocol
+/// - `Protocol(Consensus)` - Aura Consensus results
+/// - `Protocol(AmpChannelCheckpoint)` - AMP ratchet window anchoring
+/// - `Protocol(AmpProposedChannelEpochBump)` - Optimistic epoch transitions
+/// - `Protocol(AmpCommittedChannelEpochBump)` - Finalized epoch transitions
+/// - `Protocol(AmpChannelPolicy)` - Channel-level policy overrides
+///
+/// New protocol facts must be added to `protocol_facts.rs` and documented
+/// in `docs/102_journal.md` (criteria + reduction rules).
 ///
 /// ## Domain-Level Facts (via Generic + FactRegistry)
 ///
@@ -407,45 +411,8 @@ pub enum RelationalFact {
     // These facts have specialized handling in reduce_context() and should
     // NOT be migrated to domain crates.
     // ========================================================================
-    /// Guardian binding established between two authorities
-    GuardianBinding {
-        /// Account being bound to a guardian
-        account_id: AuthorityId,
-        /// Guardian authority
-        guardian_id: AuthorityId,
-        /// Hash of the binding agreement
-        binding_hash: Hash32,
-    },
-    /// Recovery grant issued by a guardian
-    RecoveryGrant {
-        /// Account that can be recovered
-        account_id: AuthorityId,
-        /// Guardian granting recovery capability
-        guardian_id: AuthorityId,
-        /// Hash of the grant details
-        grant_hash: Hash32,
-    },
-    /// Consensus result from Aura Consensus
-    Consensus {
-        /// Consensus operation identifier (as Hash32 to avoid circular dependency)
-        consensus_id: Hash32,
-        /// Hash of the operation being consensus'd
-        operation_hash: Hash32,
-        /// Whether consensus threshold was met
-        threshold_met: bool,
-        /// Number of participants in the consensus
-        participant_count: u16,
-    },
-    /// AMP channel checkpoint anchoring ratchet windows
-    AmpChannelCheckpoint(ChannelCheckpoint),
-    /// Proposed channel epoch bump (optimistic)
-    AmpProposedChannelEpochBump(ProposedChannelEpochBump),
-    /// Committed channel epoch bump (final)
-    AmpCommittedChannelEpochBump(CommittedChannelEpochBump),
-    /// Channel policy overrides
-    AmpChannelPolicy(ChannelPolicy),
-    /// Leakage tracking event (privacy budget accounting)
-    LeakageEvent(LeakageFact),
+    /// Protocol-level facts that participate in core reduction semantics.
+    Protocol(ProtocolRelationalFact),
 
     // ========================================================================
     // Domain-Level Facts (extensibility point for application facts)

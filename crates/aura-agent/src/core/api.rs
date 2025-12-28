@@ -259,11 +259,13 @@ impl AuraAgent {
                             .as_bytes(),
                         ));
 
-                        bindings.push(aura_journal::fact::RelationalFact::GuardianBinding {
-                            account_id: authority_id,
-                            guardian_id: *guardian_id,
-                            binding_hash,
-                        });
+                        bindings.push(aura_journal::fact::RelationalFact::Protocol(
+                            aura_journal::ProtocolRelationalFact::GuardianBinding {
+                                account_id: authority_id,
+                                guardian_id: *guardian_id,
+                                binding_hash,
+                            },
+                        ));
                     }
 
                     if !bindings.is_empty() {

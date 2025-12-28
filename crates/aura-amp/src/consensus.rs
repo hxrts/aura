@@ -125,7 +125,11 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects + AmpEvidenceEf
     // Insert AMP committed bump fact
     journal
         .insert_relational_fact(
-            aura_journal::fact::RelationalFact::AmpCommittedChannelEpochBump(committed.clone()),
+            aura_journal::fact::RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(
+                    committed.clone(),
+                ),
+            ),
         )
         .await?;
 

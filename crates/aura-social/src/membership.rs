@@ -4,7 +4,7 @@
 
 use crate::{error::SocialError, Block, Neighborhood};
 use aura_core::identifiers::AuthorityId;
-use aura_journal::facts::social::{BlockId, NeighborhoodId};
+use crate::facts::{BlockId, NeighborhoodId};
 
 /// Validates membership operations for blocks and neighborhoods.
 pub struct MembershipValidator;

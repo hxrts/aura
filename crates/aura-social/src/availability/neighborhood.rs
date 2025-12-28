@@ -15,7 +15,7 @@ use aura_core::{
     },
     identifiers::AuthorityId,
 };
-use aura_journal::facts::social::{BlockId, NeighborhoodId};
+use crate::facts::{BlockId, NeighborhoodId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -253,7 +253,7 @@ mod tests {
         StorageCoreEffects, StorageExtendedEffects,
     };
     use aura_core::time::{PhysicalTime, TimeStamp};
-    use aura_journal::facts::social::{BlockMemberFact, NeighborhoodFact};
+    use crate::facts::{BlockMemberFact, NeighborhoodFact};
 
     fn test_timestamp() -> TimeStamp {
         TimeStamp::PhysicalClock(PhysicalTime {

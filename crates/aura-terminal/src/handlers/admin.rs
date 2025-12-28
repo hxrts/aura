@@ -6,8 +6,9 @@ use crate::handlers::{CliOutput, HandlerContext};
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::{AccountId, AuthorityId};
 use aura_core::{FactValue, Journal};
-use aura_journal::fact::{FactContent, RelationalFact};
-use serde::Serialize;
+use aura_journal::fact::FactContent;
+use aura_journal::DomainFact;
+use aura_maintenance::{AdminReplacement, MaintenanceFact};
 
 use crate::AdminAction;
 
@@ -52,32 +53,14 @@ async fn replace_admin(
     // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
     let authority_id = AuthorityId(ctx.device_id().0);
 
-    // Persist an admin replacement fact into the journal so downstream runtimes apply the change.
-    #[derive(Serialize)]
-    struct AdminReplacementFact {
-        account_id: AccountId,
-        requested_by: AuthorityId,
-        new_admin: AuthorityId,
-        activation_epoch: u64,
-    }
+    let replacement = MaintenanceFact::AdminReplacement(AdminReplacement::new(
+        authority_id,
+        authority_id,
+        new_admin_id,
+        aura_core::Epoch::new(activation_epoch),
+    ));
 
-    let fact_payload = AdminReplacementFact {
-        account_id,
-        requested_by: authority_id,
-        new_admin: new_admin_id,
-        activation_epoch,
-    };
-
-    let fact_content = FactContent::Relational(RelationalFact::Generic {
-        context_id: ctx.effect_context().context_id(),
-        binding_type: "admin_replaced".to_string(),
-        binding_data: serde_json::to_vec(&fact_payload).map_err(|e| {
-            TerminalError::Operation(format!(
-                "Failed to serialize admin replacement payload: {}",
-                e
-            ))
-        })?,
-    });
+    let fact_content = FactContent::Relational(replacement.to_generic());
 
     let fact_value = serde_json::to_vec(&fact_content)
         .map(FactValue::Bytes)

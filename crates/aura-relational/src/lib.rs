@@ -214,11 +214,13 @@ impl RelationalContext {
         let details_bytes = details.to_bytes();
         let binding_hash = Hash32::from_bytes(&hash(&details_bytes));
 
-        self.add_fact(RelationalFact::GuardianBinding {
-            account_id,
-            guardian_id,
-            binding_hash,
-        })?;
+        self.add_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::GuardianBinding {
+                account_id,
+                guardian_id,
+                binding_hash,
+            },
+        ))?;
         self.add_domain_fact(&details)?;
 
         Ok(binding_hash)

@@ -244,7 +244,7 @@ impl SocialManager {
 mod tests {
     use super::*;
     use aura_core::effects::relay::RelayRelationship;
-    use aura_journal::facts::social::BlockId;
+    use aura_social::facts::BlockId;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])

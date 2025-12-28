@@ -22,7 +22,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 ├─────────────────────────────────────────────┤
 │ Layer 4: Orchestration                      │
 │ (aura-protocol, aura-guards, aura-consensus,│
-│  aura-amp, aura-anti-entropy, aura-bridge)  │
+│  aura-amp, aura-anti-entropy)               │
 ├─────────────────────────────────────────────┤
 │ Layer 3: Implementation                     │
 │    (aura-effects + aura-composition)        │
@@ -131,6 +131,7 @@ Layer 2 is the *specification* layer: pure domain semantics with zero runtime co
 | `aura-signature` | Identity semantics | Signature verification, device lifecycle |
 | `aura-store` | Storage domain | Storage types, capabilities, domain logic |
 | `aura-transport` | Transport semantics | P2P communication abstractions |
+| `aura-maintenance` | Maintenance facts | Snapshot, cache invalidation, OTA activation, admin replacement facts + reducer |
 
 **Key characteristics**: Implement domain logic without effect handlers or coordination.
 
@@ -148,17 +149,17 @@ These are core protocol constructs with complex reduction logic in `reduce_conte
 
 | Fact | Purpose | Why Protocol-Level |
 |------|---------|-------------------|
-| `GuardianBinding` | Guardian relationship | Core recovery protocol |
-| `RecoveryGrant` | Recovery capability | Core recovery protocol |
-| `Consensus` | Aura Consensus results | Core agreement mechanism |
-| `AmpChannelCheckpoint` | Ratchet window anchoring | Complex epoch state computation |
-| `AmpProposedChannelEpochBump` | Optimistic epoch transitions | Spacing rules, bump selection |
-| `AmpCommittedChannelEpochBump` | Finalized epoch transitions | Epoch chain validation |
-| `AmpChannelPolicy` | Channel policy overrides | Skip window derivation |
+| `Protocol(GuardianBinding)` | Guardian relationship | Core recovery protocol |
+| `Protocol(RecoveryGrant)` | Recovery capability | Core recovery protocol |
+| `Protocol(Consensus)` | Aura Consensus results | Core agreement mechanism |
+| `Protocol(AmpChannelCheckpoint)` | Ratchet window anchoring | Complex epoch state computation |
+| `Protocol(AmpProposedChannelEpochBump)` | Optimistic epoch transitions | Spacing rules, bump selection |
+| `Protocol(AmpCommittedChannelEpochBump)` | Finalized epoch transitions | Epoch chain validation |
+| `Protocol(AmpChannelPolicy)` | Channel policy overrides | Skip window derivation |
 
 **Domain-Level Facts** (via `Generic` + `FactRegistry`):
 
-Application-specific facts use `RelationalFact::Generic` and are reduced by registered `FactReducer` implementations:
+Application-specific facts use `RelationalFact::Generic` and are reduced by registered `FactReducer` implementations.
 
 | Domain Crate | Fact Type | Purpose |
 |-------------|-----------|---------|
@@ -266,7 +267,6 @@ Only facts fundamental to journal operation remain as direct enum variants:
 - Multi-party protocol orchestration (consensus in `aura-consensus`, anti-entropy in `aura-anti-entropy`)
 - Cross-handler coordination logic (`TransportCoordinator`, `StorageCoordinator`, etc.)
 - Distributed state management
-- Protocol-specific bridges and adapters (`aura-bridge`)
 - Stateful coordinators for multi-party protocols
 
 **What doesn't go here**:
@@ -279,7 +279,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Key characteristics**: This layer coordinates multiple handlers working together across network boundaries. It implements the "choreography conductor" pattern, ensuring distributed protocols execute correctly with proper authorization, flow control, and state consistency. All handlers here manage multi-party coordination, not single-party operations.
 
-**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, domain crates, and Layer 4 subcrates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`). Performance-critical protocol operations may require carefully documented exceptions for direct cryptographic library usage.
+**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, domain crates, and Layer 4 subcrates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`). Performance-critical protocol operations may require carefully documented exceptions for direct cryptographic library usage.
 
 ## Layer 5: Feature/Protocol Implementation
 
@@ -308,7 +308,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 - FactKey helper types are required for reducers/views to keep binding key derivation consistent.
 - Ceremony facts carry optional `trace_id` values to support cross-protocol traceability.
 
-**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, plus Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`).
+**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, plus Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
 
 ## Layer 6: Runtime Composition — `aura-agent`, `aura-simulator`, and `aura-app`
 
@@ -335,7 +335,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Key characteristics**: This is about "how do I deploy and run this as a production system?" It's the bridge between composed handlers/protocols and actual running applications.
 
-**Dependencies**: All domain crates, `aura-effects`, `aura-composition`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`).
+**Dependencies**: All domain crates, `aura-effects`, `aura-composition`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
 
 ## Layer 7: User Interface — `aura-terminal`
 
@@ -345,7 +345,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Key characteristic**: Contains `main()` entry point that users run directly. Binary is named `aura`.
 
-**Dependencies**: `aura-app`, `aura-agent`, `aura-core`, `aura-recovery`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`).
+**Dependencies**: `aura-app`, `aura-agent`, `aura-core`, `aura-recovery`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
 
 ## Layer 8: Testing and Development Tools
 
@@ -365,7 +365,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **Key characteristics**: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.
 
-**Dependencies**: `aura-agent`, `aura-composition`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`.
+**Dependencies**: `aura-agent`, `aura-composition`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`.
 
 ## Workspace Structure
 
@@ -376,7 +376,6 @@ crates/
 ├── aura-authentication    Authentication protocols
 ├── aura-anti-entropy    Anti-entropy sync and reconciliation
 ├── aura-amp             Authenticated messaging protocol (AMP)
-├── aura-bridge          Handler/effect bridge adapters
 ├── aura-chat            Chat facts + local prototype service
 ├── aura-composition     Handler composition and effect system assembly
 ├── aura-consensus       Consensus protocol implementation
@@ -431,7 +430,6 @@ graph TD
     consensus[aura-consensus]
     amp[aura-amp]
     anti_entropy[aura-anti-entropy]
-    bridge[aura-bridge]
 
     %% Feature Layer
     auth[aura-authentication]
@@ -839,7 +837,7 @@ Use these principles to classify code and determine the correct crate.
 - Manages multiple handlers working together across network boundaries
 - The "choreography conductor" that ensures distributed protocols execute correctly
 
-The distinctions are critical for understanding where code belongs. Single-party operations and handler composition both belong in Layer 3. Multi-party coordination goes in Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`).
+The distinctions are critical for understanding where code belongs. Single-party operations and handler composition both belong in Layer 3. Multi-party coordination goes in Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
 
 ### Composition vs. Orchestration
 
@@ -1060,7 +1058,7 @@ pub fn hash(data: &[u8]) -> [u8; 32] {
 3. **Pure functions** are deterministic regardless of when/where they're called
 
 **Why broad exemptions are dangerous**:
-- Crate-level exemptions (`aura-agent`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`) would allow business logic to bypass effects
+- Crate-level exemptions (`aura-agent`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`) would allow business logic to bypass effects
 - This breaks simulation determinism and WASM compatibility
 - Makes testing unreliable by introducing hidden external dependencies
 
@@ -1331,6 +1329,9 @@ CRDT semantics for fact-based journals and commitment trees. Implements tree sta
 
 **Extensibility**: Provides `FactType` and `FactReducer` traits plus `FactRegistry` for domain crates to register their own fact types. Domain-specific facts (chat, invitations, contacts) should use `RelationalFact::Generic` with registered reducers rather than hardcoded enum variants. Only core journal facts (`AttestedOp`, `Snapshot`, `RendezvousReceipt`) remain hardcoded.
 
+### aura-maintenance
+Maintenance domain facts and reducers for snapshots, cache invalidation, OTA activation, and admin replacement. Facts live in authority journals and reduce deterministically.
+
 ### aura-relational
 Cross-authority relationships, including Guardian relationship protocols with cross-authority consensus coordination and relational state management.
 
@@ -1369,9 +1370,6 @@ Authenticated messaging protocol (AMP), including consensus-backed epoch bumps. 
 
 ### aura-anti-entropy
 Anti-entropy sync and reconciliation (digest exchange, guarded sync operations).
-
-### aura-bridge
-Handler/effect bridge adapters (typed and unified bridges).
 
 ### aura-authentication
 Device, threshold, and guardian authentication protocols.

@@ -790,9 +790,9 @@ impl ViewReduction<GuardianDelta> for GuardianReduction {
         facts
             .iter()
             .filter_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::GuardianBinding {
-                    guardian_id, ..
-                }) => Some(GuardianDelta::GuardianAdded {
+                FactContent::Relational(RelationalFact::Protocol(
+                    aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id, .. },
+                )) => Some(GuardianDelta::GuardianAdded {
                     authority_id: format!("{:?}", guardian_id),
                     name: "unknown".to_string(),
                     added_at: 0,
@@ -1246,11 +1246,13 @@ mod tests {
         let facts = vec![
             make_test_fact(
                 1,
-                FactContent::Relational(RelationalFact::GuardianBinding {
-                    account_id: AuthorityId::new_from_entropy([1u8; 32]),
-                    guardian_id: AuthorityId::new_from_entropy([2u8; 32]),
-                    binding_hash: Hash32([0u8; 32]),
-                }),
+                FactContent::Relational(RelationalFact::Protocol(
+                    aura_journal::ProtocolRelationalFact::GuardianBinding {
+                        account_id: AuthorityId::new_from_entropy([1u8; 32]),
+                        guardian_id: AuthorityId::new_from_entropy([2u8; 32]),
+                        binding_hash: Hash32([0u8; 32]),
+                    },
+                )),
             ),
             make_test_fact(
                 2,

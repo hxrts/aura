@@ -1,0 +1,17 @@
+[package]
+name = "aura-maintenance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aura-core = { path = "../aura-core" }
+aura-journal = { path = "../aura-journal" }
+aura-macros = { path = "../aura-macros" }
+serde = { workspace = true }
+uuid = { workspace = true }

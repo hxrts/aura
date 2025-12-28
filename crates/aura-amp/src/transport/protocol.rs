@@ -148,7 +148,9 @@ pub async fn emit_proposed_bump<E: AmpJournalEffects>(
 ) -> Result<()> {
     effects
         .insert_relational_fact(
-            aura_journal::fact::RelationalFact::AmpProposedChannelEpochBump(proposal),
+            aura_journal::fact::RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpProposedChannelEpochBump(proposal),
+            ),
         )
         .await
 }

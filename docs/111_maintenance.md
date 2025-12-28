@@ -4,29 +4,15 @@ This document describes distributed maintenance in Aura. It explains snapshots, 
 
 ## 1. Maintenance Facts
 
-Maintenance uses facts stored in an authority journal. Facts represent monotone knowledge. Maintenance logic evaluates local predicates over accumulated facts. These predicates implement constraints such as GC eligibility or upgrade readiness.
+Maintenance uses facts stored in an authority journal. Facts represent monotone knowledge. Maintenance logic evaluates local predicates over accumulated facts. These predicates implement constraints such as GC eligibility or upgrade readiness. The authoritative schema lives in `crates/aura-maintenance/src/facts.rs`.
 
 ```rust
 pub enum MaintenanceFact {
-    SnapshotProposed {
-        proposal_id: Uuid,
-        target_epoch: u64,
-        digest: Hash32,
-    },
-    SnapshotCompleted {
-        proposal_id: Uuid,
-        snapshot: SnapshotV1,
-        threshold_signature: Vec<u8>,
-    },
-    CacheInvalidated {
-        keys: Vec<CacheKey>,
-        epoch_floor: u64,
-    },
-    UpgradeActivated {
-        package_id: Uuid,
-        to_version: ProtocolVersion,
-        activation_fence: u64,
-    },
+    SnapshotProposed(SnapshotProposed),
+    SnapshotCompleted(SnapshotCompleted),
+    CacheInvalidated(CacheInvalidated),
+    UpgradeActivated(UpgradeActivated),
+    AdminReplacement(AdminReplacement),
 }
 ```
 
@@ -39,8 +25,8 @@ Snapshots bound storage size. A snapshot proposal announces a target epoch and a
 Snapshot completion inserts a `SnapshotCompleted` fact. Devices prune facts whose epochs fall below the snapshot epoch. Devices prune blobs whose tombstones precede the snapshot. This pruning does not affect correctness because the snapshot represents a complete prefix.
 
 ```rust
-pub struct SnapshotV1 {
-    pub epoch: u64,
+pub struct Snapshot {
+    pub epoch: Epoch,
     pub digest: Hash32,
     pub blob_cid: Cid,
 }
@@ -64,12 +50,12 @@ This structure identifies a cached entry. Devices invalidate cached data when th
 
 Upgrades appear as monotone activation facts. Devices advertise supported versions and upgrade policies inside device metadata. Operators publish upgrade metadata containing package identifiers and version information.
 
-Devices verify upgrade artifacts using their hashes. Devices mark readiness when policies allow. A hard fork upgrade uses an activation fence. An activation fact contains the target version and the fence epoch. Devices reject sessions when their local epoch does not satisfy the fence.
+Devices verify upgrade artifacts using their hashes. Devices mark readiness when policies allow. A hard fork upgrade uses an `IdentityEpochFence { account_id, epoch }`. An activation fact contains the target version, artifact metadata, and the fence. Devices reject sessions when their local epoch does not satisfy the fence.
 
 ```rust
-pub struct UpgradeMetadata {
+pub struct UpgradeProposalMetadata {
     pub package_id: Uuid,
-    pub version: ProtocolVersion,
+    pub version: SemanticVersion,
     pub artifact_hash: Hash32,
 }
 ```
@@ -82,9 +68,10 @@ Admin replacement uses a maintenance fact. The fact records the old admin, new a
 
 ```rust
 pub struct AdminReplacement {
+    pub authority_id: AuthorityId,
     pub old_admin: AuthorityId,
     pub new_admin: AuthorityId,
-    pub activation_epoch: u64,
+    pub activation_epoch: Epoch,
 }
 ```
 
@@ -98,8 +85,8 @@ Snapshot completion sets the snapshot epoch equal to the identity epoch. Garbage
 
 ```rust
 pub struct MaintenanceEpoch {
-    pub identity_epoch: u64,
-    pub snapshot_epoch: u64,
+    pub identity_epoch: Epoch,
+    pub snapshot_epoch: Epoch,
 }
 ```
 

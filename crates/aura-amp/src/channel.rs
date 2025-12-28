@@ -68,7 +68,9 @@ where
         };
 
         self.effects
-            .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint))
+            .insert_relational_fact(RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
+            ))
             .await
             .map_err(map_err)?;
 
@@ -79,7 +81,9 @@ where
                 skip_window: params.skip_window.or(Some(window)),
             };
             self.effects
-                .insert_relational_fact(RelationalFact::AmpChannelPolicy(policy))
+                .insert_relational_fact(RelationalFact::Protocol(
+                    aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
+                ))
                 .await
                 .map_err(map_err)?;
         }
@@ -106,7 +110,9 @@ where
         };
 
         self.effects
-            .insert_relational_fact(RelationalFact::AmpCommittedChannelEpochBump(committed))
+            .insert_relational_fact(RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(committed),
+            ))
             .await
             .map_err(map_err)?;
 
@@ -117,7 +123,9 @@ where
         };
 
         self.effects
-            .insert_relational_fact(RelationalFact::AmpChannelPolicy(policy))
+            .insert_relational_fact(RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
+            ))
             .await
             .map_err(map_err)?;
 

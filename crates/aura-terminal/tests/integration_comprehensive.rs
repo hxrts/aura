@@ -382,11 +382,12 @@ mod chat_screen {
         assert!(tui.has_dispatch(
             |d| matches!(d, DispatchCommand::CreateChannel { name, .. } if name == "general")
         ));
-        assert!(tui.has_modal());
-        assert_eq!(
-            tui.state.chat_create_modal_state().unwrap().step,
-            CreateChannelStep::Waiting
-        );
+        // Modal should be dismissed after channel creation
+        assert!(!tui.has_modal());
+        // Toast should show success message
+        assert!(tui.state.toast_queue.is_active());
+        let toast = tui.state.toast_queue.current().unwrap();
+        assert!(toast.message.contains("general"));
     }
 
     #[test]

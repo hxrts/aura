@@ -26,6 +26,7 @@ aura-invitation = { path = "../aura-invitation" }
 aura-rendezvous = { path = "../aura-rendezvous" }
 aura-social = { path = "../aura-social" }
 aura-sync = { path = "../aura-sync" }
+aura-maintenance = { path = "../aura-maintenance" }
 aura-transport = { path = "../aura-transport" }
 aura-recovery = { path = "../aura-recovery" }
 aura-authorization = { path = "../aura-authorization" }

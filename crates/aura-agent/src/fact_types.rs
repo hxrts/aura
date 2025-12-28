@@ -7,6 +7,7 @@ use aura_authentication::AUTH_FACT_TYPE_ID;
 use aura_authorization::WOT_FACT_TYPE_ID;
 use aura_chat::CHAT_FACT_TYPE_ID;
 use aura_invitation::INVITATION_FACT_TYPE_ID;
+use aura_maintenance::MAINTENANCE_FACT_TYPE_ID;
 use aura_recovery::RECOVERY_FACT_TYPE_ID;
 use aura_relational::{
     CONTACT_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID, GUARDIAN_REQUEST_FACT_TYPE_ID,
@@ -45,6 +46,7 @@ pub const FACT_TYPE_IDS: &[&str] = &[
     BLOCK_REVOKE_STEWARD_FACT_TYPE_ID,
     WOT_FACT_TYPE_ID,
     VERIFY_FACT_TYPE_ID,
+    MAINTENANCE_FACT_TYPE_ID,
     STORAGE_FACT_TYPE_ID,
     TRANSPORT_FACT_TYPE_ID,
 ];

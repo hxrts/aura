@@ -520,7 +520,7 @@ fn handle_chat_create_key_queue(
                 });
             }
             Enter => {
-                // Create channel directly from Threshold step (Review step removed)
+                // Create channel directly from Threshold step
                 if modal_state.can_submit() {
                     let topic = if modal_state.topic.trim().is_empty() {
                         None
@@ -528,32 +528,38 @@ fn handle_chat_create_key_queue(
                         Some(modal_state.topic.clone())
                     };
                     let members = modal_state.selected_member_ids();
+                    let member_count = members.len();
+                    let channel_name = modal_state.name.clone();
 
                     commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
-                        name: modal_state.name.clone(),
+                        name: channel_name.clone(),
                         topic,
                         members,
                         threshold_k: modal_state.threshold_k,
                     }));
 
-                    state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::ChatCreate(ref mut s) = modal {
-                            s.step = CreateChannelStep::Waiting;
-                            s.status = Some(
-                                "Channel created. Invites sent. Waiting for acceptances…"
-                                    .to_string(),
-                            );
-                        }
-                    });
+                    // Dismiss modal and show toast
+                    state.modal_queue.dismiss();
+                    state.next_toast_id += 1;
+                    let toast_message = if member_count > 0 {
+                        format!(
+                            "Created '{}'. {} invite{} sent.",
+                            channel_name,
+                            member_count,
+                            if member_count == 1 { "" } else { "s" }
+                        )
+                    } else {
+                        format!("Created '{}'.", channel_name)
+                    };
+                    state.toast_queue.enqueue(QueuedToast::new(
+                        state.next_toast_id,
+                        toast_message,
+                        ToastLevel::Success,
+                    ));
                 }
             }
             _ => {}
         },
-        CreateChannelStep::Waiting => {
-            if key.code == Esc {
-                state.modal_queue.dismiss();
-            }
-        }
     }
 }
 

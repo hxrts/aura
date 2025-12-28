@@ -1,4 +1,4 @@
-use crate::semilattice::OpLog;
+use crate::algebra::OpLog;
 use aura_core::{
     tree::{Epoch, Snapshot, TreeOp, TreeOpKind},
     AttestedOp, LeafId, NodeIndex,
@@ -263,7 +263,7 @@ pub fn verify_join_preserving(
     oplog2: &OpLog,
     snapshot: &Snapshot,
 ) -> Result<bool, CompactionError> {
-    use crate::semilattice::JoinSemilattice;
+    use crate::algebra::JoinSemilattice;
 
     // Compute h(x ⊔ y)
     let joined = oplog1.join(oplog2);

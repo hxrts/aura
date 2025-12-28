@@ -74,7 +74,7 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 3. **Implementation** (`aura-effects` + `aura-composition`): Stateless, single-party handlers (`aura-effects`) and handler composition infrastructure (`aura-composition`). Production handlers implement core effect traits (crypto, network, storage, randomness, console, etc.). Mock/test handlers are in `aura-testkit`.
    - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects` and persists the master key via `SecureStorageEffects` (Keychain/TPM/Keystore; filesystem fallback during bring-up). Application code should not implement ad-hoc storage encryption (e.g., `LocalStore`).
 
-4. **Orchestration** (`aura-protocol` + `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`): Multi-party coordination and guard infrastructure: handler adapters, CrdtCoordinator, GuardChain (CapGuard → FlowGuard → JournalCoupler), Consensus runtime, AMP orchestration, anti-entropy/snapshot helpers.
+4. **Orchestration** (`aura-protocol` + `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`): Multi-party coordination and guard infrastructure: handler adapters, CrdtCoordinator, GuardChain (CapGuard → FlowGuard → JournalCoupler), Consensus runtime, AMP orchestration, anti-entropy/snapshot helpers.
 
 5. **Feature/Protocol** (`aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates (auth, secure messaging, guardian recovery, rendezvous, social topology, storage, etc.) built atop the orchestration layer. `aura-frost` is deprecated; FROST primitives live in `aura-core::crypto::tree_signing`.
 
@@ -162,9 +162,9 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 
 ### "Where does my code go?" Decision Tree
 - **Single-party stateless operation** → `aura-effects`
-- **Multi-party coordination** → `aura-protocol` + Layer 4 subcrates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`)
+- **Multi-party coordination** → `aura-protocol` + Layer 4 subcrates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`)
 - **Domain-specific logic** → Domain crate (`aura-journal`, etc.)
-- **Domain service handler (stateless)** → Domain crate `*Handler` (e.g., `aura-chat::ChatHandler`)
+- **Domain service handler (stateless)** → Domain crate `*FactService` (e.g., `aura-chat::ChatFactService`)
 - **RwLock wrapper service** → `aura-agent/src/handlers/*_service.rs`
 - **Complete end-to-end protocol** → Feature crate (e.g., `aura-authentication`; `aura-frost` deprecated)
 - **Effect trait definition** → `aura-core`

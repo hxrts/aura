@@ -304,11 +304,13 @@ impl DemoSignalCoordinator {
                 // Commit a GuardianBinding fact through the runtime.
                 // This flows through the scheduler to update CONTACTS_SIGNAL.
                 if let Some(runtime) = core.runtime() {
-                    let binding_fact = RelationalFact::GuardianBinding {
-                        account_id: self.bob_authority,
-                        guardian_id: authority_id.clone(),
-                        binding_hash: Hash32::default(), // Demo uses empty hash
-                    };
+                    let binding_fact = RelationalFact::Protocol(
+                        aura_journal::ProtocolRelationalFact::GuardianBinding {
+                            account_id: self.bob_authority,
+                            guardian_id: authority_id.clone(),
+                            binding_hash: Hash32::default(), // Demo uses empty hash
+                        },
+                    );
 
                     match runtime.commit_relational_facts(&[binding_fact]).await {
                         Ok(()) => {

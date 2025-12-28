@@ -103,8 +103,8 @@ async fn handle_amp_bump(
     };
 
     ctx.effects()
-        .insert_relational_fact(RelationalFact::AmpProposedChannelEpochBump(
-            proposal.clone(),
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpProposedChannelEpochBump(proposal.clone()),
         ))
         .await?;
 
@@ -150,7 +150,9 @@ async fn handle_amp_checkpoint(
     };
 
     ctx.effects()
-        .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint.clone()))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint.clone()),
+        ))
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to create checkpoint: {}", e)))?;
 

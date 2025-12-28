@@ -606,7 +606,9 @@ impl ChatService {
         };
 
         self.effects
-            .insert_relational_fact(RelationalFact::AmpCommittedChannelEpochBump(committed))
+            .insert_relational_fact(RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(committed),
+            ))
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit epoch bump: {e}")))?;
 

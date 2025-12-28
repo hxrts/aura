@@ -18,7 +18,7 @@ use aura_core::{AccountId, DeviceId, SessionId};
 use aura_journal::commitment_tree::{
     AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
 };
-use aura_journal::semilattice::OpLog;
+use aura_journal::algebra::OpLog;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
 /// Strategy for generating deterministic DeviceIds

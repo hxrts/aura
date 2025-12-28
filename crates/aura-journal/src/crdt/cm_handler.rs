@@ -5,7 +5,7 @@
 //! until causal dependencies are satisfied, then applies them idempotently.
 
 use aura_core::semilattice::{CausalOp, CmApply, Dedup, OpWithCtx};
-use aura_journal::{CausalContext, OperationId, VectorClock, VectorClockExt};
+use crate::{CausalContext, OperationId, VectorClock, VectorClockExt};
 use std::collections::{HashMap, VecDeque};
 
 use super::handler_trait::{CrdtHandler, CrdtSemantics, HandlerDiagnostics, HandlerMetrics};

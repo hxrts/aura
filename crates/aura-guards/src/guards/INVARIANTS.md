@@ -11,14 +11,14 @@ No observable network behavior may occur without successful authorization, flow 
 ### Enforcement Locus
 
 1. **Primary Enforcement**: Guard chain composition
-   - Module: `crates/aura-guards/src/guards/mod.rs`
-   - Function: `GuardChain::execute()`
-   - Sequence: `CapGuard` → `FlowGuard` → `JournalCoupler` → `TransportEffects`
+   - Module: `crates/aura-guards/src/guards/pure.rs` and `executor.rs`
+   - Types: `GuardChain` (pure evaluation), `GuardChainExecutor` (async execution)
+   - Sequence: `CapabilityGuard` → `FlowGuard` → `JournalCoupler` → `TransportEffects`
 
 2. **Guard Components**:
-   - `cap_guard.rs::CapGuard::check()` - Authorization via Biscuit/capability evaluation
-   - `flow_guard.rs::FlowGuard::charge()` - Budget charging before send
-   - `journal_coupler.rs::JournalCoupler::couple()` - Atomic fact commit
+   - `capability_guard.rs::CapabilityGuard` - Authorization via Biscuit/capability evaluation
+   - `flow.rs::FlowGuard` - Budget charging before send
+   - `journal.rs::JournalCoupler` - Atomic fact commit
 
 3. **Transport Integration**:
    - Module: `aura-protocol/src/handlers/sessions/shared.rs`

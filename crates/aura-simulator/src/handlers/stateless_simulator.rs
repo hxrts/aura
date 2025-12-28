@@ -23,9 +23,8 @@
 
 use aura_core::{
     effects::{
-        ByzantineFault, CheckpointId, ComputationFault, FaultInjectionConfig, FaultType,
-        NetworkFault, ScenarioId, ScenarioState, SimulationEffects, SimulationMetrics,
-        StorageFault,
+        CheckpointId, FaultInjectionConfig, FaultType, NetworkFault, ScenarioId, ScenarioState,
+        SimulationEffects, SimulationMetrics,
     },
     AuraError, Result as AuraResult,
 };
@@ -161,16 +160,19 @@ where
     /// Replaces stateful fault tracking with delegation to FaultInjectionEffects.
     pub async fn inject_fault(
         &self,
-        fault_type: LegacyFaultType,
-        target: String,
+        fault_type: FaultType,
         duration: Option<Duration>,
     ) -> AuraResult<()> {
         if self.config.verbose_logging {
-            debug!(fault_type = ?fault_type, target = %target, "Injecting simulation fault");
+            debug!(fault_type = ?fault_type, "Injecting simulation fault");
         }
 
-        // Convert from legacy fault type to new effect system fault type
-        let fault_config = self.convert_legacy_fault_type(fault_type, target, duration)?;
+        let fault_config = FaultInjectionConfig {
+            fault_type,
+            parameters: HashMap::new(),
+            duration,
+            probability: 1.0,
+        };
 
         // Delegate to effect system instead of storing in scenario metadata
         self.effects.inject_fault(fault_config.clone()).await?;
@@ -301,53 +303,6 @@ where
         Ok(())
     }
 
-    // Helper method to convert legacy fault types to the unified FaultType in aura-core
-    fn convert_legacy_fault_type(
-        &self,
-        legacy_fault: LegacyFaultType,
-        target: String,
-        duration: Option<Duration>,
-    ) -> AuraResult<FaultInjectionConfig> {
-        let fault_type = match legacy_fault {
-            LegacyFaultType::NetworkPartition => FaultType::Network(NetworkFault::Partition {
-                groups: vec![vec![target]],
-            }),
-            LegacyFaultType::PacketLoss { probability } => {
-                FaultType::Network(NetworkFault::PacketLoss { probability })
-            }
-            LegacyFaultType::NetworkLatency { delay } => {
-                FaultType::Network(NetworkFault::Latency { delay })
-            }
-            LegacyFaultType::StorageFailure { probability } => {
-                FaultType::Storage(StorageFault::Failure { probability })
-            }
-            LegacyFaultType::ComputationSlowness { factor } => {
-                FaultType::Computation(ComputationFault::CpuSlowness { factor })
-            }
-            LegacyFaultType::Byzantine { behavior } => {
-                let byzantine_fault = match behavior.as_str() {
-                    "equivocation" => ByzantineFault::Equivocation,
-                    "invalid_signatures" => ByzantineFault::InvalidSignatures,
-                    "silence" => ByzantineFault::Silence,
-                    "protocol_violation" => ByzantineFault::ProtocolViolation,
-                    _ => {
-                        return Err(AuraError::invalid(format!(
-                            "Unknown Byzantine behavior: {}",
-                            behavior
-                        )))
-                    }
-                };
-                FaultType::Byzantine(byzantine_fault)
-            }
-        };
-
-        Ok(FaultInjectionConfig {
-            fault_type,
-            parameters: HashMap::new(),
-            duration,
-            probability: 1.0,
-        })
-    }
 }
 
 /// Result of executing a simulation tick
@@ -368,16 +323,6 @@ pub struct ScenarioSummary {
     pub description: String,
 }
 
-/// Legacy fault type for migration compatibility
-#[derive(Debug, Clone)]
-pub enum LegacyFaultType {
-    NetworkPartition,
-    PacketLoss { probability: f64 },
-    NetworkLatency { delay: Duration },
-    StorageFailure { probability: f64 },
-    ComputationSlowness { factor: f64 },
-    Byzantine { behavior: String },
-}
 
 #[cfg(test)]
 mod tests {
@@ -453,8 +398,9 @@ mod tests {
         // Inject network partition fault
         handler
             .inject_fault(
-                LegacyFaultType::NetworkPartition,
-                "node1".to_string(),
+                FaultType::Network(NetworkFault::Partition {
+                    groups: vec![vec!["node1".to_string()]],
+                }),
                 Some(Duration::from_secs(30)),
             )
             .await
@@ -463,8 +409,7 @@ mod tests {
         // Inject packet loss fault
         handler
             .inject_fault(
-                LegacyFaultType::PacketLoss { probability: 0.1 },
-                "network".to_string(),
+                FaultType::Network(NetworkFault::PacketLoss { probability: 0.1 }),
                 None,
             )
             .await

@@ -13,6 +13,8 @@
 //! with stateless handlers. Domain crates should not implement this trait directly.
 
 use async_trait::async_trait;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Network address for peer communication
@@ -143,6 +145,48 @@ pub enum NetworkError {
         /// Reason for failure
         reason: String,
     },
+}
+
+/// UDP socket operations for Aura effects.
+#[async_trait]
+pub trait UdpSocketEffects: Send + Sync {
+    /// Enable or disable UDP broadcast on the socket.
+    async fn set_broadcast(&self, enabled: bool) -> Result<(), NetworkError>;
+
+    /// Send a datagram to the destination address.
+    async fn send_to(&self, payload: &[u8], addr: SocketAddr) -> Result<usize, NetworkError>;
+
+    /// Receive a datagram into the provided buffer.
+    async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), NetworkError>;
+}
+
+/// UDP effect surface for binding sockets.
+#[async_trait]
+pub trait UdpEffects: Send + Sync {
+    /// Bind a UDP socket to the given address.
+    async fn udp_bind(&self, addr: SocketAddr) -> Result<Arc<dyn UdpSocketEffects>, NetworkError>;
+}
+
+#[async_trait]
+impl<T: UdpEffects + ?Sized> UdpEffects for Arc<T> {
+    async fn udp_bind(&self, addr: SocketAddr) -> Result<Arc<dyn UdpSocketEffects>, NetworkError> {
+        (**self).udp_bind(addr).await
+    }
+}
+
+#[async_trait]
+impl<T: UdpSocketEffects + ?Sized> UdpSocketEffects for Arc<T> {
+    async fn set_broadcast(&self, enabled: bool) -> Result<(), NetworkError> {
+        (**self).set_broadcast(enabled).await
+    }
+
+    async fn send_to(&self, payload: &[u8], addr: SocketAddr) -> Result<usize, NetworkError> {
+        (**self).send_to(payload, addr).await
+    }
+
+    async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), NetworkError> {
+        (**self).recv_from(buffer).await
+    }
 }
 
 /// Stream type for peer connection events

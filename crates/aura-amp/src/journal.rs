@@ -13,7 +13,7 @@ use aura_core::time::{OrderTime, TimeStamp};
 use aura_core::{AuraError, FactValue, Journal, Result};
 use aura_journal::{
     fact::{Fact, FactContent, JournalNamespace, RelationalFact},
-    reduce_context, ChannelEpochState, FactJournal,
+    reduce_context, ChannelEpochState, FactJournal, ProtocolRelationalFact,
 };
 
 // ============================================================================
@@ -146,10 +146,14 @@ pub async fn get_channel_state<A: AmpJournalEffects>(
 /// Extract the context ID from a relational fact.
 pub(crate) fn fact_context(fact: &RelationalFact) -> Result<ContextId> {
     match fact {
-        RelationalFact::AmpChannelCheckpoint(cp) => Ok(cp.context),
-        RelationalFact::AmpProposedChannelEpochBump(b) => Ok(b.context),
-        RelationalFact::AmpCommittedChannelEpochBump(b) => Ok(b.context),
-        RelationalFact::AmpChannelPolicy(p) => Ok(p.context),
+        RelationalFact::Protocol(ProtocolRelationalFact::AmpChannelCheckpoint(cp)) => Ok(cp.context),
+        RelationalFact::Protocol(ProtocolRelationalFact::AmpProposedChannelEpochBump(b)) => {
+            Ok(b.context)
+        }
+        RelationalFact::Protocol(ProtocolRelationalFact::AmpCommittedChannelEpochBump(b)) => {
+            Ok(b.context)
+        }
+        RelationalFact::Protocol(ProtocolRelationalFact::AmpChannelPolicy(p)) => Ok(p.context),
         RelationalFact::Generic {
             context_id,
             binding_type,

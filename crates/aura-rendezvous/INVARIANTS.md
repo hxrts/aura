@@ -11,23 +11,23 @@ Secure channels are strictly bound to epochs and relational contexts. Messages o
 ### Enforcement Locus
 
 1. **Channel State Machine**:
-   - Module: `aura-transport/src/channel/state_machine.rs`
-   - Type: `ChannelState` enum - `{Closed, Opening, Open(epoch), Closing}`
-   - Function: `validate_transition()` - Enforces valid state transitions
+   - Module: `aura-rendezvous/src/new_channel.rs`
+   - Type: `ChannelState` enum - `{Establishing, Active, Rotating, Closed, Error}`
+   - Function: `SecureChannel::rotate()` - Enforces valid state transitions
 
 2. **Epoch Binding**:
-   - Module: `aura-transport/src/channel/epoch_binding.rs`
-   - Function: `SecureChannel::validate_epoch()` - Checks message epoch
+   - Module: `aura-rendezvous/src/new_channel.rs`
+   - Function: `SecureChannel::needs_epoch_rotation()` - Checks message epoch
    - Property: Messages with epoch != channel.epoch are rejected
 
 3. **Context Binding**:
-   - Module: `aura-transport/src/channel/context_binding.rs`
-   - Type: `ChannelIdentity(ContextId, AuthorityId, AuthorityId, Epoch)`
+   - Module: `aura-rendezvous/src/new_channel.rs`
+   - Type: `SecureChannel` with `(context_id, local, remote, epoch)`
    - Property: Channel identity immutable after establishment
 
 4. **Message Validation**:
-   - Module: `aura-transport/src/channel/validation.rs`
-   - Function: `validate_inbound_message()` - Full message validation
+   - Module: `aura-rendezvous/src/new_channel.rs`
+   - Function: `ChannelManager::find_by_context_peer()` - Channel lookup/validation
    - Checks: Epoch match, context match, state compatibility
 
 ### Failure Mode
@@ -89,23 +89,18 @@ Secure channels are strictly bound to epochs and relational contexts. Messages o
 Channel lifecycle follows strict FSM:
 
 ```rust
-// State machine definition
+// State machine definition (from aura-rendezvous/src/new_channel.rs)
 enum ChannelState {
+    /// Channel is being established
+    Establishing,
+    /// Channel is active and ready for communication
+    Active,
+    /// Channel is rotating keys
+    Rotating,
+    /// Channel has been closed
     Closed,
-    Opening { 
-        context: ContextId,
-        peer: AuthorityId,
-        epoch: Epoch,
-    },
-    Open {
-        context: ContextId,
-        peer: AuthorityId,  
-        epoch: Epoch,
-        established_at: TimeStamp,
-    },
-    Closing {
-        reason: CloseReason,
-    },
+    /// Channel encountered an error
+    Error(String),
 }
 
 // CORRECT: Epoch-aware message handling
@@ -138,21 +133,21 @@ async fn bad_send(channel: &Channel, msg: Message) {
 ### State Transition Rules
 
 Valid transitions:
-- `Closed → Opening`: Initiate channel establishment
-- `Opening → Open`: Handshake complete, epoch confirmed  
-- `Opening → Closed`: Handshake failed
-- `Open → Closing`: Graceful shutdown or epoch rotation
-- `Closing → Closed`: Cleanup complete
+- `Establishing → Active`: Handshake complete, epoch confirmed
+- `Establishing → Error`: Handshake failed
+- `Active → Rotating`: Epoch rotation triggered
+- `Active → Closed`: Graceful shutdown
+- `Rotating → Active`: Rotation complete
 
 Invalid transitions (must error):
-- `Open → Open`: Cannot re-open
-- `Closed → Open`: Must go through Opening
-- `* → Opening` when already Opening/Open
+- `Active → Establishing`: Cannot re-establish
+- `Closed → Active`: Must go through Establishing
+- `* → Establishing` when already Active
 
 ### Verification
 
 Channel tests:
 ```bash
-cargo test -p aura-transport channel_lifecycle
-cargo test -p aura-transport epoch_validation
+cargo test -p aura-rendezvous new_channel
+cargo test -p aura-rendezvous channel
 ```

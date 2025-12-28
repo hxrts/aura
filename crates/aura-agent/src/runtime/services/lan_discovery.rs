@@ -1,16 +1,17 @@
 //! LAN Discovery (Layer 6 runtime)
 //!
-//! UDP broadcast/listen is platform/runtime-specific, so the implementation lives in the
-//! runtime layer. The packet/config types live in `aura-rendezvous` as pure data.
+//! UDP broadcast/listen is platform/runtime-specific, so the implementation is provided
+//! via `UdpEffects` (Layer 3) and wired by the runtime. The packet/config types live in
+//! `aura-rendezvous` as pure data.
 
+use aura_core::effects::network::{UdpEffects, UdpSocketEffects};
 use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
 use aura_core::identifiers::AuthorityId;
 use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryPacket, RendezvousDescriptor,
 };
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
-use tokio::net::UdpSocket;
 use tokio::sync::{watch, RwLock};
 use tracing::{debug, error, info, trace, warn};
 
@@ -19,7 +20,7 @@ pub struct LanDiscoveryService {
     config: LanDiscoveryConfig,
     authority_id: AuthorityId,
     time: Arc<dyn PhysicalTimeEffects>,
-    socket: Arc<UdpSocket>,
+    socket: Arc<dyn UdpSocketEffects>,
     descriptor: Arc<RwLock<Option<RendezvousDescriptor>>>,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
@@ -30,6 +31,7 @@ impl LanDiscoveryService {
     pub async fn new(
         config: LanDiscoveryConfig,
         authority_id: AuthorityId,
+        udp: Arc<dyn UdpEffects>,
         time: Arc<dyn PhysicalTimeEffects>,
     ) -> Result<Self, String> {
         let bind_ip: Ipv4Addr = config
@@ -41,12 +43,14 @@ impl LanDiscoveryService {
             .parse()
             .map_err(|e| format!("Invalid broadcast_addr '{}': {e}", config.broadcast_addr))?;
 
-        let bind_addr = SocketAddrV4::new(bind_ip, config.port);
-        let socket = UdpSocket::bind(bind_addr)
+        let bind_addr = SocketAddr::V4(SocketAddrV4::new(bind_ip, config.port));
+        let socket = udp
+            .udp_bind(bind_addr)
             .await
             .map_err(|e| format!("UDP bind failed ({bind_addr}): {e}"))?;
         socket
             .set_broadcast(true)
+            .await
             .map_err(|e| format!("set_broadcast failed: {e}"))?;
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -58,7 +62,7 @@ impl LanDiscoveryService {
             config,
             authority_id,
             time,
-            socket: Arc::new(socket),
+            socket,
             descriptor: Arc::new(RwLock::new(None)),
             shutdown_tx,
             shutdown_rx,
@@ -95,7 +99,7 @@ impl LanDiscoveryService {
     }
 
     /// Expose the underlying UDP socket (used for ad-hoc LAN invitation sends).
-    pub fn socket(&self) -> &Arc<UdpSocket> {
+    pub fn socket(&self) -> &Arc<dyn UdpSocketEffects> {
         &self.socket
     }
 
@@ -110,7 +114,7 @@ impl LanDiscoveryService {
             .broadcast_addr
             .parse()
             .unwrap_or(Ipv4Addr::BROADCAST);
-        let broadcast_addr = SocketAddrV4::new(broadcast_ip, self.config.port);
+        let broadcast_addr = SocketAddr::V4(SocketAddrV4::new(broadcast_ip, self.config.port));
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         tokio::spawn(async move {

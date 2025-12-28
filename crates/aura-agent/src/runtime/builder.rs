@@ -200,6 +200,7 @@ impl EffectSystemBuilder {
                 authority_id,
                 rendezvous_config,
                 Arc::new(effect_system.time_effects().clone()),
+                Arc::new(aura_effects::RealUdpEffectsHandler::new()),
             )
         });
 

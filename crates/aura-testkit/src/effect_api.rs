@@ -6,7 +6,7 @@
 use async_lock::RwLock;
 use aura_core::hash::hash;
 use aura_core::AccountId;
-use aura_journal::semilattice::AccountState;
+use aura_journal::algebra::AccountState;
 use std::sync::Arc;
 use uuid::Uuid;
 

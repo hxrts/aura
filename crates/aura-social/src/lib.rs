@@ -1,7 +1,7 @@
 //! Aura Social - Social Topology Layer
 //!
 //! This crate provides the service/logic layer for Aura's urban social topology.
-//! It builds on fact types defined in `aura-journal::facts::social` to provide:
+//! It builds on fact types defined in `aura-social::facts` to provide:
 //!
 //! - Materialized views: `Block`, `Neighborhood` aggregates from journal facts
 //! - Services: `BlockService`, `NeighborhoodService`, `TraversalService`, `StorageService`
@@ -10,12 +10,12 @@
 //! # Architecture
 //!
 //! This is a **Layer 5 (Feature/Protocol)** crate that:
-//! - Depends on `aura-journal` (Layer 2) for fact types
+//! - Depends on `aura-journal` (Layer 2) for journal infrastructure
 //! - Is a peer to `aura-chat`, `aura-recovery`, `aura-invitation`
 //!
 //! # Fact vs Service Separation
 //!
-//! Facts (data structures) live in `aura-journal::facts::social`:
+//! Facts (data structures) live in `aura-social::facts`:
 //! - `BlockId`, `NeighborhoodId` - Identifiers
 //! - `BlockFact`, `ResidentFact`, `StewardFact` - Block facts
 //! - `NeighborhoodFact`, `BlockMemberFact`, `AdjacencyFact` - Neighborhood facts
@@ -30,7 +30,7 @@
 //!
 //! ```ignore
 //! use aura_social::{Block, Neighborhood, SocialTopology};
-//! use aura_journal::facts::social::{BlockFact, ResidentFact};
+//! use aura_social::facts::{BlockFact, ResidentFact};
 //!
 //! // Build a Block view from journal facts
 //! let block = Block::from_facts(&block_fact, &residents, &stewards);
@@ -93,9 +93,10 @@ pub use storage::StorageService;
 pub use topology::{DiscoveryLayer, SocialTopology};
 pub use traversal::TraversalService;
 
-// Re-export fact types from aura-journal for convenience
-pub use aura_journal::facts::social::{
-    AdjacencyFact, BlockConfigFact, BlockFact, BlockId, BlockMemberFact, BlockStorageBudget,
-    NeighborhoodFact, NeighborhoodId, ResidentFact, StewardCapabilities, StewardFact,
-    TraversalAllowedFact, TraversalDepth, TraversalPosition,
+// Re-export fact types for convenience
+pub use crate::facts::{
+    AdjacencyFact, BlockConfigFact, BlockFact, BlockId, BlockMemberFact, BlockMessageMemberFact,
+    BlockStorageBudget, NeighborhoodFact, NeighborhoodId, PinnedContentFact, ResidentFact,
+    SocialFactError, StewardCapabilities, StewardFact, TraversalAllowedFact, TraversalDepth,
+    TraversalPosition,
 };

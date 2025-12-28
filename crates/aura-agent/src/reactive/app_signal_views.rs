@@ -340,9 +340,9 @@ impl ReactiveView for ContactsSignalView {
                         }
                     }
                 }
-                FactContent::Relational(RelationalFact::GuardianBinding {
-                    guardian_id, ..
-                }) => {
+                FactContent::Relational(RelationalFact::Protocol(
+                    aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id, .. },
+                )) => {
                     // Reflect guardian status into contacts for details screens.
                     state.set_guardian_status(*guardian_id, true);
                     changed = true;
@@ -415,9 +415,9 @@ impl ReactiveView for RecoverySignalView {
 
         for fact in facts {
             match &fact.content {
-                FactContent::Relational(RelationalFact::GuardianBinding {
-                    guardian_id, ..
-                }) => {
+                FactContent::Relational(RelationalFact::Protocol(
+                    aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id, .. },
+                )) => {
                     Self::ensure_guardian(&mut state, *guardian_id);
                     Self::update_guardian_count(&mut state);
                     changed = true;

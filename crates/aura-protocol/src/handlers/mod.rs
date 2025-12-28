@@ -37,27 +37,13 @@
 //! - **core**: Base effect handler traits, registry infrastructure, error types
 //! - **tree**: Commitment tree reduction and application handlers
 //! - **memory**: (moved to aura-testkit) In-memory handlers for testing and simulation
-//! - **bridges**: Integration adapters (moved to aura-bridge)
 //! - **storage**: Storage coordination handlers
 //! - **context**: Context/lifecycle management for handler operations
 //!
-//! **Handler Categories**:
-//! - **core**: Base effect handler traits and registry
-//! - **tree**: Commitment tree operations
-//! - **memory**: (moved to aura-testkit) In-memory implementations for testing
-//! - **bridges**: Adapters for integration (moved to aura-bridge)
-//! - **storage**: Storage coordination
-//! - **context**: Context management for handler operations
-//!
 //! **Guard Chain Integration** (docs/003_information_flow_contract.md):
 //! Every message flows: CapGuard → FlowGuard → JournalCoupler → LeakageTracker → Transport
-//!   - Naming: `{Source}{Target}Adapter`
 //!
-//! - **Bridge**: Connects different subsystems or layers
-//!   - Examples: `TypedBridge`
-//!   - Naming: `{System}Bridge` or `{Adjective}Bridge`
-//!
-//! This distinction ensures:
+//! This design ensures:
 //! 1. Effects are purely declarative - they specify the interface without implementation
 //! 2. Handlers are interpretive - they provide the concrete semantics
 //! 3. The same effect can have multiple handlers (mock vs real, different backends)
@@ -235,9 +221,6 @@ pub use context::{
     MetricsContext, PlatformInfo, PropertyCheckingConfig, SessionMetadata, SimulationContext,
     TracingContext,
 };
-
-// Bridge adapters
-// Bridges live in aura-bridge to avoid coupling handler internals to other Layer 4 crates.
 
 // Memory-based handlers moved to aura-testkit.
 

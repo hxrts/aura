@@ -15,7 +15,7 @@ use aura_core::{
     },
     identifiers::AuthorityId,
 };
-use aura_journal::facts::social::BlockId;
+use crate::facts::BlockId;
 use std::sync::Arc;
 
 /// Block-level data availability.
@@ -226,7 +226,7 @@ mod tests {
         StorageCoreEffects, StorageExtendedEffects,
     };
     use aura_core::time::{PhysicalTime, TimeStamp};
-    use aura_journal::facts::social::{BlockFact, ResidentFact, StewardFact};
+    use crate::facts::{BlockFact, ResidentFact, StewardFact};
     use std::collections::HashMap;
 
     fn test_timestamp() -> TimeStamp {

@@ -95,8 +95,8 @@ pub use aura_core::effects::{LogicalClockEffects, OrderClockEffects, PhysicalTim
 pub use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
 
 pub use crdt::{
-    CausalContext, CmHandler, CvHandler, DeliveryConfig, DeliveryEffect, DeliveryGuarantee,
-    DeltaHandler, GossipStrategy, TopicId,
+    ComposedHandler, CrdtCoordinator, CrdtCoordinatorError, DeliveryConfig, DeliveryEffect,
+    DeliveryGuarantee, GossipStrategy, TopicId,
 };
 pub use effect_api::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 pub use params::*; // Re-export all parameter types

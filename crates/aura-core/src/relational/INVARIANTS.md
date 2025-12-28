@@ -11,23 +11,26 @@ Information must not flow across relational context boundaries without explicit 
 ### Enforcement Locus
 
 1. **Namespace Separation**:
-   - Module: `aura-core/src/types/context.rs`
+   - Module: `aura-core/src/types/identifiers.rs`
    - Type: `ContextId` - Opaque identifier for relational contexts
-   - Function: `JournalNamespace::from_context()` - Maps contexts to isolated namespaces
+   - Module: `aura-journal/src/fact.rs`
+   - Type: `JournalNamespace` - Maps contexts to isolated namespaces
 
 2. **Journal Isolation**:
-   - Module: `aura-journal/src/namespace.rs`
-   - Function: `validate_namespace_access()` - Ensures facts stay in correct namespace
+   - Module: `aura-journal/src/fact.rs`
+   - Type: `JournalNamespace::Context(ContextId)` - Context-scoped journals
    - Property: Facts from context A cannot appear in context B's journal
 
 3. **State Reduction Boundaries**:
-   - Module: `aura-journal/src/reduce/relational.rs`
-   - Function: `reduce_context_state()` - Reduces only facts from single context
+   - Module: `aura-journal/src/reduction.rs`
+   - Function: `reduce_context()` - Reduces only facts from single context
    - Property: Reduction never reads across context boundaries
 
 4. **Transport Scoping**:
-   - Module: `aura-transport/src/channel/context_scoped.rs`
-   - Function: `SecureChannel::bind_to_context()` - Channels bound to single context
+   - Module: `aura-transport/src/context_transport.rs`
+   - Type: `ContextTransportSession` - Sessions bound to single context
+   - Module: `aura-rendezvous/src/new_channel.rs`
+   - Type: `SecureChannel` - Channels bound to context via `context_id` field
    - Property: Messages cannot leak between contexts via channels
 
 ### Failure Mode

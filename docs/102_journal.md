@@ -59,6 +59,26 @@ The `order` field provides an opaque, privacy-preserving total order for determi
 
 This model supports account operations, relational context operations, snapshots, and rendezvous receipts. Each fact is self contained. Facts are validated before insertion into a namespace.
 
+## 2.2 Protocol-Level vs Domain-Level Relational Facts
+
+`RelationalFact` has only two variants:
+
+- `Protocol(ProtocolRelationalFact)` — protocol-level facts that **must** live in `aura-journal` because reduction semantics depend on them.
+- `Generic { .. }` — extensibility hook for domain facts (`DomainFact` + `FactReducer`).
+
+**Criteria for ProtocolRelationalFact** (all must hold):
+
+1. **Reduction-coupled**: the fact directly affects core reduction invariants in `reduce_context()` (not just a view).
+2. **Cross-domain**: the fact’s semantics are shared across multiple protocols or layers.
+3. **Non-derivable**: the state cannot be reconstructed purely via `FactReducer` + `RelationalFact::Generic`.
+
+If a fact does **not** meet all three criteria, it must be implemented as a domain fact and stored via `RelationalFact::Generic`.
+
+**Enforcement**:
+
+- All protocol facts are defined in `crates/aura-journal/src/protocol_facts.rs`.
+- Any new protocol fact requires a doc update in this section and a matching reduction rule.
+
 ## 2.1 Domain Fact Contract (Checklist + Lint)
 
 Domain facts are the extensibility mechanism for Layer 2 crates. Every domain fact must follow this contract to ensure cross-replica determinism and schema stability:

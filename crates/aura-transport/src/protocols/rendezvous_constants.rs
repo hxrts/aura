@@ -3,8 +3,8 @@
 /// Rendezvous protocol version for authentication payloads.
 pub const RENDEZVOUS_PROTOCOL_VERSION: u8 = 1;
 
-/// Social payload discriminator for rendezvous messages.
-pub const SOCIAL_PROTOCOL_RENDEZVOUS: &str = "rendezvous";
+/// Payload discriminator for rendezvous messages.
+pub const PROTOCOL_RENDEZVOUS: &str = "rendezvous";
 
 /// Transport descriptor metadata keys for rendezvous negotiation.
 pub const META_ALPN: &str = "alpn";

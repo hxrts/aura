@@ -22,7 +22,7 @@
 //!
 //! **Message Domains**:
 //! - **crypto**: Threshold cryptography (FROST, resharing, key derivation)
-//! - **social_types**: Social coordination (peer discovery, rendezvous)
+//! - **types**: Rendezvous coordination (peer discovery, rendezvous)
 //! - **common_envelope**: Message envelope infrastructure (versioning, wire format)
 //!
 //! **Design Principles** (per docs/001_system_architecture.md, docs/107_mpst_and_choreography.md):
@@ -35,7 +35,7 @@
 //! ## Usage Pattern
 //!
 //! ```rust,ignore
-//! use crate::messages::{AuraMessage, crypto::CryptoMessage, social::SocialMessage};
+//! use crate::messages::{AuraMessage, crypto::CryptoMessage, types::RendezvousEnvelope};
 //!
 //! // Create protocol-specific message
 //! let crypto_msg = CryptoMessage::new(sender_id, sequence, timestamp, payload);
@@ -47,8 +47,8 @@
 
 // Domain-specific message modules
 pub mod crypto;
-pub mod social_rendezvous;
-pub mod social_types;
+pub mod rendezvous;
+pub mod types;
 
 // Shared infrastructure
 pub mod common_envelope;
@@ -56,7 +56,7 @@ pub mod common_envelope;
 // Re-export main message types organized by domain
 pub use common_envelope::{Signed, WireEnvelope};
 pub use crypto::*;
-pub use social_types::*;
+pub use types::*;
 
 /// Current wire format version
 pub const WIRE_FORMAT_VERSION: u16 = crate::config::DEFAULT_WIRE_FORMAT_VERSION;
@@ -66,8 +66,8 @@ pub const WIRE_FORMAT_VERSION: u16 = crate::config::DEFAULT_WIRE_FORMAT_VERSION;
 pub enum AuraMessage {
     /// Threshold cryptography protocol messages
     Crypto(crypto::CryptoMessage),
-    /// Social coordination protocol messages
-    Social(social_types::SocialMessage),
+    /// Rendezvous coordination protocol messages
+    Rendezvous(types::RendezvousEnvelope),
 }
 
 impl AuraMessage {
@@ -75,7 +75,7 @@ impl AuraMessage {
     pub fn domain(&self) -> &'static str {
         match self {
             AuraMessage::Crypto(_) => "crypto",
-            AuraMessage::Social(_) => "social",
+            AuraMessage::Rendezvous(_) => "rendezvous",
         }
     }
 
@@ -83,7 +83,7 @@ impl AuraMessage {
     pub fn protocol_type(&self) -> &'static str {
         match self {
             AuraMessage::Crypto(msg) => msg.protocol_type(),
-            AuraMessage::Social(msg) => msg.protocol_type(),
+            AuraMessage::Rendezvous(msg) => msg.protocol_type(),
         }
     }
 }

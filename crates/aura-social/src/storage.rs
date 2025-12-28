@@ -3,7 +3,7 @@
 //! Provides storage budget enforcement and allocation policies.
 
 use crate::error::SocialError;
-use aura_journal::facts::social::{BlockFact, BlockMemberFact, BlockStorageBudget, ResidentFact};
+use crate::facts::{BlockFact, BlockMemberFact, BlockStorageBudget, ResidentFact};
 
 /// Service for storage budget calculations and validation.
 pub struct StorageService;
@@ -95,7 +95,7 @@ impl StorageService {
 mod tests {
     use super::*;
     use aura_core::time::{PhysicalTime, TimeStamp};
-    use aura_journal::facts::social::{BlockId, NeighborhoodId};
+    use crate::facts::{BlockId, NeighborhoodId};
 
     fn test_timestamp() -> TimeStamp {
         TimeStamp::PhysicalClock(PhysicalTime {

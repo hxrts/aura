@@ -490,56 +490,57 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
             for fact in &journal.facts {
                 if let FactContent::Relational(rf) = &fact.content {
                     let binding = match rf {
-                        RelationalFact::GuardianBinding {
-                            account_id,
-                            guardian_id,
-                            binding_hash,
-                        } => RelationalBinding {
-                            binding_type: RelationalBindingType::GuardianBinding {
-                                account_id: *account_id,
-                                guardian_id: *guardian_id,
+                        RelationalFact::Protocol(protocol) => match protocol {
+                            crate::protocol_facts::ProtocolRelationalFact::GuardianBinding {
+                                account_id,
+                                guardian_id,
+                                binding_hash,
+                            } => RelationalBinding {
+                                binding_type: RelationalBindingType::GuardianBinding {
+                                    account_id: *account_id,
+                                    guardian_id: *guardian_id,
+                                },
+                                context_id: *context_id,
+                                data: binding_hash.0.to_vec(),
                             },
-                            context_id: *context_id,
-                            data: binding_hash.0.to_vec(),
-                        },
-                        RelationalFact::RecoveryGrant {
-                            account_id,
-                            guardian_id,
-                            grant_hash,
-                        } => RelationalBinding {
-                            binding_type: RelationalBindingType::RecoveryGrant {
-                                account_id: *account_id,
-                                guardian_id: *guardian_id,
+                            crate::protocol_facts::ProtocolRelationalFact::RecoveryGrant {
+                                account_id,
+                                guardian_id,
+                                grant_hash,
+                            } => RelationalBinding {
+                                binding_type: RelationalBindingType::RecoveryGrant {
+                                    account_id: *account_id,
+                                    guardian_id: *guardian_id,
+                                },
+                                context_id: *context_id,
+                                data: grant_hash.0.to_vec(),
                             },
-                            context_id: *context_id,
-                            data: grant_hash.0.to_vec(),
-                        },
-                        RelationalFact::Consensus {
-                            consensus_id,
-                            operation_hash,
-                            threshold_met: _,
-                            participant_count: _,
-                        } => RelationalBinding {
-                            binding_type: RelationalBindingType::Generic("consensus".to_string()),
-                            context_id: *context_id,
-                            data: [consensus_id.0.to_vec(), operation_hash.0.to_vec()].concat(),
-                        },
-                        RelationalFact::AmpChannelCheckpoint(cp) => {
+                            crate::protocol_facts::ProtocolRelationalFact::Consensus {
+                                consensus_id,
+                                operation_hash,
+                                threshold_met: _,
+                                participant_count: _,
+                            } => RelationalBinding {
+                                binding_type: RelationalBindingType::Generic("consensus".to_string()),
+                                context_id: *context_id,
+                                data: [consensus_id.0.to_vec(), operation_hash.0.to_vec()].concat(),
+                            },
+                            crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(cp) => {
                             channel_checkpoints
                                 .entry((cp.channel, cp.chan_epoch))
                                 .or_default()
                                 .push(cp.clone());
                             continue;
-                        }
-                        RelationalFact::AmpProposedChannelEpochBump(bump) => {
+                            }
+                            crate::protocol_facts::ProtocolRelationalFact::AmpProposedChannelEpochBump(bump) => {
                             proposed_bumps.push(bump.clone());
                             continue;
-                        }
-                        RelationalFact::AmpCommittedChannelEpochBump(bump) => {
+                            }
+                            crate::protocol_facts::ProtocolRelationalFact::AmpCommittedChannelEpochBump(bump) => {
                             committed_bumps.push(bump.clone());
                             continue;
-                        }
-                        RelationalFact::AmpChannelPolicy(policy) => {
+                            }
+                            crate::protocol_facts::ProtocolRelationalFact::AmpChannelPolicy(policy) => {
                             channel_policies
                                 .entry(policy.channel)
                                 .and_modify(|existing| {
@@ -552,14 +553,15 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 })
                                 .or_insert_with(|| policy.clone());
                             continue;
-                        }
-                        RelationalFact::LeakageEvent(event) => {
+                            }
+                            crate::protocol_facts::ProtocolRelationalFact::LeakageEvent(event) => {
                             let observer = aura_core::effects::ObserverClass::from(event.observer);
                             let current = leakage_budget.for_observer(observer);
                             let next = current.saturating_add(event.amount);
                             leakage_budget.set_for_observer(observer, next);
                             continue;
-                        }
+                            }
+                        },
                         // Generic bindings handle all domain-specific facts
                         // (ChatFact, InvitationFact, ContactFact, etc.)
                         // via DomainFact::to_generic()
@@ -893,11 +895,13 @@ mod tests {
         let fact = Fact {
             order: OrderTime([1u8; 32]),
             timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            content: FactContent::Relational(RelationalFact::GuardianBinding {
-                account_id: AuthorityId::new_from_entropy([15u8; 32]),
-                guardian_id: AuthorityId::new_from_entropy([16u8; 32]),
-                binding_hash: Hash32::default(),
-            }),
+            content: FactContent::Relational(RelationalFact::Protocol(
+                crate::protocol_facts::ProtocolRelationalFact::GuardianBinding {
+                    account_id: AuthorityId::new_from_entropy([15u8; 32]),
+                    guardian_id: AuthorityId::new_from_entropy([16u8; 32]),
+                    binding_hash: Hash32::default(),
+                },
+            )),
         };
 
         journal.add_fact(fact).unwrap();
@@ -939,15 +943,21 @@ mod tests {
             .add_fact(Fact {
                 order: OrderTime([9u8; 32]),
                 timestamp: TimeStamp::OrderClock(OrderTime([9u8; 32])),
-                content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(checkpoint)),
+                content: FactContent::Relational(RelationalFact::Protocol(
+                    crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(
+                        checkpoint,
+                    ),
+                )),
             })
             .unwrap();
         journal
             .add_fact(Fact {
                 order: OrderTime([10u8; 32]),
                 timestamp: TimeStamp::OrderClock(OrderTime([10u8; 32])),
-                content: FactContent::Relational(RelationalFact::AmpProposedChannelEpochBump(
-                    proposed,
+                content: FactContent::Relational(RelationalFact::Protocol(
+                    crate::protocol_facts::ProtocolRelationalFact::AmpProposedChannelEpochBump(
+                        proposed,
+                    ),
                 )),
             })
             .unwrap();
@@ -988,15 +998,21 @@ mod tests {
             .add_fact(Fact {
                 order: OrderTime([11u8; 32]),
                 timestamp: TimeStamp::OrderClock(OrderTime([11u8; 32])),
-                content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(checkpoint)),
+                content: FactContent::Relational(RelationalFact::Protocol(
+                    crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(
+                        checkpoint,
+                    ),
+                )),
             })
             .unwrap();
         journal
             .add_fact(Fact {
                 order: OrderTime([12u8; 32]),
                 timestamp: TimeStamp::OrderClock(OrderTime([12u8; 32])),
-                content: FactContent::Relational(RelationalFact::AmpProposedChannelEpochBump(
-                    emergency,
+                content: FactContent::Relational(RelationalFact::Protocol(
+                    crate::protocol_facts::ProtocolRelationalFact::AmpProposedChannelEpochBump(
+                        emergency,
+                    ),
                 )),
             })
             .unwrap();
@@ -1027,31 +1043,35 @@ mod tests {
         let checkpoint = Fact {
             order: OrderTime([1u8; 32]),
             timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(
-                ChannelCheckpoint {
-                    context: ctx,
-                    channel,
-                    chan_epoch: 0,
-                    base_gen: 10,
-                    window: 16,
-                    ck_commitment: Hash32::new([8u8; 32]),
-                    skip_window_override: Some(16),
-                },
+            content: FactContent::Relational(RelationalFact::Protocol(
+                crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(
+                    ChannelCheckpoint {
+                        context: ctx,
+                        channel,
+                        chan_epoch: 0,
+                        base_gen: 10,
+                        window: 16,
+                        ck_commitment: Hash32::new([8u8; 32]),
+                        skip_window_override: Some(16),
+                    },
+                ),
             )),
         };
 
         let proposed = Fact {
             order: OrderTime([2u8; 32]),
             timestamp: TimeStamp::OrderClock(OrderTime([2u8; 32])),
-            content: FactContent::Relational(RelationalFact::AmpProposedChannelEpochBump(
-                ProposedChannelEpochBump {
-                    context: ctx,
-                    channel,
-                    parent_epoch: 0,
-                    new_epoch: 1,
-                    bump_id: Hash32::new([9u8; 32]),
-                    reason: ChannelBumpReason::Routine,
-                },
+            content: FactContent::Relational(RelationalFact::Protocol(
+                crate::protocol_facts::ProtocolRelationalFact::AmpProposedChannelEpochBump(
+                    ProposedChannelEpochBump {
+                        context: ctx,
+                        channel,
+                        parent_epoch: 0,
+                        new_epoch: 1,
+                        bump_id: Hash32::new([9u8; 32]),
+                        reason: ChannelBumpReason::Routine,
+                    },
+                ),
             )),
         };
 

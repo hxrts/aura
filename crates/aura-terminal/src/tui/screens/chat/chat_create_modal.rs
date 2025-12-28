@@ -85,14 +85,13 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
         Theme::PRIMARY
     };
 
-    // Header props with step indicator (4 steps: Details, Members, Threshold, Waiting)
+    // Header props with step indicator (3 steps: Details, Members, Threshold)
     let step_num = match step {
         CreateChannelStep::Details => 1,
         CreateChannelStep::Members => 2,
         CreateChannelStep::Threshold => 3,
-        CreateChannelStep::Waiting => 4,
     };
-    let header_props = ModalHeaderProps::new("New Chat Group").with_step(step_num, 4);
+    let header_props = ModalHeaderProps::new("New Chat Group").with_step(step_num, 3);
 
     // Footer hints vary by step
     let footer_hints = match step {
@@ -111,7 +110,6 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
             KeyHint::new("↑↓", "Adjust"),
             KeyHint::new("Enter", "Create"),
         ],
-        CreateChannelStep::Waiting => vec![KeyHint::new("Esc", "Close")],
     };
     let footer_props = ModalFooterProps::new(footer_hints);
 
@@ -199,14 +197,6 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                         };
                         vec![threshold_selector(&selector).into()]
                     },
-                    CreateChannelStep::Waiting => vec![element! {
-                        View {
-                            Text(content: "Invites Sent", color: Theme::TEXT)
-                            View(margin_top: Spacing::XS) {
-                                Text(content: props.status.clone(), color: Theme::TEXT_MUTED)
-                            }
-                        }
-                    }.into_any()],
                 })
 
                 // Status message (error/loading)

@@ -1,6 +1,6 @@
-//! Layer 2: Journal CRDT Implementations
+//! Layer 2: Journal Algebra (Semilattice) Types
 //!
-//! Domain-specific CRDT types built on aura-core semilattice foundation (Layer 1).
+//! Domain-specific CRDT types built on the aura-core semilattice foundation (Layer 1).
 //! All types implement JoinSemilattice (⊔) or MeetSemiLattice (⊓) for eventual consistency.
 //!
 //! **CRDT Types**:

@@ -13,6 +13,7 @@ aura-protocol = { path = "../aura-protocol" }
 aura-guards = { path = "../aura-guards" }
 aura-journal = { path = "../aura-journal" }
 aura-authorization = { path = "../aura-authorization" }
+aura-maintenance = { path = "../aura-maintenance" }
 aura-rendezvous = { path = "../aura-rendezvous" }
 aura-effects = { path = "../aura-effects" }
 

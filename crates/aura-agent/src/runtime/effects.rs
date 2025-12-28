@@ -462,7 +462,7 @@ impl AuraEffectSystem {
             true,
             Some(Self::TEST_CRYPTO_SEED),
             None, // No shared transport
-            None, // Default authority derivation (legacy)
+            None, // Derive authority from device_id
         ))
     }
 
@@ -488,7 +488,7 @@ impl AuraEffectSystem {
             true,
             Some(Self::TEST_CRYPTO_SEED),
             None, // No shared transport
-            None, // Default authority derivation (legacy)
+            None, // Derive authority from device_id
         ))
     }
 
@@ -507,7 +507,7 @@ impl AuraEffectSystem {
             true,
             Some(Self::TEST_CRYPTO_SEED),
             Some(shared_transport),
-            None, // Default authority derivation (legacy)
+            None, // Derive authority from device_id
         ))
     }
 
@@ -523,7 +523,7 @@ impl AuraEffectSystem {
             true,
             Some(crypto_seed),
             None, // No shared transport
-            None, // Default authority derivation (legacy)
+            None, // Derive authority from device_id
         ))
     }
 
@@ -547,7 +547,7 @@ impl AuraEffectSystem {
             true,
             Some(crypto_seed),
             Some(shared_transport),
-            None, // Default authority derivation (legacy)
+            None, // Derive authority from device_id
         ))
     }
 
@@ -1595,34 +1595,13 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         // Get current epoch for this authority
         let current_epoch = self.get_current_epoch(authority).await;
 
-        // Try to retrieve stored threshold metadata for this epoch
-        if let Some(metadata) = self.get_threshold_metadata(authority, current_epoch).await {
-            return Some(aura_core::threshold::ThresholdConfig {
+        // Retrieve stored threshold metadata for this epoch
+        self.get_threshold_metadata(authority, current_epoch)
+            .await
+            .map(|metadata| aura_core::threshold::ThresholdConfig {
                 threshold: metadata.threshold,
                 total_participants: metadata.total_participants,
-            });
-        }
-
-        // Fallback: check if we have keys but no metadata (legacy bootstrap case)
-        let location = SecureStorageLocation::with_sub_key(
-            "frost_keys",
-            format!("{}/{}", authority, current_epoch),
-            "1",
-        );
-        if self
-            .secure_storage_handler
-            .secure_exists(&location)
-            .await
-            .unwrap_or(false)
-        {
-            // Legacy case: keys exist but no metadata - assume 1-of-1
-            Some(aura_core::threshold::ThresholdConfig {
-                threshold: 1,
-                total_participants: 1,
             })
-        } else {
-            None
-        }
     }
 
     async fn threshold_state(
@@ -1632,38 +1611,15 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         // Get current epoch for this authority
         let current_epoch = self.get_current_epoch(authority).await;
 
-        // Try to retrieve stored threshold metadata for this epoch
-        if let Some(metadata) = self.get_threshold_metadata(authority, current_epoch).await {
-            return Some(aura_core::threshold::ThresholdState {
+        // Retrieve stored threshold metadata for this epoch
+        self.get_threshold_metadata(authority, current_epoch)
+            .await
+            .map(|metadata| aura_core::threshold::ThresholdState {
                 epoch: metadata.epoch,
                 threshold: metadata.threshold,
                 total_participants: metadata.total_participants,
                 participants: metadata.resolved_participants(),
-            });
-        }
-
-        // Fallback: check if we have keys but no metadata (legacy bootstrap case)
-        let location = SecureStorageLocation::with_sub_key(
-            "frost_keys",
-            format!("{}/{}", authority, current_epoch),
-            "1",
-        );
-        if self
-            .secure_storage_handler
-            .secure_exists(&location)
-            .await
-            .unwrap_or(false)
-        {
-            // Legacy case: keys exist but no metadata - return minimal state
-            Some(aura_core::threshold::ThresholdState {
-                epoch: current_epoch,
-                threshold: 1,
-                total_participants: 1,
-                participants: Vec::new(),
             })
-        } else {
-            None
-        }
     }
 
     async fn has_signing_capability(&self, authority: &AuthorityId) -> bool {
@@ -2515,8 +2471,8 @@ impl AmpChannelEffects for AuraEffectSystem {
             skip_window_override: Some(window),
         };
 
-        self.insert_relational_fact(aura_journal::fact::RelationalFact::AmpChannelCheckpoint(
-            checkpoint,
+        self.insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
         ))
         .await
         .map_err(map_amp_err)?;
@@ -2527,8 +2483,8 @@ impl AmpChannelEffects for AuraEffectSystem {
                 channel,
                 skip_window: params.skip_window.or(Some(window)),
             };
-            self.insert_relational_fact(aura_journal::fact::RelationalFact::AmpChannelPolicy(
-                policy,
+            self.insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
             ))
             .await
             .map_err(map_amp_err)?;
@@ -2549,9 +2505,9 @@ impl AmpChannelEffects for AuraEffectSystem {
             consensus_id: Default::default(),
         };
 
-        self.insert_relational_fact(
-            aura_journal::fact::RelationalFact::AmpCommittedChannelEpochBump(committed),
-        )
+        self.insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(committed),
+        ))
         .await
         .map_err(map_amp_err)?;
 
@@ -2561,7 +2517,9 @@ impl AmpChannelEffects for AuraEffectSystem {
             skip_window: Some(0),
         };
 
-        self.insert_relational_fact(aura_journal::fact::RelationalFact::AmpChannelPolicy(policy))
+        self.insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
+        ))
             .await
             .map_err(map_amp_err)?;
 
@@ -2904,14 +2862,6 @@ impl AuraEffectSystem {
         let _ = self
             .secure_storage_handler
             .secure_delete(&shares_location, &delete_caps)
-            .await;
-
-        // Best-effort cleanup of legacy guardian shares for this epoch
-        let legacy_shares_location =
-            SecureStorageLocation::new("guardian_shares", format!("{}/{}", authority, epoch));
-        let _ = self
-            .secure_storage_handler
-            .secure_delete(&legacy_shares_location, &delete_caps)
             .await;
 
         // Delete public key for this epoch

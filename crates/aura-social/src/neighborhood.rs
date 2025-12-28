@@ -3,7 +3,7 @@
 //! Provides a materialized view of a neighborhood aggregated from journal facts.
 
 use crate::error::SocialError;
-use aura_journal::facts::social::{
+use crate::facts::{
     AdjacencyFact, BlockId, BlockMemberFact, NeighborhoodFact, NeighborhoodId,
 };
 use serde::{Deserialize, Serialize};

@@ -5,7 +5,7 @@
 
 use crate::error::SocialError;
 use aura_core::identifiers::AuthorityId;
-use aura_journal::facts::social::{
+use crate::facts::{
     BlockConfigFact, BlockFact, BlockId, BlockStorageBudget, ResidentFact, StewardCapabilities,
     StewardFact,
 };

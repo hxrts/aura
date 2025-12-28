@@ -4,7 +4,7 @@
 //! that hides CRDT implementation details.
 
 use crate::fact::{Fact, FactContent, Journal as FactJournal, JournalNamespace};
-use crate::semilattice::{AccountState, OpLog};
+use crate::algebra::{AccountState, OpLog};
 
 use aura_core::effects::time::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
 use aura_core::hash::hash;
@@ -182,7 +182,7 @@ impl Journal {
     /// Add a relational fact directly to the journal
     ///
     /// This method allows adding pre-constructed relational facts (such as
-    /// `RelationalFact::Generic`, `RelationalFact::GuardianBinding`, etc.)
+    /// `RelationalFact::Generic`, `RelationalFact::Protocol(...)`, etc.)
     /// directly to the journal without going through the `JournalFact` wrapper.
     ///
     /// # Example
@@ -278,13 +278,34 @@ impl Journal {
                 content_type: match &fact.content {
                     FactContent::AttestedOp(_) => "AttestedOp".to_string(),
                     FactContent::Relational(rel) => match rel {
-                        crate::fact::RelationalFact::GuardianBinding { .. } => {
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::GuardianBinding { .. },
+                        ) => {
                             "GuardianBinding".to_string()
                         }
-                        crate::fact::RelationalFact::RecoveryGrant { .. } => {
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::RecoveryGrant { .. },
+                        ) => {
                             "RecoveryGrant".to_string()
                         }
-                        crate::fact::RelationalFact::Consensus { .. } => "Consensus".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::Consensus { .. },
+                        ) => "Consensus".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(..),
+                        ) => "AmpChannelCheckpoint".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::AmpProposedChannelEpochBump(..),
+                        ) => "AmpProposedChannelEpochBump".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::AmpCommittedChannelEpochBump(..),
+                        ) => "AmpCommittedChannelEpochBump".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::AmpChannelPolicy(..),
+                        ) => "AmpChannelPolicy".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::LeakageEvent(..),
+                        ) => "LeakageEvent".to_string(),
                         crate::fact::RelationalFact::Generic { binding_type, .. } => {
                             format!("Generic:{}", binding_type)
                         }

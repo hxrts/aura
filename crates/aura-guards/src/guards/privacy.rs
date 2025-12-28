@@ -334,7 +334,9 @@ async fn append_leakage_facts<E: GuardEffects + PhysicalTimeEffects + GuardConte
             timestamp: timestamp.clone(),
         };
 
-        let fact_content = FactContent::Relational(RelationalFact::LeakageEvent(leakage_fact));
+        let fact_content = FactContent::Relational(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::LeakageEvent(leakage_fact),
+        ));
         let bytes = serde_json::to_vec(&fact_content)
             .map_err(|e| AuraError::serialization(e.to_string()))?;
         let nonce = effect_system.random_bytes(8).await;
@@ -402,7 +404,9 @@ pub async fn reset_privacy_budget<E: GuardEffects + PhysicalTimeEffects + GuardC
         operation: RESET_OPERATION.to_string(),
         timestamp: effect_system.physical_time().await?,
     };
-    let reset_content = FactContent::Relational(RelationalFact::LeakageEvent(reset_event));
+    let reset_content = FactContent::Relational(RelationalFact::Protocol(
+        aura_journal::ProtocolRelationalFact::LeakageEvent(reset_event),
+    ));
     let reset_bytes =
         serde_json::to_vec(&reset_content).map_err(|e| AuraError::serialization(e.to_string()))?;
     let reset_key = leakage_fact_key(context_id, LeakageObserverClass::External, 0, b"reset");
@@ -469,7 +473,9 @@ fn extract_leakage_facts(journal: &Journal, context_id: ContextId) -> Vec<Leakag
         .iter()
         .filter_map(|(_key, value)| decode_fact_content(value))
         .filter_map(|content| match content {
-            FactContent::Relational(RelationalFact::LeakageEvent(event))
+            FactContent::Relational(RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::LeakageEvent(event),
+            ))
                 if event.context_id == context_id =>
             {
                 Some(event)

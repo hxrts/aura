@@ -240,7 +240,7 @@ layer_of() {
     aura-core) echo 1 ;;
     aura-journal|aura-authorization|aura-signature|aura-store|aura-transport|aura-mpst|aura-macros) echo 2 ;;
     aura-effects|aura-composition) echo 3 ;;
-    aura-protocol|aura-guards|aura-consensus|aura-amp|aura-anti-entropy|aura-bridge) echo 4 ;;
+    aura-protocol|aura-guards|aura-consensus|aura-amp|aura-anti-entropy) echo 4 ;;
     aura-authentication|aura-chat|aura-invitation|aura-recovery|aura-relational|aura-rendezvous|aura-sync|aura-app) echo 5 ;;
     aura-agent|aura-simulator) echo 6 ;;
     aura-terminal) echo 7 ;;
@@ -293,7 +293,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_DEPS" = true ]; then
 
   # Layer 4 dependency firewall: prevent upward deps into Layer 6+
   section "Layer 4 firewall — disallow dependencies on runtime/UI/testkit layers"
-  l4_crates=(aura-protocol aura-guards aura-consensus aura-amp aura-anti-entropy aura-bridge)
+  l4_crates=(aura-protocol aura-guards aura-consensus aura-amp aura-anti-entropy)
   l4_blocked="aura-agent|aura-simulator|aura-app|aura-terminal|aura-testkit"
   for crate in "${l4_crates[@]}"; do
     if [ -f "crates/$crate/Cargo.toml" ]; then

@@ -53,11 +53,12 @@ pub mod maintenance;
 pub mod sync;
 
 // Re-export key service types
-pub use maintenance::{
-    AdminReplaced, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEvent,
-    MaintenanceService, MaintenanceServiceConfig, SnapshotCompleted, SnapshotProposed,
-    UpgradeActivated, UpgradeProposal,
+pub use aura_maintenance::{
+    AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceFact,
+    SnapshotCompleted, SnapshotProposed, UpgradeActivated, UpgradeProposalMetadata,
+    MAINTENANCE_FACT_TYPE_ID,
 };
+pub use maintenance::{MaintenanceService, MaintenanceServiceConfig, UpgradeProposal};
 pub use sync::{SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth};
 
 use serde::{Deserialize, Serialize};

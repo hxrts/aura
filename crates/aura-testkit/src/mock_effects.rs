@@ -16,7 +16,7 @@ use aura_core::crypto::single_signer::{
 };
 use aura_core::effects::authorization::{AuthorizationDecision, AuthorizationError};
 use aura_core::effects::crypto::SigningKeyGenResult;
-use aura_core::effects::network::{NetworkError, PeerEventStream};
+use aura_core::effects::network::{NetworkError, PeerEventStream, UdpEffects, UdpSocketEffects};
 use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::time::{
     LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError,
@@ -825,6 +825,41 @@ impl NetworkExtendedEffects for MockEffects {
 
     async fn close(&self, _connection_id: &str) -> Result<(), NetworkError> {
         Err(NetworkError::NotImplemented)
+    }
+}
+
+#[derive(Debug, Default)]
+struct MockUdpSocket;
+
+#[async_trait]
+impl UdpSocketEffects for MockUdpSocket {
+    async fn set_broadcast(&self, _enabled: bool) -> Result<(), NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
+
+    async fn send_to(
+        &self,
+        _payload: &[u8],
+        _addr: std::net::SocketAddr,
+    ) -> Result<usize, NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
+
+    async fn recv_from(
+        &self,
+        _buffer: &mut [u8],
+    ) -> Result<(usize, std::net::SocketAddr), NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
+}
+
+#[async_trait]
+impl UdpEffects for MockEffects {
+    async fn udp_bind(
+        &self,
+        _addr: std::net::SocketAddr,
+    ) -> Result<std::sync::Arc<dyn UdpSocketEffects>, NetworkError> {
+        Ok(std::sync::Arc::new(MockUdpSocket::default()))
     }
 }
 

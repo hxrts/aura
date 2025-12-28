@@ -1,8 +1,8 @@
 //! LAN discovery packet formats and configuration (pure types).
 //!
-//! The UDP socket implementation lives in Layer 6 (`aura-agent`) so that Layer 5
-//! remains runtime/OS-agnostic and simulatable. This module intentionally contains
-//! **no** `tokio` or `std::net` usage.
+//! The UDP socket implementation is provided via `UdpEffects` (Layer 3) and wired by
+//! the runtime (Layer 6) so Layer 5 remains runtime/OS-agnostic and simulatable.
+//! This module intentionally contains **no** `tokio` or `std::net` usage.
 
 use crate::facts::{RendezvousDescriptor, TransportHint};
 use aura_core::identifiers::AuthorityId;

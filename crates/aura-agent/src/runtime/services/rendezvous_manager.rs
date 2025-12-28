@@ -8,6 +8,7 @@
 //! Supports local network peer discovery via UDP broadcast. When enabled, the manager
 //! will announce presence and discover peers on the local network.
 
+use aura_core::effects::network::UdpEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::{
@@ -151,6 +152,9 @@ pub struct RendezvousManager {
     /// Time effects (simulator-controllable)
     time: Arc<dyn PhysicalTimeEffects>,
 
+    /// UDP effects for LAN discovery sockets
+    udp: Arc<dyn UdpEffects>,
+
     /// Background cleanup task handle
     cleanup_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
@@ -176,6 +180,7 @@ impl RendezvousManager {
         authority_id: AuthorityId,
         config: RendezvousManagerConfig,
         time: Arc<dyn PhysicalTimeEffects>,
+        udp: Arc<dyn UdpEffects>,
     ) -> Self {
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
         Self {
@@ -184,6 +189,7 @@ impl RendezvousManager {
             state: Arc::new(RwLock::new(RendezvousManagerState::Stopped)),
             authority_id,
             time,
+            udp,
             cleanup_task: Arc::new(RwLock::new(None)),
             shutdown_tx,
             lan_discovery: Arc::new(RwLock::new(None)),
@@ -195,7 +201,12 @@ impl RendezvousManager {
 
     /// Create with default configuration
     pub fn with_defaults(authority_id: AuthorityId, time: Arc<dyn PhysicalTimeEffects>) -> Self {
-        Self::new(authority_id, RendezvousManagerConfig::default(), time)
+        Self::new(
+            authority_id,
+            RendezvousManagerConfig::default(),
+            time,
+            Arc::new(aura_effects::RealUdpEffectsHandler::new()),
+        )
     }
 
     /// Get the current state
@@ -515,10 +526,14 @@ impl RendezvousManager {
 
         // Create LAN discovery service
         let time: Arc<dyn PhysicalTimeEffects> = self.time.clone();
-        let lan_service =
-            LanDiscoveryService::new(self.config.lan_discovery.clone(), self.authority_id, time)
-                .await
-                .map_err(|e| format!("Failed to create LAN discovery service: {}", e))?;
+        let lan_service = LanDiscoveryService::new(
+            self.config.lan_discovery.clone(),
+            self.authority_id,
+            self.udp.clone(),
+            time,
+        )
+        .await
+        .map_err(|e| format!("Failed to create LAN discovery service: {}", e))?;
 
         // Set up callback to cache discovered peers
         let discovered_peers = self.lan_discovered_peers.clone();
@@ -731,10 +746,14 @@ mod tests {
         Arc::new(PhysicalTimeHandler::new())
     }
 
+    fn test_udp() -> Arc<dyn UdpEffects> {
+        Arc::new(aura_effects::RealUdpEffectsHandler::new())
+    }
+
     #[tokio::test]
     async fn test_manager_creation() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config, test_time());
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
 
         assert_eq!(manager.state().await, RendezvousManagerState::Stopped);
         assert!(!manager.is_running().await);
@@ -743,7 +762,7 @@ mod tests {
     #[tokio::test]
     async fn test_manager_lifecycle() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config, test_time());
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
 
         // Start
         manager.start().await.unwrap();
@@ -757,7 +776,7 @@ mod tests {
     #[tokio::test]
     async fn test_descriptor_caching() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config, test_time());
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
         manager.start().await.unwrap();
 
         let descriptor = RendezvousDescriptor {
@@ -787,7 +806,7 @@ mod tests {
     #[tokio::test]
     async fn test_publish_descriptor() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config, test_time());
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
         manager.start().await.unwrap();
 
         let snapshot = test_snapshot(test_authority(), test_context());
@@ -811,7 +830,7 @@ mod tests {
     #[tokio::test]
     async fn test_needs_refresh() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(test_authority(), config, test_time());
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
         manager.start().await.unwrap();
 
         // No descriptor cached - should need refresh

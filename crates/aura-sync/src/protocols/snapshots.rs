@@ -40,8 +40,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{sync_protocol_error, SyncResult};
-use aura_core::{AuraError, AuraResult, DeviceId, Hash32};
-use aura_journal::Epoch as TreeEpoch;
+use aura_core::{AuraError, AuraResult, AuthorityId, Epoch, Hash32};
 
 // =============================================================================
 // Types
@@ -50,14 +49,14 @@ use aura_journal::Epoch as TreeEpoch;
 /// Snapshot proposal
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotProposal {
-    /// Device proposing the snapshot
-    pub proposer: DeviceId,
+    /// Authority proposing the snapshot
+    pub proposer: AuthorityId,
 
     /// Unique proposal identifier
     pub proposal_id: Uuid,
 
     /// Target epoch for snapshot
-    pub target_epoch: TreeEpoch,
+    pub target_epoch: Epoch,
 
     /// State digest at target epoch
     pub state_digest: Hash32,
@@ -68,8 +67,8 @@ impl SnapshotProposal {
     ///
     /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and use `with_id()`
     pub fn new(
-        proposer: DeviceId,
-        target_epoch: TreeEpoch,
+        proposer: AuthorityId,
+        target_epoch: Epoch,
         state_digest: Hash32,
         proposal_uuid: Uuid,
     ) -> Self {
@@ -85,8 +84,8 @@ impl SnapshotProposal {
 /// Snapshot approval from a device
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotApproval {
-    /// Device approving the snapshot
-    pub approver: DeviceId,
+    /// Authority approving the snapshot
+    pub approver: AuthorityId,
 
     /// Proposal being approved
     pub proposal_id: Uuid,
@@ -228,8 +227,8 @@ impl SnapshotProtocol {
     /// Propose a new snapshot
     pub fn propose(
         &self,
-        proposer: DeviceId,
-        target_epoch: TreeEpoch,
+        proposer: AuthorityId,
+        target_epoch: Epoch,
         state_digest: Hash32,
         proposal_id: Uuid,
     ) -> SyncResult<(Option<WriterFenceGuard>, SnapshotProposal)> {
@@ -357,14 +356,14 @@ mod tests {
     #[test]
     fn test_snapshot_proposal() {
         let protocol = SnapshotProtocol::default();
-        let device = DeviceId::from_bytes([1; 32]);
+        let authority = AuthorityId::new_from_entropy([1; 32]);
 
         assert!(!protocol.is_pending());
 
         let (_guard, proposal) = protocol
             .propose(
-                device,
-                10,
+                authority,
+                Epoch::new(10),
                 Hash32([0; 32]),
                 Uuid::from_bytes(12u128.to_be_bytes()),
             )
@@ -379,8 +378,8 @@ mod tests {
         // Second proposal should fail
         assert!(protocol
             .propose(
-                device,
-                11,
+                authority,
+                Epoch::new(11),
                 Hash32([0; 32]),
                 uuid::Uuid::from_bytes(13u128.to_be_bytes())
             )
@@ -395,12 +394,12 @@ mod tests {
             use_writer_fence: false,
         };
         let protocol = SnapshotProtocol::new(config);
-        let device = DeviceId::from_bytes([1; 32]);
+        let authority = AuthorityId::new_from_entropy([1; 32]);
 
         let (_guard, proposal) = protocol
             .propose(
-                device,
-                10,
+                authority,
+                Epoch::new(10),
                 Hash32([0; 32]),
                 Uuid::from_bytes(30u128.to_be_bytes()),
             )
@@ -408,12 +407,12 @@ mod tests {
 
         let approvals = vec![
             SnapshotApproval {
-                approver: DeviceId::from_bytes([2; 32]),
+                approver: AuthorityId::new_from_entropy([2; 32]),
                 proposal_id: proposal.proposal_id,
                 signature: vec![],
             },
             SnapshotApproval {
-                approver: DeviceId::from_bytes([3; 32]),
+                approver: AuthorityId::new_from_entropy([3; 32]),
                 proposal_id: proposal.proposal_id,
                 signature: vec![],
             },

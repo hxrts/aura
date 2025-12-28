@@ -34,9 +34,9 @@ fn derive_context_id(label: &[u8], parts: &[&[u8]]) -> ContextId {
     ContextId::new_from_entropy(hash(&input))
 }
 
-fn relational_context_id(rel: &crate::fact::RelationalFact) -> ContextId {
-    use crate::fact::RelationalFact::*;
-    match rel {
+fn protocol_context_id(protocol: &crate::protocol_facts::ProtocolRelationalFact) -> ContextId {
+    use crate::protocol_facts::ProtocolRelationalFact::*;
+    match protocol {
         GuardianBinding {
             account_id,
             guardian_id,
@@ -70,6 +70,13 @@ fn relational_context_id(rel: &crate::fact::RelationalFact) -> ContextId {
         AmpCommittedChannelEpochBump(committed) => committed.context,
         AmpChannelPolicy(policy) => policy.context,
         LeakageEvent(event) => event.context_id,
+    }
+}
+
+fn relational_context_id(rel: &crate::fact::RelationalFact) -> ContextId {
+    use crate::fact::RelationalFact::*;
+    match rel {
+        Protocol(protocol) => protocol_context_id(protocol),
         // Generic handles all domain-specific facts (ChatFact, InvitationFact, ContactFact)
         // via DomainFact::to_generic() - context_id is always stored in the binding
         Generic { context_id, .. } => *context_id,

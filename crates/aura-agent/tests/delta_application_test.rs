@@ -96,8 +96,9 @@ impl ViewReduction<TestDelta> for CountingReduction {
         facts
             .iter()
             .filter_map(|fact| {
-                if let FactContent::Relational(RelationalFact::GuardianBinding { .. }) =
-                    &fact.content
+                if let FactContent::Relational(RelationalFact::Protocol(
+                    aura_journal::ProtocolRelationalFact::GuardianBinding { .. },
+                )) = &fact.content
                 {
                     Some(TestDelta::Increment)
                 } else {
@@ -154,11 +155,13 @@ fn make_guardian_fact(index: u64) -> Fact {
     Fact {
         order: make_order_time(index),
         timestamp: make_timestamp(1000 + index),
-        content: FactContent::Relational(RelationalFact::GuardianBinding {
-            account_id: AuthorityId::new_from_entropy([1u8; 32]),
-            guardian_id: AuthorityId::new_from_entropy([index as u8; 32]),
-            binding_hash: Hash32([0u8; 32]),
-        }),
+        content: FactContent::Relational(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::GuardianBinding {
+                account_id: AuthorityId::new_from_entropy([1u8; 32]),
+                guardian_id: AuthorityId::new_from_entropy([index as u8; 32]),
+                binding_hash: Hash32([0u8; 32]),
+            },
+        )),
     }
 }
 

@@ -28,7 +28,7 @@ The builder pattern eliminates manual handler registration. Each method creates 
 Join semilattices accumulate knowledge through union operations:
 
 ```rust
-use aura_journal::semilattice::{Join, GCounterState};
+use aura_journal::algebra::{Join, GCounterState};
 
 impl Join for GCounterState {
     fn join(&self, other: &Self) -> Self {

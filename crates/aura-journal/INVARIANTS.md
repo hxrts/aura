@@ -11,18 +11,19 @@ Identical sets of facts must always produce identical reduced state, regardless 
 ### Enforcement Locus
 
 1. **Fact Validation**:
-   - Module: `aura-journal/src/fact.rs`
-   - Function: `Fact::validate()` - Ensures facts are well-formed
-   - Function: `AttestedOp::verify()` - Validates signatures and bindings
+   - Module: `aura-journal/src/reduction.rs`
+   - Function: `reduce_authority_with_validation()` - Validates attested ops against tree state before reduction
+   - Module: `aura-journal/src/commitment_tree/application.rs`
+   - Function: `validate_invariants()` - Enforces commitment tree structural invariants
 
 2. **Deterministic Reduction**:
-   - Module: `aura-journal/src/reduce/account.rs`
-   - Function: `reduce_account_facts()` - Account state reduction
-   - Key property: Pure function over sorted facts
-   
+   - Module: `aura-journal/src/reduction.rs`
+   - Function: `reduce_authority()` / `reduce_account_facts()` - Authority state reduction
+   - Key property: Pure function over ordered facts (OrderTime)
+
 3. **Relational Reduction**:
-   - Module: `aura-journal/src/reduce/relational.rs`  
-   - Function: `reduce_relational_facts()` - Context state reduction
+   - Module: `aura-journal/src/reduction.rs`
+   - Function: `reduce_context()` - Context state reduction
    - Key property: Commutative and associative operations
 
 4. **Join Semilattice**:
@@ -30,6 +31,7 @@ Identical sets of facts must always produce identical reduced state, regardless 
    - Trait: `JoinSemilattice` implementation for facts
    - Property: `join(a, b) = join(b, a)` (commutative)
    - Property: `join(join(a, b), c) = join(a, join(b, c))` (associative)
+   - Property: `join(a, a) = a` (idempotent)
 
 ### Failure Mode
 
@@ -66,8 +68,9 @@ Identical sets of facts must always produce identical reduced state, regardless 
 3. **Reduction Invariants**:
    - No floating point operations
    - No system time access during reduction
-   - No HashMap iteration without sorting
+   - No HashMap iteration without sorting (prefer BTreeMap/BTreeSet)
    - Pure functions only (no side effects)
+   - Use `OrderTime` for deterministic ordering
 
 ### Related Invariants
 - `FACT_IMMUTABILITY`: Facts never change after creation
@@ -81,16 +84,16 @@ Reduction must be a pure function of facts:
 ```rust
 // CORRECT: Deterministic reduction
 fn reduce_facts(facts: &[Fact]) -> State {
-    // Sort facts by deterministic order
+    // Sort facts by deterministic order (OrderTime + hash tie-break)
     let sorted = facts.iter()
-        .sorted_by_key(|f| (f.timestamp(), f.hash()))
+        .sorted_by_key(|f| (f.order, f.hash()))
         .collect();
     
     // Reduce in deterministic order
     sorted.fold(State::default(), |state, fact| {
         match fact {
-            Fact::TreeOp(op) => state.apply_tree_op(op),
-            Fact::Commit(c) => state.apply_commit(c),
+            Fact::Relational(op) => state.apply_relational(op),
+            Fact::AttestedOp(op) => state.apply_attested(op),
             _ => state
         }
     })

@@ -128,7 +128,7 @@ pub use context_transport::{
 // Re-export message types
 pub use messages::{
     AuthenticationPayload, HandshakeResult, HandshakeTranscript, PayloadKind, PskHandshakeConfig,
-    RendezvousMessage, SocialMessage, SocialPayload, StorageCapabilityAnnouncement,
+    RendezvousEnvelope, RendezvousMessage, RendezvousPayload, StorageCapabilityAnnouncement,
     TransportDescriptor, TransportKind, TransportOfferPayload,
 };
 

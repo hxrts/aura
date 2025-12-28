@@ -11,6 +11,7 @@
 #![deny(clippy::print_stderr)]
 
 use std::env;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -30,6 +31,7 @@ use aura_effects::{
     EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
     RealSecureStorageHandler,
 };
+use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::tui::TuiArgs;
@@ -91,6 +93,8 @@ const ACCOUNT_FILENAME: &str = "account.json";
 /// - Production: `$AURA_PATH/.aura/journal.json` (default: `~/.aura/journal.json`)
 /// - Demo: `$AURA_PATH/.aura-demo/journal.json` (default: `~/.aura-demo/journal.json`)
 const JOURNAL_FILENAME: &str = "journal.json";
+const TUI_LOG_KEY_PREFIX: &str = "logs";
+const MAX_TUI_LOG_BYTES: usize = 1_000_000;
 
 type BootstrapStorage =
     EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>;
@@ -152,16 +156,14 @@ pub fn resolve_storage_path(explicit_override: Option<&str>, mode: TuiMode) -> P
 /// directory to ensure a clean slate for each demo session.
 ///
 /// This is ONLY called in demo mode - production directory is NEVER touched.
-fn cleanup_demo_directory(base_path: &Path) {
-    if base_path.exists() {
-        match std::fs::remove_dir_all(base_path) {
-            Ok(()) => tracing::info!(path = %base_path.display(), "Cleaned up demo directory"),
-            Err(e) => tracing::warn!(
-                path = %base_path.display(),
-                err = %e,
-                "Failed to clean up demo directory"
-            ),
-        }
+async fn cleanup_demo_storage(storage: &impl StorageExtendedEffects, base_path: &Path) {
+    match storage.clear_all().await {
+        Ok(()) => tracing::info!(path = %base_path.display(), "Cleaned up demo storage"),
+        Err(e) => tracing::warn!(
+            path = %base_path.display(),
+            err = %e,
+            "Failed to clean up demo storage"
+        ),
     }
 }
 
@@ -556,18 +558,17 @@ async fn handle_tui_launch(
 
     // Use the single source of truth for path resolution
     let base_path = resolve_storage_path(data_dir, mode);
+    let storage = Arc::new(open_bootstrap_storage(&base_path));
 
-    // In demo mode, clean up entire directory so users go through account creation
+    // In demo mode, clear storage so users go through account creation
     // This is ONLY done in demo mode - production directory is NEVER touched
     if matches!(mode, TuiMode::Demo { .. }) {
-        cleanup_demo_directory(&base_path);
+        cleanup_demo_storage(storage.as_ref(), &base_path).await;
     }
 
-    // Initialize tracing for TUI into a file (avoid stderr corruption in fullscreen).
+    // Initialize tracing for TUI into storage (avoid stderr corruption in fullscreen).
     // Safe to call multiple times; only the first init wins.
-    init_tui_tracing(&base_path, mode);
-
-    let storage = open_bootstrap_storage(&base_path);
+    init_tui_tracing(storage.clone(), mode);
 
     // Determine device ID
     let device_id = device_id_str
@@ -582,7 +583,8 @@ async fn handle_tui_launch(
     let device_id_for_account = device_id_str.unwrap_or("tui:production-device");
 
     // Try to load existing account, or use placeholders if no account exists
-    let (authority_id, context_id, has_existing_account) = match try_load_account(&storage).await? {
+    let (authority_id, context_id, has_existing_account) =
+        match try_load_account(storage.as_ref()).await? {
         AccountLoadResult::Loaded { authority, context } => {
             stdio.println(format_args!("Authority: {}", authority));
             stdio.println(format_args!("Context: {}", context));
@@ -855,8 +857,24 @@ async fn handle_tui_launch(
     Ok(())
 }
 
-#[allow(clippy::expect_used)] // Panicking is appropriate when /dev/null can't be opened
-fn init_tui_tracing(base_path: &Path, mode: TuiMode) {
+struct StorageLogWriter {
+    sender: mpsc::UnboundedSender<Vec<u8>>,
+}
+
+impl io::Write for StorageLogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.sender
+            .send(buf.to_vec())
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "log channel closed"))?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
     // Allow forcing stdio tracing for debugging.
     if std::env::var("AURA_TUI_ALLOW_STDIO").ok().as_deref() == Some("1") {
         return;
@@ -867,61 +885,34 @@ fn init_tui_tracing(base_path: &Path, mode: TuiMode) {
         TuiMode::Demo { .. } => "aura-tui-demo.log",
     };
 
-    let log_path = std::env::var_os("AURA_TUI_LOG_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| base_path.join(default_name));
+    let log_key = std::env::var("AURA_TUI_LOG_PATH")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .unwrap_or_else(|| format!("{}/{}", TUI_LOG_KEY_PREFIX, default_name));
 
-    if let Some(parent) = log_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
+    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let storage_task = storage.clone();
+    let log_key_task = log_key.clone();
+
+    tokio::spawn(async move {
+        let mut buffer: Vec<u8> = Vec::new();
+        while let Some(chunk) = rx.recv().await {
+            buffer.extend_from_slice(&chunk);
+            if buffer.len() > MAX_TUI_LOG_BYTES {
+                let excess = buffer.len() - MAX_TUI_LOG_BYTES;
+                buffer.drain(0..excess);
+            }
+            if let Err(err) = storage_task.store(&log_key_task, buffer.clone()).await {
+                tracing::warn!(error = %err, "Failed to persist TUI log chunk");
+            }
+        }
+    });
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .unwrap_or_else(|_| {
-            #[cfg(unix)]
-            {
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .open("/dev/null")
-                    .expect("Failed to open /dev/null")
-            }
-            #[cfg(not(unix))]
-            {
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&log_path)
-                    .expect("Failed to open TUI log file")
-            }
-        });
-    let file = std::sync::Arc::new(file);
-    #[cfg(not(unix))]
-    let log_path = std::sync::Arc::new(log_path);
     let make_writer = {
-        let file = file.clone();
-        #[cfg(not(unix))]
-        let log_path = log_path.clone();
-        move || {
-            file.try_clone().unwrap_or_else(|_| {
-                #[cfg(unix)]
-                {
-                    std::fs::OpenOptions::new()
-                        .write(true)
-                        .open("/dev/null")
-                        .expect("Failed to open /dev/null")
-                }
-                #[cfg(not(unix))]
-                {
-                    std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(log_path.as_ref())
-                        .expect("Failed to open TUI log file")
-                }
-            })
+        let sender = tx.clone();
+        move || StorageLogWriter {
+            sender: sender.clone(),
         }
     };
 

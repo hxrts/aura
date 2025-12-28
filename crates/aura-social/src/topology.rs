@@ -8,7 +8,7 @@ use aura_core::{
     effects::relay::{RelayCandidate, RelayRelationship},
     identifiers::AuthorityId,
 };
-use aura_journal::facts::social::BlockId;
+use crate::facts::BlockId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -391,7 +391,7 @@ impl PeerCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_journal::facts::social::NeighborhoodId;
+    use crate::facts::NeighborhoodId;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])

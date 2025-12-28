@@ -9,7 +9,7 @@
 use aura_core::effects::relay::RelayRelationship;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_journal::facts::social::{
+use aura_social::facts::{
     AdjacencyFact, BlockFact, BlockId, BlockMemberFact, NeighborhoodFact, NeighborhoodId,
     ResidentFact, StewardFact,
 };

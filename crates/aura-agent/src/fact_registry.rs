@@ -33,6 +33,7 @@ use aura_authentication::{AuthFact, AuthFactReducer, AUTH_FACT_TYPE_ID};
 use aura_chat::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 use aura_invitation::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
 use aura_journal::FactRegistry;
+use aura_maintenance::{MaintenanceFact, MaintenanceFactReducer, MAINTENANCE_FACT_TYPE_ID};
 use aura_recovery::{RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
     ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
@@ -70,6 +71,10 @@ pub fn build_fact_registry() -> FactRegistry {
     );
     registry.register::<RendezvousFact>(RENDEZVOUS_FACT_TYPE_ID, Box::new(RendezvousFactReducer));
     registry.register::<RecoveryFact>(RECOVERY_FACT_TYPE_ID, Box::new(RecoveryFactReducer));
+    registry.register::<MaintenanceFact>(
+        MAINTENANCE_FACT_TYPE_ID,
+        Box::new(MaintenanceFactReducer::default()),
+    );
     register_moderation_facts(&mut registry);
 
     registry

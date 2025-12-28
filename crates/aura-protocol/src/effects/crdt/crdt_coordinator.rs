@@ -50,7 +50,6 @@
 //! ).await?;
 //! ```
 
-use super::{CmHandler, CvHandler, DeltaHandler, MvHandler};
 use crate::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 use aura_core::{
     identifiers::DeviceId,
@@ -60,6 +59,7 @@ use aura_core::{
     time::{LogicalTime, VectorClock},
     AuraError, AuthorityId, SessionId,
 };
+use aura_journal::crdt::{CmHandler, CvHandler, DeltaHandler, MvHandler};
 use aura_journal::CausalContext;
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;

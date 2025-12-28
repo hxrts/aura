@@ -5,7 +5,7 @@
 
 use aura_core::journal::Cap;
 use aura_core::semilattice::{Bottom, JoinSemilattice, MeetSemiLattice, Top};
-use aura_journal::semilattice::{GCounter, GSet};
+use aura_journal::algebra::{GCounter, GSet};
 
 /// Test GCounter satisfies join semilattice laws
 #[test]

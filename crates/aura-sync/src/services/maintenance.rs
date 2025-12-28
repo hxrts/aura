@@ -21,7 +21,9 @@
 //! let service = MaintenanceService::new(config)?;
 //!
 //! // Propose snapshot
-//! service.propose_snapshot(target_epoch, state_digest).await?;
+//! service
+//!     .propose_snapshot(authority_id, target_epoch, state_digest)
+//!     .await?;
 //!
 //! // Handle OTA upgrade
 //! service.activate_upgrade(upgrade_proposal).await?;
@@ -47,170 +49,11 @@ use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
-use aura_core::{tree::Snapshot, AccountId, AuraError, DeviceId, Epoch, Hash32, SemanticVersion};
-
-// =============================================================================
-// Maintenance Event Types
-// =============================================================================
-
-/// Key used for cache invalidation events.
-pub type CacheKey = String;
-
-/// Maintenance events replicated through the journal CRDT.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MaintenanceEvent {
-    /// Snapshot proposal broadcast.
-    SnapshotProposed(SnapshotProposed),
-    /// Snapshot completion notification.
-    SnapshotCompleted(SnapshotCompleted),
-    /// Cache invalidation fact.
-    CacheInvalidated(CacheInvalidated),
-    /// Upgrade activation notice.
-    UpgradeActivated(UpgradeActivated),
-    /// Admin replacement announcement used by the fork workflow.
-    AdminReplaced(AdminReplaced),
-}
-
-/// Snapshot proposal metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SnapshotProposed {
-    /// Unique proposal identifier.
-    pub proposal_id: Uuid,
-    /// Device that initiated the proposal.
-    pub proposer: DeviceId,
-    /// Identity epoch fence for the snapshot.
-    pub target_epoch: Epoch,
-    /// Digest of the candidate snapshot payload (hash of canonical encoding).
-    pub state_digest: Hash32,
-}
-
-impl SnapshotProposed {
-    /// Create a new proposal.
-    pub fn new(proposer: DeviceId, target_epoch: Epoch, state_digest: Hash32) -> Self {
-        // Deterministic proposal identifier so tests remain reproducible; callers should
-        // supply a context-derived UUID when integrating with journal facts.
-        Self {
-            proposal_id: Uuid::from_bytes(1u128.to_be_bytes()),
-            proposer,
-            target_epoch,
-            state_digest,
-        }
-    }
-}
-
-/// Snapshot completion payload.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SnapshotCompleted {
-    /// Identifier of the accepted proposal.
-    pub proposal_id: Uuid,
-    /// Finalized snapshot payload.
-    pub snapshot: Snapshot,
-    /// Participants that contributed to the threshold signature.
-    pub participants: BTreeSet<DeviceId>,
-    /// Threshold signature attesting to this snapshot.
-    pub threshold_signature: Vec<u8>,
-}
-
-impl SnapshotCompleted {
-    /// Convenience constructor.
-    pub fn new(
-        proposal_id: Uuid,
-        snapshot: Snapshot,
-        participants: BTreeSet<DeviceId>,
-        threshold_signature: Vec<u8>,
-    ) -> Self {
-        Self {
-            proposal_id,
-            snapshot,
-            participants,
-            threshold_signature,
-        }
-    }
-}
-
-/// Cache invalidation payload.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CacheInvalidated {
-    /// Keys that must be refreshed.
-    pub keys: Vec<CacheKey>,
-    /// Earliest identity epoch the cache entry remains valid for.
-    pub epoch_floor: Epoch,
-}
-
-impl CacheInvalidated {
-    /// Create a new invalidation payload.
-    pub fn new(keys: Vec<CacheKey>, epoch_floor: Epoch) -> Self {
-        Self { keys, epoch_floor }
-    }
-}
-
-/// Upgrade activation metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UpgradeActivated {
-    /// Unique identifier of the upgrade package.
-    pub package_id: Uuid,
-    /// Protocol version activated.
-    pub to_version: SemanticVersion,
-    /// Identity epoch fence where the upgrade becomes mandatory.
-    pub activation_fence: IdentityEpochFence,
-}
-
-impl UpgradeActivated {
-    /// Create a new activation event.
-    pub fn new(package_id: Uuid, to_version: SemanticVersion, fence: IdentityEpochFence) -> Self {
-        Self {
-            package_id,
-            to_version,
-            activation_fence: fence,
-        }
-    }
-}
-
-/// Admin replacement announcement (allows users to fork away from a malicious admin).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AdminReplaced {
-    /// Account the new admin controls.
-    pub account_id: AccountId,
-    /// Previous administrator device (for audit).
-    pub previous_admin: DeviceId,
-    /// New administrator device.
-    pub new_admin: DeviceId,
-    /// Epoch when the new admin takes effect.
-    pub activation_epoch: Epoch,
-}
-
-impl AdminReplaced {
-    /// Create a new admin replacement fact.
-    pub fn new(
-        account_id: AccountId,
-        previous_admin: DeviceId,
-        new_admin: DeviceId,
-        activation_epoch: Epoch,
-    ) -> Self {
-        Self {
-            account_id,
-            previous_admin,
-            new_admin,
-            activation_epoch,
-        }
-    }
-}
-
-/// Identity-epoch fence describing when an upgrade becomes mandatory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IdentityEpochFence {
-    /// Account the fence applies to.
-    pub account_id: AccountId,
-    /// Target epoch for enforcement.
-    pub epoch: Epoch,
-}
-
-impl IdentityEpochFence {
-    /// Helper constructor.
-    pub fn new(account_id: AccountId, epoch: Epoch) -> Self {
-        Self { account_id, epoch }
-    }
-}
+use aura_core::{tree::Snapshot, AccountId, AuraError, AuthorityId, Epoch, Hash32, SemanticVersion};
+use aura_maintenance::{
+    CacheInvalidated, CacheKey, IdentityEpochFence, SnapshotCompleted, SnapshotProposed,
+    UpgradeActivated, UpgradeProposalMetadata,
+};
 
 /// Upgrade proposal metadata used by the OTA coordinator.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -304,7 +147,7 @@ pub struct MaintenanceService {
     started_at: Arc<RwLock<Option<Instant>>>,
 
     /// Last snapshot epoch
-    last_snapshot_epoch: Arc<RwLock<Option<u64>>>,
+    last_snapshot_epoch: Arc<RwLock<Option<Epoch>>>,
 }
 
 impl MaintenanceService {
@@ -328,8 +171,8 @@ impl MaintenanceService {
     /// Propose a snapshot
     pub async fn propose_snapshot(
         &self,
-        proposer: DeviceId,
-        target_epoch: u64,
+        proposer: AuthorityId,
+        target_epoch: Epoch,
         state_digest: Hash32,
     ) -> SyncResult<SnapshotProposed> {
         let protocol = self.snapshot_protocol.write();
@@ -342,43 +185,50 @@ impl MaintenanceService {
         let (_guard, proposal) =
             protocol.propose(proposer, target_epoch, state_digest, proposal_id)?;
 
-        // Convert to maintenance event type
-        Ok(SnapshotProposed {
-            proposal_id: proposal.proposal_id,
-            proposer: proposal.proposer,
-            target_epoch: proposal.target_epoch,
-            state_digest: proposal.state_digest,
-        })
+        Ok(SnapshotProposed::new(
+            proposal.proposer,
+            proposal.proposal_id,
+            proposal.target_epoch,
+            proposal.state_digest,
+        ))
     }
 
     /// Complete a snapshot
     pub async fn complete_snapshot(
         &self,
+        authority_id: AuthorityId,
         proposal_id: Uuid,
         snapshot: Snapshot,
-        participants: BTreeSet<DeviceId>,
+        participants: BTreeSet<AuthorityId>,
         threshold_signature: Vec<u8>,
     ) -> SyncResult<SnapshotCompleted> {
         *self.last_snapshot_epoch.write() = Some(snapshot.epoch);
 
-        Ok(SnapshotCompleted {
+        Ok(SnapshotCompleted::new(
+            authority_id,
             proposal_id,
             snapshot,
             participants,
             threshold_signature,
-        })
+        ))
     }
 
     /// Invalidate cache keys
     pub fn invalidate_cache(
         &self,
+        authority_id: AuthorityId,
         keys: Vec<String>,
-        epoch_floor: u64,
+        epoch_floor: Epoch,
     ) -> SyncResult<CacheInvalidated> {
         let mut cache = self.cache_manager.write();
-        cache.invalidate_keys(&keys, epoch_floor);
+        cache.invalidate_keys(&keys, epoch_floor.0);
 
-        Ok(CacheInvalidated { keys, epoch_floor })
+        let wrapped_keys = keys.into_iter().map(CacheKey).collect();
+        Ok(CacheInvalidated::new(
+            authority_id,
+            wrapped_keys,
+            epoch_floor,
+        ))
     }
 
     /// Propose OTA upgrade
@@ -388,7 +238,7 @@ impl MaintenanceService {
         version: SemanticVersion,
         kind: UpgradeKind,
         package_hash: Hash32,
-        proposer: DeviceId,
+        proposer: AuthorityId,
         random_effects: &R,
     ) -> SyncResult<UpgradeProposal> {
         // Use RandomEffects for deterministic UUID generation
@@ -497,15 +347,18 @@ impl MaintenanceService {
     /// Map activation_epoch to IdentityEpochFence
     fn map_activation_epoch(
         proposal: &crate::protocols::ota::UpgradeProposal,
-        proposer: DeviceId,
+        proposer: AuthorityId,
     ) -> Option<IdentityEpochFence> {
         // Map activation epoch from OTA proposal to identity epoch fence
         if let Some(activation_epoch) = proposal.activation_epoch {
             // For hard forks, we need an epoch fence to coordinate the upgrade
             // The account ID is derived from the proposer device ID
-            let account_id = AccountId(proposer.0); // Device belongs to account
+            let account_id = AccountId(proposer.0);
 
-            Some(IdentityEpochFence::new(account_id, activation_epoch))
+            Some(IdentityEpochFence::new(
+                account_id,
+                Epoch::new(activation_epoch),
+            ))
         } else {
             // Soft upgrades don't require epoch fencing
             None
@@ -538,6 +391,7 @@ impl MaintenanceService {
     /// Activate upgrade after approval
     pub async fn activate_upgrade<C: aura_core::effects::CryptoEffects>(
         &self,
+        authority_id: AuthorityId,
         proposal: UpgradeProposal,
         account_id: AccountId,
         crypto_effects: &C,
@@ -555,13 +409,20 @@ impl MaintenanceService {
 
         let activation_fence = proposal
             .activation_fence
-            .unwrap_or_else(|| IdentityEpochFence::new(account_id, 0));
+            .unwrap_or_else(|| IdentityEpochFence::new(account_id, Epoch::new(0)));
 
-        Ok(UpgradeActivated {
-            package_id: proposal.package_id,
-            to_version: proposal.version,
+        let version = proposal.version.clone();
+        Ok(UpgradeActivated::new(
+            authority_id,
+            proposal.package_id,
+            proposal.version,
             activation_fence,
-        })
+            UpgradeProposalMetadata {
+                package_id: proposal.package_id,
+                version,
+                artifact_hash: proposal.artifact_hash,
+            },
+        ))
     }
 
     /// Check if snapshot is due
@@ -572,7 +433,9 @@ impl MaintenanceService {
 
         match *self.last_snapshot_epoch.read() {
             None => true, // First snapshot
-            Some(last) => current_epoch >= last + self.config.min_snapshot_interval_epochs,
+            Some(last) => {
+                current_epoch >= last.0 + self.config.min_snapshot_interval_epochs
+            }
         }
     }
 
@@ -769,7 +632,7 @@ mod tests {
         let version = SemanticVersion::new(1, 2, 3);
         let kind = UpgradeKind::SoftFork;
         let package_hash = Hash32::from([1u8; 32]);
-        let proposer = DeviceId::new_from_entropy([3u8; 32]);
+        let proposer = AuthorityId::new_from_entropy([3u8; 32]);
 
         let proposal = service
             .propose_upgrade(
@@ -794,12 +657,17 @@ mod tests {
     fn test_cache_invalidation() {
         let service = MaintenanceService::new(Default::default()).unwrap();
 
+        let authority_id = AuthorityId::new_from_entropy([5u8; 32]);
         let result = service
-            .invalidate_cache(vec!["key1".to_string(), "key2".to_string()], 10)
+            .invalidate_cache(
+                authority_id,
+                vec!["key1".to_string(), "key2".to_string()],
+                Epoch::new(10),
+            )
             .unwrap();
 
         assert_eq!(result.keys.len(), 2);
-        assert_eq!(result.epoch_floor, 10);
+        assert_eq!(result.epoch_floor, Epoch::new(10));
     }
 
     #[test]
@@ -816,7 +684,7 @@ mod tests {
         assert!(service.is_snapshot_due(0));
 
         // After setting last snapshot
-        *service.last_snapshot_epoch.write() = Some(50);
+        *service.last_snapshot_epoch.write() = Some(Epoch::new(50));
         assert!(!service.is_snapshot_due(100)); // 100 - 50 = 50 < 100
         assert!(service.is_snapshot_due(151)); // 151 - 50 = 101 >= 100
     }

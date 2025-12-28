@@ -45,7 +45,6 @@ pub enum CreateChannelStep {
     Details,
     Members,
     Threshold,
-    Waiting,
 }
 
 #[derive(Clone, Debug, Default)]

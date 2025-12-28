@@ -4,7 +4,7 @@
 //! the social topology.
 
 use crate::{error::SocialError, Block, Neighborhood};
-use aura_journal::facts::social::{
+use crate::facts::{
     BlockId, TraversalAllowedFact, TraversalDepth, TraversalPosition,
 };
 use std::collections::HashMap;
@@ -208,7 +208,7 @@ mod tests {
     fn test_determine_depth_neighbor() {
         let block_a = BlockId::from_bytes([1u8; 32]);
         let block_b = BlockId::from_bytes([2u8; 32]);
-        let neighborhood_id = aura_journal::facts::social::NeighborhoodId::from_bytes([1u8; 32]);
+        let neighborhood_id = crate::facts::NeighborhoodId::from_bytes([1u8; 32]);
 
         let block = Block::new_empty(block_a);
         let mut neighborhood = Neighborhood::new_empty(neighborhood_id);

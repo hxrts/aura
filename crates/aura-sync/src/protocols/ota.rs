@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{sync_protocol_error, SyncResult};
-use aura_core::{DeviceId, Hash32};
+use aura_core::{AuthorityId, Hash32};
 
 // =============================================================================
 // Types
@@ -76,8 +76,8 @@ pub struct UpgradeProposal {
     /// Activation epoch (for hard forks)
     pub activation_epoch: Option<u64>,
 
-    /// Proposer device
-    pub proposer: DeviceId,
+    /// Proposer authority
+    pub proposer: AuthorityId,
 }
 
 /// Readiness status
@@ -99,8 +99,8 @@ pub struct ReadinessDeclaration {
     /// Proposal ID
     pub proposal_id: Uuid,
 
-    /// Declaring device
-    pub device: DeviceId,
+    /// Declaring authority
+    pub device: AuthorityId,
 
     /// Readiness status
     pub status: ReadinessStatus,
@@ -115,8 +115,8 @@ pub struct OTAResult {
     /// Proposal that was executed
     pub proposal: UpgradeProposal,
 
-    /// Devices that declared ready
-    pub ready_devices: Vec<DeviceId>,
+    /// Authorities that declared ready
+    pub ready_devices: Vec<AuthorityId>,
 
     /// Whether activation threshold was met
     pub activated: bool,
@@ -160,7 +160,7 @@ impl Default for OTAConfig {
 pub struct OTAProtocol {
     config: OTAConfig,
     pending_proposal: Option<UpgradeProposal>,
-    readiness: HashMap<DeviceId, ReadinessStatus>,
+    readiness: HashMap<AuthorityId, ReadinessStatus>,
 }
 
 impl OTAProtocol {
@@ -183,7 +183,7 @@ impl OTAProtocol {
         version: String,
         kind: UpgradeKind,
         package_hash: Hash32,
-        proposer: DeviceId,
+        proposer: AuthorityId,
     ) -> SyncResult<UpgradeProposal> {
         if self.pending_proposal.is_some() {
             return Err(sync_protocol_error(
@@ -211,7 +211,7 @@ impl OTAProtocol {
     /// Declare readiness for pending upgrade
     pub fn declare_readiness(
         &mut self,
-        device: DeviceId,
+        device: AuthorityId,
         status: ReadinessStatus,
     ) -> SyncResult<()> {
         if self.pending_proposal.is_none() {
@@ -244,7 +244,7 @@ impl OTAProtocol {
             return Err(sync_protocol_error("sync", "Readiness threshold not met"));
         }
 
-        let ready_devices: Vec<DeviceId> = self
+        let ready_devices: Vec<AuthorityId> = self
             .readiness
             .iter()
             .filter_map(|(device, status)| {
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_ota_proposal() {
         let mut protocol = OTAProtocol::default();
-        let device = DeviceId::from_bytes([1; 32]);
+        let device = AuthorityId::new_from_entropy([1; 32]);
 
         let proposal = protocol
             .propose_upgrade(
@@ -333,19 +333,25 @@ mod tests {
                 "2.0.0".to_string(),
                 UpgradeKind::SoftFork,
                 Hash32([0; 32]),
-                DeviceId::from_bytes([1; 32]),
+                AuthorityId::new_from_entropy([1; 32]),
             )
             .unwrap();
 
         // One ready - not enough
         protocol
-            .declare_readiness(DeviceId::from_bytes([2; 32]), ReadinessStatus::Ready)
+            .declare_readiness(
+                AuthorityId::new_from_entropy([2; 32]),
+                ReadinessStatus::Ready,
+            )
             .unwrap();
         assert!(!protocol.check_threshold());
 
         // Two ready - threshold met
         protocol
-            .declare_readiness(DeviceId::from_bytes([3; 32]), ReadinessStatus::Ready)
+            .declare_readiness(
+                AuthorityId::new_from_entropy([3; 32]),
+                ReadinessStatus::Ready,
+            )
             .unwrap();
         assert!(protocol.check_threshold());
     }
@@ -361,15 +367,21 @@ mod tests {
                 "2.0.0".to_string(),
                 UpgradeKind::SoftFork,
                 Hash32([0; 32]),
-                DeviceId::from_bytes([1; 32]),
+                AuthorityId::new_from_entropy([1; 32]),
             )
             .unwrap();
 
         protocol
-            .declare_readiness(DeviceId::from_bytes([2; 32]), ReadinessStatus::Ready)
+            .declare_readiness(
+                AuthorityId::new_from_entropy([2; 32]),
+                ReadinessStatus::Ready,
+            )
             .unwrap();
         protocol
-            .declare_readiness(DeviceId::from_bytes([3; 32]), ReadinessStatus::Ready)
+            .declare_readiness(
+                AuthorityId::new_from_entropy([3; 32]),
+                ReadinessStatus::Ready,
+            )
             .unwrap();
 
         let result = protocol.activate().unwrap();

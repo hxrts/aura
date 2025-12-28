@@ -6,7 +6,7 @@ This guide covers the Maintenance and OTA (Over-the-Air) update system in Aura. 
 
 The maintenance system is built on three key principles:
 
-1. **Coordinated Operations** - All maintenance actions require threshold approval from M-of-N devices
+1. **Coordinated Operations** - All maintenance actions require threshold approval from M-of-N authorities
 2. **Epoch Fencing** - Hard fork upgrades are gated by identity epochs for safe coordination
 3. **Journal-Based Facts** - All maintenance events are replicated through the journal CRDT
 
@@ -20,15 +20,15 @@ The maintenance service publishes events to the journal as facts. These events a
 
 The system defines five event types:
 
-**SnapshotProposed** marks the beginning of a snapshot operation. It contains the proposal identifier, proposer device, target epoch, and state digest of the candidate snapshot.
+**SnapshotProposed** marks the beginning of a snapshot operation. It contains the proposal identifier, proposer authority, target epoch, and state digest of the candidate snapshot.
 
-**SnapshotCompleted** records a successful snapshot. It includes the accepted proposal identifier, finalized snapshot payload, participating devices, and threshold signature attesting to the snapshot.
+**SnapshotCompleted** records a successful snapshot. It includes the accepted proposal identifier, finalized snapshot payload, participating authorities, and threshold signature attesting to the snapshot.
 
 **CacheInvalidated** signals cache invalidation. It specifies which cache keys must be refreshed and the earliest identity epoch the cache entry remains valid for.
 
 **UpgradeActivated** announces an activated upgrade. It contains the package identifier, target version, and identity epoch fence where the upgrade becomes mandatory.
 
-**AdminReplaced** announces an administrator change. This allows users to fork away from a malicious admin by tracking previous and new administrators with activation epoch.
+**AdminReplacement** announces an administrator change. This allows users to fork away from a malicious admin by tracking previous and new administrators with activation epoch.
 
 ## Snapshot Protocol
 
@@ -52,14 +52,17 @@ use aura_core::{Epoch, Hash32};
 
 async fn propose_snapshot(
     service: &MaintenanceService,
+    authority_id: aura_core::AuthorityId,
     target_epoch: Epoch,
     state_digest: Hash32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Propose snapshot at target epoch
-    service.propose_snapshot(target_epoch, state_digest).await?;
+    service
+        .propose_snapshot(authority_id, target_epoch, state_digest)
+        .await?;
     
     // Writer fence is now active - all concurrent writes blocked
-    // Collect approvals from M-of-N devices
+    // Collect approvals from M-of-N authorities
     
     // Once threshold reached, commit
     service.commit_snapshot().await?;
@@ -74,11 +77,11 @@ Snapshots provide deterministic checkpoints of authority state at specific epoch
 
 ```rust
 use aura_sync::services::MaintenanceService;
-use aura_core::{Epoch, Hash32, DeviceId};
+use aura_core::{AuthorityId, Epoch, Hash32};
 
 async fn snapshot_workflow(
     service: &MaintenanceService,
-    device_id: DeviceId,
+    authority_id: AuthorityId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Determine target epoch and compute state digest
     let target_epoch = 100;
@@ -86,16 +89,18 @@ async fn snapshot_workflow(
     let state_digest = current_state.compute_digest();
     
     // Propose snapshot
-    service.propose_snapshot(target_epoch, state_digest).await?;
+    service
+        .propose_snapshot(authority_id, Epoch::new(target_epoch), state_digest)
+        .await?;
     
-    // Wait for other devices to activate fence
+    // Wait for other authorities to activate fence
     // and collect approvals
     
     Ok(())
 }
 ```
 
-Proposals include the proposer device identifier, unique proposal ID, target epoch, and canonical state digest. All devices must agree on the digest before committing.
+Proposals include the proposer authority identifier, unique proposal ID, target epoch, and canonical state digest. All participants must agree on the digest before committing.
 
 ### Writer Fence
 
@@ -126,7 +131,6 @@ Fence enforcement is implicit in snapshot proposal. The protocol guarantees no c
 
 ```rust
 use aura_sync::services::MaintenanceService;
-use aura_core::DeviceId;
 
 async fn collect_approvals(
     service: &MaintenanceService,

@@ -4,7 +4,7 @@
 //! the fundamental convergence properties required for distributed consistency.
 
 use aura_core::semilattice::{Bottom, JoinSemilattice};
-use aura_journal::semilattice::{GCounter, GSet, LwwRegister};
+use aura_journal::algebra::{GCounter, GSet, LwwRegister};
 
 /// Test GCounter convergence - state-based CRDT
 #[test]

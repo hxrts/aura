@@ -210,7 +210,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
 
         effects
-            .insert_relational_fact(RelationalFact::AmpCommittedChannelEpochBump(committed))
+            .insert_relational_fact(RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(committed),
+            ))
             .await
             .map_err(|e| IntentError::internal_error(format!("AMP epoch bump failed: {e}")))?;
 

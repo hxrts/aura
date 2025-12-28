@@ -16,7 +16,7 @@
 
 use aura_core::{TreeOp, TreeOpKind};
 use aura_journal::commitment_tree::reduce;
-use aura_journal::semilattice::{JoinSemilattice, OpLog};
+use aura_journal::algebra::{JoinSemilattice, OpLog};
 use aura_journal::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex};
 use proptest::prelude::*;
 

@@ -99,6 +99,7 @@ pub mod system;
 pub mod time;
 pub mod trace;
 pub mod transport;
+pub mod udp;
 
 // Re-export production handlers only - mock handlers moved to aura-testkit
 // NOTE: WotAuthorizationHandler moved to aura-authorization per Layer 2 pattern
@@ -121,6 +122,7 @@ pub use secure::RealSecureStorageHandler;
 #[cfg(feature = "simulation")]
 pub use simulation::FallbackSimulationHandler;
 pub use storage::FilesystemStorageHandler;
+pub use udp::RealUdpEffectsHandler;
 // Re-export the new unified encrypted storage (Task 1.1)
 pub use encrypted_storage::{EncryptedStorage, EncryptedStorageConfig};
 // ProductionSyncExecutor removed - replaced by ProductionEffectInterpreter (ADR-014)

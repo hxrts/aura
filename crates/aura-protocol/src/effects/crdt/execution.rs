@@ -1,8 +1,8 @@
 //! Execution utilities for integrating handlers with choreographic protocols
 
-use super::{CmHandler, CvHandler, DeltaHandler};
 use aura_core::identifiers::{DeviceId, SessionId};
 use aura_core::semilattice::{CausalOp, CmApply, CvState, Dedup, Delta};
+use aura_journal::crdt::{CmHandler, CvHandler, DeltaHandler};
 use aura_journal::CausalContext;
 
 /// Execute state-based CRDT synchronization

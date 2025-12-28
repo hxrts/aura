@@ -120,7 +120,7 @@ impl RelayCandidateBuilder {
 mod tests {
     use super::*;
     use aura_core::{effects::relay::RelayRelationship, identifiers::ContextId};
-    use aura_journal::facts::social::BlockId;
+    use crate::facts::BlockId;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])

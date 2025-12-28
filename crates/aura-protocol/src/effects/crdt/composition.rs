@@ -1,7 +1,8 @@
 //! Composition utilities for combining multiple handlers
 
-use super::{CmHandler, CvHandler, DeliveryConfig};
+use super::DeliveryConfig;
 use aura_core::semilattice::{CausalOp, CmApply, CvState, Dedup};
+use aura_journal::crdt::{CmHandler, CvHandler};
 use aura_journal::CausalContext;
 use std::collections::HashMap;
 

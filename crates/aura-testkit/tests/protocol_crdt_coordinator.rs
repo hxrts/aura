@@ -9,7 +9,7 @@ use aura_core::{
 use aura_journal::CausalContext;
 use aura_protocol::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 use aura_protocol::effects::crdt::CrdtCoordinator;
-use aura_protocol::effects::crdt::CvHandler;
+use aura_journal::crdt::CvHandler;
 use aura_testkit::TestFixture;
 use serde::{Deserialize, Serialize};
 

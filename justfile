@@ -185,7 +185,6 @@ check-layer4-lints:
         crates/aura-consensus/src/lib.rs \
         crates/aura-amp/src/lib.rs \
         crates/aura-anti-entropy/src/lib.rs \
-        crates/aura-bridge/src/lib.rs \
         crates/aura-protocol/src/lib.rs; then
         echo "crate-level #![allow] found in Layer 4 lib.rs; move to module scope"
         exit 1

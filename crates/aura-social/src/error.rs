@@ -2,7 +2,7 @@
 //!
 //! Errors specific to social topology operations.
 
-use aura_journal::facts::social::{BlockId, NeighborhoodId};
+use crate::facts::{BlockId, NeighborhoodId};
 use thiserror::Error;
 
 /// Errors from social topology operations.

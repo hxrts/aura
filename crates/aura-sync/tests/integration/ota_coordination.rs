@@ -5,7 +5,7 @@
 
 use super::test_time;
 use super::test_utils::*;
-use aura_core::{AuraError, AuraResult, Hash32};
+use aura_core::{AuthorityId, AuraError, AuraResult, Hash32};
 use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
 use aura_testkit::simulation::network::NetworkCondition;
 use std::time::Duration;
@@ -31,9 +31,9 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
         "Need at least 3 devices for threshold test"
     );
 
-    let coordinator = fixture.devices[0];
-    let approver1 = fixture.devices[1];
-    let approver2 = fixture.devices[2];
+    let coordinator = AuthorityId(fixture.devices[0].0);
+    let approver1 = AuthorityId(fixture.devices[1].0);
+    let approver2 = AuthorityId(fixture.devices[2].0);
 
     let session = fixture
         .create_coordinated_session("ota_coordination")
@@ -109,8 +109,8 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
     let fixture = MultiDeviceTestFixture::threshold_group().await?;
     let _protocol = create_ota_protocol();
 
-    let coordinator = fixture.devices[0];
-    let approver1 = fixture.devices[1];
+    let coordinator = AuthorityId(fixture.devices[0].0);
+    let approver1 = AuthorityId(fixture.devices[1].0);
     // approver2 will not approve (simulating rejection/unavailability)
 
     let session = fixture
@@ -342,9 +342,9 @@ async fn test_ota_network_partition() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
     let _protocol = create_ota_protocol();
 
-    let coordinator = fixture.devices[0];
-    let approver1 = fixture.devices[1];
-    let approver2 = fixture.devices[2];
+    let coordinator = AuthorityId(fixture.devices[0].0);
+    let approver1 = AuthorityId(fixture.devices[1].0);
+    let approver2 = AuthorityId(fixture.devices[2].0);
 
     let session = fixture.create_coordinated_session("ota_partition").await?;
 

@@ -186,7 +186,7 @@ Layer 3 → Layer 4 → Layer 5 → Layer 6
 
 1. **aura-effects** provides stateless, single-party handlers
 2. **aura-composition** assembles them via `EffectRegistry` and builder patterns
-3. **aura-protocol** orchestrates multi-party coordination using assembled systems, with Layer 4 split into focused crates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`)
+3. **aura-protocol** orchestrates multi-party coordination using assembled systems, with Layer 4 split into focused crates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`)
 4. **Feature crates** (Layer 5) compose handlers without pulling in runtime infrastructure
 5. **aura-agent** (Layer 6) provides final runtime assembly for production deployment
 
@@ -414,7 +414,7 @@ Layer 2 is strictly *specification*: it defines domain semantics, not runtime be
 - Authorization uses typed operations and `ResourceScope` from `aura-core`.
 - Stateful handlers are allowed only in `aura-testkit` (tests).
 
-Layer 4 Orchestration contains `aura-protocol` plus focused crates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`, `aura-bridge`) for guard enforcement, consensus, AMP, sync, and bridge adapters. Tests and examples for these components live alongside their owning crates (for example, `crates/aura-consensus/tests/` and `crates/aura-guards/examples/`). Layer 5 Feature contains protocol crates for authentication, recovery, rendezvous, and storage. Layer 6 Runtime contains `aura-agent`, `aura-simulator`, and `aura-app` for system assembly and portable application core. Layer 7 Interface contains `aura-terminal` for user applications. Layer 8 Testing contains `aura-testkit` and `aura-quint` for shared fixtures and verification.
+Layer 4 Orchestration contains `aura-protocol` plus focused crates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`) for guard enforcement, consensus, AMP, and sync. Tests and examples for these components live alongside their owning crates (for example, `crates/aura-consensus/tests/` and `crates/aura-guards/examples/`). Layer 5 Feature contains protocol crates for authentication, recovery, rendezvous, and storage. Layer 6 Runtime contains `aura-agent`, `aura-simulator`, and `aura-app` for system assembly and portable application core. Layer 7 Interface contains `aura-terminal` for user applications. Layer 8 Testing contains `aura-testkit` and `aura-quint` for shared fixtures and verification.
 
 Layer 5 facts are versioned and serialized using a binary encoding (bincode) with JSON fallback for debug/compatibility, and ceremony facts carry optional `trace_id` values for cross-protocol correlation.
 

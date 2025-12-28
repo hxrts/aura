@@ -91,11 +91,13 @@ fn make_guardian_fact(account_seed: u8, guardian_seed: u8, index: u64) -> Fact {
     Fact {
         order: make_order_time(index),
         timestamp: make_timestamp(1000 + index),
-        content: FactContent::Relational(RelationalFact::GuardianBinding {
-            account_id: AuthorityId::new_from_entropy([account_seed; 32]),
-            guardian_id: AuthorityId::new_from_entropy([guardian_seed; 32]),
-            binding_hash: Hash32([0u8; 32]),
-        }),
+        content: FactContent::Relational(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::GuardianBinding {
+                account_id: AuthorityId::new_from_entropy([account_seed; 32]),
+                guardian_id: AuthorityId::new_from_entropy([guardian_seed; 32]),
+                binding_hash: Hash32([0u8; 32]),
+            },
+        )),
     }
 }
 
@@ -363,11 +365,13 @@ async fn test_guardian_binding_facts_preserved() {
     assert_eq!(received.len(), 1);
 
     // Verify fact content is preserved
-    if let FactContent::Relational(RelationalFact::GuardianBinding {
-        account_id,
-        guardian_id,
-        ..
-    }) = &received[0].content
+    if let FactContent::Relational(RelationalFact::Protocol(
+        aura_journal::ProtocolRelationalFact::GuardianBinding {
+            account_id,
+            guardian_id,
+            ..
+        },
+    )) = &received[0].content
     {
         assert_eq!(*account_id, AuthorityId::new_from_entropy([42u8; 32]));
         assert_eq!(*guardian_id, AuthorityId::new_from_entropy([99u8; 32]));

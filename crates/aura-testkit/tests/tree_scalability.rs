@@ -19,7 +19,7 @@ use aura_core::{
     DeviceId, Hash32, JoinSemilattice,
 };
 use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
-use aura_journal::semilattice::OpLog;
+use aura_journal::algebra::OpLog;
 use aura_protocol::state::PeerView;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};

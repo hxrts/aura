@@ -46,20 +46,27 @@
 //!
 //! ## Example
 //!
-//! ```ignore
-//! use aura_chat::ChatFact;
-//! use aura_journal::DomainFact;
+//! ```rust,ignore
+//! use aura_chat::{ChatFact, ChatFactService};
+//! use aura_core::ids::{ContextId, AuthorityId};
 //!
-//! // Domain fact → Generic for storage in the journal
+//! // ChatFactService is the canonical API for chat operations.
+//! // It enforces capability guards, flow budgets, and journal emission.
+//! //
+//! // For direct fact construction (testing/migration):
+//! let context_id = ContextId::new_from_entropy([1u8; 32]);
+//! let channel_id = ContextId::new_from_entropy([2u8; 32]);
+//! let sender_id = AuthorityId::new_from_entropy([3u8; 32]);
+//!
 //! let fact = ChatFact::message_sent_sealed_ms(
-//!     /* context_id */ todo!(),
-//!     /* channel_id */ todo!(),
+//!     context_id,
+//!     channel_id,
 //!     "msg-123".to_string(),
-//!     /* sender_id */ todo!(),
+//!     sender_id,
 //!     "Alice".to_string(),
-//!     b"opaque bytes".to_vec(),
-//!     /* sent_at_ms */ 0,
-//!     None,
+//!     b"encrypted message bytes".to_vec(),
+//!     1700000000000, // sent_at_ms
+//!     None,          // reply_to
 //! );
 //! let _generic = fact.to_generic();
 //! ```

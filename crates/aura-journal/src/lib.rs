@@ -35,7 +35,8 @@ pub mod effects;
 
 // Domain modules moved from aura-core
 pub mod effect_api;
-pub mod semilattice;
+pub mod algebra;
+pub mod crdt;
 
 // CRDT causal context module moved from aura-core
 pub mod causal_context;
@@ -49,6 +50,7 @@ pub mod journal_api;
 // New fact-based journal implementation (Phase 2)
 pub mod commitment_integration;
 pub mod fact;
+pub mod protocol_facts;
 pub mod reduction;
 
 // Pure functions for Aeneas translation (formal verification)
@@ -58,13 +60,11 @@ pub mod pure;
 pub mod extensibility;
 
 // Domain-specific fact schemas (Phase 2.3)
-pub mod facts;
 
 // Authority state derivation (Phase 5)
 pub mod authority_state;
 
 // Domain event types
-pub mod events;
 
 // Note: Choreographic protocols moved to aura-sync (Layer 5)
 
@@ -89,6 +89,7 @@ pub use fact::{
     AttestedOp as FactAttestedOp, Fact, FactContent, Journal as FactJournal, JournalNamespace,
     RelationalFact, SnapshotFact, TreeOpKind,
 };
+pub use protocol_facts::ProtocolRelationalFact;
 pub use reduction::{
     reduce_authority, reduce_context, ChannelEpochState, ReductionNamespaceError, RelationalState,
 };
@@ -97,7 +98,7 @@ pub use journal_api::{AccountSummary, CommittedFact, Journal, JournalFact};
 
 // CRDT Implementation Details (INTERNAL - subject to change without notice)
 #[doc(hidden)]
-pub use semilattice::{AccountState, EpochLog, GuardianRegistry, IntentPool, MaxCounter, OpLog};
+pub use algebra::{AccountState, EpochLog, GuardianRegistry, IntentPool, MaxCounter, OpLog};
 
 // Re-export tree types from aura-core for consumers that expect them from aura-journal
 pub use aura_core::tree::{
@@ -116,20 +117,11 @@ pub use causal_context::{ActorId, CausalContext, OperationId, VectorClockExt};
 pub use types::GuardianMetadata;
 
 // Event type re-exports
-pub use events::{AdminReplaced, MaintenanceEvent};
 
 // Extensibility infrastructure re-exports
 pub use extensibility::{
     decode_domain_fact, encode_domain_fact, parse_generic_fact, DomainFact, FactReducer,
     FactRegistry,
-};
-
-// Social fact schema re-exports (Phase 2.3)
-pub use facts::{
-    AdjacencyFact, BlockConfigFact, BlockFact, BlockId, BlockMemberFact, BlockMessageMemberFact,
-    BlockStorageBudget, NeighborhoodFact, NeighborhoodId, PinnedContentFact, ResidentFact,
-    SocialFactError, StewardCapabilities, StewardFact, TraversalAllowedFact, TraversalDepth,
-    TraversalPosition,
 };
 
 // See docs/100_authority_and_identity.md for migration guidance

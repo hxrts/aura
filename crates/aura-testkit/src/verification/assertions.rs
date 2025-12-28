@@ -5,7 +5,7 @@
 
 use aura_core::DeviceId;
 use aura_core::{JoinSemilattice, MeetSemiLattice};
-use aura_journal::semilattice::account_state::AccountState;
+use aura_journal::algebra::account_state::AccountState;
 use async_io::Timer;
 use std::time::{Duration, Instant};
 

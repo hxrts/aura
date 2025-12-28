@@ -145,12 +145,14 @@ impl CommitFact {
 
     /// Convert to a fact for journal insertion
     pub fn to_relational_fact(&self) -> aura_journal::fact::RelationalFact {
-        aura_journal::fact::RelationalFact::Consensus {
-            consensus_id: self.consensus_id.0,
-            operation_hash: self.operation_hash,
-            threshold_met: true,
-            participant_count: self.participants.len() as u16,
-        }
+        aura_journal::fact::RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::Consensus {
+                consensus_id: self.consensus_id.0,
+                operation_hash: self.operation_hash,
+                threshold_met: true,
+                participant_count: self.participants.len() as u16,
+            },
+        )
     }
 }
 

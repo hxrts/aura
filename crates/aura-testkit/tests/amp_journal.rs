@@ -57,7 +57,9 @@ async fn test_insert_relational_fact_checkpoint() {
     };
 
     let result = effects
-        .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
+        ))
         .await;
 
     assert!(result.is_ok(), "inserting checkpoint fact should succeed");
@@ -74,7 +76,9 @@ async fn test_insert_relational_fact_policy() {
     };
 
     let result = effects
-        .insert_relational_fact(RelationalFact::AmpChannelPolicy(policy))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
+        ))
         .await;
 
     assert!(result.is_ok(), "inserting policy fact should succeed");
@@ -95,7 +99,9 @@ async fn test_insert_multiple_facts() {
         skip_window_override: None,
     };
     effects
-        .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
+        ))
         .await
         .unwrap();
 
@@ -106,7 +112,9 @@ async fn test_insert_multiple_facts() {
         skip_window: Some(512),
     };
     effects
-        .insert_relational_fact(RelationalFact::AmpChannelPolicy(policy))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
+        ))
         .await
         .unwrap();
 
@@ -128,7 +136,9 @@ async fn test_insert_facts_for_different_contexts() {
         skip_window_override: None,
     };
     effects
-        .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint1))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint1),
+        ))
         .await
         .unwrap();
 
@@ -143,7 +153,9 @@ async fn test_insert_facts_for_different_contexts() {
         skip_window_override: None,
     };
     effects
-        .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint2))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint2),
+        ))
         .await
         .unwrap();
 
@@ -165,7 +177,9 @@ async fn test_insert_facts_for_different_channels() {
         skip_window_override: None,
     };
     effects
-        .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint1))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint1),
+        ))
         .await
         .unwrap();
 
@@ -180,7 +194,9 @@ async fn test_insert_facts_for_different_channels() {
         skip_window_override: None,
     };
     effects
-        .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint2))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint2),
+        ))
         .await
         .unwrap();
 
@@ -219,7 +235,9 @@ async fn test_context_store_insert_fact() {
     };
 
     let result = store
-        .insert_relational_fact(RelationalFact::AmpChannelCheckpoint(checkpoint))
+        .insert_relational_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
+        ))
         .await;
 
     assert!(result.is_ok());
@@ -312,7 +330,9 @@ fn test_channel_checkpoint_serialization() {
         skip_window_override: Some(512),
     };
 
-    let fact = RelationalFact::AmpChannelCheckpoint(checkpoint);
+    let fact = RelationalFact::Protocol(
+        aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
+    );
 
     // Serialize to JSON
     let json = serde_json::to_string(&fact).expect("serialization should succeed");
@@ -322,7 +342,10 @@ fn test_channel_checkpoint_serialization() {
     let recovered: RelationalFact =
         serde_json::from_str(&json).expect("deserialization should succeed");
 
-    if let RelationalFact::AmpChannelCheckpoint(cp) = recovered {
+    if let RelationalFact::Protocol(
+        aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(cp),
+    ) = recovered
+    {
         assert_eq!(cp.chan_epoch, 42);
         assert_eq!(cp.base_gen, 100);
         assert_eq!(cp.window, 1024);
@@ -340,7 +363,9 @@ fn test_channel_policy_serialization() {
         skip_window: Some(2048),
     };
 
-    let fact = RelationalFact::AmpChannelPolicy(policy);
+    let fact = RelationalFact::Protocol(
+        aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
+    );
 
     // Serialize to JSON
     let json = serde_json::to_string(&fact).expect("serialization should succeed");
@@ -350,7 +375,9 @@ fn test_channel_policy_serialization() {
     let recovered: RelationalFact =
         serde_json::from_str(&json).expect("deserialization should succeed");
 
-    if let RelationalFact::AmpChannelPolicy(p) = recovered {
+    if let RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelPolicy(p)) =
+        recovered
+    {
         assert_eq!(p.skip_window, Some(2048));
     } else {
         panic!("expected AmpChannelPolicy variant");
@@ -365,13 +392,17 @@ fn test_channel_policy_none_skip_window() {
         skip_window: None,
     };
 
-    let fact = RelationalFact::AmpChannelPolicy(policy);
+    let fact = RelationalFact::Protocol(
+        aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
+    );
 
     let json = serde_json::to_string(&fact).expect("serialization should succeed");
     let recovered: RelationalFact =
         serde_json::from_str(&json).expect("deserialization should succeed");
 
-    if let RelationalFact::AmpChannelPolicy(p) = recovered {
+    if let RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelPolicy(p)) =
+        recovered
+    {
         assert_eq!(p.skip_window, None);
     } else {
         panic!("expected AmpChannelPolicy variant");
