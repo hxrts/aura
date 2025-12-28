@@ -11,6 +11,7 @@
 
 use aura_core::effects::intent::{AuthorizationLevel, IntentMetadata};
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::Epoch;
 #[cfg(any())]
 use aura_core::time::TimeStamp;
 #[cfg(any())]
@@ -390,7 +391,7 @@ pub enum Intent {
         /// New admin authority ID
         new_admin: String,
         /// Activation epoch for the change
-        activation_epoch: u64,
+        activation_epoch: Epoch,
     },
 
     /// Propose a snapshot

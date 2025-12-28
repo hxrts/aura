@@ -6,6 +6,7 @@ use crate::handlers::{CliOutput, HandlerContext};
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::{AccountId, AuthorityId};
 use aura_core::{FactValue, Journal};
+use aura_core::types::Epoch;
 use aura_journal::fact::FactContent;
 use aura_journal::DomainFact;
 use aura_maintenance::{AdminReplacement, MaintenanceFact};
@@ -57,7 +58,7 @@ async fn replace_admin(
         authority_id,
         authority_id,
         new_admin_id,
-        aura_core::Epoch::new(activation_epoch),
+        Epoch::new(activation_epoch),
     ));
 
     let fact_content = FactContent::Relational(replacement.to_generic());

@@ -39,6 +39,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{sync_protocol_error, SyncResult};
+use aura_core::types::Epoch;
 use aura_core::{AuthorityId, Hash32};
 
 // =============================================================================
@@ -74,7 +75,7 @@ pub struct UpgradeProposal {
     pub package_hash: Hash32,
 
     /// Activation epoch (for hard forks)
-    pub activation_epoch: Option<u64>,
+    pub activation_epoch: Option<Epoch>,
 
     /// Proposer authority
     pub proposer: AuthorityId,
@@ -122,7 +123,7 @@ pub struct OTAResult {
     pub activated: bool,
 
     /// Activation epoch (if activated)
-    pub activation_epoch: Option<u64>,
+    pub activation_epoch: Option<Epoch>,
 }
 
 // =============================================================================

@@ -13,7 +13,6 @@
 //! with stateless handlers. Domain crates should not implement this trait directly.
 
 use async_trait::async_trait;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -147,44 +146,102 @@ pub enum NetworkError {
     },
 }
 
-/// UDP socket operations for Aura effects.
+/// Opaque UDP endpoint wrapper to keep core effects runtime-agnostic.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct UdpEndpoint {
+    address: String,
+}
+
+impl UdpEndpoint {
+    /// Create a new UDP endpoint wrapper.
+    pub fn new(address: impl Into<String>) -> Self {
+        Self {
+            address: address.into(),
+        }
+    }
+
+    /// Get the address string.
+    pub fn as_str(&self) -> &str {
+        &self.address
+    }
+}
+
+impl std::fmt::Display for UdpEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.address)
+    }
+}
+
+impl From<&str> for UdpEndpoint {
+    fn from(address: &str) -> Self {
+        Self::new(address)
+    }
+}
+
+impl From<String> for UdpEndpoint {
+    fn from(address: String) -> Self {
+        Self::new(address)
+    }
+}
+
+/// UDP endpoint operations for Aura effects.
 #[async_trait]
-pub trait UdpSocketEffects: Send + Sync {
+pub trait UdpEndpointEffects: Send + Sync {
     /// Enable or disable UDP broadcast on the socket.
     async fn set_broadcast(&self, enabled: bool) -> Result<(), NetworkError>;
 
     /// Send a datagram to the destination address.
-    async fn send_to(&self, payload: &[u8], addr: SocketAddr) -> Result<usize, NetworkError>;
+    async fn send_to(
+        &self,
+        payload: &[u8],
+        addr: &UdpEndpoint,
+    ) -> Result<usize, NetworkError>;
 
     /// Receive a datagram into the provided buffer.
-    async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), NetworkError>;
+    async fn recv_from(
+        &self,
+        buffer: &mut [u8],
+    ) -> Result<(usize, UdpEndpoint), NetworkError>;
 }
 
 /// UDP effect surface for binding sockets.
 #[async_trait]
 pub trait UdpEffects: Send + Sync {
     /// Bind a UDP socket to the given address.
-    async fn udp_bind(&self, addr: SocketAddr) -> Result<Arc<dyn UdpSocketEffects>, NetworkError>;
+    async fn udp_bind(
+        &self,
+        addr: UdpEndpoint,
+    ) -> Result<Arc<dyn UdpEndpointEffects>, NetworkError>;
 }
 
 #[async_trait]
 impl<T: UdpEffects + ?Sized> UdpEffects for Arc<T> {
-    async fn udp_bind(&self, addr: SocketAddr) -> Result<Arc<dyn UdpSocketEffects>, NetworkError> {
+    async fn udp_bind(
+        &self,
+        addr: UdpEndpoint,
+    ) -> Result<Arc<dyn UdpEndpointEffects>, NetworkError> {
         (**self).udp_bind(addr).await
     }
 }
 
 #[async_trait]
-impl<T: UdpSocketEffects + ?Sized> UdpSocketEffects for Arc<T> {
+impl<T: UdpEndpointEffects + ?Sized> UdpEndpointEffects for Arc<T> {
     async fn set_broadcast(&self, enabled: bool) -> Result<(), NetworkError> {
         (**self).set_broadcast(enabled).await
     }
 
-    async fn send_to(&self, payload: &[u8], addr: SocketAddr) -> Result<usize, NetworkError> {
+    async fn send_to(
+        &self,
+        payload: &[u8],
+        addr: &UdpEndpoint,
+    ) -> Result<usize, NetworkError> {
         (**self).send_to(payload, addr).await
     }
 
-    async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), NetworkError> {
+    async fn recv_from(
+        &self,
+        buffer: &mut [u8],
+    ) -> Result<(usize, UdpEndpoint), NetworkError> {
         (**self).recv_from(buffer).await
     }
 }

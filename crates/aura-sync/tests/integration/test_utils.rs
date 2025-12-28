@@ -5,6 +5,7 @@
 
 use super::test_device_id;
 use aura_core::time::PhysicalTime;
+use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_sync::{
     core::{SessionManager, SyncConfig, SyncResult},
@@ -180,7 +181,7 @@ pub fn create_ota_protocol() -> OTAProtocol {
 /// Helper for creating epoch rotation coordinator
 pub fn create_epoch_coordinator(
     device_id: DeviceId,
-    current_epoch: u64,
+    current_epoch: Epoch,
 ) -> EpochRotationCoordinator {
     let config = EpochConfig {
         epoch_duration: Duration::from_secs(300),

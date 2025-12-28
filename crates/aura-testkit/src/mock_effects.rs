@@ -16,7 +16,9 @@ use aura_core::crypto::single_signer::{
 };
 use aura_core::effects::authorization::{AuthorizationDecision, AuthorizationError};
 use aura_core::effects::crypto::SigningKeyGenResult;
-use aura_core::effects::network::{NetworkError, PeerEventStream, UdpEffects, UdpSocketEffects};
+use aura_core::effects::network::{
+    NetworkError, PeerEventStream, UdpEffects, UdpEndpoint, UdpEndpointEffects,
+};
 use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::time::{
     LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError,
@@ -30,7 +32,7 @@ use aura_core::effects::{
     JournalEffects, NetworkCoreEffects, NetworkExtendedEffects, RandomCoreEffects,
     StorageCoreEffects, StorageExtendedEffects,
 };
-use aura_core::epochs::Epoch;
+use aura_core::types::Epoch;
 use aura_core::flow::{FlowBudget, Receipt};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::scope::{AuthorizationOp, ResourceScope};
@@ -832,7 +834,7 @@ impl NetworkExtendedEffects for MockEffects {
 struct MockUdpSocket;
 
 #[async_trait]
-impl UdpSocketEffects for MockUdpSocket {
+impl UdpEndpointEffects for MockUdpSocket {
     async fn set_broadcast(&self, _enabled: bool) -> Result<(), NetworkError> {
         Err(NetworkError::NotImplemented)
     }
@@ -840,7 +842,7 @@ impl UdpSocketEffects for MockUdpSocket {
     async fn send_to(
         &self,
         _payload: &[u8],
-        _addr: std::net::SocketAddr,
+        _addr: &UdpEndpoint,
     ) -> Result<usize, NetworkError> {
         Err(NetworkError::NotImplemented)
     }
@@ -848,7 +850,7 @@ impl UdpSocketEffects for MockUdpSocket {
     async fn recv_from(
         &self,
         _buffer: &mut [u8],
-    ) -> Result<(usize, std::net::SocketAddr), NetworkError> {
+    ) -> Result<(usize, UdpEndpoint), NetworkError> {
         Err(NetworkError::NotImplemented)
     }
 }
@@ -857,8 +859,8 @@ impl UdpSocketEffects for MockUdpSocket {
 impl UdpEffects for MockEffects {
     async fn udp_bind(
         &self,
-        _addr: std::net::SocketAddr,
-    ) -> Result<std::sync::Arc<dyn UdpSocketEffects>, NetworkError> {
+        _addr: UdpEndpoint,
+    ) -> Result<std::sync::Arc<dyn UdpEndpointEffects>, NetworkError> {
         Ok(std::sync::Arc::new(MockUdpSocket::default()))
     }
 }

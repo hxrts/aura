@@ -84,6 +84,8 @@ Maintenance logic uses identity epochs for consistency. A maintenance session us
 Snapshot completion sets the snapshot epoch equal to the identity epoch. Garbage collection rules use the snapshot epoch to prune data safely. Upgrade fences use the same epoch model to enforce activation.
 
 ```rust
+use aura_maintenance::MaintenanceEpoch;
+
 pub struct MaintenanceEpoch {
     pub identity_epoch: Epoch,
     pub snapshot_epoch: Epoch,

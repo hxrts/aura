@@ -23,18 +23,7 @@ pub struct RealSecureStorageHandler {
 }
 
 impl RealSecureStorageHandler {
-    /// Create a new real secure storage handler with default path
-    ///
-    /// **Note**: Prefer `with_base_path()` in production to ensure secure storage
-    /// is placed within the configured data directory.
-    pub fn new() -> Result<Self, SecureStorageError> {
-        Ok(Self {
-            platform_config: "filesystem-fallback".to_string(),
-            base_path: PathBuf::from("./secure_store"),
-        })
-    }
-
-    /// Create a secure storage handler with a custom base path
+    /// Create a secure storage handler with a custom base path.
     ///
     /// The secure storage files will be placed in `base_path/secure_store/`.
     pub fn with_base_path(base_path: PathBuf) -> Self {
@@ -42,6 +31,13 @@ impl RealSecureStorageHandler {
             platform_config: "filesystem-fallback".to_string(),
             base_path: base_path.join("secure_store"),
         }
+    }
+
+    /// Create a handler for testing with an ephemeral temp directory.
+    #[cfg(test)]
+    pub fn for_testing() -> Self {
+        let temp_dir = std::env::temp_dir().join(format!("aura-secure-test-{}", std::process::id()));
+        Self::with_base_path(temp_dir)
     }
 
     fn require_capability(
@@ -65,15 +61,6 @@ impl RealSecureStorageHandler {
             path = path.join(sub);
         }
         path
-    }
-}
-
-impl Default for RealSecureStorageHandler {
-    fn default() -> Self {
-        Self::new().unwrap_or(Self {
-            platform_config: "filesystem-fallback".to_string(),
-            base_path: PathBuf::from("./secure_store"),
-        })
     }
 }
 

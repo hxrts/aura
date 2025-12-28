@@ -9,6 +9,7 @@ use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use aura_core::effects::StorageCoreEffects;
 use aura_core::{hash, AccountId, Hash32, SemanticVersion};
+use aura_core::types::Epoch;
 use aura_maintenance::IdentityEpochFence;
 use aura_sync::maintenance::UpgradeProposal;
 use aura_sync::protocols::ota::UpgradeKind;
@@ -109,7 +110,7 @@ async fn propose_upgrade(
         activation_fence: match kind {
             UpgradeKind::HardFork => Some(IdentityEpochFence::new(
                 AccountId::from_uuid(ctx.effect_context().authority_id().uuid()),
-                aura_core::Epoch::new(0),
+                Epoch::new(0),
             )),
             _ => None,
         },

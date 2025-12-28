@@ -74,19 +74,6 @@ where
         }
     }
 
-    /// Apply a single delta to the state
-    ///
-    /// This is a generic fallback implementation. For specific CRDT types,
-    /// you should use the specialized DeltaHandler implementations below
-    /// that work with the DeltaState trait.
-    fn apply_delta_to_state_generic(&mut self, _delta: D) {
-        // Generic implementation: We cannot apply deltas without knowing the specific
-        // relationship between Delta type and State type. Use the DeltaState implementations below.
-        tracing::debug!(
-            "Applied delta to state (generic fallback - consider using DeltaState implementation)"
-        );
-    }
-
     /// Get current state
     pub fn get_state(&self) -> &S {
         &self.state

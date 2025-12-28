@@ -8,7 +8,7 @@
 //! Supports local network peer discovery via UDP broadcast. When enabled, the manager
 //! will announce presence and discover peers on the local network.
 
-use aura_core::effects::network::UdpEffects;
+use aura_core::effects::network::{UdpEffects, UdpEndpoint};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::{
@@ -673,6 +673,7 @@ impl RendezvousManager {
         let addr: std::net::SocketAddr = peer_address
             .parse()
             .map_err(|e| format!("Invalid peer address: {}", e))?;
+        let addr = UdpEndpoint::new(addr.to_string());
 
         // Get the LAN discovery service for sending
         let lan_guard = self.lan_discovery.read().await;
@@ -682,7 +683,7 @@ impl RendezvousManager {
             let message = format!("AURA_INV:{}", invitation_code);
             let socket = lan.socket();
             socket
-                .send_to(message.as_bytes(), addr)
+                .send_to(message.as_bytes(), &addr)
                 .await
                 .map_err(|e| format!("Failed to send invitation: {}", e))?;
 

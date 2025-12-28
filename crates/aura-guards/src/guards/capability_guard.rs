@@ -265,7 +265,7 @@ impl CapabilityGuardExt for CapabilityGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::epochs::Epoch;
+    use aura_core::types::Epoch;
     use biscuit_auth::PublicKey;
 
     #[tokio::test]
@@ -279,7 +279,7 @@ mod tests {
         let guard = CapabilityGuard::new(bridge);
 
         // Create flow budget
-        let mut budget = FlowBudget::new(1000, Epoch(0)); // limit=1000, epoch=0
+        let mut budget = FlowBudget::new(1000, Epoch::new(0)); // limit=1000, epoch=0
 
         // Test without token (should fail)
         let result = guard

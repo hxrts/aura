@@ -3,6 +3,7 @@
 //! Defines what is being signed and the approval context.
 
 use crate::tree::{TreeCommitment, TreeOp};
+use crate::types::Epoch;
 use crate::AuthorityId;
 use serde::{Deserialize, Serialize};
 
@@ -77,7 +78,7 @@ pub enum SignableOperation {
         /// Hash of the device's prestate at commitment time
         prestate_hash: [u8; 32],
         /// Epoch at which activation will occur
-        activation_epoch: u64,
+        activation_epoch: Epoch,
         /// Whether the device is ready for activation
         ready: bool,
     },
@@ -184,7 +185,7 @@ impl SigningContext {
         ceremony_id: [u8; 32],
         upgrade_hash: [u8; 32],
         prestate_hash: [u8; 32],
-        activation_epoch: u64,
+        activation_epoch: Epoch,
         ready: bool,
     ) -> Self {
         Self {

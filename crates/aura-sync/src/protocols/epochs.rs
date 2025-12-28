@@ -6,6 +6,7 @@
 
 use crate::core::{sync_protocol_error, SyncError};
 use aura_core::time::PhysicalTime;
+use aura_core::types::Epoch;
 use aura_core::{ContextId, DeviceId};
 // Note: aura-sync intentionally avoids aura-macros for semantic independence
 // use aura_macros::choreography;
@@ -18,7 +19,7 @@ use std::time::Duration;
 pub struct EpochRotationCoordinator {
     #[allow(dead_code)]
     device_id: DeviceId,
-    current_epoch: u64,
+    current_epoch: Epoch,
     epoch_config: EpochConfig,
     pending_rotations: HashMap<String, EpochRotation>,
 }
@@ -37,7 +38,7 @@ pub struct EpochConfig {
 #[derive(Debug, Clone)]
 pub struct EpochRotation {
     pub rotation_id: String,
-    pub target_epoch: u64,
+    pub target_epoch: Epoch,
     pub participants: Vec<DeviceId>,
     pub confirmations: HashMap<DeviceId, EpochConfirmation>,
     /// When rotation was initiated (unified time system)
@@ -61,7 +62,7 @@ pub enum RotationStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpochRotationProposal {
     pub rotation_id: String,
-    pub proposed_epoch: u64,
+    pub proposed_epoch: Epoch,
     pub proposer_id: DeviceId,
     pub participants: Vec<DeviceId>,
     pub context_id: ContextId,
@@ -83,8 +84,8 @@ impl EpochRotationProposal {
 pub struct EpochConfirmation {
     pub rotation_id: String,
     pub participant_id: DeviceId,
-    pub current_epoch: u64,
-    pub ready_for_epoch: u64,
+    pub current_epoch: Epoch,
+    pub ready_for_epoch: Epoch,
     /// When confirmation was sent (unified time system)
     pub confirmation_timestamp: PhysicalTime,
 }
@@ -102,7 +103,7 @@ impl EpochConfirmation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpochCommit {
     pub rotation_id: String,
-    pub committed_epoch: u64,
+    pub committed_epoch: Epoch,
     /// When commit was issued (unified time system)
     pub commit_timestamp: PhysicalTime,
     pub participants: Vec<DeviceId>,
@@ -127,7 +128,7 @@ impl Default for EpochConfig {
 
 impl EpochRotationCoordinator {
     /// Create new epoch rotation coordinator
-    pub fn new(device_id: DeviceId, initial_epoch: u64, config: EpochConfig) -> Self {
+    pub fn new(device_id: DeviceId, initial_epoch: Epoch, config: EpochConfig) -> Self {
         Self {
             device_id,
             current_epoch: initial_epoch,
@@ -137,7 +138,7 @@ impl EpochRotationCoordinator {
     }
 
     /// Get current epoch
-    pub fn current_epoch(&self) -> u64 {
+    pub fn current_epoch(&self) -> Epoch {
         self.current_epoch
     }
 
@@ -174,11 +175,12 @@ impl EpochRotationCoordinator {
             ));
         }
 
-        let rotation_id = format!("epoch-rotation-{}-{}", self.current_epoch + 1, now.ts_ms);
+        let target_epoch = self.current_epoch.next();
+        let rotation_id = format!("epoch-rotation-{}-{}", target_epoch.value(), now.ts_ms);
 
         let rotation = EpochRotation {
             rotation_id: rotation_id.clone(),
-            target_epoch: self.current_epoch + 1,
+            target_epoch,
             participants: participants.clone(),
             confirmations: HashMap::new(),
             initiated_at: now.clone(),
@@ -231,7 +233,7 @@ impl EpochRotationCoordinator {
     }
 
     /// Commit epoch rotation
-    pub fn commit_rotation(&mut self, rotation_id: &str) -> Result<u64, SyncError> {
+    pub fn commit_rotation(&mut self, rotation_id: &str) -> Result<Epoch, SyncError> {
         let rotation = self
             .pending_rotations
             .get_mut(rotation_id)

@@ -4,13 +4,13 @@
 //! via `UdpEffects` (Layer 3) and wired by the runtime. The packet/config types live in
 //! `aura-rendezvous` as pure data.
 
-use aura_core::effects::network::{UdpEffects, UdpSocketEffects};
+use aura_core::effects::network::{UdpEffects, UdpEndpoint, UdpEndpointEffects};
 use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
 use aura_core::identifiers::AuthorityId;
 use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryPacket, RendezvousDescriptor,
 };
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use tokio::sync::{watch, RwLock};
 use tracing::{debug, error, info, trace, warn};
@@ -20,7 +20,7 @@ pub struct LanDiscoveryService {
     config: LanDiscoveryConfig,
     authority_id: AuthorityId,
     time: Arc<dyn PhysicalTimeEffects>,
-    socket: Arc<dyn UdpSocketEffects>,
+    socket: Arc<dyn UdpEndpointEffects>,
     descriptor: Arc<RwLock<Option<RendezvousDescriptor>>>,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
@@ -43,9 +43,9 @@ impl LanDiscoveryService {
             .parse()
             .map_err(|e| format!("Invalid broadcast_addr '{}': {e}", config.broadcast_addr))?;
 
-        let bind_addr = SocketAddr::V4(SocketAddrV4::new(bind_ip, config.port));
+        let bind_addr = UdpEndpoint::new(SocketAddrV4::new(bind_ip, config.port).to_string());
         let socket = udp
-            .udp_bind(bind_addr)
+            .udp_bind(bind_addr.clone())
             .await
             .map_err(|e| format!("UDP bind failed ({bind_addr}): {e}"))?;
         socket
@@ -99,7 +99,7 @@ impl LanDiscoveryService {
     }
 
     /// Expose the underlying UDP socket (used for ad-hoc LAN invitation sends).
-    pub fn socket(&self) -> &Arc<dyn UdpSocketEffects> {
+    pub fn socket(&self) -> &Arc<dyn UdpEndpointEffects> {
         &self.socket
     }
 
@@ -114,7 +114,7 @@ impl LanDiscoveryService {
             .broadcast_addr
             .parse()
             .unwrap_or(Ipv4Addr::BROADCAST);
-        let broadcast_addr = SocketAddr::V4(SocketAddrV4::new(broadcast_ip, self.config.port));
+        let broadcast_addr = UdpEndpoint::new(SocketAddrV4::new(broadcast_ip, self.config.port).to_string());
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         tokio::spawn(async move {
@@ -155,7 +155,7 @@ impl LanDiscoveryService {
                             continue;
                         }
 
-                        match socket.send_to(&bytes, broadcast_addr).await {
+                        match socket.send_to(&bytes, &broadcast_addr).await {
                             Ok(n) => trace!(authority = %authority_id, bytes = n, "LAN announcement sent"),
                             Err(e) => warn!(error = %e, "Failed to send LAN announcement"),
                         }

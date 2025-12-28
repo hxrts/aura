@@ -141,7 +141,7 @@ pub use leakage::{
 // Migration utilities removed - middleware transition complete
 pub use network::{
     NetworkAddress, NetworkCoreEffects, NetworkEffects, NetworkError, NetworkExtendedEffects,
-    PeerEvent, PeerEventStream, UdpEffects, UdpSocketEffects,
+    PeerEvent, PeerEventStream, UdpEffects, UdpEndpoint, UdpEndpointEffects,
 };
 pub use query::{QueryEffects, QueryError, QuerySubscription};
 #[cfg(feature = "simulation")]

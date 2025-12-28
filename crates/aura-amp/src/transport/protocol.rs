@@ -171,7 +171,7 @@ pub async fn commit_bump_with_consensus<
         proposal,
         key_packages,
         group_public_key,
-        aura_core::epochs::Epoch::from(proposal.new_epoch),
+        aura_core::types::Epoch::from(proposal.new_epoch),
         effects,
         effects,
     )

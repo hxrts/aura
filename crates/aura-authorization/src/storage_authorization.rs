@@ -913,7 +913,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_authorized_storage_no_token_fails() {
-        use aura_core::types::epochs::Epoch;
+        use aura_core::types::Epoch;
 
         let mock_storage = MockStorage::new();
         let evaluator = setup_test_evaluator();
@@ -934,7 +934,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_authorized_storage_with_token_works() {
-        use aura_core::types::epochs::Epoch;
+        use aura_core::types::Epoch;
 
         let mock_storage = MockStorage::new();
         let (authority, authority_id) = setup_test_authority();
@@ -969,7 +969,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_authorized_storage_budget_tracking() {
-        use aura_core::types::epochs::Epoch;
+        use aura_core::types::Epoch;
 
         let mock_storage = MockStorage::new();
         let evaluator = setup_test_evaluator();
@@ -983,7 +983,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_authorized_storage_token_management() {
-        use aura_core::types::epochs::Epoch;
+        use aura_core::types::Epoch;
 
         let mock_storage = MockStorage::new();
         let (authority, authority_id) = setup_test_authority();

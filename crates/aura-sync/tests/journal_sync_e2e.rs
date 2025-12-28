@@ -81,7 +81,7 @@ impl JournalEffects for TestEffects {
         Ok(FlowBudget {
             limit: 1000,
             spent: 0,
-            epoch: aura_core::types::Epoch(0),
+            epoch: aura_core::types::Epoch::new(0),
         })
     }
 
@@ -103,7 +103,7 @@ impl JournalEffects for TestEffects {
         Ok(FlowBudget {
             limit: 1000,
             spent: cost as u64,
-            epoch: aura_core::types::Epoch(0),
+            epoch: aura_core::types::Epoch::new(0),
         })
     }
 }

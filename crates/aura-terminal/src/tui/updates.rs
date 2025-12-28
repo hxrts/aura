@@ -43,6 +43,7 @@
 
 use crate::tui::components::ToastMessage;
 use crate::tui::types::{Device, MfaPolicy};
+use aura_core::types::Epoch;
 
 /// Channel sender type for UI updates
 pub type UiUpdateSender = tokio::sync::mpsc::Sender<UiUpdate>;
@@ -93,7 +94,7 @@ pub enum UiUpdate {
         ceremony_id: String,
         device_name: String,
         enrollment_code: String,
-        pending_epoch: u64,
+        pending_epoch: Epoch,
         device_id: String,
     },
 
@@ -108,7 +109,7 @@ pub enum UiUpdate {
         has_failed: bool,
         accepted_participants: Vec<aura_core::threshold::ParticipantIdentity>,
         error_message: Option<String>,
-        pending_epoch: Option<u64>,
+        pending_epoch: Option<Epoch>,
     },
 
     // =========================================================================
@@ -255,7 +256,7 @@ pub enum UiUpdate {
         /// Optional error message if failed
         error_message: Option<String>,
         /// Pending epoch for key rotation (if created)
-        pending_epoch: Option<u64>,
+        pending_epoch: Option<Epoch>,
     },
 
     // =========================================================================

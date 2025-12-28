@@ -649,7 +649,7 @@ mod tests {
     // =========================================================================
 
     use crate::quint::aura_state_extractors::CapabilityToken;
-    use aura_core::types::{epochs::Epoch, AuthorityId, ContextId, FlowBudget};
+    use aura_core::types::{AuthorityId, ContextId, Epoch, FlowBudget};
 
     fn create_test_capability_state() -> QuintSimulationState {
         let mut state = QuintSimulationState::new();

@@ -41,7 +41,8 @@
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
 use aura_core::threshold::{SigningContext, ThresholdSignature};
-use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Epoch, Hash32, SemanticVersion};
+use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Hash32, SemanticVersion};
+use aura_core::types::Epoch;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -247,7 +248,7 @@ pub enum OTACeremonyFact {
         proposal_id: String,
         package_id: String,
         version: String,
-        activation_epoch: u64,
+        activation_epoch: Epoch,
         coordinator: String,
         threshold: usize,
         quorum_size: usize,
@@ -280,7 +281,7 @@ pub enum OTACeremonyFact {
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
-        activation_epoch: u64,
+        activation_epoch: Epoch,
         ready_devices: Vec<String>,
         threshold_signature: Vec<u8>,
         timestamp_ms: u64,
@@ -446,7 +447,9 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         }
 
         // Verify activation epoch has sufficient notice
-        if proposal.activation_epoch < current_epoch + self.config.min_activation_notice_epochs {
+        if proposal.activation_epoch.value()
+            < current_epoch.value() + self.config.min_activation_notice_epochs
+        {
             return Err(AuraError::invalid(format!(
                 "Activation epoch {} too soon. Current: {}, minimum notice: {} epochs",
                 proposal.activation_epoch, current_epoch, self.config.min_activation_notice_epochs
@@ -1070,7 +1073,7 @@ mod tests {
                 version: SemanticVersion::new(2, 0, 0),
                 kind: UpgradeKind::HardFork,
                 package_hash: Hash32([0u8; 32]),
-                activation_epoch: 200,
+                activation_epoch: Epoch::new(200),
                 coordinator: DeviceId::from_bytes([1; 32]),
             },
             status: OTACeremonyStatus::CollectingCommitments,
@@ -1153,7 +1156,7 @@ mod tests {
             proposal_id: "prop-1".to_string(),
             package_id: "pkg-1".to_string(),
             version: "2.0.0".to_string(),
-            activation_epoch: 200,
+            activation_epoch: Epoch::new(200),
             coordinator: "coord-1".to_string(),
             threshold: 2,
             quorum_size: 3,
@@ -1175,7 +1178,7 @@ mod tests {
             version: SemanticVersion::new(2, 0, 0),
             kind: UpgradeKind::HardFork,
             package_hash: Hash32([0u8; 32]),
-            activation_epoch: 200,
+            activation_epoch: Epoch::new(200),
             coordinator: DeviceId::from_bytes([1; 32]),
         };
 
@@ -1185,7 +1188,7 @@ mod tests {
             version: SemanticVersion::new(2, 0, 0),
             kind: UpgradeKind::HardFork,
             package_hash: Hash32([0u8; 32]),
-            activation_epoch: 200,
+            activation_epoch: Epoch::new(200),
             coordinator: DeviceId::from_bytes([1; 32]),
         };
 
@@ -1194,7 +1197,7 @@ mod tests {
 
         // Different proposal should have different hash
         let proposal3 = UpgradeProposal {
-            activation_epoch: 300, // Different epoch
+            activation_epoch: Epoch::new(300), // Different epoch
             ..proposal1.clone()
         };
         assert_ne!(proposal1.compute_hash(), proposal3.compute_hash());

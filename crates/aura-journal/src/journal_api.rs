@@ -309,7 +309,6 @@ impl Journal {
                         crate::fact::RelationalFact::Generic { binding_type, .. } => {
                             format!("Generic:{}", binding_type)
                         }
-                        _ => "Relational".to_string(),
                     },
                     FactContent::Snapshot(_) => "Snapshot".to_string(),
                     FactContent::RendezvousReceipt { .. } => "RendezvousReceipt".to_string(),

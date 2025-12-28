@@ -7,6 +7,7 @@ use super::test_time;
 use super::test_utils::*;
 use aura_core::{AuthorityId, AuraError, AuraResult, Hash32};
 use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
+use aura_core::types::Epoch;
 use aura_testkit::simulation::network::NetworkCondition;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -126,7 +127,7 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
             version: String::from("1.3.0"),
             kind: UpgradeKind::HardFork,
             package_hash: Hash32::from([0xdeu8; 32]),
-            activation_epoch: Some(100),
+            activation_epoch: Some(Epoch::new(100)),
             proposer: coordinator,
         };
 
@@ -197,9 +198,9 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
     let device3 = fixture.devices[2];
 
     // Create epoch coordinators
-    let mut coord1 = create_epoch_coordinator(device1, 5); // Current epoch 5
-    let _coord2 = create_epoch_coordinator(device2, 5);
-    let coord3 = create_epoch_coordinator(device3, 4); // Behind by one epoch
+    let mut coord1 = create_epoch_coordinator(device1, Epoch::new(5)); // Current epoch 5
+    let _coord2 = create_epoch_coordinator(device2, Epoch::new(5));
+    let coord3 = create_epoch_coordinator(device3, Epoch::new(4)); // Behind by one epoch
 
     let session = fixture.create_coordinated_session("epoch_fencing").await?;
 
@@ -224,16 +225,16 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
             let conf2 = EpochConfirmation {
                 rotation_id: rotation_id.clone(),
                 participant_id: device2,
-                current_epoch: 5,
-                ready_for_epoch: 6,
+                current_epoch: Epoch::new(5),
+                ready_for_epoch: Epoch::new(6),
                 confirmation_timestamp: test_confirmation_time(),
             };
 
             let conf3 = EpochConfirmation {
                 rotation_id: rotation_id.clone(),
                 participant_id: device3,
-                current_epoch: 4,
-                ready_for_epoch: 6, // Jumping to match others
+                current_epoch: Epoch::new(4),
+                ready_for_epoch: Epoch::new(6), // Jumping to match others
                 confirmation_timestamp: test_confirmation_time(),
             };
 
@@ -276,7 +277,7 @@ async fn test_ota_rollback() -> AuraResult<()> {
     let fixture = MultiDeviceTestFixture::threshold_group().await?;
     let _protocol = create_ota_protocol();
 
-    let coordinator = fixture.devices[0];
+    let coordinator = AuthorityId(fixture.devices[0].0);
 
     let session = fixture.create_coordinated_session("ota_rollback").await?;
 
@@ -342,9 +343,9 @@ async fn test_ota_network_partition() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
     let _protocol = create_ota_protocol();
 
-    let coordinator = AuthorityId(fixture.devices[0].0);
-    let approver1 = AuthorityId(fixture.devices[1].0);
-    let approver2 = AuthorityId(fixture.devices[2].0);
+    let coordinator = fixture.devices[0];
+    let approver1 = fixture.devices[1];
+    let approver2 = fixture.devices[2];
 
     let session = fixture.create_coordinated_session("ota_partition").await?;
 

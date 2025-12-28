@@ -11,7 +11,7 @@ use aura_consensus::protocol::run_consensus;
 use aura_consensus::types::CommitFact;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::RandomEffects;
-use aura_core::epochs::Epoch;
+use aura_core::types::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::{AuthorityId, Prestate, Result};
 use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};

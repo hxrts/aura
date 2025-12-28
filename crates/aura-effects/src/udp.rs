@@ -3,7 +3,7 @@
 //! Stateless UDP socket implementation backing `UdpEffects` from aura-core.
 
 use async_trait::async_trait;
-use aura_core::effects::network::{NetworkError, UdpEffects, UdpSocketEffects};
+use aura_core::effects::network::{NetworkError, UdpEffects, UdpEndpoint, UdpEndpointEffects};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
@@ -26,7 +26,7 @@ struct RealUdpSocket {
 }
 
 #[async_trait]
-impl UdpSocketEffects for RealUdpSocket {
+impl UdpEndpointEffects for RealUdpSocket {
     async fn set_broadcast(&self, enabled: bool) -> Result<(), NetworkError> {
         self.socket
             .set_broadcast(enabled)
@@ -34,7 +34,14 @@ impl UdpSocketEffects for RealUdpSocket {
         Ok(())
     }
 
-    async fn send_to(&self, payload: &[u8], addr: SocketAddr) -> Result<usize, NetworkError> {
+    async fn send_to(
+        &self,
+        payload: &[u8],
+        addr: &UdpEndpoint,
+    ) -> Result<usize, NetworkError> {
+        let addr: SocketAddr = addr.as_str().parse().map_err(|e| {
+            NetworkError::ConnectionFailed(format!("Invalid UDP address '{}': {e}", addr))
+        })?;
         self.socket
             .send_to(payload, addr)
             .await
@@ -44,10 +51,14 @@ impl UdpSocketEffects for RealUdpSocket {
             })
     }
 
-    async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), NetworkError> {
+    async fn recv_from(
+        &self,
+        buffer: &mut [u8],
+    ) -> Result<(usize, UdpEndpoint), NetworkError> {
         self.socket
             .recv_from(buffer)
             .await
+            .map(|(len, addr)| (len, UdpEndpoint::new(addr.to_string())))
             .map_err(|e| NetworkError::ReceiveFailed {
                 reason: e.to_string(),
             })
@@ -56,7 +67,13 @@ impl UdpSocketEffects for RealUdpSocket {
 
 #[async_trait]
 impl UdpEffects for RealUdpEffectsHandler {
-    async fn udp_bind(&self, addr: SocketAddr) -> Result<Arc<dyn UdpSocketEffects>, NetworkError> {
+    async fn udp_bind(
+        &self,
+        addr: UdpEndpoint,
+    ) -> Result<Arc<dyn UdpEndpointEffects>, NetworkError> {
+        let addr: SocketAddr = addr.as_str().parse().map_err(|e| {
+            NetworkError::ConnectionFailed(format!("Invalid UDP bind address '{addr}': {e}"))
+        })?;
         let socket = UdpSocket::bind(addr).await.map_err(|e| {
             NetworkError::ConnectionFailed(format!("UDP bind failed ({addr}): {e}"))
         })?;

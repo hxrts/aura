@@ -49,7 +49,8 @@ use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
-use aura_core::{tree::Snapshot, AccountId, AuraError, AuthorityId, Epoch, Hash32, SemanticVersion};
+use aura_core::{tree::Snapshot, AccountId, AuraError, AuthorityId, Hash32, SemanticVersion};
+use aura_core::types::Epoch;
 use aura_maintenance::{
     CacheInvalidated, CacheKey, IdentityEpochFence, SnapshotCompleted, SnapshotProposed,
     UpgradeActivated, UpgradeProposalMetadata,
@@ -202,7 +203,7 @@ impl MaintenanceService {
         participants: BTreeSet<AuthorityId>,
         threshold_signature: Vec<u8>,
     ) -> SyncResult<SnapshotCompleted> {
-        *self.last_snapshot_epoch.write() = Some(snapshot.epoch);
+        *self.last_snapshot_epoch.write() = Some(Epoch::new(snapshot.epoch));
 
         Ok(SnapshotCompleted::new(
             authority_id,
@@ -221,7 +222,7 @@ impl MaintenanceService {
         epoch_floor: Epoch,
     ) -> SyncResult<CacheInvalidated> {
         let mut cache = self.cache_manager.write();
-        cache.invalidate_keys(&keys, epoch_floor.0);
+        cache.invalidate_keys(&keys, epoch_floor.value());
 
         let wrapped_keys = keys.into_iter().map(CacheKey).collect();
         Ok(CacheInvalidated::new(
@@ -338,7 +339,9 @@ impl MaintenanceService {
         // Activation fence if present
         if let Some(ref fence) = proposal.activation_fence {
             message.write_all(fence.account_id.0.as_bytes()).unwrap();
-            message.write_all(&fence.epoch.to_le_bytes()).unwrap();
+            message
+                .write_all(&fence.epoch.value().to_le_bytes())
+                .unwrap();
         }
 
         message
@@ -355,10 +358,7 @@ impl MaintenanceService {
             // The account ID is derived from the proposer device ID
             let account_id = AccountId(proposer.0);
 
-            Some(IdentityEpochFence::new(
-                account_id,
-                Epoch::new(activation_epoch),
-            ))
+            Some(IdentityEpochFence::new(account_id, activation_epoch))
         } else {
             // Soft upgrades don't require epoch fencing
             None
@@ -426,7 +426,7 @@ impl MaintenanceService {
     }
 
     /// Check if snapshot is due
-    pub fn is_snapshot_due(&self, current_epoch: u64) -> bool {
+    pub fn is_snapshot_due(&self, current_epoch: Epoch) -> bool {
         if !self.config.auto_snapshot_enabled {
             return false;
         }
@@ -434,7 +434,7 @@ impl MaintenanceService {
         match *self.last_snapshot_epoch.read() {
             None => true, // First snapshot
             Some(last) => {
-                current_epoch >= last.0 + self.config.min_snapshot_interval_epochs
+                current_epoch.value() >= last.value() + self.config.min_snapshot_interval_epochs
             }
         }
     }
@@ -681,11 +681,11 @@ mod tests {
         let service = MaintenanceService::new(config).unwrap();
 
         // First snapshot should be due
-        assert!(service.is_snapshot_due(0));
+        assert!(service.is_snapshot_due(Epoch::new(0)));
 
         // After setting last snapshot
         *service.last_snapshot_epoch.write() = Some(Epoch::new(50));
-        assert!(!service.is_snapshot_due(100)); // 100 - 50 = 50 < 100
-        assert!(service.is_snapshot_due(151)); // 151 - 50 = 101 >= 100
+        assert!(!service.is_snapshot_due(Epoch::new(100))); // 100 - 50 = 50 < 100
+        assert!(service.is_snapshot_due(Epoch::new(151))); // 151 - 50 = 101 >= 100
     }
 }

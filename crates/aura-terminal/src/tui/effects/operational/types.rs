@@ -2,6 +2,8 @@
 //!
 //! Response and error types for operational commands.
 
+use aura_core::types::Epoch;
+
 /// Result type for operational commands
 pub type OpResult = Result<OpResponse, OpError>;
 
@@ -36,7 +38,7 @@ pub enum OpResponse {
         /// Shareable enrollment code to import on the new device
         enrollment_code: String,
         /// Pending epoch created during prepare
-        pending_epoch: u64,
+        pending_epoch: Epoch,
         /// Device id being enrolled
         device_id: String,
     },

@@ -270,7 +270,7 @@ pub struct AuraStateMapper {
 impl AuraStateMapper {
     /// Create a new Aura state mapper with standard type registrations
     pub fn new() -> Self {
-        use aura_core::types::{epochs::Epoch, AuthorityId, ContextId, FlowBudget};
+        use aura_core::types::{AuthorityId, ContextId, Epoch, FlowBudget};
 
         let mut mapper = StateMapper::new();
         mapper.register_type::<String>();
@@ -353,7 +353,7 @@ pub struct SimulationStateMapper {
 impl SimulationStateMapper {
     /// Create a new simulation state mapper
     pub fn new() -> Self {
-        use aura_core::types::{epochs::Epoch, AuthorityId, ContextId, FlowBudget};
+        use aura_core::types::{AuthorityId, ContextId, Epoch, FlowBudget};
 
         let mut mapper = StateMapper::new();
         mapper.register_type::<String>();
@@ -599,7 +599,7 @@ impl StateDiff {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::types::{epochs::Epoch, AuthorityId, FlowBudget};
+    use aura_core::types::{AuthorityId, Epoch, FlowBudget};
 
     #[test]
     fn test_state_mapper_basic() {

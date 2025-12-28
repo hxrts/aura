@@ -11,7 +11,7 @@
 //! - Simulation world state → Combined Quint state
 
 use aura_core::effects::QuintMappable;
-use aura_core::types::{epochs::Epoch, AuthorityId, ContextId, FlowBudget};
+use aura_core::types::{AuthorityId, ContextId, Epoch, FlowBudget};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 

@@ -6,6 +6,7 @@ use crate::cli::context::ContextAction;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use aura_core::hash;
+use aura_core::types::Epoch;
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -53,7 +54,7 @@ async fn inspect_context(
             snapshot.flow_budget.limit,
             snapshot.flow_budget.spent,
             headroom,
-            snapshot.flow_budget.epoch
+            snapshot.flow_budget.epoch.value()
         ),
     );
 
@@ -118,7 +119,7 @@ async fn show_receipts(
                 "  - hop={} cost={} epoch={} status={} chains={}",
                 hop,
                 receipt.cost,
-                receipt.epoch,
+                receipt.epoch.value(),
                 receipt.status.as_deref().unwrap_or("unknown"),
                 receipt.chain_hash.as_deref().unwrap_or("n/a")
             ));
@@ -201,14 +202,14 @@ struct ChannelDebug {
 struct FlowBudgetDebug {
     pub limit: u64,
     pub spent: u64,
-    pub epoch: u64,
+    pub epoch: Epoch,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct ReceiptDebug {
     pub hop: String,
     pub cost: u32,
-    pub epoch: u64,
+    pub epoch: Epoch,
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]

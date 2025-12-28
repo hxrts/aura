@@ -26,7 +26,7 @@ use aura_core::identifiers::AuthorityId;
 use aura_core::identifiers::ChannelId;
 use aura_core::query::{FactPredicate, Query};
 use aura_core::tree::{AttestedOp, TreeOp};
-use aura_core::types::FrostThreshold;
+use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::AccountId;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -862,7 +862,7 @@ impl AppCore {
         threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
-    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
+    ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
         let runtime = self
             .runtime
             .as_ref()
@@ -883,7 +883,7 @@ impl AppCore {
     ///
     /// # Errors
     /// Returns `IntentError::NoAgent` if no runtime is configured.
-    pub async fn commit_guardian_key_rotation(&self, new_epoch: u64) -> Result<(), IntentError> {
+    pub async fn commit_guardian_key_rotation(&self, new_epoch: Epoch) -> Result<(), IntentError> {
         let runtime = self.runtime.as_ref().ok_or_else(|| {
             IntentError::no_agent("commit_guardian_key_rotation requires a runtime")
         })?;
@@ -903,7 +903,7 @@ impl AppCore {
     /// Returns `IntentError::NoAgent` if no runtime is configured.
     pub async fn rollback_guardian_key_rotation(
         &self,
-        failed_epoch: u64,
+        failed_epoch: Epoch,
     ) -> Result<(), IntentError> {
         let runtime = self.runtime.as_ref().ok_or_else(|| {
             IntentError::no_agent("rollback_guardian_key_rotation requires a runtime")

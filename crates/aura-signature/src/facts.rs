@@ -7,7 +7,7 @@
 //! authority-centric model where authorities hide internal device structure.
 
 use aura_core::time::PhysicalTime;
-use aura_core::types::epochs::Epoch;
+use aura_core::types::Epoch;
 use aura_core::types::facts::{FactDelta, FactDeltaReducer};
 use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use aura_core::AuthorityId;
@@ -468,13 +468,13 @@ mod tests {
             authority_id,
             vec![1, 2, 3, 4],
             Cap::top(),
-            Epoch(1),
+            Epoch::new(1),
             1000,
         );
 
         assert_eq!(fact.authority_id(), Some(authority_id));
         assert_eq!(fact.timestamp_ms(), 1000);
-        assert_eq!(fact.epoch(), Some(Epoch(1)));
+        assert_eq!(fact.epoch(), Some(Epoch::new(1)));
         assert_eq!(fact.fact_type(), "authority_registered");
     }
 
@@ -487,7 +487,7 @@ mod tests {
             authority_id,
             vec![1, 2, 3, 4],
             Cap::top(),
-            Epoch(1),
+            Epoch::new(1),
             1000,
         );
 
@@ -525,7 +525,7 @@ mod tests {
         let fact = VerifyFact::authority_suspended_ms(
             authority_id,
             "test reason".to_string(),
-            Epoch(1),
+            Epoch::new(1),
             1234567890,
         );
         assert_eq!(fact.timestamp_ms(), 1234567890);

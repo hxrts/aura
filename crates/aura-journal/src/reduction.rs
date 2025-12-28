@@ -10,7 +10,6 @@ use crate::fact::{
 use aura_core::{
     authority::TreeStateSummary,
     effects::LeakageBudget,
-    epochs::Epoch,
     hash,
     identifiers::{AuthorityId, ChannelId, ContextId},
     time::OrderTime,
@@ -163,7 +162,7 @@ fn apply_rotate_epoch(tree_state: &TreeStateSummary) -> TreeStateSummary {
     // Epoch rotation requires recomputing all commitments in the tree
     // with the new epoch value
 
-    let new_epoch = Epoch(tree_state.epoch().0 + 1);
+    let new_epoch = tree_state.epoch().next();
 
     // In a full implementation, we would:
     // 1. Iterate through all leaves and recompute their commitments with new epoch

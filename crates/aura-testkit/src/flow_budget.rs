@@ -5,7 +5,7 @@
 use async_trait::async_trait;
 use aura_authorization::{BiscuitAuthorizationBridge, ContextOp, ResourceScope};
 use aura_core::effects::FlowBudgetEffects;
-use aura_core::epochs::Epoch;
+use aura_core::types::Epoch;
 use aura_core::flow::{FlowBudget, FlowBudgetKey, Receipt};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Hash32};

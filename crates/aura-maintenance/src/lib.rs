@@ -7,7 +7,25 @@
 pub mod facts;
 
 pub use facts::{
-    AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceFact,
-    MaintenanceFactDelta, MaintenanceFactReducer, SnapshotCompleted, SnapshotProposed,
-    UpgradeActivated, UpgradeProposalMetadata, MAINTENANCE_FACT_TYPE_ID,
+    AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEpoch,
+    MaintenanceFact, MaintenanceFactDelta, MaintenanceFactKey, MaintenanceFactReducer,
+    SnapshotCompleted, SnapshotProposed, UpgradeActivated, UpgradeProposalMetadata,
+    MAINTENANCE_FACT_TYPE_ID,
 };
+
+/// Operation category map (A/B/C) for maintenance gating and review.
+pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    ("maintenance:snapshot-proposed", "B"),
+    ("maintenance:snapshot-completed", "B"),
+    ("maintenance:cache-invalidated", "A"),
+    ("maintenance:upgrade-activated", "C"),
+    ("maintenance:admin-replacement", "C"),
+];
+
+/// Lookup the operation category (A/B/C) for a given maintenance operation.
+pub fn operation_category(operation: &str) -> Option<&'static str> {
+    OPERATION_CATEGORIES
+        .iter()
+        .find(|(op, _)| *op == operation)
+        .map(|(_, category)| *category)
+}

@@ -10,7 +10,7 @@ use aura_core::effects::{
     RandomCoreEffects, StorageCoreEffects, StorageExtendedEffects,
 };
 use aura_core::time::PhysicalTime;
-use aura_core::types::epochs::Epoch;
+use aura_core::types::Epoch;
 use aura_core::types::flow::Receipt;
 use aura_core::{AuraError, AuraResult, Cap, FlowBudget, Journal};
 use aura_core::{AuthorityId, ContextId};

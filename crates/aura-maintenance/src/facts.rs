@@ -3,7 +3,8 @@
 use aura_core::hash::hash;
 use aura_core::time::ProvenancedTime;
 use aura_core::types::facts::{FactDelta, FactDeltaReducer};
-use aura_core::{AccountId, AuthorityId, ContextId, Epoch, Hash32, SemanticVersion};
+use aura_core::{AccountId, AuthorityId, ContextId, Hash32, SemanticVersion};
+use aura_core::types::Epoch;
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
 use aura_journal::{DomainFact, FactReducer};
 use aura_macros::DomainFact;
@@ -33,6 +34,25 @@ impl IdentityEpochFence {
     /// Helper constructor.
     pub fn new(account_id: AccountId, epoch: Epoch) -> Self {
         Self { account_id, epoch }
+    }
+}
+
+/// Epoch tuple used by maintenance workflows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaintenanceEpoch {
+    /// Current identity epoch for the authority.
+    pub identity_epoch: Epoch,
+    /// Snapshot epoch used for garbage collection fencing.
+    pub snapshot_epoch: Epoch,
+}
+
+impl MaintenanceEpoch {
+    /// Helper constructor.
+    pub fn new(identity_epoch: Epoch, snapshot_epoch: Epoch) -> Self {
+        Self {
+            identity_epoch,
+            snapshot_epoch,
+        }
     }
 }
 
@@ -205,10 +225,15 @@ impl AdminReplacement {
     context_fn = "context_id"
 )]
 pub enum MaintenanceFact {
+    /// Snapshot proposal fact.
     SnapshotProposed(SnapshotProposed),
+    /// Snapshot completion fact.
     SnapshotCompleted(SnapshotCompleted),
+    /// Cache invalidation fact.
     CacheInvalidated(CacheInvalidated),
+    /// Upgrade activation fact.
     UpgradeActivated(UpgradeActivated),
+    /// Admin replacement fact.
     AdminReplacement(AdminReplacement),
 }
 
@@ -241,7 +266,8 @@ impl MaintenanceFact {
         }
     }
 
-    fn binding_key(&self) -> MaintenanceFactKey {
+    /// Stable reducer key for this fact type.
+    pub fn binding_key(&self) -> MaintenanceFactKey {
         let (sub_type, data) = match self {
             MaintenanceFact::SnapshotProposed(fact) => (
                 "snapshot-proposed",
@@ -273,18 +299,26 @@ impl MaintenanceFact {
 /// Key for indexing maintenance facts in the journal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaintenanceFactKey {
+    /// Fact subtype identifier.
     pub sub_type: &'static str,
+    /// Opaque key payload for the subtype.
     pub data: Vec<u8>,
 }
 
 /// Delta produced by maintenance fact reduction.
 #[derive(Debug, Clone, Default)]
 pub struct MaintenanceFactDelta {
+    /// Count of snapshot proposals.
     pub snapshot_proposals: u64,
+    /// Count of snapshot completions.
     pub snapshot_completions: u64,
+    /// Count of cache invalidation facts.
     pub cache_invalidations: u64,
+    /// Number of cache keys invalidated.
     pub cache_keys_invalidated: u64,
+    /// Count of upgrade activations.
     pub upgrades_activated: u64,
+    /// Count of admin replacements.
     pub admin_replacements: u64,
 }
 
@@ -378,7 +412,9 @@ impl MaintenanceFact {
 /// Snapshot completion receipt used by maintenance workflows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotReceipt {
+    /// Proposal identifier for the completed snapshot.
     pub proposal_id: Uuid,
+    /// Completion time for the snapshot.
     pub completed_at: ProvenancedTime,
 }
 

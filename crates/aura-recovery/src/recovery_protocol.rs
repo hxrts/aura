@@ -5,7 +5,7 @@
 
 use crate::facts::{RecoveryFact, RecoveryFactEmitter};
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
-use aura_core::epochs::Epoch;
+use aura_core::types::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
 use aura_core::identifiers::ContextId;

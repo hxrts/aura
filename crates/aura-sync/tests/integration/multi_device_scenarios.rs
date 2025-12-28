@@ -4,6 +4,7 @@
 //! and realistic end-to-end synchronization workflows.
 
 use super::test_utils::*;
+use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult};
 use aura_testkit::simulation::network::NetworkCondition;
 use std::time::Duration;
@@ -129,7 +130,7 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
         println!("  Epoch coordination: Synchronizing epochs");
         let mut coordinators = Vec::new();
         for (i, device_id) in fixture.devices.iter().enumerate() {
-            let coordinator = create_epoch_coordinator(*device_id, i as u64); // Staggered epochs
+            let coordinator = create_epoch_coordinator(*device_id, Epoch::new(i as u64)); // Staggered epochs
             coordinators.push(coordinator);
         }
         tokio::time::sleep(Duration::from_millis(800)).await;

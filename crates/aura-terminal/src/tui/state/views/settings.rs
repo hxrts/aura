@@ -3,6 +3,7 @@
 use super::KeyRotationCeremonyUiState;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::types::{AuthorityInfo, AuthoritySubSection, MfaPolicy, SettingsSection};
+use aura_core::types::Epoch;
 
 /// Settings screen state
 #[derive(Clone, Debug, Default)]
@@ -129,7 +130,7 @@ impl DeviceEnrollmentCeremonyModalState {
         is_complete: bool,
         has_failed: bool,
         error_message: Option<String>,
-        pending_epoch: Option<u64>,
+        pending_epoch: Option<Epoch>,
     ) {
         self.ceremony.update_from_status(
             accepted_count,

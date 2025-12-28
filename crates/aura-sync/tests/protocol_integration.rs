@@ -5,6 +5,7 @@
 //! the aura-testkit testing framework and with each other.
 
 use aura_core::time::PhysicalTime;
+use aura_core::types::Epoch;
 use aura_core::DeviceId;
 use aura_sync::protocols::{
     AntiEntropyConfig, AntiEntropyProtocol, EpochConfig, EpochRotationCoordinator,
@@ -293,9 +294,9 @@ fn test_epoch_rotation_coordinator_creation() {
     // Test epoch rotation coordinator instantiation
     let device_id = device(16);
     let config = EpochConfig::default();
-    let coordinator = EpochRotationCoordinator::new(device_id, 0, config);
+    let coordinator = EpochRotationCoordinator::new(device_id, Epoch::new(0), config);
 
-    assert_eq!(coordinator.current_epoch(), 0);
+    assert_eq!(coordinator.current_epoch(), Epoch::new(0));
 }
 
 #[test]
@@ -303,7 +304,7 @@ fn test_epoch_rotation_initiation() {
     // Test epoch rotation initiation
     let device_id = device(17);
     let config = EpochConfig::default();
-    let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
+    let mut coordinator = EpochRotationCoordinator::new(device_id, Epoch::new(0), config);
 
     let participant1 = device(18);
     let participant2 = device(19);
@@ -329,7 +330,7 @@ fn test_epoch_rotation_with_insufficient_participants() {
         ..Default::default()
     };
 
-    let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
+    let mut coordinator = EpochRotationCoordinator::new(device_id, Epoch::new(0), config);
 
     let participant = device(21);
     let context_id = aura_core::ContextId::new_from_entropy([1u8; 32]);
@@ -349,7 +350,7 @@ fn test_epoch_confirmation_processing() {
     // Test processing epoch confirmations
     let device_id = device(22);
     let config = EpochConfig::default();
-    let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
+    let mut coordinator = EpochRotationCoordinator::new(device_id, Epoch::new(0), config);
 
     let participant1 = device(23);
     let participant2 = device(24);
@@ -367,8 +368,8 @@ fn test_epoch_confirmation_processing() {
     let confirmation1 = aura_sync::protocols::EpochConfirmation {
         rotation_id: rotation_id.clone(),
         participant_id: participant1,
-        current_epoch: 0,
-        ready_for_epoch: 1,
+        current_epoch: Epoch::new(0),
+        ready_for_epoch: Epoch::new(1),
         confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
     };
 
@@ -379,8 +380,8 @@ fn test_epoch_confirmation_processing() {
     let confirmation2 = aura_sync::protocols::EpochConfirmation {
         rotation_id: rotation_id.clone(),
         participant_id: participant2,
-        current_epoch: 0,
-        ready_for_epoch: 1,
+        current_epoch: Epoch::new(0),
+        ready_for_epoch: Epoch::new(1),
         confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
     };
 
@@ -394,7 +395,7 @@ fn test_epoch_commit() {
     // Test epoch commit operation
     let device_id = device(25);
     let config = EpochConfig::default();
-    let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
+    let mut coordinator = EpochRotationCoordinator::new(device_id, Epoch::new(0), config);
 
     let participants = vec![device(26), device(27)];
     let context_id = aura_core::ContextId::new_from_entropy([3u8; 32]);
@@ -412,8 +413,8 @@ fn test_epoch_commit() {
         let confirmation = aura_sync::protocols::EpochConfirmation {
             rotation_id: rotation_id.clone(),
             participant_id: participant,
-            current_epoch: 0,
-            ready_for_epoch: 1,
+            current_epoch: Epoch::new(0),
+            ready_for_epoch: Epoch::new(1),
             confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
         };
         let _ = coordinator.process_confirmation(confirmation);
@@ -422,8 +423,8 @@ fn test_epoch_commit() {
     // Commit the rotation
     let result = coordinator.commit_rotation(&rotation_id);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), 1); // New epoch is 1
-    assert_eq!(coordinator.current_epoch(), 1);
+    assert_eq!(result.unwrap(), Epoch::new(1)); // New epoch is 1
+    assert_eq!(coordinator.current_epoch(), Epoch::new(1));
 }
 
 #[test]
@@ -431,7 +432,7 @@ fn test_epoch_rotation_cleanup() {
     // Test cleanup of completed rotations
     let device_id = device(28);
     let config = EpochConfig::default();
-    let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
+    let mut coordinator = EpochRotationCoordinator::new(device_id, Epoch::new(0), config);
 
     // Create and complete multiple rotations
     for i in 0..3 {
@@ -451,8 +452,8 @@ fn test_epoch_rotation_cleanup() {
             let confirmation = aura_sync::protocols::EpochConfirmation {
                 rotation_id: rotation_id.clone(),
                 participant_id: participant,
-                current_epoch: i,
-                ready_for_epoch: i + 1,
+                current_epoch: Epoch::new(i),
+                ready_for_epoch: Epoch::new(i + 1),
                 confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
             };
             let _ = coordinator.process_confirmation(confirmation);
@@ -488,7 +489,7 @@ fn test_protocol_independence() {
     let _snap = SnapshotProtocol::new(snapshot_config);
     let _ota = OTAProtocol::new(ota_config);
     let _recv = ReceiptVerificationProtocol::new(receipt_config);
-    let _epoch = EpochRotationCoordinator::new(device(40), 0, epoch_config);
+    let _epoch = EpochRotationCoordinator::new(device(40), Epoch::new(0), epoch_config);
 
     // All should coexist without conflicts
 }
@@ -517,9 +518,9 @@ fn test_multi_device_protocol_scenarios() {
     let device3 = device(43);
 
     // Create coordinators on each device
-    let mut coord1 = EpochRotationCoordinator::new(device1, 0, EpochConfig::default());
-    let _coord2 = EpochRotationCoordinator::new(device2, 0, EpochConfig::default());
-    let _coord3 = EpochRotationCoordinator::new(device3, 0, EpochConfig::default());
+    let mut coord1 = EpochRotationCoordinator::new(device1, Epoch::new(0), EpochConfig::default());
+    let _coord2 = EpochRotationCoordinator::new(device2, Epoch::new(0), EpochConfig::default());
+    let _coord3 = EpochRotationCoordinator::new(device3, Epoch::new(0), EpochConfig::default());
 
     // Device 1 initiates rotation
     let context = aura_core::ContextId::new_from_entropy([5u8; 32]);
@@ -535,16 +536,16 @@ fn test_multi_device_protocol_scenarios() {
     let conf2 = aura_sync::protocols::EpochConfirmation {
         rotation_id: rotation_id.clone(),
         participant_id: device2,
-        current_epoch: 0,
-        ready_for_epoch: 1,
+        current_epoch: Epoch::new(0),
+        ready_for_epoch: Epoch::new(1),
         confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
     };
 
     let conf3 = aura_sync::protocols::EpochConfirmation {
         rotation_id: rotation_id.clone(),
         participant_id: device3,
-        current_epoch: 0,
-        ready_for_epoch: 1,
+        current_epoch: Epoch::new(0),
+        ready_for_epoch: Epoch::new(1),
         confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
     };
 
@@ -557,8 +558,8 @@ fn test_multi_device_protocol_scenarios() {
 
     // Commit
     let new_epoch = coord1.commit_rotation(&rotation_id).unwrap();
-    assert_eq!(new_epoch, 1);
+    assert_eq!(new_epoch, Epoch::new(1));
 
     // In real scenario, devices 2 and 3 would also receive and commit the rotation
-    assert_eq!(coord1.current_epoch(), 1);
+    assert_eq!(coord1.current_epoch(), Epoch::new(1));
 }

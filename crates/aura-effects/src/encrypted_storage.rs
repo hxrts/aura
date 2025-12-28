@@ -201,7 +201,7 @@ where
         let read_caps = [SecureStorageCapability::Read];
         let write_caps = [SecureStorageCapability::Write];
 
-        let key_bytes = if self.secure.secure_exists(&location).await.map_err(|e| {
+        let mut key_bytes = if self.secure.secure_exists(&location).await.map_err(|e| {
             StorageError::ConfigurationError {
                 reason: format!("Failed to check secure storage: {}", e),
             }
@@ -231,9 +231,24 @@ where
         };
 
         if key_bytes.len() != 32 {
-            return Err(StorageError::ConfigurationError {
-                reason: format!("Invalid master key length: {}", key_bytes.len()),
-            });
+            // If secure storage contains an invalid key length, treat it as corrupt and
+            // re-generate a fresh master key. This preserves correctness because existing
+            // encrypted data would be unreadable with a malformed key anyway.
+            let delete_caps = [SecureStorageCapability::Delete];
+            let _ = self.secure.secure_delete(&location, &delete_caps).await;
+            let regenerated = self.crypto.random_bytes(32).await;
+            if regenerated.len() != 32 {
+                return Err(StorageError::ConfigurationError {
+                    reason: "Failed to generate 32-byte key".to_string(),
+                });
+            }
+            self.secure
+                .secure_store(&location, &regenerated, &write_caps)
+                .await
+                .map_err(|e| StorageError::ConfigurationError {
+                    reason: format!("Failed to store master key: {}", e),
+                })?;
+            key_bytes = regenerated;
         }
 
         let mut key = [0u8; 32];

@@ -8,7 +8,7 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
-use aura_core::types::epochs::Epoch;
+use aura_core::types::Epoch;
 use aura_core::types::facts::{FactDelta, FactDeltaReducer};
 use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use serde::{Deserialize, Serialize};
@@ -296,14 +296,14 @@ mod tests {
             recipient,
             cost: 100,
             new_spent: 500,
-            epoch: Epoch(1),
+            epoch: Epoch::new(1),
             charged_at: pt(1000),
         };
 
         assert_eq!(fact.authority_id(), sender);
         assert_eq!(fact.context_id(), Some(context_id));
         assert_eq!(fact.timestamp_ms(), 1000);
-        assert_eq!(fact.epoch(), Some(Epoch(1)));
+        assert_eq!(fact.epoch(), Some(Epoch::new(1)));
         assert_eq!(fact.fact_type(), "flow_budget_charged");
     }
 
@@ -320,7 +320,7 @@ mod tests {
             recipient,
             cost: 100,
             new_spent: 500,
-            epoch: Epoch(1),
+            epoch: Epoch::new(1),
             charged_at: pt(1000),
         };
 
@@ -338,7 +338,7 @@ mod tests {
             grantee,
             scope: vec![1, 2, 3],
             capabilities: vec![4, 5, 6],
-            delegation_epoch: Epoch(1),
+            delegation_epoch: Epoch::new(1),
             delegated_at: pt(2000),
         };
 
@@ -362,7 +362,7 @@ mod tests {
             recipient,
             token_fingerprint: [0u8; 32],
             initial_capabilities: vec!["read".to_string(), "write".to_string()],
-            issued_epoch: Epoch(1),
+            issued_epoch: Epoch::new(1),
             issued_at: pt(3000),
         };
 

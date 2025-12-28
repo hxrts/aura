@@ -31,6 +31,7 @@ use aura_app::signal_defs::{
 };
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::types::Epoch;
 
 use crate::error::TerminalError;
 use crate::handlers::tui::{resolve_storage_path, TuiMode};
@@ -262,7 +263,7 @@ pub struct IoContext {
 pub struct DeviceEnrollmentStartInfo {
     pub ceremony_id: String,
     pub enrollment_code: String,
-    pub pending_epoch: u64,
+    pub pending_epoch: Epoch,
     pub device_id: String,
 }
 

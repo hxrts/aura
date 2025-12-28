@@ -23,7 +23,7 @@
 
 use aura_core::{
     effects::{
-        CheckpointId, FaultInjectionConfig, FaultType, NetworkFault, ScenarioId, ScenarioState,
+        CheckpointId, FaultInjectionConfig, FaultType, ScenarioId, ScenarioState,
         SimulationEffects, SimulationMetrics,
     },
     AuraError, Result as AuraResult,
@@ -327,6 +327,7 @@ pub struct ScenarioSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::NetworkFault;
     use aura_testkit::MockSimulationHandler;
     use tokio;
 

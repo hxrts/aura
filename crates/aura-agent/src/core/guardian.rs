@@ -1,6 +1,6 @@
 //! Guardian consensus policy configuration for the agent runtime.
 
-use aura_core::epochs::Epoch;
+use aura_core::types::Epoch;
 use aura_core::AuthorityId;
 use serde::{Deserialize, Serialize};
 

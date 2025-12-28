@@ -557,7 +557,7 @@ pub fn verify_threshold_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::epochs::Epoch;
+    use aura_core::types::Epoch;
     use aura_core::AuthorityId;
 
     fn authority(seed: u8) -> AuthorityId {

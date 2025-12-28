@@ -13,8 +13,4 @@ Layer 2 domain crate defining maintenance facts and reduction helpers.
 - Reduction is deterministic: no clocks, randomness, or external state.
 
 ## Operation Categories
-- `maintenance:snapshot-proposed` → B
-- `maintenance:snapshot-completed` → B
-- `maintenance:cache-invalidated` → A
-- `maintenance:upgrade-activated` → C
-- `maintenance:admin-replacement` → C
+See `OPERATION_CATEGORIES` in `crates/aura-maintenance/src/lib.rs` for the current A/B/C table.

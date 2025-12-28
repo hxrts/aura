@@ -1,5 +1,7 @@
 //! Shared ceremony view state
 
+use aura_core::types::Epoch;
+
 /// Shared UI state for key-rotation / membership-change ceremonies.
 #[derive(Clone, Debug, Default)]
 pub struct KeyRotationCeremonyUiState {
@@ -15,7 +17,7 @@ pub struct KeyRotationCeremonyUiState {
     /// Optional error message
     pub error_message: Option<String>,
     /// Pending epoch, if the ceremony created one during prepare
-    pub pending_epoch: Option<u64>,
+    pub pending_epoch: Option<Epoch>,
 }
 
 impl KeyRotationCeremonyUiState {
@@ -35,7 +37,7 @@ impl KeyRotationCeremonyUiState {
         is_complete: bool,
         has_failed: bool,
         error_message: Option<String>,
-        pending_epoch: Option<u64>,
+        pending_epoch: Option<Epoch>,
     ) {
         self.accepted_count = accepted_count;
         self.total_count = total_count;

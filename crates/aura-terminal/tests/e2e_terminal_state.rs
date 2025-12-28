@@ -25,8 +25,6 @@
 //! cargo test --package aura-terminal --test e2e_terminal_state
 //! ```
 
-use std::time::Duration;
-
 // ============================================================================
 // Component State Tests (non-PTY, for faster CI)
 // ============================================================================

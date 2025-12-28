@@ -29,7 +29,7 @@ use aura_core::effects::{
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
-use aura_core::types::FrostThreshold;
+use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_journal::fact::{CommittedChannelEpochBump, RelationalFact};
@@ -750,7 +750,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
-    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
+    ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
         let authority = self.agent.authority_id();
         let signing_service = self.agent.threshold_signing();
 
@@ -775,29 +775,32 @@ impl RuntimeBridge for AgentRuntimeBridge {
         signing_service
             .rotate_keys(&authority, threshold_k.value(), total_n, &participants)
             .await
+            .map(|(epoch, key_packages, public_key)| {
+                (Epoch::new(epoch), key_packages, public_key)
+            })
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to rotate guardian keys: {}", e))
             })
     }
 
-    async fn commit_guardian_key_rotation(&self, new_epoch: u64) -> Result<(), IntentError> {
+    async fn commit_guardian_key_rotation(&self, new_epoch: Epoch) -> Result<(), IntentError> {
         let authority = self.agent.authority_id();
         let signing_service = self.agent.threshold_signing();
 
         signing_service
-            .commit_key_rotation(&authority, new_epoch)
+            .commit_key_rotation(&authority, new_epoch.value())
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to commit key rotation: {}", e))
             })
     }
 
-    async fn rollback_guardian_key_rotation(&self, failed_epoch: u64) -> Result<(), IntentError> {
+    async fn rollback_guardian_key_rotation(&self, failed_epoch: Epoch) -> Result<(), IntentError> {
         let authority = self.agent.authority_id();
         let signing_service = self.agent.threshold_signing();
 
         signing_service
-            .rollback_key_rotation(&authority, failed_epoch)
+            .rollback_key_rotation(&authority, failed_epoch.value())
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to rollback key rotation: {}", e))
@@ -875,7 +878,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             threshold_k: threshold_k_value,
             total_n,
             guardian_ids: all_guardian_authority_ids.clone(),
-            new_epoch,
+            new_epoch: new_epoch.value(),
         };
         let operation_hash = operation.compute_hash();
 
@@ -888,7 +891,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         tracing::info!(
             ceremony_id = %ceremony_id,
-            new_epoch,
+            new_epoch = new_epoch.value(),
             threshold_k = threshold_k_value,
             total_n,
             "Guardian ceremony initiated, sending invitations to {} guardians",
@@ -904,7 +907,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 threshold_k_value,
                 total_n,
                 participants,
-                new_epoch,
+                new_epoch.value(),
                 None,
             )
             .await
@@ -1019,16 +1022,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to prepare device rotation: {e}"))
             })?;
+        let pending_epoch = Epoch::new(pending_epoch);
 
         let pubkey_location = SecureStorageLocation::with_sub_key(
             "threshold_pubkey",
             format!("{}", authority_id),
-            format!("{}", pending_epoch),
+            format!("{}", pending_epoch.value()),
         );
         let config_location = SecureStorageLocation::with_sub_key(
             "threshold_config",
             format!("{}", authority_id),
-            format!("{}", pending_epoch),
+            format!("{}", pending_epoch.value()),
         );
 
         let public_key_package = effects
@@ -1082,8 +1086,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
         let prestate_hash = aura_core::Hash32(hash(&prestate_input));
 
-        let op_input =
-            serde_json::to_vec(&(pending_epoch, threshold_value, total_n, &parsed_devices))
+        let op_input = serde_json::to_vec(&(
+            pending_epoch.value(),
+            threshold_value,
+            total_n,
+            &parsed_devices,
+        ))
                 .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
@@ -1104,7 +1112,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 threshold_value,
                 total_n,
                 participants,
-                pending_epoch,
+                pending_epoch.value(),
                 None,
             )
             .await
@@ -1157,7 +1165,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 "application/aura-device-threshold-key-package".to_string(),
             );
             metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
-            metadata.insert("pending-epoch".to_string(), pending_epoch.to_string());
+            metadata.insert(
+                "pending-epoch".to_string(),
+                pending_epoch.value().to_string(),
+            );
             metadata.insert(
                 "initiator-device-id".to_string(),
                 current_device_id.to_string(),
@@ -1286,16 +1297,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to prepare device rotation: {e}"))
             })?;
+        let pending_epoch = Epoch::new(pending_epoch);
 
         let pubkey_location = SecureStorageLocation::with_sub_key(
             "threshold_pubkey",
             format!("{}", authority_id),
-            format!("{}", pending_epoch),
+            format!("{}", pending_epoch.value()),
         );
         let config_location = SecureStorageLocation::with_sub_key(
             "threshold_config",
             format!("{}", authority_id),
-            format!("{}", pending_epoch),
+            format!("{}", pending_epoch.value()),
         );
 
         let public_key_package = match effects
@@ -1359,7 +1371,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let op_input = serde_json::to_vec(&(
             new_device_id,
-            pending_epoch,
+            pending_epoch.value(),
             threshold_k,
             total_n,
             current_device_id,
@@ -1398,7 +1410,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 acceptance_threshold,
                 acceptance_n,
                 acceptors,
-                pending_epoch,
+                pending_epoch.value(),
                 Some(new_device_id),
             )
             .await
@@ -1443,7 +1455,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     "application/aura-device-enrollment-key-package".to_string(),
                 );
                 metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
-                metadata.insert("pending-epoch".to_string(), pending_epoch.to_string());
+                metadata.insert(
+                    "pending-epoch".to_string(),
+                    pending_epoch.value().to_string(),
+                );
                 metadata.insert(
                     "initiator-device-id".to_string(),
                     current_device_id.to_string(),
@@ -1491,7 +1506,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 new_device_id,
                 Some(device_name),
                 ceremony_id.clone(),
-                pending_epoch,
+                pending_epoch.value(),
                 invited_key_package,
                 threshold_config.clone(),
                 public_key_package.clone(),
@@ -1595,6 +1610,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     "Failed to prepare device removal rotation: {e}"
                 ))
             })?;
+        let pending_epoch = Epoch::new(pending_epoch);
 
         // Compute a best-effort prestate-bound ceremony id.
         let prestate_input = serde_json::to_vec(&(
@@ -1605,7 +1621,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
         let prestate_hash = aura_core::Hash32(hash(&prestate_input));
 
-        let op_input = serde_json::to_vec(&(target_device_id, pending_epoch, threshold_k, total_n))
+        let op_input = serde_json::to_vec(&(
+            target_device_id,
+            pending_epoch.value(),
+            threshold_k,
+            total_n,
+        ))
             .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
@@ -1626,7 +1647,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 0,
                 0,
                 Vec::new(),
-                pending_epoch,
+                pending_epoch.value(),
                 None,
             )
             .await
@@ -1661,7 +1682,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         if let Err(e) = effects
-            .commit_key_rotation(&authority_id, pending_epoch)
+            .commit_key_rotation(&authority_id, pending_epoch.value())
             .await
         {
             let _ = tracker
@@ -1713,7 +1734,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             has_failed: state.has_failed,
             accepted_guardians,
             error_message: state.error_message.clone(),
-            pending_epoch: Some(state.new_epoch),
+            pending_epoch: Some(Epoch::new(state.new_epoch)),
         })
     }
 
@@ -1742,7 +1763,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             has_failed: state.has_failed,
             accepted_participants: state.accepted_participants,
             error_message: state.error_message,
-            pending_epoch: Some(state.new_epoch),
+            pending_epoch: Some(Epoch::new(state.new_epoch)),
         })
     }
 
@@ -1757,7 +1778,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Best-effort: rollback pending epoch if present and not committed.
         if !state.is_committed {
-            self.rollback_guardian_key_rotation(state.new_epoch).await?;
+            self.rollback_guardian_key_rotation(Epoch::new(state.new_epoch))
+                .await?;
         }
 
         tracker
@@ -2206,7 +2228,7 @@ fn convert_invitation_type_to_bridge(
             device_id: *device_id,
             device_name: device_name.clone(),
             ceremony_id: ceremony_id.clone(),
-            pending_epoch: *pending_epoch,
+            pending_epoch: Epoch::new(*pending_epoch),
         },
     }
 }

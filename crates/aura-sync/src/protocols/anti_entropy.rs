@@ -54,6 +54,7 @@ use aura_authorization::BiscuitTokenManager;
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::scope::ResourceScope;
 use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, Journal};
+use aura_core::types::Epoch;
 use aura_guards::{BiscuitGuardEvaluator, GuardError};
 
 // =============================================================================
@@ -446,7 +447,7 @@ impl AntiEntropyProtocol {
                 operation: aura_core::scope::AuthorityOp::UpdateTree, // Sync requires authority access
             };
 
-            let mut flow_budget = FlowBudget::new(1000, aura_core::epochs::Epoch::new(0)); // Standard sync budget
+            let mut flow_budget = FlowBudget::new(1000, Epoch::new(0)); // Standard sync budget
 
             match evaluator.evaluate_guard_default_time(
                 token,

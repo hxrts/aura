@@ -108,6 +108,7 @@ mod tests {
     use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature};
     use aura_core::time::{PhysicalTime, ProvenancedTime, TimeStamp};
     use aura_core::{AuthorityId, Hash32};
+    use futures::future::yield_now;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use uuid::Uuid;
@@ -151,7 +152,7 @@ mod tests {
             &self,
             role: ChoreographicRole,
         ) -> Result<Vec<u8>, ChoreographyError> {
-            for _ in 0..10 {
+            for _ in 0..200 {
                 {
                     let mut queues = self
                         .bus
@@ -166,9 +167,12 @@ mod tests {
                         }
                     }
                 }
-                tokio::task::yield_now().await;
+                yield_now().await;
             }
-            Err(ChoreographyError::CommunicationTimeout { role, timeout_ms: 1 })
+            Err(ChoreographyError::CommunicationTimeout {
+                role,
+                timeout_ms: 1,
+            })
         }
 
         async fn broadcast_bytes(&self, message: Vec<u8>) -> Result<(), ChoreographyError> {
@@ -299,7 +303,7 @@ mod tests {
                 signature: vec![0u8; 32],
             },
             next_commitment: None,
-            epoch: aura_core::epochs::Epoch(1),
+            epoch: aura_core::types::Epoch::new(1),
         };
 
         let commit_fact = CommitFact::new(

@@ -10,7 +10,7 @@
 //! - WitnessState nonce lifecycle
 
 use aura_consensus::witness::{WitnessSet, WitnessState, WitnessTracker};
-use aura_core::{epochs::Epoch, frost::NonceCommitment, AuthorityId};
+use aura_core::{frost::NonceCommitment, types::Epoch, AuthorityId};
 use aura_testkit::builders::keys::helpers::test_frost_key_shares;
 use rand::SeedableRng;
 

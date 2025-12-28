@@ -14,7 +14,7 @@ use super::{
 };
 use crate::authorization::BiscuitAuthorizationBridge;
 use aura_authorization::{AuthorityOp, ResourceScope};
-use aura_core::{epochs::Epoch, AuraError, AuraResult, FlowBudget};
+use aura_core::{types::Epoch, AuraError, AuraResult, FlowBudget};
 use std::future::Future;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -57,7 +57,7 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
             operation: AuthorityOp::UpdateTree,
         },
         1,
-        FlowBudget::new(guard.required_tokens.len() as u64 + 1, Epoch(0)),
+        FlowBudget::new(guard.required_tokens.len() as u64 + 1, Epoch::new(0)),
     );
 
     for (idx, token) in guard.required_tokens.iter().enumerate() {

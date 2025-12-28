@@ -6,13 +6,14 @@
 use crate::commitment_tree::authority_state::AuthorityTreeState;
 use crate::fact::AttestedOp;
 use aura_core::authority::TreeStateSummary;
-use aura_core::{epochs::Epoch, Hash32};
+use aura_core::types::Epoch;
+use aura_core::Hash32;
 
 /// Convert AuthorityTreeState to the summary TreeStateSummary
 impl From<&AuthorityTreeState> for TreeStateSummary {
     fn from(authority_state: &AuthorityTreeState) -> Self {
         TreeStateSummary::with_values(
-            Epoch(authority_state.epoch),
+            Epoch::new(authority_state.epoch),
             Hash32::new(authority_state.root_commitment),
             authority_state.get_threshold(),
             authority_state.active_leaf_count() as u32,
@@ -42,7 +43,7 @@ impl AttestedOp {
     /// Get the resulting epoch after this operation
     pub fn resulting_epoch(&self, parent_epoch: Epoch) -> Epoch {
         // Tree operations increment the epoch
-        Epoch(parent_epoch.0 + 1)
+        parent_epoch.next()
     }
 }
 
@@ -60,7 +61,7 @@ mod tests {
 
         let tree_state = auth_state.to_tree_state_summary();
 
-        assert_eq!(tree_state.epoch(), Epoch(5));
+        assert_eq!(tree_state.epoch(), Epoch::new(5));
 
         // Debug the commitment issue
         let expected = [1; 32];
@@ -78,7 +79,7 @@ mod tests {
     #[test]
     fn test_attested_op_validation() {
         let parent_commitment = Hash32::new([2; 32]);
-        let tree_state = TreeStateSummary::with_values(Epoch(10), parent_commitment, 2, 3);
+        let tree_state = TreeStateSummary::with_values(Epoch::new(10), parent_commitment, 2, 3);
 
         let valid_op = AttestedOp {
             tree_op: TreeOpKind::AddLeaf {

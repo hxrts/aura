@@ -32,7 +32,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::ThresholdConfig;
 use aura_core::tree::{AttestedOp, TreeOp};
-use aura_core::types::FrostThreshold;
+use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::SigningContext;
 use aura_core::{DeviceId, ThresholdSignature};
 use aura_journal::{fact::RelationalFact, DomainFact};
@@ -508,11 +508,11 @@ impl RuntimeBridge for MockRuntimeBridge {
     // Key Rotation (Override defaults to return success)
     // =========================================================================
 
-    async fn commit_guardian_key_rotation(&self, _new_epoch: u64) -> Result<(), IntentError> {
+    async fn commit_guardian_key_rotation(&self, _new_epoch: Epoch) -> Result<(), IntentError> {
         Ok(())
     }
 
-    async fn rollback_guardian_key_rotation(&self, _failed_epoch: u64) -> Result<(), IntentError> {
+    async fn rollback_guardian_key_rotation(&self, _failed_epoch: Epoch) -> Result<(), IntentError> {
         Ok(())
     }
 
@@ -535,9 +535,9 @@ impl RuntimeBridge for MockRuntimeBridge {
         _threshold_k: FrostThreshold,
         _total_n: u16,
         _guardian_ids: &[String],
-    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
+    ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
         // Return mock key rotation data: (epoch, key_packages, public_key_package)
-        let epoch = 1u64;
+        let epoch = Epoch::new(1);
         let key_packages: Vec<Vec<u8>> = vec![vec![0u8; 32]; 3]; // 3 guardian packages
         let public_key_package = vec![0u8; 32];
         Ok((epoch, key_packages, public_key_package))
@@ -568,7 +568,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(DeviceEnrollmentStart {
             ceremony_id: self.next_id(),
             enrollment_code: format!("aura-enroll:mock:{}", device_name),
-            pending_epoch: 1,
+            pending_epoch: Epoch::new(1),
             device_id: DeviceId::new(),
         })
     }
@@ -590,7 +590,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             has_failed: false,
             accepted_guardians: Vec::new(),
             error_message: None,
-            pending_epoch: Some(1),
+            pending_epoch: Some(Epoch::new(1)),
         })
     }
 
@@ -608,7 +608,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             has_failed: false,
             accepted_participants: Vec::new(),
             error_message: None,
-            pending_epoch: Some(1),
+            pending_epoch: Some(Epoch::new(1)),
         })
     }
 

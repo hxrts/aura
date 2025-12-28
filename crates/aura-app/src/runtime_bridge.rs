@@ -46,7 +46,7 @@ use aura_core::threshold::{
     ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
 };
 use aura_core::tree::{AttestedOp, TreeOp};
-use aura_core::types::FrostThreshold;
+use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
 use aura_effects::PhysicalTimeHandler;
 use aura_journal::fact::RelationalFact;
@@ -108,7 +108,7 @@ pub struct DeviceEnrollmentStart {
     /// Shareable enrollment code (e.g. QR/copy-paste) to import on the new device.
     pub enrollment_code: String,
     /// Pending epoch created during prepare.
-    pub pending_epoch: u64,
+    pub pending_epoch: Epoch,
     /// Device id being enrolled.
     pub device_id: DeviceId,
 }
@@ -138,7 +138,7 @@ pub struct KeyRotationCeremonyStatus {
     /// Optional error message if failed
     pub error_message: Option<String>,
     /// Pending epoch for key rotation (if applicable)
-    pub pending_epoch: Option<u64>,
+    pub pending_epoch: Option<Epoch>,
 }
 
 /// Status of a guardian ceremony
@@ -165,7 +165,7 @@ pub struct CeremonyStatus {
     /// This is the epoch that was created when the ceremony started.
     /// If the ceremony is canceled, this epoch's keys should be rolled back.
     /// If the ceremony succeeds, this becomes the active epoch.
-    pub pending_epoch: Option<u64>,
+    pub pending_epoch: Option<Epoch>,
 }
 
 /// Information about a peer discovered via LAN (mDNS/UDP broadcast)
@@ -204,7 +204,7 @@ pub enum InvitationBridgeType {
         device_id: DeviceId,
         device_name: Option<String>,
         ceremony_id: String,
-        pending_epoch: u64,
+        pending_epoch: Epoch,
     },
 }
 
@@ -561,19 +561,19 @@ pub trait RuntimeBridge: Send + Sync {
         threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[String],
-    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError>;
+    ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError>;
 
     /// Commit a guardian key rotation after successful ceremony
     ///
     /// Called when all guardians have accepted and stored their key shares.
     /// This makes the new epoch authoritative.
-    async fn commit_guardian_key_rotation(&self, new_epoch: u64) -> Result<(), IntentError>;
+    async fn commit_guardian_key_rotation(&self, new_epoch: Epoch) -> Result<(), IntentError>;
 
     /// Rollback a guardian key rotation after ceremony failure
     ///
     /// Called when the ceremony fails (guardian declined, user cancelled, or timeout).
     /// This discards the new epoch's keys and keeps the previous configuration active.
-    async fn rollback_guardian_key_rotation(&self, failed_epoch: u64) -> Result<(), IntentError>;
+    async fn rollback_guardian_key_rotation(&self, failed_epoch: Epoch) -> Result<(), IntentError>;
 
     /// Initiate a guardian ceremony
     ///
@@ -1092,19 +1092,19 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _threshold_k: FrostThreshold,
         _total_n: u16,
         _guardian_ids: &[String],
-    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), IntentError> {
+    ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
         Err(IntentError::no_agent(
             "Key rotation not available in offline mode",
         ))
     }
 
-    async fn commit_guardian_key_rotation(&self, _new_epoch: u64) -> Result<(), IntentError> {
+    async fn commit_guardian_key_rotation(&self, _new_epoch: Epoch) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
             "Key rotation not available in offline mode",
         ))
     }
 
-    async fn rollback_guardian_key_rotation(&self, _failed_epoch: u64) -> Result<(), IntentError> {
+    async fn rollback_guardian_key_rotation(&self, _failed_epoch: Epoch) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
             "Key rotation not available in offline mode",
         ))
