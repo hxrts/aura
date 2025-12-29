@@ -1,3 +1,5 @@
+//! DKG transcript integration tests.
+
 use aura_consensus::dkg::transcript::{compute_transcript_hash, finalize_transcript};
 use aura_consensus::dkg::types::{DealerPackage, DkgConfig};
 use aura_core::{AuthorityId, Hash32};
