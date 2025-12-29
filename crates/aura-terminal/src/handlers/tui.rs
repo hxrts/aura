@@ -95,6 +95,7 @@ const ACCOUNT_FILENAME: &str = "account.json";
 const JOURNAL_FILENAME: &str = "journal.json";
 const TUI_LOG_KEY_PREFIX: &str = "logs";
 const MAX_TUI_LOG_BYTES: usize = 1_000_000;
+const TUI_LOG_QUEUE_CAPACITY: usize = 256;
 
 type BootstrapStorage =
     EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>;
@@ -858,14 +859,23 @@ async fn handle_tui_launch(
 }
 
 struct StorageLogWriter {
-    sender: mpsc::UnboundedSender<Vec<u8>>,
+    sender: mpsc::Sender<Vec<u8>>,
 }
 
 impl io::Write for StorageLogWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.sender
-            .send(buf.to_vec())
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "log channel closed"))?;
+        match self.sender.try_send(buf.to_vec()) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                // Drop log chunks when the queue is saturated to avoid unbounded memory growth.
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "log channel closed",
+                ));
+            }
+        }
         Ok(buf.len())
     }
 
@@ -890,7 +900,7 @@ fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
         .filter(|path| !path.trim().is_empty())
         .unwrap_or_else(|| format!("{}/{}", TUI_LOG_KEY_PREFIX, default_name));
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(TUI_LOG_QUEUE_CAPACITY);
     let storage_task = storage.clone();
     let log_key_task = log_key.clone();
 

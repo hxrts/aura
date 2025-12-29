@@ -1768,6 +1768,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .map(|guard| guard.clone())
                                             .unwrap_or_default();
 
+                                        // Require at least 2 devices to set up multi-factor authority
+                                        if current_devices.len() < 2 {
+                                            new_state.toast_error(
+                                                "You must add a device to set up a multi-factor authority. \
+                                                 Go to Devices → Add device first.",
+                                            );
+                                            continue;
+                                        }
+
                                         let candidates: Vec<crate::tui::state_machine::GuardianCandidate> = current_devices
                                             .iter()
                                             .map(|d| {

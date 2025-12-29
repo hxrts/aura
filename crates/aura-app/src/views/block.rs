@@ -174,6 +174,8 @@ impl BlockState {
     pub const DEFAULT_STORAGE_BUDGET: u64 = 10 * 1024 * 1024;
     /// Default resident allocation: 200 KB
     pub const RESIDENT_ALLOCATION: u64 = 200 * 1024;
+    /// Maximum number of kick records retained in memory.
+    const MAX_KICK_LOG: usize = 200;
 
     /// Create a new block with the creator as steward
     pub fn new(
@@ -309,6 +311,10 @@ impl BlockState {
     /// Add a kick record to the audit log
     pub fn add_kick(&mut self, record: KickRecord) {
         self.kick_log.push(record);
+        if self.kick_log.len() > Self::MAX_KICK_LOG {
+            let overflow = self.kick_log.len() - Self::MAX_KICK_LOG;
+            self.kick_log.drain(0..overflow);
+        }
     }
 
     /// Add a pinned message with metadata

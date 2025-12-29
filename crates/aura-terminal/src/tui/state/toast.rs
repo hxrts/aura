@@ -14,6 +14,8 @@ const DEFAULT_TOAST_TICKS: u32 = 50;
 
 /// Special value indicating a toast should never auto-dismiss
 const NO_AUTO_DISMISS: u32 = u32::MAX;
+/// Hard cap on pending toasts to prevent unbounded growth.
+const MAX_PENDING_TOASTS: usize = 128;
 
 /// Toast queue that ensures only one toast is visible at a time.
 ///
@@ -109,6 +111,10 @@ impl ToastQueue {
         if self.active.is_none() {
             self.active = Some(toast);
         } else {
+            if self.pending.len() >= MAX_PENDING_TOASTS {
+                // Drop the oldest pending toast to keep memory bounded.
+                let _ = self.pending.pop_front();
+            }
             self.pending.push_back(toast);
         }
     }

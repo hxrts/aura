@@ -91,6 +91,15 @@ pub struct InvitationsState {
 }
 
 impl InvitationsState {
+    /// Maximum number of historical invitations retained in-memory.
+    const MAX_HISTORY: usize = 200;
+
+    fn trim_history(&mut self) {
+        if self.history.len() > Self::MAX_HISTORY {
+            let overflow = self.history.len() - Self::MAX_HISTORY;
+            self.history.drain(0..overflow);
+        }
+    }
     /// Get invitation by ID
     pub fn invitation(&self, id: &str) -> Option<&Invitation> {
         self.pending
@@ -132,6 +141,7 @@ impl InvitationsState {
             inv.status = InvitationStatus::Accepted;
             self.pending_count = self.pending_count.saturating_sub(1);
             self.history.push(inv);
+            self.trim_history();
             return;
         }
         // Check in sent
@@ -139,6 +149,7 @@ impl InvitationsState {
             let mut inv = self.sent.remove(idx);
             inv.status = InvitationStatus::Accepted;
             self.history.push(inv);
+            self.trim_history();
         }
     }
 
@@ -150,6 +161,7 @@ impl InvitationsState {
             inv.status = InvitationStatus::Rejected;
             self.pending_count = self.pending_count.saturating_sub(1);
             self.history.push(inv);
+            self.trim_history();
             return;
         }
         // Check in sent
@@ -157,6 +169,7 @@ impl InvitationsState {
             let mut inv = self.sent.remove(idx);
             inv.status = InvitationStatus::Rejected;
             self.history.push(inv);
+            self.trim_history();
         }
     }
 
@@ -166,6 +179,7 @@ impl InvitationsState {
             let mut inv = self.sent.remove(idx);
             inv.status = InvitationStatus::Revoked;
             self.history.push(inv);
+            self.trim_history();
         }
     }
 
@@ -177,6 +191,7 @@ impl InvitationsState {
             inv.status = InvitationStatus::Expired;
             self.pending_count = self.pending_count.saturating_sub(1);
             self.history.push(inv);
+            self.trim_history();
             return;
         }
         // Check in sent
@@ -184,6 +199,7 @@ impl InvitationsState {
             let mut inv = self.sent.remove(idx);
             inv.status = InvitationStatus::Expired;
             self.history.push(inv);
+            self.trim_history();
         }
     }
 

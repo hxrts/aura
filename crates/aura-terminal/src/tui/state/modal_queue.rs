@@ -13,6 +13,9 @@ use super::views::{
     ImportInvitationModalState, InvitationCodeModalState, NicknameModalState, TopicModalState,
 };
 
+/// Hard cap on pending modals to avoid unbounded growth if callers enqueue repeatedly.
+const MAX_PENDING_MODALS: usize = 64;
+
 /// Unified modal enum - ALL modals MUST be one of these variants.
 ///
 /// This enum enforces that all modals go through the queue system.
@@ -228,6 +231,10 @@ impl ModalQueue {
         if self.active.is_none() {
             self.active = Some(modal);
         } else {
+            if self.pending.len() >= MAX_PENDING_MODALS {
+                // Drop the oldest pending modal to keep memory bounded.
+                let _ = self.pending.pop_front();
+            }
             self.pending.push_back(modal);
         }
     }

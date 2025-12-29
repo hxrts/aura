@@ -92,6 +92,8 @@ pub struct ChatState {
 }
 
 impl ChatState {
+    /// Maximum number of messages retained in-memory for the active channel.
+    const MAX_ACTIVE_MESSAGES: usize = 500;
     /// Get channel by ID
     pub fn channel(&self, id: &ChannelId) -> Option<&Channel> {
         self.channels.iter().find(|c| c.id == *id)
@@ -169,6 +171,10 @@ impl ChatState {
             // Avoid duplicates
             if !self.messages.iter().any(|m| m.id == message.id) {
                 self.messages.push(message);
+                if self.messages.len() > Self::MAX_ACTIVE_MESSAGES {
+                    let overflow = self.messages.len() - Self::MAX_ACTIVE_MESSAGES;
+                    self.messages.drain(0..overflow);
+                }
             }
         }
     }

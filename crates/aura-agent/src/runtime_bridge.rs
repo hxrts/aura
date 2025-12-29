@@ -2198,11 +2198,19 @@ impl RuntimeBridge for AgentRuntimeBridge {
             Ok(state) => state,
             Err(e) => {
                 tracing::warn!("Failed to read commitment tree state for devices: {e}");
-                return Vec::new();
+                // Return at least the current device on error
+                let id = current_device.to_string();
+                let short = id.chars().take(8).collect::<String>();
+                return vec![BridgeDeviceInfo {
+                    id,
+                    name: format!("Device {short} (local)"),
+                    is_current: true,
+                    last_seen: None,
+                }];
             }
         };
 
-        state
+        let mut devices: Vec<BridgeDeviceInfo> = state
             .leaves
             .values()
             .filter(|leaf| leaf.role == LeafRole::Device)
@@ -2216,7 +2224,26 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     last_seen: None,
                 }
             })
-            .collect()
+            .collect();
+
+        // Ensure the current device is always included, even if not yet in the commitment tree.
+        // This handles fresh accounts where no device enrollment ceremony has occurred yet.
+        let current_in_tree = devices.iter().any(|d| d.is_current);
+        if !current_in_tree {
+            let id = current_device.to_string();
+            let short = id.chars().take(8).collect::<String>();
+            devices.insert(
+                0,
+                BridgeDeviceInfo {
+                    id,
+                    name: format!("Device {short} (local)"),
+                    is_current: true,
+                    last_seen: None,
+                },
+            );
+        }
+
+        devices
     }
 
     async fn set_display_name(&self, name: &str) -> Result<(), IntentError> {

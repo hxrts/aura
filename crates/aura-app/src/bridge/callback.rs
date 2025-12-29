@@ -111,6 +111,7 @@ pub struct ObserverRegistry {
 }
 
 impl ObserverRegistry {
+    const MAX_OBSERVERS: usize = 64;
     /// Create a new registry
     pub fn new() -> Self {
         Self::default()
@@ -120,6 +121,9 @@ impl ObserverRegistry {
     pub fn add(&mut self, observer: Arc<dyn StateObserver>) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
+        if self.observers.len() >= Self::MAX_OBSERVERS {
+            self.observers.remove(0);
+        }
         self.observers.push((id, observer));
         id
     }
