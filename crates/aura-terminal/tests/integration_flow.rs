@@ -192,9 +192,11 @@ impl TestAgent {
 
     async fn read_home(&self) -> aura_app::views::HomeState {
         let core = self.app_core.read().await;
-        core.read(&*HOMES_SIGNAL)
+        let homes = core
+            .read(&*HOMES_SIGNAL)
             .await
-            .expect("Failed to read HOMES_SIGNAL")
+            .expect("Failed to read HOMES_SIGNAL");
+        homes.current_home().cloned().unwrap_or_default()
     }
 
     async fn read_neighborhood(&self) -> aura_app::views::NeighborhoodState {
@@ -592,8 +594,8 @@ async fn test_home_lifecycle_flow() {
     println!("Initial home state:");
     let bob_home = env.get_agent("bob").read_home().await;
     println!("  Home ID: {}", bob_home.id);
-    println!("  Home name: {}", bob_home_state.name);
-    println!("  Residents: {}", bob_home_state.residents.len());
+    println!("  Home name: {}", bob_home.name);
+    println!("  Residents: {}", bob_home.residents.len());
 
     // Note: Home creation commands would be added here when implemented
     // For now, we verify the signal infrastructure is in place
@@ -755,7 +757,7 @@ async fn test_social_graph_flow() {
     let bob_home = env.get_agent("bob").read_home().await;
     println!(
         "  Home state: id={}, name={}",
-        bob_home.id, bob_home_state.name
+        bob_home.id, bob_home.name
     );
 
     // Phase 5: Invite contact to home (SendHomeInvitation)
@@ -861,7 +863,7 @@ async fn test_social_graph_contact_home_view() {
     let bob_home = env.get_agent("bob").read_home().await;
     println!("\nBob's home:");
     println!("  ID: {}", bob_home.id);
-    println!("  Name: {}", bob_home_state.name);
+    println!("  Name: {}", bob_home.name);
 
     // The contact-home view in UI would filter contacts based on home membership
     // This test verifies the signals are available for such a view

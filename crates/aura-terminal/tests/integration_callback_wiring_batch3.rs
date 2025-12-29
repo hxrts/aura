@@ -22,8 +22,8 @@ use async_lock::RwLock;
 use std::sync::Arc;
 
 use aura_app::signal_defs::{
-    HOMES_SIGNAL, HOMES_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
-    RECOVERY_SIGNAL, UNREAD_COUNT_SIGNAL,
+    CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
+    UNREAD_COUNT_SIGNAL,
 };
 use aura_app::views::RecoveryProcessStatus;
 use aura_app::{AppConfig, AppCore};
@@ -87,19 +87,23 @@ async fn test_home_signals_initialization() {
     // Phase 1: Read initial HOMES_SIGNAL state
     println!("Phase 1: Check HOMES_SIGNAL initial state");
     let core = app_core.read().await;
-    let home_state = core.read(&*HOMES_SIGNAL).await;
+    let homes_state = core.read(&*HOMES_SIGNAL).await;
 
-    match home_state {
+    match homes_state {
         Ok(state) => {
             println!("  HOMES_SIGNAL initialized");
-            println!("  Home ID: {}", state.id);
-            println!("  Home name: {}", state.name);
-            println!("  Resident count: {}", state.resident_count);
-            // Default state should have empty/default values
-            assert!(
-                state.residents.is_empty() || state.id == ChannelId::default(),
-                "Initial home state should be empty or default"
-            );
+            if let Some(home_state) = state.current_home() {
+                println!("  Home ID: {}", home_state.id);
+                println!("  Home name: {}", home_state.name);
+                println!("  Resident count: {}", home_state.resident_count);
+                // Default state should have empty/default values
+                assert!(
+                    home_state.residents.is_empty() || home_state.id == ChannelId::default(),
+                    "Initial home state should be empty or default"
+                );
+            } else {
+                println!("  No current home yet");
+            }
         }
         Err(e) => {
             println!(
@@ -213,14 +217,18 @@ async fn test_home_resident_operations() {
     println!("Phase 1: Check initial resident state");
     let core = app_core.read().await;
 
-    if let Ok(home_state) = core.read(&*HOMES_SIGNAL).await {
-        println!("  Home ID: {}", home_state.id);
-        println!("  Initial residents: {}", home_state.residents.len());
-        println!("  My role: {:?}", home_state.my_role);
+    if let Ok(homes_state) = core.read(&*HOMES_SIGNAL).await {
+        if let Some(home_state) = homes_state.current_home() {
+            println!("  Home ID: {}", home_state.id);
+            println!("  Initial residents: {}", home_state.residents.len());
+            println!("  My role: {:?}", home_state.my_role);
 
-        // User should be owner/steward of their own home
-        for resident in &home_state.residents {
-            println!("    Resident: {} ({:?})", resident.name, resident.role);
+            // User should be owner/steward of their own home
+            for resident in &home_state.residents {
+                println!("    Resident: {} ({:?})", resident.name, resident.role);
+            }
+        } else {
+            println!("  No current home yet");
         }
     }
 
@@ -1047,11 +1055,12 @@ async fn test_pin_unpin_message() {
     // Phase 1: Get initial home state for pinned messages
     println!("Phase 1: Check initial pinned messages");
     let core = app_core.read().await;
-    if let Ok(home_state) = core.read(&*HOMES_SIGNAL).await {
-        println!(
-            "  Initial pinned messages: {}",
-            home_state.pinned_messages.len()
-        );
+    if let Ok(homes_state) = core.read(&*HOMES_SIGNAL).await {
+        let pinned_count = homes_state
+            .current_home()
+            .map(|home_state| home_state.pinned_messages.len())
+            .unwrap_or(0);
+        println!("  Initial pinned messages: {}", pinned_count);
     }
     drop(core);
 

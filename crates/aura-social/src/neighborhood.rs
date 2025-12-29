@@ -89,7 +89,7 @@ impl Neighborhood {
     ///
     /// Given a home, returns all blocks that share adjacency with it.
     /// This includes direct adjacencies only (1-hop).
-    pub fn adjacent_blocks(&self, from_home: HomeId) -> Vec<HomeId> {
+    pub fn adjacent_homes(&self, from_home: HomeId) -> Vec<HomeId> {
         self.neighbors_of(from_home)
     }
 

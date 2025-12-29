@@ -392,7 +392,7 @@ impl FlowTraceReplayer {
                         if pair.len() == 2 {
                             let key = pair[0].as_str().unwrap_or_default().to_string();
                             let home = Self::extract_home_state(&pair[1])?;
-                            homes.insert(key, home_state);
+                            homes.insert(key, home);
                         }
                     }
                 }
@@ -407,17 +407,17 @@ impl FlowTraceReplayer {
         let mut home = HomeState::default();
 
         if let Some(obj) = value.as_object() {
-            home_state.owner = obj
+            home.owner = obj
                 .get("owner")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
 
-            home_state.residents = Self::extract_string_set(obj.get("residents"));
-            home_state.stewards = Self::extract_string_set(obj.get("stewards"));
+            home.residents = Self::extract_string_set(obj.get("residents"));
+            home.stewards = Self::extract_string_set(obj.get("stewards"));
         }
 
-        Ok(home_state)
+        Ok(home)
     }
 
     /// Extract neighborhoods map

@@ -262,7 +262,7 @@ pub async fn create_channel(
         channel_type: ChannelType::Home,
         unread_count: 0,
         is_dm: false,
-        member_count: (members.len() + 1) as u32,
+        member_count: 0,
         last_message: None,
         last_message_time: None,
         last_activity: timestamp_ms,

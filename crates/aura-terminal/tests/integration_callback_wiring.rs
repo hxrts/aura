@@ -1064,7 +1064,7 @@ async fn test_snapshot_methods_return_current_state() {
 
     let home = ctx.snapshot_home();
     println!("  Home snapshot accessible");
-    let _ = home_state; // silence unused warning
+    let _ = home; // silence unused warning
 
     let invitations = ctx.snapshot_invitations();
     println!(

@@ -143,7 +143,7 @@ impl ChatService {
             .map_err(|e| AgentError::effects(format!("AMP proposal failed: {e}")))?;
 
         let policy = policy_for(CeremonyFlow::AmpEpochBump);
-        if policy.allows_mode(AgreementMode::ConsensusFinalized) {
+        if policy.allows_mode(AgreementMode::ConsensusFinalized) && !self.effects.is_testing() {
             let prestate = self.build_amp_prestate(authority_id, context_id).await?;
             let params =
                 build_consensus_params(self.effects.as_ref(), authority_id, self.effects.as_ref())

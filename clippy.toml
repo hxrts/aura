@@ -61,6 +61,19 @@ type-complexity-threshold = 250
 # Security-focused lints
 allow-unwrap-in-tests = true
 
+# === Rust Style Guide Thresholds ===
+
+# Safety §1: "functions small enough to fit on one screen"
+cognitive-complexity-threshold = 25
+
+# APIs: misuse hard - "avoid bool parameters (use enums)"
+max-fn-params-bools = 2
+max-struct-bools = 2
+
+# Memory §7: large types should be passed by reference
+trivial-copy-size-limit = 32
+pass-by-value-size-limit = 256
+
 # ============================================================================
 # HASH TRAIT ENFORCEMENT NOTES
 # ============================================================================

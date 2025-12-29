@@ -573,7 +573,7 @@ mod tests {
         let frame = frame_from_string("Home Screen\nPress 1 for home", 80, 24);
         handler.render(frame).await.unwrap();
 
-        assert!(handler.frame_contains("Block"));
+        assert!(handler.frame_contains("Home"));
         assert!(handler.frame_contains("Press 1"));
         assert!(!handler.frame_contains("Chat"));
     }

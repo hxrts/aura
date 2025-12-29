@@ -66,6 +66,24 @@ impl ThresholdConfigMetadata {
     }
 }
 
+/// Legacy threshold metadata stored by AuraEffectSystem rotate_keys.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ThresholdMetadataFallback {
+    /// The epoch this configuration applies to
+    #[allow(dead_code)]
+    epoch: u64,
+    /// Minimum signers required (k-of-n)
+    threshold: u16,
+    /// Total number of participants
+    total_participants: u16,
+    /// Participants (in protocol participant order)
+    #[serde(default)]
+    participants: Vec<ParticipantIdentity>,
+    /// Agreement mode (A1/A2/A3)
+    #[serde(default)]
+    agreement_mode: AgreementMode,
+}
+
 /// State for a signing context (per authority)
 #[derive(Debug, Clone)]
 pub struct SigningContextState {
@@ -706,14 +724,14 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 ))
             })?;
 
-        // Load threshold config metadata stored during rotate_keys
+        // Load threshold config metadata stored during rotate_keys.
         let config_location = SecureStorageLocation::with_sub_key(
             "threshold_config",
             format!("{}", authority),
             format!("{}", new_epoch),
         );
 
-        let config_bytes = self
+        let mut config_metadata: ThresholdConfigMetadata = match self
             .effects
             .secure_retrieve(
                 &config_location,
@@ -723,17 +741,73 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 ],
             )
             .await
-            .map_err(|e| {
-                AuraError::internal(format!(
-                    "Failed to load threshold config for epoch {}: {}",
-                    new_epoch, e
-                ))
-            })?;
-
-        let mut config_metadata: ThresholdConfigMetadata = serde_json::from_slice(&config_bytes)
-            .map_err(|e| {
+        {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
                 AuraError::internal(format!("Failed to deserialize threshold config: {}", e))
-            })?;
+            })?,
+            Err(_) => {
+                // Fallback to legacy metadata stored by AuraEffectSystem rotate_keys.
+                let legacy_location = SecureStorageLocation::with_sub_key(
+                    "threshold_metadata",
+                    format!("{}", authority),
+                    format!("{}", new_epoch),
+                );
+                let legacy_bytes = self
+                    .effects
+                    .secure_retrieve(
+                        &legacy_location,
+                        &[
+                            SecureStorageCapability::Read,
+                            SecureStorageCapability::Write,
+                        ],
+                    )
+                    .await
+                    .map_err(|e| {
+                        AuraError::internal(format!(
+                            "Failed to load threshold metadata for epoch {}: {}",
+                            new_epoch, e
+                        ))
+                    })?;
+                let legacy: ThresholdMetadataFallback = serde_json::from_slice(&legacy_bytes)
+                    .map_err(|e| {
+                        AuraError::internal(format!(
+                            "Failed to deserialize threshold metadata: {}",
+                            e
+                        ))
+                    })?;
+                let mode = if legacy.threshold >= 2 {
+                    SigningMode::Threshold
+                } else {
+                    SigningMode::SingleSigner
+                };
+                let metadata = ThresholdConfigMetadata {
+                    threshold_k: legacy.threshold,
+                    total_n: legacy.total_participants,
+                    participants: legacy.participants,
+                    mode,
+                    agreement_mode: legacy.agreement_mode,
+                };
+
+                let upgraded = serde_json::to_vec(&metadata).map_err(|e| {
+                    AuraError::internal(format!(
+                        "Failed to serialize upgraded threshold config: {}",
+                        e
+                    ))
+                })?;
+                let _ = self
+                    .effects
+                    .secure_store(
+                        &config_location,
+                        &upgraded,
+                        &[
+                            SecureStorageCapability::Read,
+                            SecureStorageCapability::Write,
+                        ],
+                    )
+                    .await;
+                metadata
+            }
+        };
 
         if config_metadata.agreement_mode != AgreementMode::ConsensusFinalized {
             config_metadata.agreement_mode = AgreementMode::ConsensusFinalized;

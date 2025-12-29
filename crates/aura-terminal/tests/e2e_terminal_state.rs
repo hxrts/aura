@@ -1718,14 +1718,14 @@ async fn test_steward_role_flow() {
             storage_allocated: 200 * 1024,
         };
 
-        home_state.add_resident(resident1);
-        home_state.add_resident(resident2);
+        home.add_resident(resident1);
+        home.add_resident(resident2);
 
         // Set as owner so we have permission to grant/revoke
-        home_state.my_role = ResidentRole::Owner;
+        home.my_role = ResidentRole::Owner;
 
         // Add home and select it
-        core.views().add_home(home_state);
+        core.views().add_home(home);
         core.views().select_home(Some(home_id.clone()));
     }
 
@@ -1748,7 +1748,7 @@ async fn test_steward_role_flow() {
         let core = app_core.read().await;
         let homes = core.views().get_homes();
         let home = homes.current_home().expect("Home should exist");
-        let resident = home_state
+        let resident = home
             .resident(&resident1_id)
             .expect("Resident should exist");
         assert!(
@@ -1775,7 +1775,7 @@ async fn test_steward_role_flow() {
         let core = app_core.read().await;
         let homes = core.views().get_homes();
         let home = homes.current_home().expect("Home should exist");
-        let resident = home_state
+        let resident = home
             .resident(&resident1_id)
             .expect("Resident should exist");
         assert!(
@@ -2364,8 +2364,8 @@ async fn test_channel_mode_operations() {
             0,
             home_context_id.to_string(),
         );
-        home_state.my_role = ResidentRole::Owner;
-        core.views().add_home(home_state);
+        home.my_role = ResidentRole::Owner;
+        core.views().add_home(home);
         core.views().select_home(Some(home_id.clone()));
     }
 
@@ -3332,14 +3332,16 @@ async fn test_snapshot_data_accuracy() {
     // Emit home state via signal
     {
         let core = app_core.read().await;
-        core.emit(&*HOMES_SIGNAL, home_state.clone())
+        let mut homes_state = aura_app::views::home::HomesState::default();
+        homes_state.add_home(home_state.clone());
+        core.emit(&*HOMES_SIGNAL, homes_state)
             .await
             .expect("Failed to emit home state");
     }
 
     // Get snapshot and verify created_at
     let home_snapshot = ctx.snapshot_home();
-    if let Some(home_info) = &home_snapshot.home {
+    if let Some(home_info) = &home_snapshot.home_state {
         assert_eq!(
             home_info.created_at, test_created_at,
             "HomeInfo.created_at should match the HomeState value"

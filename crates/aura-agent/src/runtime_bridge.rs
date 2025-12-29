@@ -1444,7 +1444,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
-        let signing_service = self.agent.threshold_signing();
         let current_device_id = self.agent.context().device_id();
 
         // Best-effort: derive current device participant set from the commitment tree.

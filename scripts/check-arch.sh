@@ -23,6 +23,7 @@ Options (run all when none given):
   --concurrency    Concurrency hygiene (block_in_place, unbounded channels)
   --reactive       TUI reactive data model (signals as source of truth, no domain data in props)
   --serialization  Serialization format enforcement (DAG-CBOR canonical, no bincode)
+  --style          Rust style guide rules (usize in wire formats, bounded collections, etc.)
   --layer N[,M...] Filter output to specific layer numbers (1-8); repeatable
   --quick          Run fast checks only (skip todos, placeholders)
   -v, --verbose    Show more detail (allowlisted paths, etc.)
@@ -42,6 +43,7 @@ RUN_CRYPTO=false
 RUN_CONCURRENCY=false
 RUN_REACTIVE=false
 RUN_SERIALIZATION=false
+RUN_STYLE=false
 RUN_QUICK=false
 VERBOSE=false
 LAYER_FILTERS=()
@@ -59,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --concurrency) RUN_ALL=false; RUN_CONCURRENCY=true ;;
     --reactive) RUN_ALL=false; RUN_REACTIVE=true ;;
     --serialization) RUN_ALL=false; RUN_SERIALIZATION=true ;;
+    --style) RUN_ALL=false; RUN_STYLE=true ;;
     --layer)
       if [[ -z "${2-}" ]]; then
         echo "--layer requires a layer number (1-8)"; exit 1
@@ -89,6 +92,7 @@ if [ "$RUN_QUICK" = true ] && [ "$RUN_ALL" = true ]; then
   RUN_CONCURRENCY=true
   RUN_REACTIVE=true
   RUN_SERIALIZATION=true
+  RUN_STYLE=true
   RUN_TODOS=false  # Skip todos in quick mode
   RUN_ALL=false
 fi
@@ -945,6 +949,93 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   else
     info "SessionId::new(): none outside tests"
   fi
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_STYLE" = true ]; then
+  section "Rust Style Guide — safety and API rules (work/030.md)"
+
+  # Safety §3: "Prefer explicitly-sized integers, avoid usize in stored formats"
+  # Find structs with Serialize/Deserialize that contain usize fields
+  # Use -U for multiline matching to catch struct definitions spanning lines
+  usize_serialized=$(rg --no-heading -n "usize" crates -g "*.rs" \
+    | xargs -I{} sh -c 'file="${1%%:*}"; if grep -l "#\[derive.*Serialize" "$file" >/dev/null 2>&1; then echo "$1"; fi' _ {} 2>/dev/null || true)
+  filtered_usize=$(echo "$usize_serialized" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" \
+    | grep -v "crates/aura-testkit/" \
+    | grep -v "// usize ok:" \
+    | grep -v "fn " \
+    | grep -v "let " \
+    | grep -v "for " \
+    | grep -v "impl " || true)
+  # Only show field definitions (pub xxx: usize or xxx: usize,)
+  field_usize=$(echo "$filtered_usize" | grep -E ":\s*usize\s*[,}]|pub\s+\w+:\s*usize" || true)
+  emit_hits "usize in serialized struct field (use u32/u64 for wire formats; Safety §3)" "$field_usize"
+  verbose "Add '// usize ok: <reason>' comment to suppress false positives"
+
+  # Safety §2: "Every queue, buffer, batch, map must have a hard upper bound"
+  # Find Vec<u8> fields in core types (signatures, payloads, ciphertext) without MAX_* constants
+  unbounded_bytes=$(rg --no-heading -n "pub\s+\w+:\s*Vec<u8>" crates/aura-core/src -g "*.rs" || true)
+  if [ -n "$unbounded_bytes" ]; then
+    missing_bounds=""
+    while IFS= read -r hit; do
+      [ -z "$hit" ] && continue
+      file="${hit%%:*}"
+      # Check if file has a MAX_*_BYTES or MAX_*_SIZE constant
+      if ! grep -qE "const\s+MAX_.*_(BYTES|SIZE|LEN)" "$file" 2>/dev/null; then
+        missing_bounds="${missing_bounds}${hit}"$'\n'
+      fi
+    done <<< "$unbounded_bytes"
+    emit_hits "Vec<u8> field without MAX_*_BYTES constant in same file (Safety §2)" "$missing_bounds"
+  else
+    info "Vec<u8> bounds: all core types have MAX_* constants"
+  fi
+
+  # Safety §2: "Encode limits as constants with units in the name"
+  # Find numeric constants without unit suffixes
+  constants_no_units=$(rg --no-heading -n "const\s+[A-Z][A-Z0-9_]+:\s*(u\d+|i\d+|usize)\s*=\s*\d+" crates/aura-core/src -g "*.rs" \
+    | grep -vE "_(MS|BYTES|COUNT|SIZE|MAX|MIN|LEN|LIMIT|DEPTH|HEIGHT|BITS|SECS|NANOS)(\s*:|:)" \
+    | grep -vE "VERSION|MAGIC|EPOCH|THRESHOLD|FACTOR|RATIO|WIRE_FORMAT|DEFAULT_" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" || true)
+  if [ -n "$constants_no_units" ]; then
+    emit_hits "Numeric constant without unit suffix (_MS, _BYTES, _COUNT, etc.; Safety §2)" "$constants_no_units"
+    verbose "Expected patterns: TIMEOUT_MS, BATCH_SIZE_MAX, MAX_RETRY_COUNT, BUFFER_SIZE_BYTES"
+  else
+    info "Constants with units: all numeric constants have unit suffixes"
+  fi
+
+  # Style by Numbers: "#[must_use] for APIs where dropping the value is likely a bug"
+  # Find builder methods (with_*) without #[must_use]
+  builder_methods=$(rg --no-heading -n "pub\s+(const\s+)?fn\s+with_\w+\s*\(" crates/aura-core/src -g "*.rs" || true)
+  if [ -n "$builder_methods" ]; then
+    missing_must_use=""
+    while IFS= read -r hit; do
+      [ -z "$hit" ] && continue
+      file="${hit%%:*}"
+      rest="${hit#*:}"
+      linenum="${rest%%:*}"
+      # Check if previous 1-3 lines have #[must_use]
+      has_must_use=false
+      for offset in 1 2 3; do
+        prev_line=$((linenum - offset))
+        if [ "$prev_line" -gt 0 ]; then
+          if sed -n "${prev_line}p" "$file" 2>/dev/null | grep -q "#\[must_use\]"; then
+            has_must_use=true
+            break
+          fi
+        fi
+      done
+      if [ "$has_must_use" = false ]; then
+        missing_must_use="${missing_must_use}${hit}"$'\n'
+      fi
+    done <<< "$builder_methods"
+    emit_hits "Builder method without #[must_use] (Style by Numbers)" "$missing_must_use"
+  else
+    info "Builder methods: all have #[must_use]"
+  fi
+
+  info "Rust style guide checks complete (see also: clippy lints in Cargo.toml)"
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then

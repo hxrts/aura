@@ -143,6 +143,7 @@ impl AuraAgent {
         let ceremony_tracker = self.ceremony_tracker().await;
         let authority_id = self.authority_id();
         let effects = self.runtime.effects();
+        let signing_service = self.threshold_signing();
 
         let mut acceptance_count = 0usize;
         let mut completed_count = 0usize;
@@ -273,6 +274,21 @@ impl AuraAgent {
                             new_epoch,
                             error = %e,
                             "Failed to commit guardian key rotation"
+                        );
+                        let _ = ceremony_tracker
+                            .mark_failed(ceremony_id, Some(format!("Commit failed: {e}")))
+                            .await;
+                        continue;
+                    }
+                    if let Err(e) = signing_service
+                        .commit_key_rotation(&authority_id, new_epoch)
+                        .await
+                    {
+                        tracing::error!(
+                            ceremony_id = %ceremony_id,
+                            new_epoch,
+                            error = %e,
+                            "Failed to update guardian signing context"
                         );
                         let _ = ceremony_tracker
                             .mark_failed(ceremony_id, Some(format!("Commit failed: {e}")))
@@ -771,7 +787,7 @@ impl AuraAgent {
                     }
 
                     let new_epoch = ceremony_state.new_epoch;
-                    let policy = policy_for(CeremonyFlow::DeviceMfaRotation);
+                    let policy = policy_for(CeremonyFlow::DeviceEnrollment);
                     if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
                         let context_id =
                             ContextId::new_from_entropy(hash::hash(&authority_id.to_bytes()));
@@ -811,6 +827,21 @@ impl AuraAgent {
                             new_epoch,
                             error = %e,
                             "Failed to commit device enrollment key rotation"
+                        );
+                        let _ = ceremony_tracker
+                            .mark_failed(ceremony_id, Some(format!("Commit failed: {e}")))
+                            .await;
+                        continue;
+                    }
+                    if let Err(e) = signing_service
+                        .commit_key_rotation(&authority_id, new_epoch)
+                        .await
+                    {
+                        tracing::error!(
+                            ceremony_id = %ceremony_id,
+                            new_epoch,
+                            error = %e,
+                            "Failed to update device enrollment signing context"
                         );
                         let _ = ceremony_tracker
                             .mark_failed(ceremony_id, Some(format!("Commit failed: {e}")))
@@ -1091,6 +1122,21 @@ impl AuraAgent {
                             .await;
                         continue;
                     }
+                    if let Err(e) = signing_service
+                        .commit_key_rotation(&authority_id, new_epoch)
+                        .await
+                    {
+                        tracing::error!(
+                            ceremony_id = %ceremony_id,
+                            new_epoch,
+                            error = %e,
+                            "Failed to update device threshold signing context"
+                        );
+                        let _ = ceremony_tracker
+                            .mark_failed(ceremony_id, Some(format!("Commit failed: {e}")))
+                            .await;
+                        continue;
+                    }
 
                     let commit_context = {
                         let mut h = aura_core::hash::hasher();
@@ -1166,6 +1212,18 @@ impl AuraAgent {
                             new_epoch,
                             error = %e,
                             "Failed to activate committed device threshold epoch"
+                        );
+                        continue;
+                    }
+                    if let Err(e) = signing_service
+                        .commit_key_rotation(&authority_id, new_epoch)
+                        .await
+                    {
+                        tracing::warn!(
+                            authority_id = %authority_id,
+                            new_epoch,
+                            error = %e,
+                            "Failed to update signing context for committed device threshold epoch"
                         );
                     }
                 }

@@ -965,9 +965,10 @@ where
         + Send
         + Sync,
 {
+    let participant_count = participants.len().max(1) as u16;
     let config = DkdConfig {
-        threshold: 2,
-        total_participants: participants.len() as u16,
+        threshold: participant_count,
+        total_participants: participant_count,
         app_id: app_id.to_string(),
         context: context.to_string(),
         ..Default::default()
@@ -1085,7 +1086,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dkd_agreement_mode_requires_consensus() {
-        let participants = vec![device(1), device(2)];
+        let participants = vec![device(9)];
         let effects = TestEffectsBuilder::for_unit_tests(device(9))
             .build()
             .unwrap_or_else(|_| panic!("Failed to build test effects"));

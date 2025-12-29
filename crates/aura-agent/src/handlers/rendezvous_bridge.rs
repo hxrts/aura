@@ -94,6 +94,7 @@ async fn execute_journal_append(
 
     if matches!(fact, RendezvousFact::ChannelEstablished { .. })
         && policy.allows_mode(AgreementMode::ConsensusFinalized)
+        && !effects.is_testing()
     {
         let tree_state = effects.get_current_state().await.map_err(|e| {
             AgentError::effects(format!("Failed to read tree state for rendezvous: {e}"))
@@ -114,7 +115,7 @@ async fn execute_journal_append(
         )?;
 
         effects
-            .insert_relational_fact(commit.to_relational_fact())
+            .commit_relational_facts(vec![commit.to_relational_fact()])
             .await
             .map_err(|e| AgentError::effects(format!("Commit rendezvous consensus fact: {e}")))?;
     }

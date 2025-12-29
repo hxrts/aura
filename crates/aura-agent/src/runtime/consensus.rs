@@ -8,8 +8,10 @@ use aura_core::effects::{
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash::hash;
 use aura_core::threshold::ParticipantIdentity;
+use aura_core::threshold::ThresholdState;
 use aura_core::types::Epoch;
 use aura_core::{AuraError, AuthorityId, Hash32};
+use serde::Deserialize;
 use std::collections::HashMap;
 
 pub(crate) fn participant_identity_to_authority_id(
@@ -103,12 +105,10 @@ pub(crate) async fn build_consensus_params(
     authority_id: AuthorityId,
     signing_service: &impl ThresholdSigningEffects,
 ) -> Result<ConsensusParams, AuraError> {
-    let state = signing_service
-        .threshold_state(&authority_id)
-        .await
-        .ok_or_else(|| {
-            AuraError::invalid("Consensus requires an existing threshold configuration".to_string())
-        })?;
+    let state = match signing_service.threshold_state(&authority_id).await {
+        Some(state) => state,
+        None => load_threshold_state_from_storage(effects, authority_id).await?,
+    };
 
     let public_key_package = signing_service.public_key_package(&authority_id).await;
     let (key_packages, group_public_key) = load_consensus_key_material(
@@ -132,4 +132,117 @@ pub(crate) async fn build_consensus_params(
         group_public_key,
         epoch: Epoch::new(state.epoch),
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct ThresholdConfigMetadata {
+    threshold_k: u16,
+    total_n: u16,
+    #[serde(default)]
+    participants: Vec<ParticipantIdentity>,
+    #[serde(default)]
+    agreement_mode: aura_core::threshold::AgreementMode,
+}
+
+#[derive(Debug, Deserialize)]
+struct ThresholdMetadataFallback {
+    threshold: u16,
+    total_participants: u16,
+    #[serde(default)]
+    participants: Vec<ParticipantIdentity>,
+    #[serde(default)]
+    agreement_mode: aura_core::threshold::AgreementMode,
+}
+
+async fn load_threshold_state_from_storage(
+    effects: &crate::runtime::AuraEffectSystem,
+    authority_id: AuthorityId,
+) -> Result<ThresholdState, AuraError> {
+    let epoch_location = SecureStorageLocation::new("epoch_state", format!("{}", authority_id));
+    let epoch_bytes = effects
+        .secure_retrieve(&epoch_location, &[SecureStorageCapability::Read])
+        .await
+        .map_err(|_| {
+            AuraError::invalid("Consensus requires an existing threshold configuration".to_string())
+        })?;
+
+    let epoch = if epoch_bytes.len() >= 8 {
+        let bytes: [u8; 8] = epoch_bytes[..8].try_into().unwrap_or([0u8; 8]);
+        u64::from_le_bytes(bytes)
+    } else {
+        0
+    };
+
+    if epoch == 0 {
+        return Err(AuraError::invalid(
+            "Consensus requires an existing threshold configuration".to_string(),
+        ));
+    }
+
+    let config_location = SecureStorageLocation::with_sub_key(
+        "threshold_config",
+        format!("{}", authority_id),
+        format!("{}", epoch),
+    );
+
+    let config = match effects
+        .secure_retrieve(
+            &config_location,
+            &[
+                SecureStorageCapability::Read,
+                SecureStorageCapability::Write,
+            ],
+        )
+        .await
+    {
+        Ok(bytes) => {
+            let metadata: ThresholdConfigMetadata = serde_json::from_slice(&bytes).map_err(|e| {
+                AuraError::internal(format!("Failed to deserialize threshold config: {}", e))
+            })?;
+            ThresholdState {
+                epoch,
+                threshold: metadata.threshold_k,
+                total_participants: metadata.total_n,
+                participants: metadata.participants,
+                agreement_mode: metadata.agreement_mode,
+            }
+        }
+        Err(_) => {
+            let legacy_location = SecureStorageLocation::with_sub_key(
+                "threshold_metadata",
+                format!("{}", authority_id),
+                format!("{}", epoch),
+            );
+            let legacy_bytes = effects
+                .secure_retrieve(
+                    &legacy_location,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await
+                .map_err(|_| {
+                    AuraError::invalid(
+                        "Consensus requires an existing threshold configuration".to_string(),
+                    )
+                })?;
+            let metadata: ThresholdMetadataFallback =
+                serde_json::from_slice(&legacy_bytes).map_err(|e| {
+                    AuraError::internal(format!(
+                        "Failed to deserialize threshold metadata: {}",
+                        e
+                    ))
+                })?;
+            ThresholdState {
+                epoch,
+                threshold: metadata.threshold,
+                total_participants: metadata.total_participants,
+                participants: metadata.participants,
+                agreement_mode: metadata.agreement_mode,
+            }
+        }
+    };
+
+    Ok(config)
 }

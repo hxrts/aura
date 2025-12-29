@@ -901,9 +901,16 @@ async fn test_create_home_propagates_to_home_signal() {
     // Get initial home state
     let initial_home = {
         let core = app_core.read().await;
-        core.read(&*HOMES_SIGNAL).await.unwrap()
+        core.read(&*HOMES_SIGNAL)
+            .await
+            .ok()
+            .and_then(|state| state.current_home().cloned())
     };
-    println!("  Initial home id: {:?}", initial_home.id);
+    if let Some(home_state) = &initial_home {
+        println!("  Initial home id: {:?}", home_state.id);
+    } else {
+        println!("  No initial home");
+    }
 
     // Create a new home
     let result = ctx
@@ -917,11 +924,18 @@ async fn test_create_home_propagates_to_home_signal() {
     // Check HOMES_SIGNAL was updated
     let final_home = {
         let core = app_core.read().await;
-        core.read(&*HOMES_SIGNAL).await.unwrap()
+        core.read(&*HOMES_SIGNAL)
+            .await
+            .ok()
+            .and_then(|state| state.current_home().cloned())
     };
 
-    println!("  Final home id: {:?}", final_home.id);
-    println!("  Final home name: {:?}", final_home_state.name);
+    if let Some(home_state) = &final_home {
+        println!("  Final home id: {:?}", home_state.id);
+        println!("  Final home name: {:?}", home_state.name);
+    } else {
+        println!("  No final home");
+    }
 
     // If command succeeded, verify home was created
     if result.is_ok() {
@@ -1074,12 +1088,19 @@ async fn test_social_graph_full_flow() {
     // Verify home state
     let home_state = {
         let core = app_core.read().await;
-        core.read(&*HOMES_SIGNAL).await.unwrap()
+        core.read(&*HOMES_SIGNAL)
+            .await
+            .ok()
+            .and_then(|state| state.current_home().cloned())
     };
-    println!(
-        "  Home state after creation: id={:?}, name={:?}",
-        home_state.id, home_state.name
-    );
+    if let Some(home_state) = &home_state {
+        println!(
+            "  Home state after creation: id={:?}, name={:?}",
+            home_state.id, home_state.name
+        );
+    } else {
+        println!("  No home after creation");
+    }
 
     // Step 4: Verify all signals are consistent
     println!("Step 4: Verifying signal consistency...");

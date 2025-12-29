@@ -61,7 +61,7 @@ fn create_home(home_seed: u8, resident_count: usize) -> (Home, AuthorityId, Vec<
 
     let home = Home::from_facts(&home_fact, None, &resident_facts, &steward_facts);
 
-    (home_instance, steward, residents)
+    (home, steward, residents)
 }
 
 /// Create a neighborhood with the specified homes
@@ -170,7 +170,7 @@ impl ReachabilityChecker for PartialReachability {
 fn test_large_home_simulation() {
     // Simulate a home at maximum capacity (8 residents)
     let (home, steward, residents) = create_home(1, 8);
-    let topology = SocialTopology::new(steward, Some(home_instance), vec![]);
+    let topology = SocialTopology::new(steward, Some(home), vec![]);
 
     // Should have 7 home peers
     assert_eq!(topology.home_peers().len(), 7);
@@ -257,7 +257,7 @@ fn test_mesh_neighborhood_topology() {
 fn test_partial_home_partition() {
     // Simulate a scenario where some home peers are unreachable
     let (home, steward, residents) = create_home(1, 5);
-    let topology = SocialTopology::new(steward, Some(home_instance), vec![]);
+    let topology = SocialTopology::new(steward, Some(home), vec![]);
 
     // Only first two peers are reachable
     let reachable_peers: std::collections::HashSet<AuthorityId> =
@@ -289,7 +289,7 @@ fn test_partial_home_partition() {
 fn test_complete_home_partition() {
     // Simulate a scenario where ALL home peers are unreachable
     let (home, steward, _) = create_home(1, 5);
-    let topology = SocialTopology::new(steward, Some(home_instance), vec![]);
+    let topology = SocialTopology::new(steward, Some(home), vec![]);
 
     let builder = RelayCandidateBuilder::from_topology(topology);
     let context = aura_core::effects::relay::RelayContext::new(
@@ -313,7 +313,7 @@ fn test_complete_home_partition() {
 fn test_guardian_fallback_during_partition() {
     // Test that guardians can be used when home peers are unreachable
     let (home, steward, _residents) = create_home(1, 3);
-    let mut topology = SocialTopology::new(steward, Some(home_instance), vec![]);
+    let mut topology = SocialTopology::new(steward, Some(home), vec![]);
 
     let guardian = test_authority(88);
     topology.add_peer(guardian, RelayRelationship::Guardian);
@@ -367,7 +367,7 @@ fn test_progressive_social_presence_loss() {
     let (home, steward, _residents) = create_home(1, 3);
 
     // Full social presence
-    let topology_full = SocialTopology::new(steward, Some(home_instance.clone()), vec![]);
+    let topology_full = SocialTopology::new(steward, Some(home.clone()), vec![]);
     assert!(topology_full.has_social_presence());
     assert_eq!(topology_full.home_peers().len(), 2);
 
@@ -441,7 +441,7 @@ fn test_deterministic_neighborhood_adjacency() {
 fn test_deterministic_relay_candidate_order() {
     // Verify that relay candidates are generated in deterministic order
     let (home, steward, _) = create_home(1, 5);
-    let topology = SocialTopology::new(steward, Some(home_instance), vec![]);
+    let topology = SocialTopology::new(steward, Some(home), vec![]);
 
     let builder = RelayCandidateBuilder::from_topology(topology.clone());
     let context = aura_core::effects::relay::RelayContext::new(
@@ -561,7 +561,7 @@ fn test_gradually_expanding_network() {
 
     // Phase 3: Joins a home
     let (home, _steward, _) = create_home(1, 5);
-    let topology3 = SocialTopology::new(authority, Some(home_instance), vec![]);
+    let topology3 = SocialTopology::new(authority, Some(home), vec![]);
     assert_eq!(
         topology3.discovery_layer(&test_authority(99)),
         DiscoveryLayer::Home
@@ -588,7 +588,7 @@ fn test_many_peers_performance() {
     let (home, steward, _) = create_home(1, 8);
 
     // Add guardians too
-    let mut topology = SocialTopology::new(steward, Some(home_instance), vec![]);
+    let mut topology = SocialTopology::new(steward, Some(home), vec![]);
 
     // Add several guardians
     for i in 90..95 {

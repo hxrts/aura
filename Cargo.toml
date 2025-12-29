@@ -173,6 +173,37 @@ type_complexity = "warn"
 unwrap_used = "warn"
 expect_used = "warn"
 
+# === Rust Style Guide Enforcement ===
+
+# Safety §4 / Style by Numbers: "#[must_use] for APIs where dropping the value is likely a bug"
+must_use_candidate = "warn"
+
+# APIs: misuse hard - "avoid bool parameters (use enums)"
+fn_params_excessive_bools = "warn"
+struct_excessive_bools = "warn"
+
+# Memory §7: "pre-size collections", "avoid per-request allocations"
+large_types_passed_by_value = "warn"
+trivially_copy_pass_by_ref = "warn"
+needless_pass_by_value = "warn"
+redundant_clone = "warn"
+implicit_clone = "warn"
+vec_box = "warn"
+
+# Safety §1: "simple, explicit control flow"
+cognitive_complexity = "warn"
+manual_let_else = "warn"
+
+# Safety §5: Error handling - async functions that never await are suspicious
+unused_async = "warn"
+
+# Performance: format!("{}", x) → format!("{x}")
+uninlined_format_args = "warn"
+
+# Naming / Consistency
+default_trait_access = "warn"
+semicolon_if_nothing_returned = "warn"
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"

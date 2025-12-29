@@ -372,9 +372,9 @@ mod tests {
 
         assert_eq!(residents.len(), 3);
         assert_eq!(steward, residents[0]);
-        assert!(home_instance.is_resident(&steward));
-        assert!(home_instance.is_steward(&steward));
-        assert_eq!(home_instance.residents.len(), 3);
+        assert!(home.is_resident(&steward));
+        assert!(home.is_steward(&steward));
+        assert_eq!(home.residents.len(), 3);
     }
 
     #[test]
