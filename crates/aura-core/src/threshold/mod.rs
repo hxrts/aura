@@ -22,12 +22,19 @@
 //! by parameterizing on `SigningContext`.
 
 mod context;
+mod lifecycle;
 mod participant;
 mod signature;
+mod types;
 
 pub use context::{ApprovalContext, GroupAction, SignableOperation, SigningContext};
+pub use lifecycle::{
+    ConsensusLifecycle, CoordinatorLifecycle, ProvisionalLifecycle, RotationLifecycle,
+    ThresholdLifecycle,
+};
 pub use participant::{ParticipantEndpoint, ParticipantIdentity, SigningParticipant};
 pub use signature::ThresholdSignature;
+pub use types::{ConvergenceCert, ReversionFact, RotateFact};
 
 // Re-export ThresholdConfig and ThresholdState from crypto::frost for convenience
 pub use crate::crypto::frost::{ThresholdConfig, ThresholdState};

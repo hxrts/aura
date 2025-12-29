@@ -22,7 +22,9 @@ This fact model defines snapshot, cache, and upgrade events. Each fact is immuta
 
 Snapshots bound storage size. A snapshot proposal announces a target epoch and a digest of the journal prefix. Devices verify the digest. If valid, they contribute signatures. A threshold signature completes the snapshot.
 
-Snapshot completion inserts a `SnapshotCompleted` fact. Devices prune facts whose epochs fall below the snapshot epoch. Devices prune blobs whose tombstones precede the snapshot. This pruning does not affect correctness because the snapshot represents a complete prefix.
+Snapshot completion inserts a `SnapshotCompleted` fact. Devices prune facts whose epochs fall below the snapshot epoch. Devices prune blobs whose retractions precede the snapshot. This pruning does not affect correctness because the snapshot represents a complete prefix.
+
+DKG transcript blobs follow the same garbage collection fence: once a snapshot is finalized, transcripts with epochs older than the snapshot retention window may be deleted. This keeps long-lived key ceremonies from accumulating unbounded storage while preserving the ability to replay from the latest snapshot.
 
 ```rust
 pub struct Snapshot {

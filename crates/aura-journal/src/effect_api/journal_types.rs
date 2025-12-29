@@ -33,9 +33,9 @@ pub enum JournalError {
     #[error("Intent {0} not found")]
     IntentNotFound(IntentId),
 
-    /// Intent is tombstoned (already completed)
-    #[error("Intent {0} is tombstoned")]
-    IntentTombstoned(IntentId),
+    /// Intent is retracted (already completed)
+    #[error("Intent {0} is retracted")]
+    IntentRetracted(IntentId),
 
     /// Capability validation failed
     #[error("Capability validation failed: {0}")]
@@ -65,8 +65,8 @@ pub struct JournalStats {
     pub num_ops: usize,
     /// Number of pending intents
     pub num_intents: usize,
-    /// Number of tombstoned intents
-    pub num_tombstones: usize,
+    /// Number of retracted intents
+    pub num_retractions: usize,
     /// Latest epoch
     pub latest_epoch: Option<Epoch>,
     /// Number of devices in tree

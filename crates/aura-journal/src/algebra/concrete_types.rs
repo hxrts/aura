@@ -17,8 +17,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct IntentPool {
     /// Active intents
     pub intents: BTreeMap<IntentId, Intent>,
-    /// Tombstones for removed intents
-    pub tombstones: BTreeSet<IntentId>,
+    /// Retracted intent IDs (observed-remove set)
+    pub retractions: BTreeSet<IntentId>,
 }
 
 impl IntentPool {
@@ -26,7 +26,7 @@ impl IntentPool {
     pub fn new() -> Self {
         Self {
             intents: BTreeMap::new(),
-            tombstones: BTreeSet::new(),
+            retractions: BTreeSet::new(),
         }
     }
 
@@ -34,15 +34,15 @@ impl IntentPool {
     pub fn add_intent(&mut self, intent: Intent) {
         let id = intent.intent_id;
 
-        // Only add if not tombstoned (observed-remove: add wins)
-        if !self.tombstones.contains(&id) {
+        // Only add if not retracted (observed-remove: add wins)
+        if !self.retractions.contains(&id) {
             self.intents.insert(id, intent);
         }
     }
 
     /// Remove an intent from the pool
     pub fn remove_intent(&mut self, id: IntentId) {
-        self.tombstones.insert(id);
+        self.retractions.insert(id);
         self.intents.remove(&id);
     }
 
@@ -78,14 +78,14 @@ impl JoinSemilattice for IntentPool {
 
         // Merge intents (add wins over remove)
         for (id, intent) in &other.intents {
-            if !result.tombstones.contains(id) {
+            if !result.retractions.contains(id) {
                 result.intents.insert(*id, intent.clone());
             }
         }
 
-        // Merge tombstones (union)
-        for id in &other.tombstones {
-            result.tombstones.insert(*id);
+        // Merge retractions (union)
+        for id in &other.retractions {
+            result.retractions.insert(*id);
             result.intents.remove(id); // Remove if present
         }
 

@@ -424,6 +424,10 @@ if recovery_op.is_emergency() {
 - Separate contexts for different relationship types
 - Garbage collect expired bindings periodically
 
+**Lifecycle Notes:**
+- A1/A2 facts are usable immediately but are provisional; any durable relational state must be A3 (consensus-finalized).
+- Soft-safe operations should emit `ConvergenceCert` and `ReversionFact` protocol facts to make convergence and reversion risk explicit.
+
 ## 10. Contexts vs Channels: Operation Categories
 
 Understanding the distinction between relational contexts and channels is essential for operation categorization.

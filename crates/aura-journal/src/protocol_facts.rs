@@ -5,8 +5,8 @@
 //! `RelationalFact::Generic` + `FactRegistry` instead.
 
 use crate::fact::{
-    ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, LeakageFact,
-    ProposedChannelEpochBump,
+    ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, ConvergenceCert,
+    DkgTranscriptCommit, LeakageFact, ProposedChannelEpochBump, ReversionFact, RotateFact,
 };
 use aura_core::{AuthorityId, Hash32};
 use serde::{Deserialize, Serialize};
@@ -53,4 +53,12 @@ pub enum ProtocolRelationalFact {
     AmpChannelPolicy(ChannelPolicy),
     /// Leakage tracking event (privacy budget accounting)
     LeakageEvent(LeakageFact),
+    /// Finalized DKG transcript commit
+    DkgTranscriptCommit(DkgTranscriptCommit),
+    /// Coordinator convergence certificate (soft-safe)
+    ConvergenceCert(ConvergenceCert),
+    /// Explicit reversion fact (soft-safe)
+    ReversionFact(ReversionFact),
+    /// Rotation/upgrade marker for lifecycle transitions
+    RotateFact(RotateFact),
 }

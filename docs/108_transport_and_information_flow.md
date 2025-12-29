@@ -316,6 +316,8 @@ Category B and C operations have different confirmation models:
 - Category B uses proposal/approval state
 - Category C uses ceremony completion status
 
+Lifecycle modes (A1/A2/A3) apply within these categories: A1/A2 updates are usable immediately but must be treated as provisional until A3 consensus finalization. Soft-safe A2 should publish convergence certificates and reversion facts so UI and transport can surface any reversion risk during the soft window.
+
 See [Consensus - Operation Categories](104_consensus.md#17-operation-categories) for categorization details.
 
 ## 10. Summary

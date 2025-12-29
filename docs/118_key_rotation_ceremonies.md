@@ -4,13 +4,15 @@ Aura treats *membership changes* and *key rotations* as **Category C ceremonies*
 
 ## Why ceremonies?
 
-Operations like “add a device”, “add/remove guardians”, “change group membership”, or “change block membership” all change **who can produce valid signatures** (or who is expected to participate in signing). These operations:
+Operations like “add a device”, “add/remove guardians”, “change group membership”, or “change block membership” all change who can produce valid signatures (or who is expected to participate in signing). These operations:
 
 - require multi-party participation and explicit consent,
 - must be bound to a **prestate** to avoid TOCTOU / replay,
 - must support **rollback** if the ceremony fails or is cancelled.
 
 See `docs/117_operation_categories.md` for the Category C requirements.
+
+**Finalization rule**: Provisional or coordinator fast paths may be used to stage intent, but key rotation is only durable once consensus finalizes the ceremony (commit facts + transcript commit).
 
 ## Shared contract
 

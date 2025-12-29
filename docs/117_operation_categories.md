@@ -12,6 +12,8 @@ Operations in Aura fall into three categories based on their effect timing and s
 | B | Deferred | Pending until confirmed | Medium-risk policy/membership changes |
 | C | Consensus-Gated | Blocked until ceremony completes | Cryptographic context establishment |
 
+**Agreement modes are orthogonal to categories**: operations can use provisional or soft-safe fast paths, but any **durable shared state** must be consensus-finalized (A3). See `work/bft_dkg_research.md` for the fast-path + finalization taxonomy.
+
 ## Domain Fact Contract (Applies to Category A/B Facts)
 
 Optimistic and deferred operations emit domain facts. To keep those facts deterministic and versioned across replicas, follow the domain fact contract in `docs/102_journal.md` and validate with `scripts/check-domain-fact-contract.sh`.

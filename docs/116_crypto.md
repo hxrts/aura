@@ -353,7 +353,23 @@ Low-level primitives live in `aura-core/src/crypto/tree_signing.rs`. This module
 
 The handler in `aura-effects/src/crypto.rs` implements FROST key generation and signing. This is the only location with direct `frost_ed25519` library calls.
 
-### 7.2 Usage Pattern
+### 7.2 Lifecycle Taxonomy (Key Generation vs Agreement)
+
+Aura separates **key generation** from **agreement/finality**:
+
+- **K1: Local/Single-Signer** (no DKG)
+- **K2: Dealer-Based DKG** (trusted coordinator)
+- **K3: Quorum/BFT-DKG** (consensus-finalized transcript)
+
+Agreement modes are orthogonal:
+
+- **A1: Provisional** (usable immediately, not final)
+- **A2: Coordinator Soft-Safe** (bounded divergence + convergence cert)
+- **A3: Consensus-Finalized** (unique, durable, non-forkable)
+
+Leader selection (lottery/round seed/fixed coordinator) and pipelining are **orthogonal optimizations**, not agreement modes.
+
+### 7.3 Usage Pattern
 
 The recommended pattern uses `AppCore` for high-level operations.
 
@@ -374,11 +390,11 @@ let context = SigningContext::self_tree_op(authority, tree_op);
 let signature = signing_service.sign(context).await?;
 ```
 
-### 7.3 Design Rationale
+### 7.4 Design Rationale
 
 The unified trait abstraction enables a consistent interface across multi-device, guardian, and group scenarios. It provides proper audit context via `ApprovalContext` for UX and logging. It enables testability via mock implementations in `aura-testkit`. It provides key isolation with secure storage integration.
 
-### 7.4 FROST Minimum Threshold
+### 7.5 FROST Minimum Threshold
 
 FROST requires `threshold >= 2`. Calling `frost_generate_keys(1, 1)` returns an error. For single-signer scenarios, use `generate_signing_keys(1, 1)` which routes to Ed25519 automatically.
 

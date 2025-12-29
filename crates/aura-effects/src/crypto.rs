@@ -412,6 +412,22 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         }
     }
 
+    async fn generate_signing_keys_with(
+        &self,
+        method: aura_core::effects::crypto::KeyGenerationMethod,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<aura_core::effects::crypto::SigningKeyGenResult, CryptoError> {
+        match method {
+            aura_core::effects::crypto::KeyGenerationMethod::SingleSigner => {
+                self.generate_signing_keys(1, 1).await
+            }
+            aura_core::effects::crypto::KeyGenerationMethod::DealerBased => {
+                self.generate_signing_keys(threshold, max_signers).await
+            }
+        }
+    }
+
     async fn sign_with_key(
         &self,
         message: &[u8],
@@ -1142,6 +1158,23 @@ mod single_signer_tests {
         assert_eq!(keys.mode, SigningMode::Threshold);
         assert_eq!(keys.key_packages.len(), 3);
         assert!(!keys.public_key_package.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_generate_signing_keys_with_dealer_based() {
+        let crypto = RealCryptoHandler::new();
+        let result = crypto
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                2,
+                3,
+            )
+            .await;
+
+        assert!(result.is_ok(), "generate_signing_keys_with should succeed");
+        let keys = result.unwrap();
+        assert_eq!(keys.mode, SigningMode::Threshold);
+        assert_eq!(keys.key_packages.len(), 3);
     }
 
     #[tokio::test]

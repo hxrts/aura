@@ -18,6 +18,7 @@ aura-effects = { path = "../aura-effects" }
 aura-composition = { path = "../aura-composition" }
 aura-protocol = { path = "../aura-protocol" }
 aura-guards = { path = "../aura-guards" }
+aura-consensus = { path = "../aura-consensus" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
 aura-chat = { path = "../aura-chat" }

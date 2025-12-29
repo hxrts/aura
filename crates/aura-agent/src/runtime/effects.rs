@@ -12,7 +12,9 @@ use aura_app::ReactiveHandler;
 use aura_authorization::BiscuitAuthorizationBridge;
 use aura_composition::{CompositeHandlerAdapter, RegisterAllOptions};
 use aura_core::crypto::single_signer::SigningMode;
-use aura_core::effects::crypto::{FrostSigningPackage, SigningKeyGenResult};
+use aura_core::effects::crypto::{
+    FrostSigningPackage, KeyGenerationMethod, SigningKeyGenResult,
+};
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::transport::{TransportEnvelope, TransportReceipt, TransportStats};
@@ -1240,6 +1242,17 @@ impl CryptoExtendedEffects for AuraEffectSystem {
     ) -> Result<SigningKeyGenResult, CryptoError> {
         self.crypto_handler
             .generate_signing_keys(threshold, max_signers)
+            .await
+    }
+
+    async fn generate_signing_keys_with(
+        &self,
+        method: KeyGenerationMethod,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError> {
+        self.crypto_handler
+            .generate_signing_keys_with(method, threshold, max_signers)
             .await
     }
 

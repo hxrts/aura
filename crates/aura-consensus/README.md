@@ -13,6 +13,7 @@ src/
 │   └── verification/        # Verification infrastructure
 │       ├── quint_mapping.rs # Quint ITF trace correspondence
 │       └── kani_proofs.rs   # Bounded model checking proofs
+├── dkg/           # Quorum-driven DKG orchestration + transcript helpers
 ├── frost.rs        # FrostConsensusOrchestrator - crypto integration with pipelining
 ├── protocol.rs     # ConsensusProtocol - main coordination and execution
 ├── messages.rs     # Protocol messages and choreography definitions

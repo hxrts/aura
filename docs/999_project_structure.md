@@ -265,6 +265,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 **Contains**:
 - Guard chain coordination (`CapGuard → FlowGuard → JournalCoupler`) in `aura-guards`
 - Multi-party protocol orchestration (consensus in `aura-consensus`, anti-entropy in `aura-anti-entropy`)
+- Quorum-driven DKG orchestration and transcript handling in `aura-consensus/src/dkg/`
 - Cross-handler coordination logic (`TransportCoordinator`, `StorageCoordinator`, etc.)
 - Distributed state management
 - Stateful coordinators for multi-party protocols

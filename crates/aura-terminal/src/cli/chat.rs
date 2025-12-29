@@ -151,7 +151,7 @@ pub enum ChatCommands {
         content: String,
     },
 
-    /// Delete a message (soft delete with tombstone)
+    /// Delete a message (soft delete with retraction)
     Delete {
         /// Group ID containing the message
         group_id: Uuid,
@@ -388,7 +388,7 @@ fn delete_command() -> impl Parser<ChatCommands> {
     })
     .to_options()
     .command("delete")
-    .help("Delete a message (soft delete with tombstone)")
+    .help("Delete a message (soft delete with retraction)")
 }
 
 fn export_command() -> impl Parser<ChatCommands> {

@@ -23,7 +23,8 @@ use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::{
-    CryptoExtendedEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    crypto::KeyGenerationMethod, CryptoExtendedEffects, SecureStorageCapability,
+    SecureStorageEffects, SecureStorageLocation,
 };
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{
@@ -273,7 +274,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         // Generate 1-of-1 signing keys (will use Ed25519 single-signer mode)
         let key_result = self
             .effects
-            .generate_signing_keys(1, 1)
+            .generate_signing_keys_with(KeyGenerationMethod::SingleSigner, 1, 1)
             .await
             .map_err(|e| AuraError::internal(format!("Key generation failed: {}", e)))?;
 
@@ -496,7 +497,11 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             // Single-signer mode (shouldn't happen for guardian ceremony, but handle it)
             let result = self
                 .effects
-                .generate_signing_keys(new_threshold, new_total_participants)
+                .generate_signing_keys_with(
+                    KeyGenerationMethod::DealerBased,
+                    new_threshold,
+                    new_total_participants,
+                )
                 .await
                 .map_err(|e| AuraError::internal(format!("Key generation failed: {}", e)))?;
 

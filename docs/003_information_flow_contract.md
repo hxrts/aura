@@ -26,6 +26,8 @@ Only `spent` and `epoch` values appear as facts inside the journal. The `limit` 
 
 For multi-hop forwarding, relays validate a signed per-hop receipt from the previous hop, then charge their own budget before forwarding. Limits update deterministically via the shared Biscuit/policy evaluation on every device, so replicas converge even though only `spent` charges are recorded. Guard evaluation follows the sequence described in [Authorization](109_authorization.md).
 
+DKG dealer packages and transcript payloads are treated as high-cost emissions. They must be charged through FlowGuard before any transport side effect, and bounded by policy (package count and byte size) to prevent DoS via oversized shares.
+
 ### Time Domain Semantics and Leakage
 
 - **PhysicalClock** timestamps are used for guard-chain charging, receipts, and cooldowns. They are obtained exclusively through `PhysicalTimeEffects` implementations (production or simulator) and never via direct `SystemTime::now()`.

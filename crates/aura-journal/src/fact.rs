@@ -15,6 +15,7 @@ use aura_core::{
     time::{OrderTime, TimeStamp},
     Hash32, Result,
 };
+pub use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
 use crate::protocol_facts::ProtocolRelationalFact;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -306,6 +307,26 @@ pub struct CommittedChannelEpochBump {
     pub consensus_id: Hash32,
 }
 
+/// Finalized DKG transcript commit (consensus-backed)
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DkgTranscriptCommit {
+    /// Relational context containing this transcript (if applicable)
+    pub context: ContextId,
+    /// Epoch for which the transcript is valid
+    pub epoch: u64,
+    /// Membership hash bound into the transcript
+    pub membership_hash: Hash32,
+    /// Deterministic cutoff (round/height/view)
+    pub cutoff: u64,
+    /// Number of dealer packages included
+    pub package_count: u32,
+    /// Hash of the transcript contents
+    pub transcript_hash: Hash32,
+    /// Optional blob reference for transcript payload
+    pub blob_ref: Option<Hash32>,
+}
+
+
 /// Channel-level policy controls (governable)
 ///
 /// Allows overriding skip window per channel via relational context policy facts.
@@ -388,6 +409,10 @@ pub struct LeakageFact {
 /// - `Protocol(AmpProposedChannelEpochBump)` - Optimistic epoch transitions
 /// - `Protocol(AmpCommittedChannelEpochBump)` - Finalized epoch transitions
 /// - `Protocol(AmpChannelPolicy)` - Channel-level policy overrides
+/// - `Protocol(DkgTranscriptCommit)` - Consensus-finalized DKG transcript
+/// - `Protocol(ConvergenceCert)` - Soft-safe convergence certificate
+/// - `Protocol(ReversionFact)` - Soft-safe explicit reversion
+/// - `Protocol(RotateFact)` - Lifecycle rotation/upgrade marker
 ///
 /// New protocol facts must be added to `protocol_facts.rs` and documented
 /// in `docs/102_journal.md` (criteria + reduction rules).

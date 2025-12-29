@@ -4,7 +4,7 @@
 //! Inspired by Datomic's approach, all data changes are represented as facts with:
 //!
 //! - **Assert**: Add a fact to a scope
-//! - **Tombstone**: Mark a specific fact as retracted
+//! - **Retract**: Mark a specific fact as retracted
 //! - **EpochBump**: Invalidate all facts in a scope before a point
 //! - **Checkpoint**: Create a queryable snapshot of scope state
 //!
@@ -393,7 +393,7 @@ pub struct AnchorProof {
 /// These are the primitive operations that modify the journal:
 ///
 /// - `Assert`: Add a new fact
-/// - `Tombstone`: Mark a specific fact as retracted
+/// - `Retract`: Mark a specific fact as retracted
 /// - `EpochBump`: Invalidate all facts in a scope before a point
 /// - `Checkpoint`: Create a queryable snapshot
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -411,18 +411,18 @@ pub enum FactOp {
     /// Mark a specific fact as retracted.
     ///
     /// The fact remains in the journal but is marked as no longer valid.
-    /// Queries can choose to include or exclude tombstoned facts.
-    Tombstone {
-        /// The fact being tombstoned
+    /// Queries can choose to include or exclude retracted facts.
+    Retract {
+        /// The fact being retracted
         target: FactId,
-        /// Reason for the tombstone
+        /// Reason for the retraction
         reason: RetractReason,
     },
 
     /// Bump the epoch for a scope, invalidating older facts.
     ///
     /// All facts in the scope with epochs before `new_epoch` are considered
-    /// superseded. This is more efficient than individual tombstones when
+    /// superseded. This is more efficient than individual retractions when
     /// replacing large amounts of data.
     EpochBump {
         /// The scope to bump
@@ -466,9 +466,9 @@ impl FactOp {
         }
     }
 
-    /// Create a Tombstone operation
-    pub fn tombstone(target: FactId, reason: RetractReason) -> Self {
-        Self::Tombstone { target, reason }
+    /// Create a Retract operation
+    pub fn retract(target: FactId, reason: RetractReason) -> Self {
+        Self::Retract { target, reason }
     }
 
     /// Create an EpochBump operation
@@ -498,7 +498,7 @@ impl FactOp {
     pub fn affected_scope(&self) -> Option<&ScopeId> {
         match self {
             Self::Assert { scope, .. } => scope.as_ref(),
-            Self::Tombstone { .. } => None, // Scope determined by target fact
+            Self::Retract { .. } => None, // Scope determined by target fact
             Self::EpochBump { scope, .. } => Some(scope),
             Self::Checkpoint { scope, .. } => Some(scope),
         }
@@ -648,7 +648,7 @@ impl TransactionId {
 /// let tx = Transaction::new(scope)
 ///     .with_op(FactOp::assert(content1))
 ///     .with_op(FactOp::assert(content2))
-///     .with_op(FactOp::tombstone(old_fact_id, RetractReason::Superseded { by: new_id }));
+///     .with_op(FactOp::retract(old_fact_id, RetractReason::Superseded { by: new_id }));
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
@@ -805,7 +805,7 @@ pub enum TemporalQuery {
     /// Query database state as of a point in time.
     ///
     /// Returns facts that were valid at that point, excluding
-    /// later tombstones and epoch bumps.
+    /// later retractions and epoch bumps.
     AsOf(TemporalPoint),
 
     /// Query facts added since a point in time.
@@ -1044,8 +1044,8 @@ mod tests {
         let assert_op = FactOp::assert(FactContent::new("test", vec![]));
         assert!(assert_op.is_monotonic());
 
-        let tombstone_op = FactOp::tombstone(FactId([0; 32]), RetractReason::UserDeleted);
-        assert!(!tombstone_op.is_monotonic());
+        let retract_op = FactOp::retract(FactId([0; 32]), RetractReason::UserDeleted);
+        assert!(!retract_op.is_monotonic());
 
         let epoch_bump = FactOp::epoch_bump(ScopeId::root(), Epoch::new(1));
         assert!(!epoch_bump.is_monotonic());

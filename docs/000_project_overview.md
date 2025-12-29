@@ -38,6 +38,8 @@ The layers are as follows:
 
 8. Testing and tools (`aura-testkit`, `aura-quint`): Test fixtures, mock effect handlers, and simulation harnesses.
 
+**Lifecycle taxonomy**: Aura separates key generation (K1/K2/K3) from agreement/finality (A1/A2/A3). Fast paths (provisional/coordinator) provide immediate usability, but durable shared state is always consensus-finalized.
+
 ## Documentation Index
 
 Additional documentation covers specific aspects of the system. The Foundation category covers mathematical and architectural foundations. The Core Systems category covers each major component. The Developer Guides category provides practical guides for implementation. The Project Meta category covers project structure.

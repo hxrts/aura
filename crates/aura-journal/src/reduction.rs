@@ -560,6 +560,38 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                             leakage_budget.set_for_observer(observer, next);
                             continue;
                             }
+                            crate::protocol_facts::ProtocolRelationalFact::DkgTranscriptCommit(commit) => {
+                            bindings.push(RelationalBinding {
+                                binding_type: RelationalBindingType::Generic("dkg_transcript_commit".to_string()),
+                                context_id: *context_id,
+                                data: commit.transcript_hash.0.to_vec(),
+                            });
+                            continue;
+                            }
+                            crate::protocol_facts::ProtocolRelationalFact::ConvergenceCert(cert) => {
+                            bindings.push(RelationalBinding {
+                                binding_type: RelationalBindingType::Generic("convergence_cert".to_string()),
+                                context_id: *context_id,
+                                data: cert.op_id.0.to_vec(),
+                            });
+                            continue;
+                            }
+                            crate::protocol_facts::ProtocolRelationalFact::ReversionFact(reversion) => {
+                            bindings.push(RelationalBinding {
+                                binding_type: RelationalBindingType::Generic("reversion_fact".to_string()),
+                                context_id: *context_id,
+                                data: reversion.op_id.0.to_vec(),
+                            });
+                            continue;
+                            }
+                            crate::protocol_facts::ProtocolRelationalFact::RotateFact(rotate) => {
+                            bindings.push(RelationalBinding {
+                                binding_type: RelationalBindingType::Generic("rotate_fact".to_string()),
+                                context_id: *context_id,
+                                data: rotate.to_state.0.to_vec(),
+                            });
+                            continue;
+                            }
                         },
                         // Generic bindings handle all domain-specific facts
                         // (ChatFact, InvitationFact, ContactFact, etc.)

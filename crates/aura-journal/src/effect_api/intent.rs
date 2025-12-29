@@ -96,7 +96,7 @@ pub enum IntentStatus {
     Pending,
     /// Intent is currently being executed (prepare/ACK phase)
     Executing,
-    /// Intent completed successfully (tombstoned)
+    /// Intent completed successfully (retracted from pool)
     Completed,
     /// Intent failed and was rejected
     Failed,

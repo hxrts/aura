@@ -506,6 +506,8 @@ Database operations use two orthogonal dimensions:
 
 **Important:** Aura Consensus is **NOT linearizable by default**. Each consensus instance independently agrees on a single operation and prestate. To sequence operations, use session types (see [MPST and Choreography](107_mpst_and_choreography.md)).
 
+Agreement modes are orthogonal to the coordination matrix: A1 (provisional) and A2 (soft-safe) may provide immediate usability, but any durable shared database state must be A3 (consensus-finalized) with prestate binding. Soft-safe windows should be bounded with convergence certificates and explicit reversion facts.
+
 ### 7.3 Mutation Receipts
 
 `MutationReceipt` indicates how a mutation was coordinated:
@@ -553,7 +555,7 @@ Aura uses a Datomic-inspired immutable database model where all changes are repr
 
 **Immutability**: Facts are never deleted - they are either:
 - **Asserted**: Added to a scope
-- **Tombstoned**: Marked as retracted (but remain queryable in history)
+- **Retracted**: Marked as no longer valid (but remain queryable in history)
 - **Epoch-bumped**: Bulk invalidation of facts in a scope
 - **Checkpointed**: Snapshotted for temporal queries
 
@@ -586,7 +588,7 @@ pub enum FactOp {
     Assert { content: FactContent, scope: Option<ScopeId> },
 
     /// Mark a specific fact as retracted
-    Tombstone { target: FactId, reason: RetractReason },
+    Retract { target: FactId, reason: RetractReason },
 
     /// Invalidate all facts in scope before new epoch
     EpochBump { scope: ScopeId, new_epoch: Epoch, checkpoint: Option<Hash32> },
@@ -598,7 +600,7 @@ pub enum FactOp {
 
 **Monotonic vs Non-monotonic**:
 - `Assert` and `Checkpoint` are monotonic (no coordination required)
-- `Tombstone` and `EpochBump` are non-monotonic (may require consensus)
+- `Retract` and `EpochBump` are non-monotonic (may require consensus)
 
 ### 8.3 FactEffects Trait
 
@@ -633,7 +635,7 @@ For atomic operations, facts can be grouped:
 let tx = Transaction::new(ScopeId::authority("abc"))
     .with_op(FactOp::assert(content1))
     .with_op(FactOp::assert(content2))
-    .with_op(FactOp::tombstone(old_id, RetractReason::Superseded { by: new_id }))
+    .with_op(FactOp::retract(old_id, RetractReason::Superseded { by: new_id }))
     .with_finality(Finality::Checkpointed);
 
 let receipt = effects.apply_transaction(tx).await?;

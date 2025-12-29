@@ -74,6 +74,7 @@ Key components:
 - `ThresholdSigningEffects` trait – Async interface for bootstrap, sign, and query operations
 - `ThresholdSigningService` in `aura-agent` – Production implementation using FROST
 - `SigningContext`, `SignableOperation`, `ApprovalContext` – Context types in `aura-core/src/threshold/`
+- Lifecycle traits in `aura-core/src/threshold/lifecycle.rs` – Provisional/Coordinator/Consensus/Rotation modes (fast paths + finalization)
 - `AppCore.sign_tree_op()` – High-level signing API returning `AttestedOp`
 
 See [Cryptography](116_crypto.md) for the detailed threshold signature architecture.

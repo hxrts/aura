@@ -24,6 +24,8 @@ An account authority is an authority with long term state. An account maintains 
 
 An account authority uses a [commitment tree](101_accounts_and_commitment_tree.md) to define its internal threshold structure. The commitment tree stores device leaves and branch policies. The commitment tree determines which devices can sign operations under the account root. The account root commitment identifies the current state of the commitment tree.
 
+Aura supports multiple key generation methods for account authorities: K1 (single-signer), K2 (dealer-based DKG), and K3 (quorum/BFT DKG). These are orthogonal to agreement modes (A1 provisional, A2 coordinator soft-safe, A3 consensus-finalized). Durable shared authority state must be finalized via A3, even when K1/K2 are used for local bootstrapping.
+
 ```rust
 /// Authority trait representing an opaque cryptographic actor
 pub trait Authority: Send + Sync {

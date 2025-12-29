@@ -18,7 +18,7 @@
 //! - **Scopes**: Hierarchical namespace organization
 //!
 //! ```text
-//! FactOp (Assert/Tombstone/EpochBump/Checkpoint)
+//! FactOp (Assert/Retract/EpochBump/Checkpoint)
 //!        ↓
 //! FactEffects::apply_op() → Check scope finality config
 //!        ↓
@@ -57,7 +57,7 @@ pub enum FactError {
     #[error("Scope not found: {scope}")]
     ScopeNotFound { scope: String },
 
-    /// Fact not found (for tombstone/reference operations)
+    /// Fact not found (for retraction/reference operations)
     #[error("Fact not found: {fact_id:?}")]
     FactNotFound { fact_id: FactId },
 
@@ -190,7 +190,7 @@ pub trait FactEffects: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `op` - The operation to apply (Assert, Tombstone, EpochBump, Checkpoint)
+    /// * `op` - The operation to apply (Assert, Retract, EpochBump, Checkpoint)
     /// * `scope` - The scope to apply the operation in
     ///
     /// # Returns
@@ -294,7 +294,7 @@ pub struct TemporalFact {
     pub fact_id: FactId,
     /// When the fact was asserted
     pub asserted_at: PhysicalTime,
-    /// When the fact was retracted (if tombstoned)
+    /// When the fact was retracted (None if still valid)
     pub retracted_at: Option<PhysicalTime>,
     /// The scope containing this fact
     pub scope: ScopeId,
@@ -311,7 +311,7 @@ pub struct TemporalFact {
 }
 
 impl TemporalFact {
-    /// Check if this fact is currently valid (not tombstoned)
+    /// Check if this fact is currently valid (not retracted)
     pub fn is_valid(&self) -> bool {
         self.retracted_at.is_none()
     }
@@ -454,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn test_temporal_fact_tombstoned() {
+    fn test_temporal_fact_retracted() {
         let fact = TemporalFact {
             fact_id: FactId([0; 32]),
             asserted_at: time_at(1000),

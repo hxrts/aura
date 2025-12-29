@@ -11,7 +11,7 @@
 //! - **Grow-Only**: Peers can only be added, never removed
 //! - **Join-Semilattice**: Union operation for merging peer sets
 //! - **Idempotent**: Multiple additions of same peer are idempotent
-//! - **No Tombstones**: No removal tracking needed (pure growth)
+//! - **No Retractions**: No removal tracking needed (pure growth)
 //!
 //! ## Usage
 //!

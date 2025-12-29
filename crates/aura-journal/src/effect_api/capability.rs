@@ -138,7 +138,7 @@ impl CapabilitySignature {
 /// Capability reference
 ///
 /// A time-limited authorization token that grants specific permissions for a specific resource.
-/// Capabilities are issued as part of TreeOp records and can be revoked via tombstones.
+/// Capabilities are issued as part of TreeOp records and can be revoked via retractions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityRef {
     /// Unique identifier for this capability

@@ -6,6 +6,7 @@
 
 use super::{
     core::{self, ConsensusPhase as CorePhase, ConsensusState as CoreState},
+    dkg::{self, DkgConfig, DkgTranscriptStore, DealerPackage},
     frost::FrostConsensusOrchestrator,
     messages::{ConsensusMessage, ConsensusPhase, ConsensusRequest, ConsensusResponse},
     types::{CommitFact, ConsensusConfig, ConsensusId},
@@ -19,7 +20,7 @@ use aura_core::{
     epochs::Epoch,
     frost::{NonceCommitment, PublicKeyPackage, Share},
     time::{PhysicalTime, ProvenancedTime, TimeStamp},
-    AuraError, AuthorityId, Hash32, Prestate, Result,
+    AuraError, AuthorityId, ContextId, Hash32, Prestate, Result,
 };
 use aura_macros::choreography;
 use frost_ed25519;
@@ -196,6 +197,18 @@ impl ConsensusProtocol {
         self.frost_orchestrator
             .run_consensus(request, random, time)
             .await
+    }
+
+    /// Finalize a DKG transcript and persist its commit reference.
+    pub fn finalize_dkg_transcript<S: DkgTranscriptStore + ?Sized>(
+        &self,
+        context: ContextId,
+        config: &DkgConfig,
+        packages: Vec<DealerPackage>,
+        store: &S,
+    ) -> Result<aura_journal::fact::DkgTranscriptCommit> {
+        let transcript = dkg::ceremony::run_dkg_ceremony(config, packages)?;
+        dkg::ceremony::persist_transcript(store, context, &transcript)
     }
 
     /// Participate as witness in consensus

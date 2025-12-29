@@ -8,6 +8,8 @@ Rendezvous establishes secure channels between authorities. The `RendezvousServi
 
 Rendezvous does not establish global identity. All operations are scoped to a `ContextId`. A context defines which authorities may see descriptors. Only participating authorities have the keys required to decrypt descriptor payloads.
 
+Rendezvous descriptor exchange can run in provisional (A1) or soft-safe (A2) modes to enable rapid connectivity under poor network conditions, but durable channel epochs and membership changes must be finalized via consensus (A3). Soft-safe flows should emit convergence and reversion facts so participants can reason about reversion risk while channels are warming.
+
 ## 2. Architecture
 
 The rendezvous crate follows Aura's fact-based architecture:

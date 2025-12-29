@@ -10,6 +10,8 @@ Consensus is single-shot. It agrees on a single operation and a single prestate.
 
 A consensus instance uses a context-scoped committee. The committee contains witnesses selected by the authority or relational context. Committee members may be offline. The protocol completes even under partitions.
 
+**Durable truth**: Consensus finalization is the single source of durable shared state. Fast-path coordination (provisional or soft-safe) may run in parallel for liveness, but its outputs must be superseded by commit facts. For BFT-DKG, consensus finalizes a transcript and emits `DkgTranscriptCommit` facts.
+
 ### 1.3 Consensus is NOT Linearizable by Default
 
 **Important:** Aura Consensus is single-shot agreement, not log-based linearization.

@@ -23,6 +23,10 @@
 use crate::threshold::{
     ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature, ThresholdState,
 };
+pub use crate::threshold::{
+    ConsensusLifecycle, CoordinatorLifecycle, ProvisionalLifecycle, RotationLifecycle,
+    ThresholdLifecycle,
+};
 use crate::{AuraError, AuthorityId};
 use async_trait::async_trait;
 

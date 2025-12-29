@@ -87,6 +87,15 @@ pub struct SigningKeyGenResult {
     pub mode: SigningMode,
 }
 
+/// Supported key generation methods for threshold signing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyGenerationMethod {
+    /// Single-signer Ed25519 (K1).
+    SingleSigner,
+    /// Dealer-based FROST key generation (K2).
+    DealerBased,
+}
+
 /// Core cryptographic effects interface
 ///
 /// This trait defines cryptographic operations for the Aura effects system.
@@ -173,6 +182,23 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
     ) -> Result<SigningKeyGenResult, CryptoError> {
         let _ = (threshold, max_signers);
         Err(AuraError::crypto("generate_signing_keys not supported"))
+    }
+
+    /// Generate signing keys with an explicit method.
+    ///
+    /// - `SingleSigner` uses Ed25519 directly.
+    /// - `DealerBased` uses dealer-based FROST key generation.
+    ///
+    /// Consensus-finalized DKG (K3) is not a CryptoExtendedEffects operation
+    /// and is orchestrated in `aura-consensus`.
+    async fn generate_signing_keys_with(
+        &self,
+        method: KeyGenerationMethod,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError> {
+        let _ = method;
+        self.generate_signing_keys(threshold, max_signers).await
     }
 
     async fn sign_with_key(

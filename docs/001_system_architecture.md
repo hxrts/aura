@@ -570,6 +570,8 @@ Demo mode compiles only with the development feature flag. The simulator automat
 
 Aura classifies operations into three categories based on their security requirements and execution timing. This classification determines when consensus is needed versus when CRDT eventual consistency suffices.
 
+Agreement modes (provisional/soft-safe/consensus-finalized) are orthogonal to these categories. Fast paths can improve liveness, but any durable shared state must be consensus-finalized.
+
 ### 11.1 Category A: Optimistic Operations
 
 Operations that can proceed immediately without consensus. These use CRDT facts with eventual consistency and provide immediate local effect.

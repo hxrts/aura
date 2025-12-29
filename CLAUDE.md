@@ -106,6 +106,20 @@ Aura now models identity via opaque authorities (`AuthorityId`) and relational c
 - **Hybrid journal model**: fact journal (join) + capability frontier (meet) combined as `JournalState` for effects/runtime use.
 - **Transaction Model**: Database operations coordinate via two orthogonal dimensions: (1) Authority Scope (Single vs Cross-authority) and (2) Agreement Level (Monotone/CRDT vs Consensus). Monotone operations use CRDT merge (0 RTT). Non-monotone operations use consensus (1-3 RTT). Cross-authority operations work with both. Consensus is NOT linearizable - use session types for operation sequencing. See `docs/113_database.md` §8 and `work/reactive.md` §7.4.
 
+## Threshold Lifecycle Taxonomy
+
+Aura separates **key generation** from **agreement/finality**:
+- **K1**: Local/Single‑Signer (no DKG)
+- **K2**: Dealer‑Based DKG (trusted coordinator)
+- **K3**: Quorum/BFT‑DKG (consensus‑finalized transcript)
+
+Agreement modes are orthogonal:
+- **A1**: Provisional (usable immediately, not final)
+- **A2**: Coordinator Soft‑Safe (bounded divergence + convergence cert)
+- **A3**: Consensus‑Finalized (unique, durable, non‑forkable)
+
+Leader selection and pipelining are **orthogonal optimizations**, not agreement modes. Fast paths (A1/A2) must be explicitly marked provisional and superseded by A3 for durable shared state.
+
 ## Distributed Systems Contract
 
 See `docs/004_distributed_systems_contract.md` for the distributed-systems guarantees (safety, liveness, partial synchrony assumptions, latency expectations, adversarial models, and monitoring guidance).
