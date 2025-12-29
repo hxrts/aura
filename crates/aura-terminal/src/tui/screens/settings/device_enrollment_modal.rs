@@ -5,6 +5,7 @@
 
 use iocraft::prelude::*;
 
+use aura_core::threshold::AgreementMode;
 use crate::tui::components::{CodeDisplayModal, CodeDisplayStatus};
 
 #[derive(Default, Props)]
@@ -18,6 +19,8 @@ pub struct DeviceEnrollmentModalProps {
     pub is_complete: bool,
     pub has_failed: bool,
     pub error_message: String,
+    pub agreement_mode: AgreementMode,
+    pub reversion_risk: bool,
     /// Whether code was copied to clipboard
     pub copied: bool,
 }
@@ -37,7 +40,17 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
     } else if props.is_complete {
         "Enrollment complete".to_string()
     } else {
-        "Waiting for acceptance…".to_string()
+        match props.agreement_mode {
+            AgreementMode::Provisional => "Waiting for acceptance…".to_string(),
+            AgreementMode::CoordinatorSoftSafe => {
+                if props.reversion_risk {
+                    "Soft-safe (reversion risk)".to_string()
+                } else {
+                    "Soft-safe".to_string()
+                }
+            }
+            AgreementMode::ConsensusFinalized => "Finalized".to_string(),
+        }
     };
 
     let step_title = if props.is_complete {

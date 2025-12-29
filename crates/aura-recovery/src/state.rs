@@ -243,6 +243,12 @@ impl RecoveryState {
                 }
             }
 
+            RecoveryFact::RecoveryApproved { context_id, .. } => {
+                if let Some(recovery) = self.recoveries.get_mut(context_id) {
+                    recovery.status = RecoveryStatus::Approved;
+                }
+            }
+
             RecoveryFact::RecoveryDisputeFiled {
                 context_id,
                 disputer_id,
@@ -452,6 +458,8 @@ impl RecoveryOperationState {
 pub enum RecoveryStatus {
     /// Waiting for guardian shares
     AwaitingShares,
+    /// Guardian approvals reached quorum
+    Approved,
     /// A dispute has been filed
     Disputed,
     /// Recovery completed successfully
@@ -656,6 +664,34 @@ mod tests {
         assert_eq!(recovery.shares_submitted.len(), 1);
         assert_eq!(recovery.status, RecoveryStatus::AwaitingShares);
         assert!(recovery.shares_submitted.contains(&guardian1));
+    }
+
+    #[test]
+    fn test_recovery_approved() {
+        let ctx = test_context_id();
+        let account = test_authority_id(1);
+
+        let facts = vec![
+            RecoveryFact::RecoveryInitiated {
+                context_id: ctx,
+                account_id: account,
+                trace_id: None,
+                request_hash: test_hash(1),
+                initiated_at: pt(1000),
+            },
+            RecoveryFact::RecoveryApproved {
+                context_id: ctx,
+                account_id: account,
+                trace_id: None,
+                approvals_hash: test_hash(2),
+                approved_at: pt(1500),
+            },
+        ];
+
+        let state = RecoveryState::from_facts(&facts);
+        let recovery = state.recovery_for_context(&ctx).unwrap();
+
+        assert_eq!(recovery.status, RecoveryStatus::Approved);
     }
 
     #[test]

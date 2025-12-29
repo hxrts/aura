@@ -184,6 +184,21 @@ mod single_device_tests {
         assert!(!signature.signature.is_empty());
         assert!(!signature.public_key_package.is_empty());
     }
+
+    /// Test threshold state exposes agreement mode
+    #[tokio::test]
+    async fn test_threshold_state_agreement_mode() {
+        let effects = MockEffects::deterministic();
+        let authority = test_authority(6);
+
+        effects.bootstrap_authority(&authority).await.unwrap();
+        let state = effects.threshold_state(&authority).await.unwrap();
+
+        assert_eq!(
+            state.agreement_mode,
+            aura_core::threshold::AgreementMode::Provisional
+        );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -265,6 +280,7 @@ mod guardian_recovery_tests {
         }
     }
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 8.7.3: Consensus with Threshold Signatures
@@ -505,12 +521,18 @@ mod real_frost_tests {
     async fn test_frost_key_generation() {
         let effects = MockEffects::deterministic();
 
-        // Generate 1-of-1 keys
-        let result = effects.frost_generate_keys(1, 1).await;
-        assert!(result.is_ok(), "FROST key generation should succeed");
+        // Generate 2-of-3 keys via standardized API
+        let result = effects
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                2,
+                3,
+            )
+            .await;
+        assert!(result.is_ok(), "Threshold key generation should succeed");
 
         let keys = result.unwrap();
-        assert_eq!(keys.key_packages.len(), 1, "Should have 1 key package");
+        assert_eq!(keys.key_packages.len(), 3, "Should have 3 key packages");
         assert!(
             !keys.public_key_package.is_empty(),
             "Public key package should not be empty"
@@ -523,8 +545,14 @@ mod real_frost_tests {
         let effects = MockEffects::deterministic();
 
         // Generate 2-of-3 keys
-        let result = effects.frost_generate_keys(2, 3).await;
-        assert!(result.is_ok(), "FROST 2-of-3 key generation should succeed");
+        let result = effects
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                2,
+                3,
+            )
+            .await;
+        assert!(result.is_ok(), "Threshold 2-of-3 key generation should succeed");
 
         let keys = result.unwrap();
         assert_eq!(keys.key_packages.len(), 3, "Should have 3 key packages");
@@ -540,7 +568,14 @@ mod real_frost_tests {
         let effects = MockEffects::deterministic();
 
         // Generate keys first
-        let keys = effects.frost_generate_keys(1, 1).await.unwrap();
+        let keys = effects
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                2,
+                3,
+            )
+            .await
+            .unwrap();
 
         // Generate nonces
         let result = effects.frost_generate_nonces(&keys.key_packages[0]).await;
@@ -556,22 +591,31 @@ mod real_frost_tests {
         let effects = MockEffects::deterministic();
 
         // 1. Generate keys
-        let keys = effects.frost_generate_keys(1, 1).await.unwrap();
-        let key_package = &keys.key_packages[0];
+        let keys = effects
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                2,
+                3,
+            )
+            .await
+            .unwrap();
+        let key_package_1 = &keys.key_packages[0];
+        let key_package_2 = &keys.key_packages[1];
         let public_key_package = &keys.public_key_package;
 
         // 2. Generate nonces
-        let nonces = effects.frost_generate_nonces(key_package).await.unwrap();
+        let nonces_1 = effects.frost_generate_nonces(key_package_1).await.unwrap();
+        let nonces_2 = effects.frost_generate_nonces(key_package_2).await.unwrap();
 
         // 3. Create message to sign
         let message = b"test message for signing";
 
         // 4. Create signing package
-        let participants = vec![1u16];
+        let participants = vec![1u16, 2u16];
         let signing_package = effects
             .frost_create_signing_package(
                 message,
-                std::slice::from_ref(&nonces),
+                &[nonces_1.clone(), nonces_2.clone()],
                 &participants,
                 public_key_package,
             )
@@ -580,13 +624,17 @@ mod real_frost_tests {
 
         // 5. Create signature share
         let share = effects
-            .frost_sign_share(&signing_package, key_package, &nonces)
+            .frost_sign_share(&signing_package, key_package_1, &nonces_1)
+            .await
+            .unwrap();
+        let share2 = effects
+            .frost_sign_share(&signing_package, key_package_2, &nonces_2)
             .await
             .unwrap();
 
         // 6. Aggregate (trivial for single signer)
         let signature = effects
-            .frost_aggregate_signatures(&signing_package, &[share])
+            .frost_aggregate_signatures(&signing_package, &[share, share2])
             .await
             .unwrap();
 

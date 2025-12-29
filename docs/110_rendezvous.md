@@ -37,7 +37,7 @@ aura-rendezvous/
 
 The transport layer uses a priority sequence of connection attempts. Direct QUIC is attempted first. QUIC using reflexive addresses via STUN is attempted next. TCP direct is attempted next. WebSocket relay is attempted last. The first successful connection is used.
 
-Aura uses relay-first fallback. Relays use guardians or designated peers. Relay traffic uses end-to-end encryption. Relay capabilities must be valid for the context.
+Aura uses relay-first fallback. Relays use guardians or peers designated to provide relay services. Relay traffic uses end-to-end encryption. Relay capabilities must be valid for the context.
 
 STUN discovery identifies the external address of each participant. Devices query STUN servers periodically. The reflexive address appears in rendezvous descriptors as a transport hint. STUN failure does not prevent rendezvous because relay is always available.
 
@@ -121,23 +121,19 @@ choreography! {
 
         // Initiator publishes descriptor (fact insertion, propagates via sync)
         Initiator[guard_capability = "rendezvous:publish",
-                  flow_cost = 1,
                   journal_facts = "descriptor_offered"]
         -> Responder: DescriptorOffer(RendezvousDescriptor);
 
         // Responder publishes response descriptor
         Responder[guard_capability = "rendezvous:publish",
-                  flow_cost = 1,
                   journal_facts = "descriptor_answered"]
         -> Initiator: DescriptorAnswer(RendezvousDescriptor);
 
         // Direct channel establishment
         Initiator[guard_capability = "rendezvous:connect",
-                  flow_cost = 2]
         -> Responder: HandshakeInit(NoiseHandshake);
 
         Responder[guard_capability = "rendezvous:connect",
-                  flow_cost = 2,
                   journal_facts = "channel_established"]
         -> Initiator: HandshakeComplete(NoiseHandshake);
     }
@@ -152,21 +148,17 @@ choreography! {
     protocol RelayedRendezvous {
         roles: Initiator, Relay, Responder;
 
-        Initiator[guard_capability = "rendezvous:relay",
-                  flow_cost = 2]
+        Initiator[guard_capability = "rendezvous:relay",]
         -> Relay: RelayRequest(RelayEnvelope);
 
         Relay[guard_capability = "relay:forward",
-              flow_cost = 1,
               leak = "neighbor:1"]
         -> Responder: RelayForward(RelayEnvelope);
 
-        Responder[guard_capability = "rendezvous:relay",
-                  flow_cost = 2]
+        Responder[guard_capability = "rendezvous:relay"]
         -> Relay: RelayResponse(RelayEnvelope);
 
         Relay[guard_capability = "relay:forward",
-              flow_cost = 1,
               leak = "neighbor:1"]
         -> Initiator: RelayComplete(RelayEnvelope);
     }

@@ -5,6 +5,7 @@
 //! deterministically. See docs/111_maintenance.md for behavior.
 
 pub mod facts;
+pub mod gc;
 
 pub use facts::{
     AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEpoch,
@@ -12,6 +13,7 @@ pub use facts::{
     SnapshotCompleted, SnapshotProposed, UpgradeActivated, UpgradeProposalMetadata,
     MAINTENANCE_FACT_TYPE_ID,
 };
+pub use gc::{plan_dkg_transcript_gc, TranscriptGcPlan};
 
 /// Operation category map (A/B/C) for maintenance gating and review.
 pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[

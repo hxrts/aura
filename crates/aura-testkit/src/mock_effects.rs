@@ -910,6 +910,7 @@ impl aura_core::effects::ThresholdSigningEffects for MockEffects {
             participants: vec![aura_core::threshold::ParticipantIdentity::guardian(
                 authority.clone(),
             )],
+            agreement_mode: aura_core::threshold::AgreementMode::Provisional,
         })
     }
 

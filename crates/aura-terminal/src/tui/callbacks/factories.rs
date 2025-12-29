@@ -813,6 +813,8 @@ impl SettingsCallbacks {
                         accepted_participants: status.accepted_participants.clone(),
                         error_message: status.error_message.clone(),
                         pending_epoch: status.pending_epoch,
+                        agreement_mode: status.agreement_mode,
+                        reversion_risk: status.reversion_risk,
                     });
                 }
 
@@ -836,6 +838,8 @@ impl SettingsCallbacks {
                                 accepted_participants: status.accepted_participants.clone(),
                                 error_message: status.error_message.clone(),
                                 pending_epoch: status.pending_epoch,
+                                agreement_mode: status.agreement_mode,
+                                reversion_risk: status.reversion_risk,
                             });
                         },
                         tokio::time::sleep,

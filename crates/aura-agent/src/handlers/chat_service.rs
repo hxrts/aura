@@ -205,6 +205,15 @@ impl ChatService {
         creator_id: AuthorityId,
         initial_members: Vec<AuthorityId>,
     ) -> AgentResult<ChatGroup> {
+        let policy = aura_core::threshold::policy_for(
+            aura_core::threshold::CeremonyFlow::GroupBlockCreation,
+        );
+        if !policy.allows_mode(aura_core::threshold::AgreementMode::Provisional) {
+            return Err(AgentError::invalid(
+                "group creation policy does not allow provisional AMP channel",
+            ));
+        }
+
         let group_uuid = self.effects.random_uuid().await;
         let group_id = ChatGroupId::from_uuid(group_uuid);
 
@@ -603,6 +612,7 @@ impl ChatService {
             // For membership-driven bumps, use zeroed identifiers (no consensus proposal)
             chosen_bump_id: Default::default(),
             consensus_id: Default::default(),
+            transcript_ref: None,
         };
 
         self.effects

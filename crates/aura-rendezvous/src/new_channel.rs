@@ -5,6 +5,7 @@
 //! the guard chain for authorized communication.
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::{AuraError, AuraResult};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -44,6 +45,10 @@ pub struct SecureChannel {
     epoch: u64,
     /// Channel state
     state: ChannelState,
+    /// Agreement mode (A1/A2/A3) for the channel lifecycle
+    agreement_mode: AgreementMode,
+    /// Whether reversion is still possible
+    reversion_risk: bool,
     /// Whether the channel needs key rotation
     needs_rotation: bool,
     /// Bytes sent on this channel (for flow budget tracking)
@@ -86,6 +91,8 @@ impl SecureChannel {
             needs_rotation: false,
             bytes_sent: 0,
             bytes_received: 0,
+            agreement_mode: policy_for(CeremonyFlow::RendezvousSecureChannel).initial_mode(),
+            reversion_risk: true,
         }
     }
 
@@ -137,6 +144,8 @@ impl SecureChannel {
     /// Mark the channel as active
     pub fn mark_active(&mut self) {
         self.state = ChannelState::Active;
+        self.agreement_mode = AgreementMode::CoordinatorSoftSafe;
+        self.reversion_risk = true;
     }
 
     /// Mark the channel as closed
@@ -173,6 +182,8 @@ impl SecureChannel {
         self.epoch = new_epoch;
         self.needs_rotation = false;
         self.state = ChannelState::Active;
+        self.agreement_mode = AgreementMode::ConsensusFinalized;
+        self.reversion_risk = false;
 
         Ok(())
     }

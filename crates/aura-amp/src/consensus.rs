@@ -13,7 +13,7 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::RandomEffects;
 use aura_core::types::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
-use aura_core::{AuthorityId, Prestate, Result};
+use aura_core::{AuthorityId, Hash32, Prestate, Result};
 use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};
 use std::collections::HashMap;
 
@@ -43,6 +43,7 @@ pub async fn run_amp_channel_epoch_bump(
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
+    transcript_ref: Option<Hash32>,
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
@@ -63,6 +64,7 @@ pub async fn run_amp_channel_epoch_bump(
         new_epoch: proposal.new_epoch,
         chosen_bump_id: proposal.bump_id,
         consensus_id: commit.consensus_id.0,
+        transcript_ref,
     };
 
     Ok((committed, commit))
@@ -75,6 +77,7 @@ pub async fn run_amp_channel_epoch_bump_default(
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
+    transcript_ref: Option<Hash32>,
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
@@ -87,6 +90,7 @@ pub async fn run_amp_channel_epoch_bump_default(
         key_packages,
         group_public_key,
         epoch,
+        transcript_ref,
         random,
         time,
     )
@@ -106,6 +110,7 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects + AmpEvidenceEf
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
+    transcript_ref: Option<Hash32>,
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<CommittedChannelEpochBump> {
@@ -117,6 +122,7 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects + AmpEvidenceEf
         key_packages,
         group_public_key,
         epoch,
+        transcript_ref,
         random,
         time,
     )
@@ -157,6 +163,7 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects + AmpEv
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
     epoch: Epoch,
+    transcript_ref: Option<Hash32>,
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<CommittedChannelEpochBump> {
@@ -170,6 +177,7 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects + AmpEv
         key_packages,
         group_public_key,
         epoch,
+        transcript_ref,
         random,
         time,
     )

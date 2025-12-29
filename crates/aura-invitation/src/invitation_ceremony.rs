@@ -50,7 +50,7 @@
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
-use aura_core::threshold::ThresholdSignature;
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
 use aura_core::{AuraError, AuraResult, Hash32};
 use aura_journal::DomainFact;
 use serde::{Deserialize, Serialize};
@@ -458,6 +458,13 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         ceremony_id: InvitationCeremonyId,
         timestamp_ms: u64,
     ) -> AuraResult<(String, Vec<InvitationCeremonyCommand>)> {
+        let policy = policy_for(CeremonyFlow::Invitation);
+        if !policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            return Err(AuraError::invalid(
+                "Invitation policy does not permit consensus finalization",
+            ));
+        }
+
         // First, get ceremony and validate + compute relationship ID
         let relationship_id = {
             let ceremony = self
@@ -627,6 +634,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let fact = InvitationFact::CeremonyInitiated {
             ceremony_id: ceremony_id_hex.clone(),
             sender: sender.to_string(),
+            agreement_mode: None,
             trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
@@ -643,6 +651,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyAcceptanceReceived {
             ceremony_id: ceremony_id_hex.clone(),
+            agreement_mode: None,
             trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
@@ -661,6 +670,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let fact = InvitationFact::CeremonyCommitted {
             ceremony_id: ceremony_id_hex.clone(),
             relationship_id: relationship_id.to_string(),
+            agreement_mode: Some(AgreementMode::ConsensusFinalized),
             trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };

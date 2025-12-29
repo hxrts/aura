@@ -17,6 +17,7 @@
 //!                         ✓ TEST
 //! ```
 
+use aura_core::threshold::AgreementMode;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::screens::ChatFocus as ScreenChatFocus;
 use crate::tui::state::{
@@ -205,6 +206,8 @@ pub struct ContactsViewProps {
     pub guardian_setup_modal_threshold_k: u8,
     pub guardian_setup_modal_threshold_n: u8,
     pub guardian_setup_modal_ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
+    pub guardian_setup_modal_agreement_mode: AgreementMode,
+    pub guardian_setup_modal_reversion_risk: bool,
     pub guardian_setup_modal_error: String,
     // Demo mode shortcuts
     #[cfg(feature = "development")]
@@ -295,6 +298,8 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         guardian_k,
         guardian_n,
         guardian_responses,
+        guardian_agreement_mode,
+        guardian_reversion_risk,
         guardian_error,
     ) = match state.modal_queue.current() {
         Some(QueuedModal::GuardianSetup(s)) => (
@@ -313,6 +318,8 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
             s.threshold_k,
             s.threshold_n(),
             s.ceremony_responses.clone(),
+            s.ceremony.agreement_mode,
+            s.ceremony.reversion_risk,
             s.error.clone().unwrap_or_default(),
         ),
         _ => (
@@ -324,6 +331,8 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
             2,
             3,
             vec![],
+            AgreementMode::ConsensusFinalized,
+            false,
             String::new(),
         ),
     };
@@ -364,6 +373,8 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         guardian_setup_modal_threshold_k: guardian_k,
         guardian_setup_modal_threshold_n: guardian_n,
         guardian_setup_modal_ceremony_responses: guardian_responses,
+        guardian_setup_modal_agreement_mode: guardian_agreement_mode,
+        guardian_setup_modal_reversion_risk: guardian_reversion_risk,
         guardian_setup_modal_error: guardian_error,
         // Demo mode (development feature only)
         #[cfg(feature = "development")]
@@ -436,6 +447,8 @@ pub struct SettingsViewProps {
     pub device_enrollment_modal_has_failed: bool,
     pub device_enrollment_modal_error_message: String,
     pub device_enrollment_modal_copied: bool,
+    pub device_enrollment_modal_agreement_mode: AgreementMode,
+    pub device_enrollment_modal_reversion_risk: bool,
     // Confirm remove modal
     pub confirm_remove_modal_visible: bool,
     pub confirm_remove_modal_device_id: String,
@@ -450,6 +463,8 @@ pub struct SettingsViewProps {
     pub mfa_setup_modal_threshold_k: u8,
     pub mfa_setup_modal_threshold_n: u8,
     pub mfa_setup_modal_ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
+    pub mfa_setup_modal_agreement_mode: AgreementMode,
+    pub mfa_setup_modal_reversion_risk: bool,
     pub mfa_setup_modal_error: String,
 }
 
@@ -490,6 +505,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         enrollment_has_failed,
         enrollment_error_message,
         enrollment_copied,
+        enrollment_agreement_mode,
+        enrollment_reversion_risk,
     ) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsDeviceEnrollment(s)) => (
             true,
@@ -506,6 +523,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
             s.ceremony.has_failed,
             s.ceremony.error_message.clone().unwrap_or_default(),
             s.copied,
+            s.ceremony.agreement_mode,
+            s.ceremony.reversion_risk,
         ),
         _ => (
             false,
@@ -518,6 +537,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
             false,
             false,
             String::new(),
+            false,
+            AgreementMode::ConsensusFinalized,
             false,
         ),
     };
@@ -546,6 +567,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         mfa_k,
         mfa_n,
         mfa_responses,
+        mfa_agreement_mode,
+        mfa_reversion_risk,
         mfa_error,
     ) = match state.modal_queue.current() {
         Some(QueuedModal::MfaSetup(s)) => (
@@ -564,6 +587,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
             s.threshold_k,
             s.threshold_n(),
             s.ceremony_responses.clone(),
+            s.ceremony.agreement_mode,
+            s.ceremony.reversion_risk,
             s.error.clone().unwrap_or_default(),
         ),
         _ => (
@@ -575,6 +600,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
             2,
             3,
             vec![],
+            AgreementMode::ConsensusFinalized,
+            false,
             String::new(),
         ),
     };
@@ -613,6 +640,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         device_enrollment_modal_has_failed: enrollment_has_failed,
         device_enrollment_modal_error_message: enrollment_error_message,
         device_enrollment_modal_copied: enrollment_copied,
+        device_enrollment_modal_agreement_mode: enrollment_agreement_mode,
+        device_enrollment_modal_reversion_risk: enrollment_reversion_risk,
         // Confirm remove modal (from queue)
         confirm_remove_modal_visible: confirm_remove_visible,
         confirm_remove_modal_device_id: confirm_remove_device_id,
@@ -627,6 +656,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         mfa_setup_modal_threshold_k: mfa_k,
         mfa_setup_modal_threshold_n: mfa_n,
         mfa_setup_modal_ceremony_responses: mfa_responses,
+        mfa_setup_modal_agreement_mode: mfa_agreement_mode,
+        mfa_setup_modal_reversion_risk: mfa_reversion_risk,
         mfa_setup_modal_error: mfa_error,
     }
 }

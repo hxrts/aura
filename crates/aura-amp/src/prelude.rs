@@ -8,7 +8,8 @@ pub use crate::consensus::{
 };
 pub use crate::{
     amp_recv, amp_recv_with_receipt, amp_send, commit_bump_with_consensus, emit_proposed_bump,
-    prepare_send, validate_header, AmpChannelCoordinator, AmpDelivery, AmpEvidenceEffects,
+    emit_soft_safe_bump, prepare_send, validate_header, AmpChannelCoordinator, AmpDelivery,
+    AmpEvidenceEffects,
     AmpJournalEffects, AmpMessage, AmpReceipt, AmpTelemetry, ChannelMembershipFact,
     ChannelParticipantEvent,
 };

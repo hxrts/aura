@@ -1,30 +1,101 @@
 //! Transcript storage interface for DKG payloads.
 
 use super::types::DkgTranscript;
-use aura_core::{AuraError, Hash32, Result};
+use async_trait::async_trait;
+use aura_core::{
+    effects::StorageEffects,
+    util::serialization::{from_slice, to_vec},
+    AuraError, Hash32, Result,
+};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 /// Storage interface for DKG transcripts (blob or journal reference).
+#[async_trait]
 pub trait DkgTranscriptStore: Send + Sync {
     /// Persist a transcript and return an optional blob reference.
-    fn put(&self, transcript: &DkgTranscript) -> Result<Option<Hash32>>;
+    async fn put(&self, transcript: &DkgTranscript) -> Result<Option<Hash32>>;
     /// Load a transcript by reference.
-    fn get(&self, reference: &Hash32) -> Result<DkgTranscript>;
+    async fn get(&self, reference: &Hash32) -> Result<DkgTranscript>;
 }
 
-/// Default in-memory placeholder store (not for production).
+/// Default in-memory store (intended for tests).
 #[derive(Default)]
-pub struct MemoryTranscriptStore;
+pub struct MemoryTranscriptStore {
+    transcripts: Mutex<HashMap<Hash32, DkgTranscript>>,
+}
 
+#[async_trait]
 impl DkgTranscriptStore for MemoryTranscriptStore {
-    fn put(&self, _transcript: &DkgTranscript) -> Result<Option<Hash32>> {
-        Err(AuraError::invalid(
-            "MemoryTranscriptStore is a placeholder; provide a real transcript store",
-        ))
+    async fn put(&self, transcript: &DkgTranscript) -> Result<Option<Hash32>> {
+        let reference = transcript.transcript_hash;
+        let mut guard = self
+            .transcripts
+            .lock()
+            .map_err(|_| aura_core::AuraError::invalid("transcript store lock poisoned"))?;
+        guard.insert(reference, transcript.clone());
+        Ok(Some(reference))
     }
 
-    fn get(&self, _reference: &Hash32) -> Result<DkgTranscript> {
-        Err(AuraError::invalid(
-            "MemoryTranscriptStore is a placeholder; provide a real transcript store",
-        ))
+    async fn get(&self, reference: &Hash32) -> Result<DkgTranscript> {
+        let guard = self
+            .transcripts
+            .lock()
+            .map_err(|_| aura_core::AuraError::invalid("transcript store lock poisoned"))?;
+        guard
+            .get(reference)
+            .cloned()
+            .ok_or_else(|| aura_core::AuraError::not_found("transcript not found"))
+    }
+}
+
+/// Storage-backed transcript store using StorageEffects.
+pub struct StorageTranscriptStore<S: StorageEffects + ?Sized> {
+    storage: Arc<S>,
+    prefix: String,
+}
+
+impl<S: StorageEffects + ?Sized> StorageTranscriptStore<S> {
+    pub fn new_default(storage: Arc<S>) -> Self {
+        Self::new(storage, "dkg/transcripts")
+    }
+
+    pub fn new(storage: Arc<S>, prefix: impl Into<String>) -> Self {
+        Self {
+            storage,
+            prefix: prefix.into(),
+        }
+    }
+
+    fn key_for(&self, reference: &Hash32) -> String {
+        format!("{}/{}", self.prefix, reference.to_hex())
+    }
+}
+
+#[async_trait]
+impl<S: StorageEffects + ?Sized> DkgTranscriptStore for StorageTranscriptStore<S> {
+    async fn put(&self, transcript: &DkgTranscript) -> Result<Option<Hash32>> {
+        let reference = transcript.transcript_hash;
+        let key = self.key_for(&reference);
+        let bytes =
+            to_vec(transcript).map_err(|e| AuraError::serialization(e.to_string()))?;
+        self.storage
+            .store(&key, bytes)
+            .await
+            .map_err(|e| AuraError::storage(e.to_string()))?;
+        Ok(Some(reference))
+    }
+
+    async fn get(&self, reference: &Hash32) -> Result<DkgTranscript> {
+        let key = self.key_for(reference);
+        let blob = self
+            .storage
+            .retrieve(&key)
+            .await
+            .map_err(|e| AuraError::storage(e.to_string()))?
+            .ok_or_else(|| AuraError::not_found("transcript not found"))?;
+        let transcript =
+            from_slice(&blob).map_err(|e| AuraError::serialization(e.to_string()))?;
+        Ok(transcript)
     }
 }

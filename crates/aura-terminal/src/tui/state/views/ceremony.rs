@@ -1,5 +1,6 @@
 //! Shared ceremony view state
 
+use aura_core::threshold::AgreementMode;
 use aura_core::types::Epoch;
 
 /// Shared UI state for key-rotation / membership-change ceremonies.
@@ -18,6 +19,10 @@ pub struct KeyRotationCeremonyUiState {
     pub error_message: Option<String>,
     /// Pending epoch, if the ceremony created one during prepare
     pub pending_epoch: Option<Epoch>,
+    /// Agreement mode (A1/A2/A3)
+    pub agreement_mode: AgreementMode,
+    /// Whether reversion is still possible
+    pub reversion_risk: bool,
 }
 
 impl KeyRotationCeremonyUiState {
@@ -38,6 +43,8 @@ impl KeyRotationCeremonyUiState {
         has_failed: bool,
         error_message: Option<String>,
         pending_epoch: Option<Epoch>,
+        agreement_mode: AgreementMode,
+        reversion_risk: bool,
     ) {
         self.accepted_count = accepted_count;
         self.total_count = total_count;
@@ -45,6 +52,8 @@ impl KeyRotationCeremonyUiState {
         self.is_complete = is_complete;
         self.has_failed = has_failed;
         self.error_message = error_message;
+        self.agreement_mode = agreement_mode;
+        self.reversion_risk = reversion_risk;
         if pending_epoch.is_some() {
             self.pending_epoch = pending_epoch;
         }

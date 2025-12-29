@@ -34,6 +34,7 @@ use aura_core::{
     effects::{JournalEffects, PhysicalTimeEffects},
     hash,
     identifiers::AuthorityId,
+    threshold::{policy_for, AgreementMode, CeremonyFlow},
     time::PhysicalTime,
     Hash32,
 };
@@ -194,6 +195,8 @@ pub struct CeremonyState {
     pub initiated_at: PhysicalTime,
     /// When the ceremony was completed (if completed)
     pub completed_at: Option<PhysicalTime>,
+    /// Agreement mode (A1/A2/A3)
+    pub agreement_mode: AgreementMode,
 }
 
 impl CeremonyState {
@@ -629,6 +632,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
             },
             initiated_at: now,
             completed_at: None,
+            agreement_mode: policy_for(CeremonyFlow::GuardianSetupRotation).initial_mode(),
         };
 
         Ok(state)
@@ -765,6 +769,12 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
 
         // Threshold reached! Commit the key rotation
         let new_epoch = state.operation.new_epoch;
+        let policy = policy_for(CeremonyFlow::GuardianSetupRotation);
+        if !policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            return Err(RecoveryError::invalid(
+                "Guardian rotation does not permit consensus finalization",
+            ));
+        }
 
         self.effects
             .commit_key_rotation(authority_id, new_epoch)
@@ -772,6 +782,16 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
             .map_err(|e| {
                 RecoveryError::internal(format!("Failed to commit key rotation: {}", e))
             })?;
+
+        if let Some(threshold_state) = self.effects.threshold_state(authority_id).await {
+            if threshold_state.agreement_mode != AgreementMode::ConsensusFinalized {
+                tracing::warn!(
+                    ceremony_id = %state.ceremony_id,
+                    agreement_mode = ?threshold_state.agreement_mode,
+                    "Guardian rotation committed without consensus finalization"
+                );
+            }
+        }
 
         // Get participants who accepted
         let participants: Vec<AuthorityId> = state
@@ -783,6 +803,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
 
         state.status = CeremonyStatus::Committed { new_epoch };
         state.completed_at = Some(now.clone());
+        state.agreement_mode = AgreementMode::ConsensusFinalized;
 
         // Emit commit fact
         self.emit_fact(CeremonyFact::Committed {
@@ -984,6 +1005,7 @@ mod tests {
                 uncertainty: None,
             },
             completed_at: None,
+            agreement_mode: AgreementMode::CoordinatorSoftSafe,
         };
 
         assert!(state.has_threshold()); // 2-of-3 met

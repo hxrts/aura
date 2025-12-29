@@ -23,6 +23,7 @@
 
 use aura_composition::{IntoViewDelta, ViewDelta, ViewDeltaReducer};
 use aura_core::identifiers::AuthorityId;
+use aura_core::threshold::AgreementMode;
 use aura_journal::DomainFact;
 
 use crate::{InvitationFact, INVITATION_FACT_TYPE_ID};
@@ -65,6 +66,10 @@ pub enum InvitationDelta {
         reason: Option<String>,
         /// For "committed" status, the resulting relationship ID
         relationship_id: Option<String>,
+        /// Agreement mode (A1/A2/A3) if available
+        agreement_mode: Option<AgreementMode>,
+        /// Whether reversion is still possible
+        reversion_risk: bool,
         timestamp_ms: u64,
     },
 }
@@ -156,6 +161,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
             // Ceremony facts
             InvitationFact::CeremonyInitiated {
                 ceremony_id,
+                agreement_mode,
                 timestamp_ms,
                 ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
@@ -163,10 +169,13 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 status: "initiated".to_string(),
                 reason: None,
                 relationship_id: None,
+                reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
+                agreement_mode,
                 timestamp_ms,
             }),
             InvitationFact::CeremonyAcceptanceReceived {
                 ceremony_id,
+                agreement_mode,
                 timestamp_ms,
                 ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
@@ -174,11 +183,14 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 status: "acceptance_received".to_string(),
                 reason: None,
                 relationship_id: None,
+                reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
+                agreement_mode,
                 timestamp_ms,
             }),
             InvitationFact::CeremonyCommitted {
                 ceremony_id,
                 relationship_id,
+                agreement_mode,
                 timestamp_ms,
                 ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
@@ -186,6 +198,8 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 status: "committed".to_string(),
                 reason: None,
                 relationship_id: Some(relationship_id),
+                reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
+                agreement_mode,
                 timestamp_ms,
             }),
             InvitationFact::CeremonyAborted {
@@ -198,6 +212,8 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 status: "aborted".to_string(),
                 reason: Some(reason),
                 relationship_id: None,
+                reversion_risk: true,
+                agreement_mode: None,
                 timestamp_ms,
             }),
         };

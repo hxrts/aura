@@ -200,7 +200,7 @@ impl ConsensusProtocol {
     }
 
     /// Finalize a DKG transcript and persist its commit reference.
-    pub fn finalize_dkg_transcript<S: DkgTranscriptStore + ?Sized>(
+    pub async fn finalize_dkg_transcript<S: DkgTranscriptStore + ?Sized>(
         &self,
         context: ContextId,
         config: &DkgConfig,
@@ -208,7 +208,7 @@ impl ConsensusProtocol {
         store: &S,
     ) -> Result<aura_journal::fact::DkgTranscriptCommit> {
         let transcript = dkg::ceremony::run_dkg_ceremony(config, packages)?;
-        dkg::ceremony::persist_transcript(store, context, &transcript)
+        dkg::ceremony::persist_transcript(store, context, &transcript).await
     }
 
     /// Participate as witness in consensus

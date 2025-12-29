@@ -23,6 +23,7 @@
 
 mod context;
 mod lifecycle;
+mod policy;
 mod participant;
 mod signature;
 mod types;
@@ -32,9 +33,10 @@ pub use lifecycle::{
     ConsensusLifecycle, CoordinatorLifecycle, ProvisionalLifecycle, RotationLifecycle,
     ThresholdLifecycle,
 };
+pub use policy::{policy_for, CeremonyFlow, CeremonyLifecyclePolicy, KeyGenerationPolicy};
 pub use participant::{ParticipantEndpoint, ParticipantIdentity, SigningParticipant};
 pub use signature::ThresholdSignature;
-pub use types::{ConvergenceCert, ReversionFact, RotateFact};
+pub use types::{AgreementMode, ConvergenceCert, ReversionFact, RotateFact};
 
 // Re-export ThresholdConfig and ThresholdState from crypto::frost for convenience
 pub use crate::crypto::frost::{ThresholdConfig, ThresholdState};

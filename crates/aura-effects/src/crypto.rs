@@ -17,6 +17,8 @@ use aura_core::effects::{
     CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
 };
 use aura_core::hash;
+use aura_core::util::serialization::to_vec;
+use aura_core::Hash32;
 use zeroize::Zeroize;
 
 /// Derive an encryption key using the specified context and version
@@ -128,6 +130,31 @@ pub fn derive_key_material(
     // Truncate to requested length
     output.truncate(output_length);
     Ok(output)
+}
+
+/// Compute a deterministic transcript hash for dealer-based key generation (K2).
+///
+/// This mirrors the canonical hashing used by consensus DKG transcripts (K3),
+/// but operates over the dealer outputs already present in the local keygen.
+pub fn compute_dealer_transcript_hash(
+    key_packages: &[Vec<u8>],
+    public_key_package: &[u8],
+) -> Result<Hash32, CryptoError> {
+    #[derive(serde::Serialize)]
+    struct DealerTranscriptDigest<'a> {
+        key_packages: &'a [Vec<u8>],
+        public_key_package: &'a [u8],
+    }
+
+    let digest = DealerTranscriptDigest {
+        key_packages,
+        public_key_package,
+    };
+    let encoded = to_vec(&digest).map_err(|e| CryptoError::serialization(e.to_string()))?;
+    let mut hasher = hash::hasher();
+    hasher.update(b"AURA_DKG_TRANSCRIPT");
+    hasher.update(&encoded);
+    Ok(Hash32(hasher.finalize()))
 }
 
 /// Real crypto handler using actual cryptographic operations.
@@ -1175,6 +1202,15 @@ mod single_signer_tests {
         let keys = result.unwrap();
         assert_eq!(keys.mode, SigningMode::Threshold);
         assert_eq!(keys.key_packages.len(), 3);
+    }
+
+    #[test]
+    fn test_compute_dealer_transcript_hash_deterministic() {
+        let key_packages = vec![vec![1u8; 8], vec![2u8; 8]];
+        let public_key_package = vec![9u8; 16];
+        let hash1 = compute_dealer_transcript_hash(&key_packages, &public_key_package).unwrap();
+        let hash2 = compute_dealer_transcript_hash(&key_packages, &public_key_package).unwrap();
+        assert_eq!(hash1, hash2);
     }
 
     #[tokio::test]

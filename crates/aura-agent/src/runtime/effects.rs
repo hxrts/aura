@@ -59,6 +59,7 @@ use super::shared_transport::SharedTransport;
 const DEFAULT_WINDOW: u32 = 1024;
 const TYPED_FACT_STORAGE_PREFIX: &str = "journal/facts";
 const DEFAULT_CHOREO_FLOW_COST: u32 = 1;
+const CHOREO_FLOW_COST_PER_KB: u32 = 1;
 
 /// Concrete effect system combining all effects for runtime usage
 ///
@@ -1525,6 +1526,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             1,   // threshold
             1,   // total_participants
             &[], // 1-of-1 bootstrap: participant set is implicit (local signer)
+            aura_core::threshold::AgreementMode::Provisional,
         )
         .await?;
 
@@ -1635,6 +1637,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
                 threshold: metadata.threshold,
                 total_participants: metadata.total_participants,
                 participants: metadata.resolved_participants(),
+                agreement_mode: metadata.agreement_mode,
             })
     }
 
@@ -1745,6 +1748,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             new_threshold,
             new_total_participants,
             participants,
+            aura_core::threshold::AgreementMode::CoordinatorSoftSafe,
         )
         .await?;
 
@@ -2048,11 +2052,15 @@ impl ChoreographicEffects for AuraEffectSystem {
         };
 
         let peer = AuthorityId::from_uuid(role.device_id);
+        let kb_units = ((message.len() as u32).saturating_add(1023)) / 1024;
+        let flow_cost = DEFAULT_CHOREO_FLOW_COST
+            .saturating_add(kb_units.saturating_mul(CHOREO_FLOW_COST_PER_KB));
+
         let guard_chain = create_send_guard_op(
             GuardOperation::Custom("choreography:send".to_string()),
             context_id,
             peer,
-            DEFAULT_CHOREO_FLOW_COST,
+            flow_cost,
         )
         .with_operation_id(format!(
             "choreography_send_{:?}_{:?}",
@@ -2519,6 +2527,7 @@ impl AmpChannelEffects for AuraEffectSystem {
             new_epoch: state.chan_epoch + 1,
             chosen_bump_id: Default::default(),
             consensus_id: Default::default(),
+            transcript_ref: None,
         };
 
         self.insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
@@ -2918,6 +2927,7 @@ impl AuraEffectSystem {
         threshold: u16,
         total_participants: u16,
         participants: &[aura_core::threshold::ParticipantIdentity],
+        agreement_mode: aura_core::threshold::AgreementMode,
     ) -> Result<(), AuraError> {
         let metadata = ThresholdMetadata {
             epoch,
@@ -2925,6 +2935,7 @@ impl AuraEffectSystem {
             total_participants,
             participants: participants.to_vec(),
             guardian_ids: Vec::new(),
+            agreement_mode,
         };
 
         let location = SecureStorageLocation::with_sub_key(
@@ -3013,6 +3024,9 @@ struct ThresholdMetadata {
     /// Legacy guardian IDs (for backward-compatible deserialization)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     guardian_ids: Vec<String>,
+    /// Agreement mode (A1/A2/A3) for the stored epoch
+    #[serde(default)]
+    agreement_mode: aura_core::threshold::AgreementMode,
 }
 
 impl ThresholdMetadata {

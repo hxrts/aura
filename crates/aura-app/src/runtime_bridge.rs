@@ -43,7 +43,7 @@ use aura_core::effects::amp::{
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{
-    ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
+    AgreementMode, ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
 };
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
@@ -139,6 +139,10 @@ pub struct KeyRotationCeremonyStatus {
     pub error_message: Option<String>,
     /// Pending epoch for key rotation (if applicable)
     pub pending_epoch: Option<Epoch>,
+    /// Agreement mode (A1/A2/A3)
+    pub agreement_mode: AgreementMode,
+    /// Whether reversion is still possible
+    pub reversion_risk: bool,
 }
 
 /// Status of a guardian ceremony
@@ -166,6 +170,10 @@ pub struct CeremonyStatus {
     /// If the ceremony is canceled, this epoch's keys should be rolled back.
     /// If the ceremony succeeds, this becomes the active epoch.
     pub pending_epoch: Option<Epoch>,
+    /// Agreement mode (A1/A2/A3)
+    pub agreement_mode: AgreementMode,
+    /// Whether reversion is still possible
+    pub reversion_risk: bool,
 }
 
 /// Information about a peer discovered via LAN (mDNS/UDP broadcast)

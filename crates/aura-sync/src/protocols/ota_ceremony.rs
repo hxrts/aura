@@ -40,7 +40,9 @@
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
-use aura_core::threshold::{SigningContext, ThresholdSignature};
+use aura_core::threshold::{
+    policy_for, AgreementMode, CeremonyFlow, SigningContext, ThresholdSignature,
+};
 use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Hash32, SemanticVersion};
 use aura_core::types::Epoch;
 use serde::{Deserialize, Serialize};
@@ -200,6 +202,8 @@ pub struct OTACeremonyState {
     pub proposal: UpgradeProposal,
     /// Current status
     pub status: OTACeremonyStatus,
+    /// Agreement mode (A1/A2/A3)
+    pub agreement_mode: AgreementMode,
     /// Readiness commitments by device
     pub commitments: HashMap<DeviceId, ReadinessCommitment>,
     /// Required threshold (M-of-N)
@@ -478,6 +482,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             ceremony_id,
             proposal: proposal.clone(),
             status: OTACeremonyStatus::CollectingCommitments,
+            agreement_mode: policy_for(CeremonyFlow::OtaActivation).initial_mode(),
             commitments: HashMap::new(),
             threshold: self.config.threshold,
             quorum_size: self.config.quorum_size,
@@ -564,6 +569,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
 
             if threshold_reached {
                 ceremony.status = OTACeremonyStatus::AwaitingConsensus;
+                ceremony.agreement_mode = AgreementMode::CoordinatorSoftSafe;
             }
         }
 
@@ -609,6 +615,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         // Update status
         if let Some(ceremony) = self.ceremonies.get_mut(&ceremony_id) {
             ceremony.status = OTACeremonyStatus::Committed;
+            ceremony.agreement_mode = AgreementMode::ConsensusFinalized;
         }
 
         // NOTE: True FROST threshold signing requires architectural changes:
@@ -1077,6 +1084,7 @@ mod tests {
                 coordinator: DeviceId::from_bytes([1; 32]),
             },
             status: OTACeremonyStatus::CollectingCommitments,
+            agreement_mode: policy_for(CeremonyFlow::OtaActivation).initial_mode(),
             commitments: HashMap::new(),
             threshold: 2,
             quorum_size: 3,

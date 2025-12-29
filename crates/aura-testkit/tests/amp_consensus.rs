@@ -46,6 +46,7 @@ async fn amp_consensus_smoke() {
         key_packages,
         group_public_key.into(),
         Epoch::from(1),
+        None,
         &random,
         &time,
     )
@@ -97,6 +98,7 @@ async fn amp_consensus_success_path() {
         key_packages,
         gp.into(),
         Epoch::from(1),
+        None,
         &random,
         &time,
     )
@@ -145,6 +147,7 @@ async fn amp_consensus_missing_keys_fails() {
         key_packages,
         group_public_key.into(),
         Epoch::from(1),
+        None,
         &random,
         &time,
     )

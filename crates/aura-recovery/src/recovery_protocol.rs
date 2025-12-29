@@ -10,6 +10,7 @@ use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
 use aura_core::identifiers::ContextId;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
@@ -386,6 +387,29 @@ impl RecoveryProtocolHandler {
         let threshold_met = self.protocol.is_threshold_met(ceremony_approvals);
 
         if threshold_met {
+            let approvals_hash = Self::hash_approvals(ceremony_approvals);
+
+            let approved_fact = RecoveryFact::RecoveryApproved {
+                context_id,
+                account_id: self.protocol.account_authority,
+                trace_id: Some(approval.recovery_id.clone()),
+                approvals_hash,
+                approved_at: PhysicalTime {
+                    ts_ms: timestamp,
+                    uncertainty: None,
+                },
+            };
+            self.emit_fact(approved_fact, time_effects, journal).await?;
+
+            self.update_journal_recovery_state_via_effects(
+                &approval.recovery_id,
+                "approved",
+                ceremony_approvals,
+                time_effects,
+                journal,
+            )
+            .await?;
+
             // Finalize recovery via effects
             self.finalize_recovery_via_effects(
                 &approval.recovery_id,
@@ -398,6 +422,19 @@ impl RecoveryProtocolHandler {
         }
 
         Ok(threshold_met)
+    }
+
+    fn hash_approvals(approvals: &[GuardianApproval]) -> Hash32 {
+        let mut sorted = approvals.to_vec();
+        sorted.sort_by_key(|approval| approval.guardian_id.to_bytes());
+
+        let mut bytes = Vec::new();
+        for approval in sorted {
+            bytes.extend_from_slice(&approval.guardian_id.to_bytes());
+            bytes.extend_from_slice(&approval.signature);
+        }
+
+        Hash32(hash::hash(&bytes))
     }
 
     /// Notify guardians about recovery request via NetworkEffects
@@ -442,6 +479,13 @@ impl RecoveryProtocolHandler {
         network: &dyn NetworkEffects,
         journal: &dyn JournalEffects,
     ) -> Result<()> {
+        let policy = policy_for(CeremonyFlow::RecoveryExecution);
+        if !policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            return Err(AuraError::invalid(
+                "Recovery execution does not permit consensus finalization",
+            ));
+        }
+
         // Create context ID for this recovery ceremony
         let context_id = ContextId::new_from_entropy(hash::hash(recovery_id.as_bytes()));
 

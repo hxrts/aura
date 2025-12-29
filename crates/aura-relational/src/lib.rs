@@ -68,7 +68,10 @@ use aura_core::{
     time::{OrderTime, TimeStamp},
     Hash32, Result,
 };
-use aura_journal::fact::{Fact, FactContent, Journal, JournalNamespace, RelationalFact};
+use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
+use aura_journal::fact::{
+    DkgTranscriptCommit, Fact, FactContent, Journal, JournalNamespace, RelationalFact,
+};
 use aura_journal::DomainFact;
 use std::collections::BTreeSet;
 use std::sync::RwLock;
@@ -238,6 +241,34 @@ impl RelationalContext {
         let grant_hash = Hash32::from_bytes(&hash(&bytes));
         self.add_domain_fact(&details)?;
         Ok(grant_hash)
+    }
+
+    /// Append a convergence certificate (A2 soft-safe).
+    pub fn add_convergence_cert(&self, cert: ConvergenceCert) -> Result<()> {
+        self.add_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::ConvergenceCert(cert),
+        ))
+    }
+
+    /// Append a reversion fact for a soft-safe operation.
+    pub fn add_reversion_fact(&self, fact: ReversionFact) -> Result<()> {
+        self.add_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::ReversionFact(fact),
+        ))
+    }
+
+    /// Append a lifecycle rotation fact.
+    pub fn add_rotate_fact(&self, fact: RotateFact) -> Result<()> {
+        self.add_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::RotateFact(fact),
+        ))
+    }
+
+    /// Append a consensus-finalized DKG transcript commit.
+    pub fn add_dkg_transcript_commit(&self, commit: DkgTranscriptCommit) -> Result<()> {
+        self.add_fact(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::DkgTranscriptCommit(commit),
+        ))
     }
 
     /// Get all guardian bindings in this context

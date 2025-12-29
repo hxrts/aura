@@ -591,6 +591,8 @@ impl RuntimeBridge for MockRuntimeBridge {
             accepted_guardians: Vec::new(),
             error_message: None,
             pending_epoch: Some(Epoch::new(1)),
+            agreement_mode: aura_core::threshold::AgreementMode::CoordinatorSoftSafe,
+            reversion_risk: true,
         })
     }
 
@@ -609,6 +611,8 @@ impl RuntimeBridge for MockRuntimeBridge {
             accepted_participants: Vec::new(),
             error_message: None,
             pending_epoch: Some(Epoch::new(1)),
+            agreement_mode: aura_core::threshold::AgreementMode::CoordinatorSoftSafe,
+            reversion_risk: true,
         })
     }
 

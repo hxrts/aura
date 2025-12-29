@@ -19,7 +19,9 @@
 
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
-use aura_core::threshold::ParticipantIdentity;
+use aura_core::threshold::{
+    policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity,
+};
 use aura_core::DeviceId;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -65,6 +67,9 @@ pub struct CeremonyState {
     /// Whether the ceremony has been committed (key rotation activated)
     pub is_committed: bool,
 
+    /// Agreement mode (A1/A2/A3) for the ceremony lifecycle
+    pub agreement_mode: AgreementMode,
+
     /// Optional error message if failed
     pub error_message: Option<String>,
 
@@ -73,6 +78,20 @@ pub struct CeremonyState {
 }
 
 impl CeremonyTracker {
+    fn initial_mode_for_kind(kind: CeremonyKind) -> AgreementMode {
+        match kind {
+            CeremonyKind::GuardianRotation => {
+                policy_for(CeremonyFlow::GuardianSetupRotation).initial_mode()
+            }
+            CeremonyKind::DeviceRotation => {
+                policy_for(CeremonyFlow::DeviceMfaRotation).initial_mode()
+            }
+            CeremonyKind::DeviceEnrollment => {
+                policy_for(CeremonyFlow::DeviceEnrollment).initial_mode()
+            }
+            CeremonyKind::DeviceRemoval => policy_for(CeremonyFlow::DeviceRemoval).initial_mode(),
+        }
+    }
     /// Create a new ceremony tracker
     pub fn new() -> Self {
         Self {
@@ -118,6 +137,7 @@ impl CeremonyTracker {
             started_at: Instant::now(),
             has_failed: false,
             is_committed: false,
+            agreement_mode: Self::initial_mode_for_kind(kind),
             error_message: None,
             timeout: Duration::from_secs(30),
         };
@@ -189,6 +209,9 @@ impl CeremonyTracker {
         state.accepted_participants.push(participant.clone());
 
         let threshold_reached = state.accepted_participants.len() >= state.threshold_k as usize;
+        if threshold_reached {
+            state.agreement_mode = AgreementMode::CoordinatorSoftSafe;
+        }
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -216,6 +239,7 @@ impl CeremonyTracker {
         }
 
         state.is_committed = true;
+        state.agreement_mode = AgreementMode::ConsensusFinalized;
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -471,6 +495,49 @@ mod tests {
         assert!(!tracker.is_complete("ceremony-1").await.unwrap());
         tracker.mark_committed("ceremony-1").await.unwrap();
         assert!(tracker.is_complete("ceremony-1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_agreement_mode_transitions() {
+        let tracker = CeremonyTracker::new();
+
+        let a = AuthorityId::new_from_entropy([1u8; 32]);
+        let b = AuthorityId::new_from_entropy([2u8; 32]);
+
+        tracker
+            .register(
+                "ceremony-1".to_string(),
+                CeremonyKind::GuardianRotation,
+                2,
+                2,
+                vec![
+                    ParticipantIdentity::guardian(a),
+                    ParticipantIdentity::guardian(b),
+                ],
+                100,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let state = tracker.get("ceremony-1").await.unwrap();
+        assert_eq!(state.agreement_mode, AgreementMode::CoordinatorSoftSafe);
+
+        tracker
+            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
+            .await
+            .unwrap();
+        tracker
+            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(b))
+            .await
+            .unwrap();
+
+        let state = tracker.get("ceremony-1").await.unwrap();
+        assert_eq!(state.agreement_mode, AgreementMode::CoordinatorSoftSafe);
+
+        tracker.mark_committed("ceremony-1").await.unwrap();
+        let state = tracker.get("ceremony-1").await.unwrap();
+        assert_eq!(state.agreement_mode, AgreementMode::ConsensusFinalized);
     }
 
     #[tokio::test]

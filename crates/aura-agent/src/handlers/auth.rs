@@ -556,13 +556,17 @@ mod tests {
         let effects = AuraEffectSystem::testing(&config).unwrap();
         let handler = AuthHandler::new(authority_context).unwrap();
 
-        // Step 1: Generate FROST threshold keys (2-of-3)
+        // Step 1: Generate threshold keys (2-of-3) via standardized API
         let threshold = 2;
         let max_signers = 3;
         let key_gen_result = effects
-            .frost_generate_keys(threshold, max_signers)
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                threshold,
+                max_signers,
+            )
             .await
-            .expect("FROST key generation should succeed");
+            .expect("Threshold key generation should succeed");
 
         assert_eq!(key_gen_result.key_packages.len(), max_signers as usize);
 

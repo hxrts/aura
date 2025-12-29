@@ -157,6 +157,14 @@ pub enum RecoveryDelta {
         shares_needed: u16,
     },
 
+    /// Recovery approvals reached quorum (approval ceremony complete)
+    RecoveryApproved {
+        /// Account authority ID being recovered
+        account_id: String,
+        /// Timestamp when approvals reached quorum (ms since epoch)
+        approved_at: u64,
+    },
+
     /// Recovery is in the dispute window
     RecoveryDisputeWindow {
         /// Timestamp when dispute window ends (ms since epoch)
@@ -357,6 +365,15 @@ impl ViewDeltaReducer for RecoveryViewReducer {
                 })
             }
 
+            RecoveryFact::RecoveryApproved {
+                account_id,
+                approved_at,
+                ..
+            } => Some(RecoveryDelta::RecoveryApproved {
+                account_id: format_authority_id(&account_id),
+                approved_at: approved_at.ts_ms,
+            }),
+
             RecoveryFact::RecoveryDisputeFiled { filed_at, .. } => {
                 // Assume 1 hour dispute window
                 Some(RecoveryDelta::RecoveryDisputeWindow {
@@ -521,6 +538,31 @@ mod tests {
                 assert_eq!(*completed_at, 1234567999);
             }
             _ => panic!("Expected RecoverySucceeded delta"),
+        }
+    }
+
+    #[test]
+    fn test_recovery_approved_reduction() {
+        let reducer = RecoveryViewReducer;
+
+        let fact = RecoveryFact::RecoveryApproved {
+            context_id: test_context_id(),
+            account_id: test_authority_id(1),
+            trace_id: None,
+            approvals_hash: test_hash(7),
+            approved_at: pt(1234567990),
+        };
+
+        let bytes = fact.to_bytes();
+        let deltas = reducer.reduce_fact(RECOVERY_FACT_TYPE_ID, &bytes, None);
+
+        assert_eq!(deltas.len(), 1);
+        let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
+        match delta {
+            RecoveryDelta::RecoveryApproved { approved_at, .. } => {
+                assert_eq!(*approved_at, 1234567990);
+            }
+            _ => panic!("Expected RecoveryApproved delta"),
         }
     }
 

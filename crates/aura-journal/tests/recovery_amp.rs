@@ -39,6 +39,7 @@ fn recovery_from_journal_reconstructs_channel_state() {
                 new_epoch: 1,
                 chosen_bump_id: Hash32::new([9u8; 32]),
                 consensus_id: Hash32::new([8u8; 32]),
+                transcript_ref: None,
             }),
         )),
     };

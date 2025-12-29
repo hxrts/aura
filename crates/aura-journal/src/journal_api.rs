@@ -306,6 +306,18 @@ impl Journal {
                         crate::fact::RelationalFact::Protocol(
                             crate::protocol_facts::ProtocolRelationalFact::LeakageEvent(..),
                         ) => "LeakageEvent".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::DkgTranscriptCommit(..),
+                        ) => "DkgTranscriptCommit".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::ConvergenceCert(..),
+                        ) => "ConvergenceCert".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::ReversionFact(..),
+                        ) => "ReversionFact".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::RotateFact(..),
+                        ) => "RotateFact".to_string(),
                         crate::fact::RelationalFact::Generic { binding_type, .. } => {
                             format!("Generic:{}", binding_type)
                         }

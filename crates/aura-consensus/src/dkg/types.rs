@@ -12,6 +12,9 @@ pub struct DkgConfig {
     pub max_signers: u16,
     pub membership_hash: Hash32,
     pub cutoff: u64,
+    pub prestate_hash: Hash32,
+    pub operation_hash: Hash32,
+    pub participants: Vec<AuthorityId>,
 }
 
 /// Dealer contribution package (opaque until verification).
@@ -29,6 +32,9 @@ pub struct DkgTranscript {
     pub epoch: u64,
     pub membership_hash: Hash32,
     pub cutoff: u64,
+    pub prestate_hash: Hash32,
+    pub operation_hash: Hash32,
+    pub participants: Vec<AuthorityId>,
     pub packages: Vec<DealerPackage>,
     pub transcript_hash: Hash32,
 }

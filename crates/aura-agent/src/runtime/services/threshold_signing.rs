@@ -28,12 +28,18 @@ use aura_core::effects::{
 };
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{
-    ApprovalContext, ParticipantIdentity, SignableOperation, SigningContext, ThresholdConfig,
-    ThresholdSignature, ThresholdState,
+    AgreementMode, ApprovalContext, ParticipantIdentity, SignableOperation, SigningContext,
+    ThresholdConfig, ThresholdSignature, ThresholdState,
 };
-use aura_core::{effects::ThresholdSigningEffects, AuraError};
+use aura_core::{
+    effects::{PhysicalTimeEffects, ThresholdSigningEffects},
+    threshold::{ConvergenceCert, ReversionFact},
+    AuraError, ContextId, Hash32,
+};
+use aura_consensus::dkg::recovery::recover_share_from_transcript;
+use aura_consensus::dkg::{DkgTranscript, DkgTranscriptStore, StorageTranscriptStore};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -52,6 +58,9 @@ struct ThresholdConfigMetadata {
     guardian_ids: Vec<String>,
     /// Signing mode (SingleSigner for 1-of-1, Threshold for k>=2)
     mode: SigningMode,
+    /// Agreement mode for this epoch (A1/A2/A3)
+    #[serde(default)]
+    agreement_mode: AgreementMode,
 }
 
 impl ThresholdConfigMetadata {
@@ -83,6 +92,14 @@ pub struct SigningContextState {
     pub mode: SigningMode,
     /// Participants who hold shares (for threshold state queries / prestate binding)
     pub participants: Vec<ParticipantIdentity>,
+    /// Agreement mode (A1/A2/A3)
+    pub agreement_mode: AgreementMode,
+}
+
+#[derive(Debug, Clone)]
+pub struct CoordinatorLease {
+    pub coord_epoch: u64,
+    pub issued_at_ms: u64,
 }
 
 /// Unified service for all threshold signing operations
@@ -98,6 +115,7 @@ pub struct ThresholdSigningService {
 
     /// Known signing contexts (keyed by authority)
     contexts: RwLock<HashMap<AuthorityId, SigningContextState>>,
+    leases: RwLock<HashMap<AuthorityId, CoordinatorLease>>,
 }
 
 impl std::fmt::Debug for ThresholdSigningService {
@@ -114,7 +132,111 @@ impl ThresholdSigningService {
         Self {
             effects,
             contexts: RwLock::new(HashMap::new()),
+            leases: RwLock::new(HashMap::new()),
         }
+    }
+
+    fn transcript_store(&self) -> StorageTranscriptStore<AuraEffectSystem> {
+        StorageTranscriptStore::new_default(self.effects.clone())
+    }
+
+    /// Load a finalized DKG transcript by blob reference.
+    pub async fn load_dkg_transcript(&self, reference: Hash32) -> Result<DkgTranscript, AuraError> {
+        let store = self.transcript_store();
+        store.get(&reference).await
+    }
+
+    /// Recover the encrypted share payload from a transcript for this authority.
+    pub async fn recover_share_from_transcript(
+        &self,
+        transcript: &DkgTranscript,
+        authority: &AuthorityId,
+    ) -> Result<Vec<u8>, AuraError> {
+        recover_share_from_transcript(transcript, *authority)
+    }
+
+    /// Update the agreement mode (A1/A2/A3) for an authority's signing context.
+    pub async fn set_agreement_mode(
+        &self,
+        authority: &AuthorityId,
+        mode: AgreementMode,
+    ) -> Result<(), AuraError> {
+        let mut contexts = self.contexts.write().await;
+        let state = contexts
+            .get_mut(authority)
+            .ok_or_else(|| AuraError::not_found("authority context not found"))?;
+        state.agreement_mode = mode;
+        Ok(())
+    }
+
+    /// Acquire or advance the coordinator lease (fencing token) for an authority.
+    pub async fn acquire_coordinator_lease(
+        &self,
+        authority: &AuthorityId,
+        coord_epoch: u64,
+    ) -> Result<CoordinatorLease, AuraError> {
+        let mut leases = self.leases.write().await;
+        if let Some(existing) = leases.get(authority) {
+            if coord_epoch <= existing.coord_epoch {
+                return Err(AuraError::invalid(
+                    "Coordinator lease must advance monotonically",
+                ));
+            }
+        }
+
+        let now = self.effects.physical_time().await?;
+        let lease = CoordinatorLease {
+            coord_epoch,
+            issued_at_ms: now.ts_ms,
+        };
+        leases.insert(*authority, lease.clone());
+        Ok(lease)
+    }
+
+    /// Emit a convergence certificate for a soft-safe operation.
+    pub async fn emit_convergence_cert(
+        &self,
+        context: ContextId,
+        coordinator: &AuthorityId,
+        op_id: Hash32,
+        prestate_hash: Hash32,
+        ack_set: Option<BTreeSet<AuthorityId>>,
+        window: u64,
+    ) -> Result<ConvergenceCert, AuraError> {
+        let leases = self.leases.read().await;
+        let lease = leases.get(coordinator).ok_or_else(|| {
+            AuraError::invalid("Coordinator lease missing for convergence cert")
+        })?;
+
+        Ok(ConvergenceCert {
+            context,
+            op_id,
+            prestate_hash,
+            coord_epoch: lease.coord_epoch,
+            ack_set,
+            window,
+        })
+    }
+
+    /// Emit a reversion fact for a soft-safe operation.
+    pub async fn emit_reversion_fact(
+        &self,
+        context: ContextId,
+        coordinator: &AuthorityId,
+        op_id: Hash32,
+        winner_op_id: Hash32,
+    ) -> Result<ReversionFact, AuraError> {
+        let leases = self.leases.read().await;
+        let lease = leases.get(coordinator).ok_or_else(|| {
+            AuraError::invalid("Coordinator lease missing for reversion fact")
+        })?;
+
+        Ok(ReversionFact {
+            context,
+            op_id,
+            winner_op_id,
+            coord_epoch: lease.coord_epoch,
+        })
     }
 
     /// Sign operation for single-device using Ed25519 (SigningMode::SingleSigner)
@@ -315,6 +437,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             // For 1-of-1 bootstrap, the participant set is implicit (local signer).
             // Ceremonies will overwrite this when rotating into multi-party configs.
             participants: Vec::new(),
+            agreement_mode: AgreementMode::Provisional,
         };
 
         // Store in memory cache
@@ -427,6 +550,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 threshold: state.config.threshold,
                 total_participants: state.config.total_participants,
                 participants: state.participants.clone(),
+                agreement_mode: state.agreement_mode,
             })
     }
 
@@ -589,6 +713,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             } else {
                 SigningMode::SingleSigner
             },
+            agreement_mode: AgreementMode::CoordinatorSoftSafe,
         };
 
         let config_bytes = serde_json::to_vec(&config_metadata).map_err(|e| {
@@ -698,10 +823,36 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 ))
             })?;
 
-        let config_metadata: ThresholdConfigMetadata = serde_json::from_slice(&config_bytes)
+        let mut config_metadata: ThresholdConfigMetadata = serde_json::from_slice(&config_bytes)
             .map_err(|e| {
                 AuraError::internal(format!("Failed to deserialize threshold config: {}", e))
             })?;
+
+        if config_metadata.agreement_mode != AgreementMode::ConsensusFinalized {
+            config_metadata.agreement_mode = AgreementMode::ConsensusFinalized;
+            let updated_bytes = serde_json::to_vec(&config_metadata).map_err(|e| {
+                AuraError::internal(format!(
+                    "Failed to serialize threshold config: {}",
+                    e
+                ))
+            })?;
+            self.effects
+                .secure_store(
+                    &config_location,
+                    &updated_bytes,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await
+                .map_err(|e| {
+                    AuraError::internal(format!(
+                        "Failed to update threshold config for epoch {}: {}",
+                        new_epoch, e
+                    ))
+                })?;
+        }
 
         // Build the new threshold config from stored metadata
         let new_config = ThresholdConfig::new(config_metadata.threshold_k, config_metadata.total_n)
@@ -710,6 +861,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         // Update or create in-memory context to use the new epoch with proper config.
         let mut contexts = self.contexts.write().await;
         let participants = config_metadata.resolved_participants();
+        let agreement_mode = config_metadata.agreement_mode;
 
         if let Some(state) = contexts.get_mut(authority) {
             let old_epoch = state.epoch;
@@ -718,6 +870,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             state.config = new_config;
             state.mode = config_metadata.mode;
             state.participants = participants;
+            state.agreement_mode = agreement_mode;
 
             tracing::info!(
                 ?authority,
@@ -741,6 +894,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 public_key_package,
                 mode: config_metadata.mode,
                 participants,
+                agreement_mode,
             };
 
             contexts.insert(*authority, state);

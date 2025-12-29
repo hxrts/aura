@@ -305,6 +305,8 @@ pub fn render_guardian_setup_modal(contacts: &ContactsViewProps) -> Option<AnyEl
                         threshold_k: contacts.guardian_setup_modal_threshold_k,
                         threshold_n: contacts.guardian_setup_modal_threshold_n,
                         ceremony_responses: contacts.guardian_setup_modal_ceremony_responses.clone(),
+                        agreement_mode: contacts.guardian_setup_modal_agreement_mode,
+                        reversion_risk: contacts.guardian_setup_modal_reversion_risk,
                         error: contacts.guardian_setup_modal_error.clone(),
                     )
                 }
@@ -341,6 +343,8 @@ pub fn render_mfa_setup_modal(settings: &SettingsViewProps) -> Option<AnyElement
                         threshold_k: settings.mfa_setup_modal_threshold_k,
                         threshold_n: settings.mfa_setup_modal_threshold_n,
                         ceremony_responses: settings.mfa_setup_modal_ceremony_responses.clone(),
+                        agreement_mode: settings.mfa_setup_modal_agreement_mode,
+                        reversion_risk: settings.mfa_setup_modal_reversion_risk,
                         error: settings.mfa_setup_modal_error.clone(),
                     )
                 }
@@ -521,6 +525,8 @@ pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<An
                         is_complete: settings.device_enrollment_modal_is_complete,
                         has_failed: settings.device_enrollment_modal_has_failed,
                         error_message: settings.device_enrollment_modal_error_message.clone(),
+                        agreement_mode: settings.device_enrollment_modal_agreement_mode,
+                        reversion_risk: settings.device_enrollment_modal_reversion_risk,
                         copied: settings.device_enrollment_modal_copied,
                     )
                 }

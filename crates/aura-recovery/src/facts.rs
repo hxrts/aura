@@ -272,6 +272,21 @@ pub enum RecoveryFact {
         submitted_at: PhysicalTime,
     },
 
+    /// Recovery approvals reached quorum (approval ceremony complete)
+    RecoveryApproved {
+        /// Relational context for the recovery
+        context_id: ContextId,
+        /// Account being recovered
+        account_id: AuthorityId,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default)]
+        trace_id: Option<String>,
+        /// Hash of the approval set
+        approvals_hash: Hash32,
+        /// Timestamp when approvals reached quorum (uses unified time system)
+        approved_at: PhysicalTime,
+    },
+
     /// Dispute filed during recovery dispute window
     RecoveryDisputeFiled {
         /// Relational context for the recovery
@@ -357,6 +372,7 @@ impl RecoveryFact {
             // Key recovery
             RecoveryFact::RecoveryInitiated { context_id, .. } => *context_id,
             RecoveryFact::RecoveryShareSubmitted { context_id, .. } => *context_id,
+            RecoveryFact::RecoveryApproved { context_id, .. } => *context_id,
             RecoveryFact::RecoveryDisputeFiled { context_id, .. } => *context_id,
             RecoveryFact::RecoveryCompleted { context_id, .. } => *context_id,
             RecoveryFact::RecoveryFailed { context_id, .. } => *context_id,
@@ -383,6 +399,7 @@ impl RecoveryFact {
             RecoveryFact::MembershipChangeRejected { .. } => "membership-change-rejected",
             RecoveryFact::RecoveryInitiated { .. } => "recovery-initiated",
             RecoveryFact::RecoveryShareSubmitted { .. } => "recovery-share-submitted",
+            RecoveryFact::RecoveryApproved { .. } => "recovery-approved",
             RecoveryFact::RecoveryDisputeFiled { .. } => "recovery-dispute-filed",
             RecoveryFact::RecoveryCompleted { .. } => "recovery-completed",
             RecoveryFact::RecoveryFailed { .. } => "recovery-failed",
@@ -438,6 +455,15 @@ impl RecoveryFact {
                 data.extend_from_slice(&share_hash.0);
                 data
             }
+            RecoveryFact::RecoveryApproved {
+                account_id,
+                approvals_hash,
+                ..
+            } => {
+                let mut data = account_id.to_bytes().to_vec();
+                data.extend_from_slice(&approvals_hash.0);
+                data
+            }
             RecoveryFact::RecoveryDisputeFiled { disputer_id, .. } => {
                 disputer_id.to_bytes().to_vec()
             }
@@ -477,6 +503,7 @@ impl RecoveryFact {
             // Key recovery
             RecoveryFact::RecoveryInitiated { initiated_at, .. } => initiated_at.ts_ms,
             RecoveryFact::RecoveryShareSubmitted { submitted_at, .. } => submitted_at.ts_ms,
+            RecoveryFact::RecoveryApproved { approved_at, .. } => approved_at.ts_ms,
             RecoveryFact::RecoveryDisputeFiled { filed_at, .. } => filed_at.ts_ms,
             RecoveryFact::RecoveryCompleted { completed_at, .. } => completed_at.ts_ms,
             RecoveryFact::RecoveryFailed { failed_at, .. } => failed_at.ts_ms,
@@ -712,6 +739,25 @@ impl RecoveryFact {
             share_hash,
             submitted_at: PhysicalTime {
                 ts_ms: submitted_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a RecoveryApproved fact with millisecond timestamp (backward compatibility)
+    pub fn recovery_approved_ms(
+        context_id: ContextId,
+        account_id: AuthorityId,
+        approvals_hash: Hash32,
+        approved_at_ms: u64,
+    ) -> Self {
+        Self::RecoveryApproved {
+            context_id,
+            account_id,
+            trace_id: None,
+            approvals_hash,
+            approved_at: PhysicalTime {
+                ts_ms: approved_at_ms,
                 uncertainty: None,
             },
         }
@@ -1198,6 +1244,14 @@ mod tests {
                 trace_id: None,
                 share_hash: test_hash(1),
                 submitted_at: pt(0),
+            }
+            .sub_type(),
+            RecoveryFact::RecoveryApproved {
+                context_id: ctx,
+                account_id: test_authority_id(1),
+                trace_id: None,
+                approvals_hash: test_hash(1),
+                approved_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::RecoveryDisputeFiled {

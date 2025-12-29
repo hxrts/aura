@@ -15,10 +15,11 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{CryptoEffects, NetworkEffects, RandomEffects};
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::{AuraError, Result};
 use aura_guards::traits::GuardContextProvider;
 use aura_guards::{GuardEffects, GuardOperation, GuardOperationId};
-use aura_journal::fact::ProposedChannelEpochBump;
+use aura_journal::fact::{DkgTranscriptCommit, FactContent, ProposedChannelEpochBump, RelationalFact};
 use aura_transport::amp::{
     derive_for_recv, derive_for_send, AmpError, AmpHeader as TransportAmpHeader, RatchetDerivation,
 };
@@ -109,6 +110,26 @@ fn build_amp_send_guard(
     .with_journal_coupler(JournalCoupler::new())
 }
 
+fn latest_transcript_ref_from_context(
+    journal: &aura_journal::FactJournal,
+    context: ContextId,
+) -> Option<aura_core::Hash32> {
+    let mut latest: Option<DkgTranscriptCommit> = None;
+
+    for fact in journal.facts.iter() {
+        if let FactContent::Relational(RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::DkgTranscriptCommit(commit),
+        )) = &fact.content
+        {
+            if commit.context == context {
+                latest = Some(commit.clone());
+            }
+        }
+    }
+
+    latest.and_then(|commit| commit.blob_ref.or(Some(commit.transcript_hash)))
+}
+
 // ============================================================================
 // Low-level Operations
 // ============================================================================
@@ -141,11 +162,17 @@ pub async fn validate_header<E: AmpJournalEffects>(
         .map_err(map_amp_error)
 }
 
-/// Insert a proposed bump as a fact.
+/// Insert a proposed bump as a fact (A1: provisional).
 pub async fn emit_proposed_bump<E: AmpJournalEffects>(
     effects: &E,
     proposal: ProposedChannelEpochBump,
 ) -> Result<()> {
+    let policy = policy_for(CeremonyFlow::AmpEpochBump);
+    if !policy.allows_mode(AgreementMode::Provisional) {
+        return Err(AuraError::invalid(
+            "AMP epoch bump policy does not allow provisional mode",
+        ));
+    }
     effects
         .insert_relational_fact(
             aura_journal::fact::RelationalFact::Protocol(
@@ -155,7 +182,25 @@ pub async fn emit_proposed_bump<E: AmpJournalEffects>(
         .await
 }
 
-/// Finalize a pending bump via consensus and insert committed fact.
+/// Insert a convergence certificate for a soft-safe bump (A2).
+pub async fn emit_soft_safe_bump<E: AmpJournalEffects>(
+    effects: &E,
+    cert: aura_core::threshold::ConvergenceCert,
+) -> Result<()> {
+    let policy = policy_for(CeremonyFlow::AmpEpochBump);
+    if !policy.allows_mode(AgreementMode::CoordinatorSoftSafe) {
+        return Err(AuraError::invalid(
+            "AMP epoch bump policy does not allow soft-safe mode",
+        ));
+    }
+    effects
+        .insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::ConvergenceCert(cert),
+        ))
+        .await
+}
+
+/// Finalize a pending bump via consensus and insert committed fact (A3).
 pub async fn commit_bump_with_consensus<
     E: AmpJournalEffects + AmpEvidenceEffects + RandomEffects + PhysicalTimeEffects,
 >(
@@ -164,7 +209,22 @@ pub async fn commit_bump_with_consensus<
     proposal: &ProposedChannelEpochBump,
     key_packages: HashMap<aura_core::AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
+    transcript_ref: Option<aura_core::Hash32>,
 ) -> Result<()> {
+    let policy = policy_for(CeremonyFlow::AmpEpochBump);
+    if !policy.allows_mode(AgreementMode::ConsensusFinalized) {
+        return Err(AuraError::invalid(
+            "AMP epoch bump policy does not allow consensus finalization",
+        ));
+    }
+    let resolved_transcript = match transcript_ref {
+        Some(value) => Some(value),
+        None => {
+            let journal = effects.fetch_context_journal(proposal.context).await?;
+            latest_transcript_ref_from_context(&journal, proposal.context)
+        }
+    };
+
     finalize_amp_bump_with_journal_default(
         effects,
         prestate,
@@ -172,6 +232,7 @@ pub async fn commit_bump_with_consensus<
         key_packages,
         group_public_key,
         aura_core::types::Epoch::from(proposal.new_epoch),
+        resolved_transcript,
         effects,
         effects,
     )

@@ -110,6 +110,8 @@ pub enum UiUpdate {
         accepted_participants: Vec<aura_core::threshold::ParticipantIdentity>,
         error_message: Option<String>,
         pending_epoch: Option<Epoch>,
+        agreement_mode: aura_core::threshold::AgreementMode,
+        reversion_risk: bool,
     },
 
     // =========================================================================
@@ -257,6 +259,10 @@ pub enum UiUpdate {
         error_message: Option<String>,
         /// Pending epoch for key rotation (if created)
         pending_epoch: Option<Epoch>,
+        /// Agreement mode (A1/A2/A3)
+        agreement_mode: aura_core::threshold::AgreementMode,
+        /// Whether reversion is still possible
+        reversion_risk: bool,
     },
 
     // =========================================================================

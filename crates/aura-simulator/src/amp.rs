@@ -114,6 +114,7 @@ where
             new_epoch: state.chan_epoch + 1,
             chosen_bump_id: Default::default(),
             consensus_id: Default::default(),
+            transcript_ref: None,
         };
 
         self.effects

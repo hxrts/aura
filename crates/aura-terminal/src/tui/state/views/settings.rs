@@ -131,6 +131,8 @@ impl DeviceEnrollmentCeremonyModalState {
         has_failed: bool,
         error_message: Option<String>,
         pending_epoch: Option<Epoch>,
+        agreement_mode: aura_core::threshold::AgreementMode,
+        reversion_risk: bool,
     ) {
         self.ceremony.update_from_status(
             accepted_count,
@@ -140,6 +142,8 @@ impl DeviceEnrollmentCeremonyModalState {
             has_failed,
             error_message,
             pending_epoch,
+            agreement_mode,
+            reversion_risk,
         );
     }
 

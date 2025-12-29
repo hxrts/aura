@@ -70,6 +70,10 @@ fn protocol_context_id(protocol: &crate::protocol_facts::ProtocolRelationalFact)
         AmpCommittedChannelEpochBump(committed) => committed.context,
         AmpChannelPolicy(policy) => policy.context,
         LeakageEvent(event) => event.context_id,
+        DkgTranscriptCommit(commit) => commit.context,
+        ConvergenceCert(cert) => cert.context,
+        ReversionFact(reversion) => reversion.context,
+        RotateFact(rotate) => rotate.context,
     }
 }
 

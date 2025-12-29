@@ -4,6 +4,23 @@ use crate::{AuthorityId, ContextId, Hash32};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+/// Agreement mode for threshold operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AgreementMode {
+    /// A1: Provisional (usable immediately, not final).
+    Provisional,
+    /// A2: Coordinator soft-safe (bounded divergence with convergence cert).
+    CoordinatorSoftSafe,
+    /// A3: Consensus-finalized (unique, durable, non-forkable).
+    ConsensusFinalized,
+}
+
+impl Default for AgreementMode {
+    fn default() -> Self {
+        AgreementMode::ConsensusFinalized
+    }
+}
+
 /// Coordinator convergence certificate for soft-safe operations.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ConvergenceCert {

@@ -37,6 +37,7 @@
 //! ```
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::threshold::AgreementMode;
 use aura_core::time::PhysicalTime;
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
@@ -121,6 +122,9 @@ pub enum InvitationFact {
         ceremony_id: String,
         /// Authority initiating the ceremony
         sender: String,
+        /// Agreement mode at initiation (A1)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agreement_mode: Option<AgreementMode>,
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
@@ -132,6 +136,9 @@ pub enum InvitationFact {
     CeremonyAcceptanceReceived {
         /// Ceremony identifier
         ceremony_id: String,
+        /// Agreement mode after acceptance (A2)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agreement_mode: Option<AgreementMode>,
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
@@ -145,6 +152,9 @@ pub enum InvitationFact {
         ceremony_id: String,
         /// Resulting relationship identifier
         relationship_id: String,
+        /// Agreement mode after commit (A3)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agreement_mode: Option<AgreementMode>,
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,

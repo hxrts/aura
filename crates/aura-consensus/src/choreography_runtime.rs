@@ -108,9 +108,9 @@ mod tests {
     use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature};
     use aura_core::time::{PhysicalTime, ProvenancedTime, TimeStamp};
     use aura_core::{AuthorityId, Hash32};
-    use futures::future::yield_now;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use tokio::task::yield_now;
     use uuid::Uuid;
 
     #[derive(Default)]

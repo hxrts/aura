@@ -13,6 +13,7 @@ use aura_core::effects::amp::{
 };
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{OrderTime, TimeStamp};
 use aura_journal::fact::{
     ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, RelationalFact,
@@ -43,6 +44,12 @@ where
         &self,
         params: ChannelCreateParams,
     ) -> std::result::Result<ChannelId, AmpChannelError> {
+        let policy = policy_for(CeremonyFlow::AmpBootstrap);
+        if !policy.allows_mode(AgreementMode::Provisional) {
+            return Err(AmpChannelError::InvalidState(
+                "AMP bootstrap policy does not allow provisional channels".to_string(),
+            ));
+        }
         let channel = if let Some(id) = params.channel {
             id
         } else {
@@ -107,6 +114,7 @@ where
             new_epoch: state.chan_epoch + 1,
             chosen_bump_id: Default::default(),
             consensus_id: Default::default(),
+            transcript_ref: None,
         };
 
         self.effects

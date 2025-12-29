@@ -16,6 +16,7 @@ use crate::tui::components::{
 use crate::tui::layout::dim;
 use crate::tui::state_machine::{GuardianCeremonyResponse, GuardianSetupStep};
 use crate::tui::theme::{Borders, Icons, Spacing, Theme};
+use aura_core::threshold::AgreementMode;
 use crate::tui::types::KeyHint;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +87,10 @@ pub struct GuardianSetupModalProps {
     pub threshold_n: u8,
     /// Ceremony responses (id, name, response)
     pub ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
+    /// Agreement mode (A1/A2/A3) for the ceremony
+    pub agreement_mode: AgreementMode,
+    /// Whether reversion is still possible
+    pub reversion_risk: bool,
     /// Error message if any
     pub error: String,
 }
@@ -235,6 +240,17 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
 fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'static> {
     let responses = props.ceremony_responses.clone();
     let copy = props.kind.copy();
+    let agreement_label = match props.agreement_mode {
+        AgreementMode::Provisional => "Provisional",
+        AgreementMode::CoordinatorSoftSafe => {
+            if props.reversion_risk {
+                "Soft-safe (reversion risk)"
+            } else {
+                "Soft-safe"
+            }
+        }
+        AgreementMode::ConsensusFinalized => "Finalized",
+    };
 
     // Count responses
     let total = responses.len();
@@ -262,6 +278,12 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
                         "Accepted: {}  Pending: {}  Declined: {}",
                         accepted, pending, declined
                     ),
+                    color: Theme::TEXT_MUTED,
+                )
+            }
+            View(margin_top: Spacing::XS) {
+                Text(
+                    content: format!("Agreement: {agreement_label}"),
                     color: Theme::TEXT_MUTED,
                 )
             }

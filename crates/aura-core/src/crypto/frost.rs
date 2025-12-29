@@ -3,6 +3,7 @@
 //! This module provides types for FROST (Flexible Round-Optimized Schnorr Threshold)
 //! signatures, including participant identifiers and threshold configuration.
 
+use crate::threshold::AgreementMode;
 use crate::types::participants::ParticipantIdentity;
 use crate::AuraError;
 use frost_ed25519 as frost;
@@ -60,6 +61,9 @@ pub struct ThresholdState {
     pub total_participants: u16,
     /// Participants (in protocol participant order)
     pub participants: Vec<ParticipantIdentity>,
+    /// Agreement mode (A1/A2/A3) for current keying state
+    #[serde(default)]
+    pub agreement_mode: AgreementMode,
 }
 
 impl ThresholdState {
@@ -70,6 +74,7 @@ impl ThresholdState {
             threshold: 0,
             total_participants: 0,
             participants: Vec::new(),
+            agreement_mode: AgreementMode::default(),
         }
     }
 

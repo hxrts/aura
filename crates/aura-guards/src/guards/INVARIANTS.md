@@ -77,3 +77,5 @@ async fn guarded_send(&self, msg: Message) -> Result<()> {
     self.transport.send(msg).await
 }
 ```
+
+**DKG Payloads**: Dealer packages and transcript payloads are treated as high-cost messages. They must flow through the same guard chain, with flow costs scaled by package count and byte size to prevent budget bypass during key ceremonies.

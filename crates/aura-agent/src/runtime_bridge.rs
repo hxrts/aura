@@ -26,12 +26,16 @@ use aura_core::effects::{
     time::PhysicalTimeEffects,
     StorageCoreEffects, ThresholdSigningEffects, TransportEffects,
 };
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
-use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
+use aura_core::threshold::{
+    AgreementMode, ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
+};
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
 use aura_core::EffectContext;
+use aura_core::Hash32;
 use aura_journal::fact::{CommittedChannelEpochBump, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
@@ -57,6 +61,96 @@ impl AgentRuntimeBridge {
     pub fn new(agent: Arc<AuraAgent>) -> Self {
         Self { agent }
     }
+}
+
+fn participant_identity_to_authority_id(
+    identity: &ParticipantIdentity,
+) -> Result<AuthorityId, IntentError> {
+    match identity {
+        ParticipantIdentity::Guardian(id) => Ok(*id),
+        ParticipantIdentity::GroupMember { member, .. } => Ok(*member),
+        ParticipantIdentity::Device(device_id) => {
+            let bytes = device_id.to_bytes().map_err(|_| {
+                IntentError::internal_error("Failed to convert device id to bytes".to_string())
+            })?;
+            Ok(AuthorityId::new_from_entropy(hash(&bytes)))
+        }
+    }
+}
+
+fn membership_hash_from_participants(participants: &[AuthorityId]) -> Hash32 {
+    let mut sorted = participants.to_vec();
+    sorted.sort_by(|a, b| a.to_bytes().cmp(&b.to_bytes()));
+    let mut bytes = Vec::with_capacity(sorted.len() * 16);
+    for id in sorted {
+        bytes.extend_from_slice(&id.to_bytes());
+    }
+    Hash32(hash(&bytes))
+}
+
+async fn persist_stub_dkg_transcript(
+    effects: Arc<crate::runtime::AuraEffectSystem>,
+    authority_id: AuthorityId,
+    epoch: u64,
+    threshold: u16,
+    max_signers: u16,
+    participants: &[ParticipantIdentity],
+    prestate_hash: Hash32,
+    operation_hash: Hash32,
+) -> Result<Option<Hash32>, IntentError> {
+    let mut participant_ids = Vec::with_capacity(participants.len());
+    for participant in participants {
+        participant_ids.push(participant_identity_to_authority_id(participant)?);
+    }
+
+    let membership_hash = membership_hash_from_participants(&participant_ids);
+    let context = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+
+    let config = aura_consensus::dkg::types::DkgConfig {
+        epoch,
+        threshold,
+        max_signers,
+        membership_hash,
+        cutoff: epoch,
+        prestate_hash,
+        operation_hash,
+        participants: participant_ids.clone(),
+    };
+
+    let mut packages = Vec::with_capacity(participant_ids.len());
+    for dealer in participant_ids {
+        let package =
+            aura_consensus::dkg::dealer::build_dealer_package(&config, dealer).map_err(|e| {
+                IntentError::internal_error(format!("Failed to build dealer package: {e}"))
+            })?;
+        packages.push(package);
+    }
+
+    let transcript =
+        aura_consensus::dkg::ceremony::run_dkg_ceremony(&config, packages).map_err(|e| {
+            IntentError::internal_error(format!("Finalize DKG transcript failed: {e}"))
+        })?;
+
+    let store = aura_consensus::dkg::StorageTranscriptStore::new_default(effects.clone());
+    let commit =
+        aura_consensus::dkg::ceremony::persist_transcript(&store, context, &transcript)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Persist transcript failed: {e}")))?;
+
+    effects
+        .commit_relational_facts(vec![RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::DkgTranscriptCommit(commit.clone()),
+        )])
+        .await
+        .map_err(|e| IntentError::internal_error(format!("Commit DKG fact failed: {e}")))?;
+
+    tracing::warn!(
+        authority_id = %authority_id,
+        epoch,
+        "Persisted stub DKG transcript (placeholder for consensus DKG)"
+    );
+
+    Ok(commit.blob_ref.or(Some(commit.transcript_hash)))
 }
 
 const ACCOUNT_CONFIG_KEYS: [&str; 2] = ["account.json", "demo-account.json"];
@@ -207,6 +301,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             new_epoch: state.chan_epoch + 1,
             chosen_bump_id: Default::default(),
             consensus_id: Default::default(),
+            transcript_ref: None,
         };
 
         effects
@@ -815,6 +910,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     ) -> Result<String, IntentError> {
         use aura_core::effects::ThresholdSigningEffects;
         use aura_core::hash::hash;
+        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
         use aura_recovery::guardian_ceremony::GuardianState;
         use aura_recovery::{CeremonyId, GuardianRotationOp};
 
@@ -835,6 +931,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .copied()
             .map(aura_core::threshold::ParticipantIdentity::guardian)
             .collect::<Vec<_>>();
+
+        let policy = policy_for(CeremonyFlow::GuardianSetupRotation);
 
         // Step 1: Generate FROST keys at new epoch
         let (new_epoch, key_packages, _public_key) = self
@@ -881,6 +979,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
             new_epoch: new_epoch.value(),
         };
         let operation_hash = operation.compute_hash();
+
+        if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
+            let _ = persist_stub_dkg_transcript(
+                self.agent.runtime().effects(),
+                authority_id,
+                new_epoch.value(),
+                threshold_k_value,
+                total_n,
+                &participants,
+                prestate_hash,
+                operation_hash,
+            )
+            .await?;
+        }
 
         // Use a monotonic nonce for uniqueness within this process.
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -968,7 +1080,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ThresholdSigningEffects,
         };
         use aura_core::hash::hash;
-        use aura_core::threshold::ParticipantIdentity;
+        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity};
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
@@ -1009,6 +1121,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 threshold_value, total_n
             )));
         }
+
+        let policy = policy_for(CeremonyFlow::DeviceMfaRotation);
 
         let participants: Vec<ParticipantIdentity> = parsed_devices
             .iter()
@@ -1094,6 +1208,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ))
                 .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
+
+        if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
+            let _ = persist_stub_dkg_transcript(
+                effects.clone(),
+                authority_id,
+                pending_epoch.value(),
+                threshold_value,
+                total_n,
+                &participants,
+                prestate_hash,
+                op_hash,
+            )
+            .await?;
+        }
 
         let nonce_bytes = effects.random_bytes(8).await;
         let nonce = u64::from_le_bytes(nonce_bytes[..8].try_into().unwrap_or_default());
@@ -1214,7 +1342,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ThresholdSigningEffects,
         };
         use aura_core::hash::hash;
-        use aura_core::threshold::ParticipantIdentity;
+        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity};
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
@@ -1278,6 +1406,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .copied()
             .map(ParticipantIdentity::device)
             .collect();
+
+        let policy = policy_for(CeremonyFlow::DeviceEnrollment);
+        if policy.keygen != KeyGenerationPolicy::K2DealerBased {
+            return Err(IntentError::internal_error(
+                "Device enrollment requires dealer-based DKG (K2)".to_string(),
+            ));
+        }
 
         let total_n = participants.len() as u16;
         let mut threshold_k = if let Some(config) = self.get_threshold_config().await {
@@ -1585,6 +1720,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             remaining_devices.push(current_device_id);
         }
 
+        let policy = aura_core::threshold::policy_for(
+            aura_core::threshold::CeremonyFlow::DeviceRemoval,
+        );
+
         // For now, only support removing a device when the result is a single-device account.
         // Supporting multi-device removals requires distributing fresh shares to all remaining devices.
         if remaining_devices.len() != 1 {
@@ -1629,6 +1768,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ))
             .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
+
+        if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
+            let _ = persist_stub_dkg_transcript(
+                effects.clone(),
+                authority_id,
+                pending_epoch.value(),
+                threshold_k,
+                total_n,
+                &participants,
+                prestate_hash,
+                op_hash,
+            )
+            .await?;
+        }
 
         let nonce_bytes = effects.random_bytes(8).await;
         let nonce = u64::from_le_bytes(nonce_bytes[..8].try_into().unwrap_or_default());
@@ -1735,6 +1888,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             accepted_guardians,
             error_message: state.error_message.clone(),
             pending_epoch: Some(Epoch::new(state.new_epoch)),
+            agreement_mode: state.agreement_mode,
+            reversion_risk: state.agreement_mode != AgreementMode::ConsensusFinalized,
         })
     }
 
@@ -1764,6 +1919,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             accepted_participants: state.accepted_participants,
             error_message: state.error_message,
             pending_epoch: Some(Epoch::new(state.new_epoch)),
+            agreement_mode: state.agreement_mode,
+            reversion_risk: state.agreement_mode != AgreementMode::ConsensusFinalized,
         })
     }
 

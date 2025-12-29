@@ -43,7 +43,7 @@
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
 use aura_core::identifiers::AuthorityId;
-use aura_core::threshold::ThresholdSignature;
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
 use aura_core::{AuraError, AuraResult, Hash32};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -144,8 +144,8 @@ pub struct RecoveryApproval {
 pub enum RecoveryCeremonyStatus {
     /// Ceremony initiated, collecting guardian approvals
     CollectingApprovals,
-    /// Quorum reached, awaiting final consensus
-    AwaitingConsensus,
+    /// Quorum reached, awaiting execution finalization
+    AwaitingExecution,
     /// Consensus reached, recovery committed
     Committed,
     /// Ceremony aborted (insufficient approvals, rejection, or timeout)
@@ -171,6 +171,8 @@ pub struct RecoveryCeremonyState {
     pub started_at_ms: u64,
     /// Timeout for ceremony completion (ms)
     pub timeout_ms: u64,
+    /// Agreement mode (A1/A2/A3)
+    pub agreement_mode: AgreementMode,
 }
 
 impl RecoveryCeremonyState {
@@ -410,6 +412,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             threshold,
             started_at_ms: nonce,
             timeout_ms: self.config.default_timeout_ms,
+            agreement_mode: policy_for(CeremonyFlow::RecoveryApproval).initial_mode(),
         };
 
         // Store ceremony
@@ -499,7 +502,8 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
                 && ceremony.status == RecoveryCeremonyStatus::CollectingApprovals;
 
             if quorum_reached {
-                ceremony.status = RecoveryCeremonyStatus::AwaitingConsensus;
+                ceremony.status = RecoveryCeremonyStatus::AwaitingExecution;
+                ceremony.agreement_mode = AgreementMode::CoordinatorSoftSafe;
             }
         }
 
@@ -517,6 +521,12 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
 
     /// Commit the ceremony after consensus.
     pub async fn commit_ceremony(&mut self, ceremony_id: RecoveryCeremonyId) -> AuraResult<()> {
+        let policy = policy_for(CeremonyFlow::RecoveryExecution);
+        if !policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            return Err(AuraError::invalid(
+                "Recovery execution does not permit consensus finalization",
+            ));
+        }
         // Get ceremony info before mutable borrow
         let (account_authority, operation_type, approved_guardians) = {
             let ceremony = self
@@ -524,10 +534,10 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
                 .get(&ceremony_id)
                 .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
 
-            // Verify ceremony is awaiting consensus
-            if ceremony.status != RecoveryCeremonyStatus::AwaitingConsensus {
+            // Verify ceremony is awaiting execution
+            if ceremony.status != RecoveryCeremonyStatus::AwaitingExecution {
                 return Err(AuraError::invalid(format!(
-                    "Ceremony not awaiting consensus: {:?}",
+                    "Ceremony not awaiting execution: {:?}",
                     ceremony.status
                 )));
             }
@@ -547,6 +557,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         // Update status
         if let Some(ceremony) = self.ceremonies.get_mut(&ceremony_id) {
             ceremony.status = RecoveryCeremonyStatus::Committed;
+            ceremony.agreement_mode = AgreementMode::ConsensusFinalized;
         }
 
         // Emit committed fact
@@ -902,8 +913,8 @@ mod tests {
             RecoveryCeremonyStatus::CollectingApprovals
         ));
 
-        let status = RecoveryCeremonyStatus::AwaitingConsensus;
-        assert!(matches!(status, RecoveryCeremonyStatus::AwaitingConsensus));
+        let status = RecoveryCeremonyStatus::AwaitingExecution;
+        assert!(matches!(status, RecoveryCeremonyStatus::AwaitingExecution));
 
         let status = RecoveryCeremonyStatus::Committed;
         assert!(matches!(status, RecoveryCeremonyStatus::Committed));
@@ -931,6 +942,7 @@ mod tests {
             threshold: 2,
             started_at_ms: 0,
             timeout_ms: 1000,
+            agreement_mode: AgreementMode::CoordinatorSoftSafe,
         };
 
         // No approvals - threshold not met
@@ -1058,6 +1070,7 @@ mod tests {
             threshold: 1,
             started_at_ms: 0,
             timeout_ms: 1000,
+            agreement_mode: AgreementMode::CoordinatorSoftSafe,
         };
 
         // No rejections initially

@@ -278,7 +278,7 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
     let effects_b = agent_b.runtime().effects();
     let location = SecureStorageLocation::with_sub_key(
         "participant_shares",
-        format!("{}/{}", env.authority_id, start_c.pending_epoch),
+        format!("{}/{}", env.authority_id, start_c.pending_epoch.value()),
         ParticipantIdentity::device(device_b_id).storage_key(),
     );
 

@@ -31,6 +31,7 @@ use aura_core::{
     effects::{CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects},
     hash, AuraError, AuraResult, DeviceId, Hash32,
 };
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
@@ -204,6 +205,7 @@ impl From<DkdError> for AuraError {
 pub struct DkdProtocol {
     config: DkdConfig,
     active_sessions: HashMap<DkdSessionId, KeyDerivationContext>,
+    agreement_mode: AgreementMode,
 }
 
 impl DkdProtocol {
@@ -212,6 +214,7 @@ impl DkdProtocol {
         Self {
             config,
             active_sessions: HashMap::new(),
+            agreement_mode: policy_for(CeremonyFlow::DkdCeremony).initial_mode(),
         }
     }
 
@@ -261,6 +264,11 @@ impl DkdProtocol {
             epoch: current_time,
             metadata: HashMap::new(),
         };
+
+        let policy = policy_for(CeremonyFlow::DkdCeremony);
+        if policy.allows_mode(AgreementMode::CoordinatorSoftSafe) {
+            self.agreement_mode = AgreementMode::CoordinatorSoftSafe;
+        }
 
         self.active_sessions.insert(session_id.clone(), context);
 
@@ -321,6 +329,11 @@ impl DkdProtocol {
         let verification_proof = self
             .verify_derivation(effects, session_id, &derived_key, &revealed_contributions)
             .await?;
+
+        let policy = policy_for(CeremonyFlow::DkdCeremony);
+        if policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            self.agreement_mode = AgreementMode::ConsensusFinalized;
+        }
 
         // Create result
         let context =

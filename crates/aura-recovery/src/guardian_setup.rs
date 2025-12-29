@@ -349,22 +349,26 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             )));
         }
 
-        // Generate FROST keys for the recovery authority
+        // Generate threshold keys for the recovery authority
         let num_guardians = acceptances.len() as u16;
         let threshold = request.threshold as u16;
 
         tracing::info!(
             threshold = %threshold,
             guardians = %num_guardians,
-            "Generating FROST keys for guardian recovery authority"
+            "Generating threshold keys for guardian recovery authority"
         );
 
         let frost_keys = self
             .effect_system()
-            .frost_generate_keys(threshold, num_guardians)
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                threshold,
+                num_guardians,
+            )
             .await
             .map_err(|e| {
-                crate::RecoveryError::internal(format!("FROST key generation failed: {}", e))
+                crate::RecoveryError::internal(format!("Key generation failed: {}", e))
             })?;
 
         // Encrypt each guardian's key share

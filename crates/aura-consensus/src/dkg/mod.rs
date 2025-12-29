@@ -9,4 +9,4 @@ pub mod types;
 pub mod verifier;
 
 pub use types::{DealerPackage, DkgConfig, DkgTranscript};
-pub use storage::{DkgTranscriptStore, MemoryTranscriptStore};
+pub use storage::{DkgTranscriptStore, MemoryTranscriptStore, StorageTranscriptStore};

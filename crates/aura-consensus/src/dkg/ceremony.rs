@@ -8,31 +8,76 @@ use super::{
 };
 use aura_core::{AuraError, ContextId, Result};
 use aura_journal::fact::DkgTranscriptCommit;
+use std::collections::BTreeSet;
 
 pub fn run_dkg_ceremony(config: &DkgConfig, packages: Vec<DealerPackage>) -> Result<DkgTranscript> {
-    if packages.len() < config.threshold as usize {
-        return Err(AuraError::invalid(
-            "DKG ceremony requires at least threshold packages",
-        ));
-    }
+    validate_config(config)?;
+    validate_packages(config, &packages)?;
 
     for package in &packages {
         verify_dealer_package(package)?;
     }
 
-    finalize_transcript(
-        config.epoch,
-        config.membership_hash,
-        config.cutoff,
-        packages,
-    )
+    finalize_transcript(config, packages)
 }
 
-pub fn persist_transcript<S: DkgTranscriptStore + ?Sized>(
+pub async fn persist_transcript<S: DkgTranscriptStore + ?Sized>(
     store: &S,
     context: ContextId,
     transcript: &DkgTranscript,
 ) -> Result<DkgTranscriptCommit> {
-    let blob_ref = store.put(transcript)?;
+    let blob_ref = store.put(transcript).await?;
     Ok(build_transcript_commit(context, transcript, blob_ref))
+}
+
+fn validate_config(config: &DkgConfig) -> Result<()> {
+    if config.participants.is_empty() {
+        return Err(AuraError::invalid(
+            "DKG config requires explicit participants",
+        ));
+    }
+    if config.threshold == 0 {
+        return Err(AuraError::invalid("DKG threshold must be non-zero"));
+    }
+    if config.threshold as usize > config.participants.len() {
+        return Err(AuraError::invalid(
+            "DKG threshold exceeds participant count",
+        ));
+    }
+    if config.max_signers as usize > config.participants.len() {
+        return Err(AuraError::invalid(
+            "DKG max_signers exceeds participant count",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_packages(config: &DkgConfig, packages: &[DealerPackage]) -> Result<()> {
+    if packages.len() < config.threshold as usize {
+        return Err(AuraError::invalid(
+            "DKG ceremony requires at least threshold packages",
+        ));
+    }
+    if packages.len() > config.max_signers as usize {
+        return Err(AuraError::invalid(
+            "DKG ceremony exceeds max_signers package count",
+        ));
+    }
+
+    let mut seen = BTreeSet::new();
+    for package in packages {
+        if !seen.insert(package.dealer) {
+            return Err(AuraError::invalid("Duplicate dealer package detected"));
+        }
+
+        for participant in &config.participants {
+            if !package.encrypted_shares.contains_key(participant) {
+                return Err(AuraError::invalid(
+                    "Dealer package missing participant share",
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }

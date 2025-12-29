@@ -576,6 +576,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             accepted_participants,
                             error_message,
                             pending_epoch,
+                            agreement_mode,
+                            reversion_risk,
                         } => {
                             let mut toast: Option<(String, crate::tui::state_machine::ToastLevel)> =
                                 None;
@@ -597,6 +599,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 has_failed,
                                                 error_message.clone(),
                                                 pending_epoch,
+                                                agreement_mode,
+                                                reversion_risk,
                                             );
 
                                             if has_failed {
@@ -637,6 +641,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 has_failed,
                                                 error_message.clone(),
                                                 pending_epoch,
+                                                agreement_mode,
+                                                reversion_risk,
                                             );
 
                                             // Update per-guardian responses based on accepted participants.
@@ -728,6 +734,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 has_failed,
                                                 error_message.clone(),
                                                 pending_epoch,
+                                                agreement_mode,
+                                                reversion_risk,
                                             );
 
                                             use aura_core::threshold::ParticipantIdentity;
@@ -961,6 +969,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             has_failed,
                             error_message,
                             pending_epoch,
+                            agreement_mode,
+                            reversion_risk,
                         } => {
                             let mut toast: Option<(String, crate::tui::state_machine::ToastLevel)> =
                                 None;
@@ -987,6 +997,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 has_failed,
                                                 error_message.clone(),
                                                 pending_epoch,
+                                                agreement_mode,
+                                                reversion_risk,
                                             );
 
                                             for (id, _name, response) in &mut s.ceremony_responses {
@@ -1863,6 +1875,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                             accepted_participants: Vec::new(),
                                                             error_message: None,
                                                             pending_epoch: None,
+                                                            agreement_mode: aura_core::threshold::policy_for(
+                                                                aura_core::threshold::CeremonyFlow::GuardianSetupRotation,
+                                                            )
+                                                            .initial_mode(),
+                                                            reversion_risk: true,
                                                         });
                                                     }
 
@@ -1889,6 +1906,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                                         accepted_participants: status.accepted_participants.clone(),
                                                                         error_message: status.error_message.clone(),
                                                                         pending_epoch: status.pending_epoch,
+                                                                        agreement_mode: status.agreement_mode,
+                                                                        reversion_risk: status.reversion_risk,
                                                                     });
                                                                 }
                                                             },
@@ -1986,6 +2005,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                             accepted_participants: Vec::new(),
                                                             error_message: None,
                                                             pending_epoch: None,
+                                                            agreement_mode: aura_core::threshold::policy_for(
+                                                                aura_core::threshold::CeremonyFlow::DeviceMfaRotation,
+                                                            )
+                                                            .initial_mode(),
+                                                            reversion_risk: true,
                                                         });
                                                     }
 
@@ -2011,6 +2035,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                                         accepted_participants: status.accepted_participants.clone(),
                                                                         error_message: status.error_message.clone(),
                                                                         pending_epoch: status.pending_epoch,
+                                                                        agreement_mode: status.agreement_mode,
+                                                                        reversion_risk: status.reversion_risk,
                                                                     });
                                                                 }
                                                             },

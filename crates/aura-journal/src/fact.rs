@@ -305,6 +305,9 @@ pub struct CommittedChannelEpochBump {
     pub chosen_bump_id: Hash32,
     /// Consensus instance identifier (hash) that finalized this bump
     pub consensus_id: Hash32,
+    /// Optional DKG transcript reference for the finalized channel key material
+    #[serde(default)]
+    pub transcript_ref: Option<Hash32>,
 }
 
 /// Finalized DKG transcript commit (consensus-backed)

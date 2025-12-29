@@ -52,6 +52,15 @@ Both implementations share:
 2. **Type Definitions** (`aura-core::frost`) - `Share`, `PublicKeyPackage`, `ThresholdSignature`
 3. **Key Material Source** - Both fetch keys from `SecureStorageEffects` (Keychain/TPM/Keystore)
 
+## DKG Transcript Storage
+
+The `dkg` module provides a storage abstraction for finalized transcripts:
+
+- `MemoryTranscriptStore` for tests/in-memory usage
+- `StorageTranscriptStore` for production adapters (backed by `StorageEffects`)
+
+Transcripts are serialized using canonical DAG-CBOR and stored under a deterministic hash key.
+
 ## Architecture
 
 ```

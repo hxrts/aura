@@ -1,30 +1,54 @@
 //! Transcript accumulation and finalization (BFT-DKG).
 
-use super::types::{DealerPackage, DkgTranscript};
-use aura_core::{hash, AuraError, Hash32, Result};
+use super::types::{DealerPackage, DkgConfig, DkgTranscript};
+use aura_core::{
+    hash,
+    util::serialization::to_vec,
+    AuraError, ContextId, Hash32, Result,
+};
 use aura_journal::fact::DkgTranscriptCommit;
-use aura_core::ContextId;
 
-pub fn compute_transcript_hash(packages: &[DealerPackage]) -> Result<Hash32> {
-    let encoded = bincode::serialize(packages)
-        .map_err(|e| AuraError::serialization(e.to_string()))?;
+#[derive(serde::Serialize)]
+struct TranscriptDigest<'a> {
+    epoch: u64,
+    membership_hash: Hash32,
+    cutoff: u64,
+    prestate_hash: Hash32,
+    operation_hash: Hash32,
+    participants: &'a [aura_core::AuthorityId],
+    packages: &'a [DealerPackage],
+}
+
+pub fn compute_transcript_hash(
+    config: &DkgConfig,
+    packages: &[DealerPackage],
+) -> Result<Hash32> {
+    let digest = TranscriptDigest {
+        epoch: config.epoch,
+        membership_hash: config.membership_hash,
+        cutoff: config.cutoff,
+        prestate_hash: config.prestate_hash,
+        operation_hash: config.operation_hash,
+        participants: &config.participants,
+        packages,
+    };
+    let encoded =
+        to_vec(&digest).map_err(|e| AuraError::serialization(e.to_string()))?;
     let mut hasher = hash::hasher();
     hasher.update(b"AURA_DKG_TRANSCRIPT");
     hasher.update(&encoded);
     Ok(Hash32(hasher.finalize()))
 }
 
-pub fn finalize_transcript(
-    epoch: u64,
-    membership_hash: Hash32,
-    cutoff: u64,
-    packages: Vec<DealerPackage>,
-) -> Result<DkgTranscript> {
-    let transcript_hash = compute_transcript_hash(&packages)?;
+pub fn finalize_transcript(config: &DkgConfig, packages: Vec<DealerPackage>) -> Result<DkgTranscript> {
+    let transcript_hash = compute_transcript_hash(config, &packages)?;
     Ok(DkgTranscript {
-        epoch,
-        membership_hash,
-        cutoff,
+        epoch: config.epoch,
+        membership_hash: config.membership_hash,
+        cutoff: config.cutoff,
+        prestate_hash: config.prestate_hash,
+        operation_hash: config.operation_hash,
+        participants: config.participants.clone(),
         packages,
         transcript_hash,
     })
