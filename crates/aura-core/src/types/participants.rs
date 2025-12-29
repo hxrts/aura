@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Ed25519 directly instead of FROST.
 ///
 /// Used by all ceremony types: guardian key rotation, device enrollment,
-/// device removal, and group/block membership changes.
+/// device removal, and group/home membership changes.
 ///
 /// # Construction
 ///

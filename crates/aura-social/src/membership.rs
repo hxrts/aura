@@ -2,33 +2,33 @@
 //!
 //! Provides validation for membership operations on blocks and neighborhoods.
 
-use crate::{error::SocialError, Block, Neighborhood};
+use crate::{error::SocialError, home::Home, Neighborhood};
 use aura_core::identifiers::AuthorityId;
-use crate::facts::{BlockId, NeighborhoodId};
+use crate::facts::{HomeId, NeighborhoodId};
 
 /// Validates membership operations for blocks and neighborhoods.
 pub struct MembershipValidator;
 
 impl MembershipValidator {
-    /// Validate that an authority can join a block as a resident.
-    pub fn validate_block_join(block: &Block, authority: &AuthorityId) -> Result<(), SocialError> {
-        block.validate_join(authority)
+    /// Validate that an authority can join a home as a resident.
+    pub fn validate_home_join(home: &Home, authority: &AuthorityId) -> Result<(), SocialError> {
+        home.validate_join(authority)
     }
 
-    /// Validate that a block can join a neighborhood.
+    /// Validate that a home can join a neighborhood.
     pub fn validate_neighborhood_join(
-        block: &Block,
+        home: &Home,
         neighborhood: &Neighborhood,
         current_neighborhood_count: usize,
     ) -> Result<(), SocialError> {
-        // Check if block is already a member
-        neighborhood.validate_block_join(block.block_id)?;
+        // Check if home is already a member
+        neighborhood.validate_home_join(home.home_id)?;
 
-        // Check if block has capacity for another neighborhood
-        if current_neighborhood_count >= block.neighborhood_limit as usize {
+        // Check if home has capacity for another neighborhood
+        if current_neighborhood_count >= home.neighborhood_limit as usize {
             return Err(SocialError::NeighborhoodLimitReached {
-                block_id: block.block_id,
-                max: block.neighborhood_limit,
+                home_id: home.home_id,
+                max: home.neighborhood_limit,
             });
         }
 
@@ -38,30 +38,30 @@ impl MembershipValidator {
     /// Validate that an adjacency can be created between two blocks.
     pub fn validate_adjacency(
         neighborhood: &Neighborhood,
-        block_a: BlockId,
-        block_b: BlockId,
+        home_a: HomeId,
+        home_b: HomeId,
     ) -> Result<(), SocialError> {
-        neighborhood.validate_adjacency(block_a, block_b)
+        neighborhood.validate_adjacency(home_a, home_b)
     }
 
     /// Check if an authority has the minimum required relationship
-    /// to be considered a block peer or neighborhood peer.
+    /// to be considered a home peer or neighborhood peer.
     pub fn can_relay_for(
-        block: &Block,
+        home: &Home,
         neighborhoods: &[Neighborhood],
         authority: &AuthorityId,
         target: &AuthorityId,
-        target_block: Option<BlockId>,
+        target_block: Option<HomeId>,
     ) -> bool {
-        // Block peers can relay for each other
-        if block.is_resident(authority) && block.is_resident(target) {
+        // Home peers can relay for each other
+        if home.is_resident(authority) && home.is_resident(target) {
             return true;
         }
 
         // Check neighborhood peer relationships
-        if let Some(target_block_id) = target_block {
+        if let Some(target_home_id) = target_block {
             for neighborhood in neighborhoods {
-                if neighborhood.is_member(block.block_id) && neighborhood.is_member(target_block_id)
+                if neighborhood.is_member(home.home_id) && neighborhood.is_member(target_home_id)
                 {
                     // Both blocks are in the same neighborhood
                     return true;
@@ -76,16 +76,16 @@ impl MembershipValidator {
 /// Membership state tracking for a single authority.
 #[derive(Debug, Clone, Default)]
 pub struct MembershipState {
-    /// The block the authority resides in, if any
-    pub resident_block: Option<BlockId>,
-    /// Neighborhoods the authority's block belongs to
+    /// The home the authority resides in, if any
+    pub resident_block: Option<HomeId>,
+    /// Neighborhoods the authority.s home belongs to
     pub neighborhood_memberships: Vec<NeighborhoodId>,
 }
 
 impl MembershipState {
     /// Create a new membership state.
     pub fn new(
-        resident_block: Option<BlockId>,
+        resident_block: Option<HomeId>,
         neighborhood_memberships: Vec<NeighborhoodId>,
     ) -> Self {
         Self {
@@ -114,23 +114,23 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_block_join() {
-        let block = Block::new_empty(BlockId::from_bytes([1u8; 32]));
+    fn test_validate_home_join() {
+        let home_instance = Home::new_empty(HomeId::from_bytes([1u8; 32]));
         let authority = test_authority(1);
 
-        assert!(MembershipValidator::validate_block_join(&block, &authority).is_ok());
+        assert!(MembershipValidator::validate_home_join(&home_instance, &authority).is_ok());
     }
 
     #[test]
     fn test_validate_neighborhood_join() {
-        let block = Block::new_empty(BlockId::from_bytes([1u8; 32]));
+        let home_instance = Home::new_empty(HomeId::from_bytes([1u8; 32]));
         let neighborhood = Neighborhood::new_empty(NeighborhoodId::from_bytes([1u8; 32]));
 
         // Can join with 0 current memberships
-        assert!(MembershipValidator::validate_neighborhood_join(&block, &neighborhood, 0).is_ok());
+        assert!(MembershipValidator::validate_neighborhood_join(&home_instance, &neighborhood, 0).is_ok());
 
         // Cannot join at limit (4 for v1)
-        let result = MembershipValidator::validate_neighborhood_join(&block, &neighborhood, 4);
+        let result = MembershipValidator::validate_neighborhood_join(&home_instance, &neighborhood, 4);
         assert!(matches!(
             result,
             Err(SocialError::NeighborhoodLimitReached { .. })
@@ -139,10 +139,10 @@ mod tests {
 
     #[test]
     fn test_membership_state() {
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
         let neighborhood_id = NeighborhoodId::from_bytes([1u8; 32]);
 
-        let state = MembershipState::new(Some(block_id), vec![neighborhood_id]);
+        let state = MembershipState::new(Some(home_id), vec![neighborhood_id]);
 
         assert!(state.has_social_presence());
         assert!(state.is_in_neighborhood(neighborhood_id));

@@ -27,7 +27,7 @@ use std::sync::Arc;
 /// 3. Waits for guardian acceptances
 /// 4. ViewState update auto-forwards to RECOVERY_SIGNAL for UI updates
 ///
-/// The ceremony is non-blocking - guardians can respond asynchronously.
+/// The ceremony is asynchronous; guardians can respond over time.
 pub async fn start_recovery(
     app_core: &Arc<RwLock<AppCore>>,
     guardian_ids: Vec<String>,

@@ -1,23 +1,23 @@
-//! Block Creation Modal
+//! Home Creation Modal
 //!
-//! Modal for creating a new block in the neighborhood.
+//! Modal for creating a new home in the neighborhood.
 
 use iocraft::prelude::*;
 
 use crate::tui::layout::dim;
-use crate::tui::state::views::BlockCreateModalState;
+use crate::tui::state::views::HomeCreateModalState;
 use crate::tui::theme::{Borders, Spacing, Theme};
 
-/// Props for BlockCreateModal
+/// Props for HomeCreateModal
 #[derive(Default, Props)]
-pub struct BlockCreateModalProps {
+pub struct HomeCreateModalProps {
     /// Modal state
-    pub state: BlockCreateModalState,
+    pub state: HomeCreateModalState,
 }
 
-/// Modal for creating a new block
+/// Modal for creating a new home
 #[component]
-pub fn BlockCreateModal(props: &BlockCreateModalProps) -> impl Into<AnyElement<'static>> {
+pub fn HomeCreateModal(props: &HomeCreateModalProps) -> impl Into<AnyElement<'static>> {
     let state = &props.state;
     let name = state.name.clone();
     let description = state.description.clone();
@@ -35,12 +35,12 @@ pub fn BlockCreateModal(props: &BlockCreateModalProps) -> impl Into<AnyElement<'
     };
 
     // Header props
-    let header_props = crate::tui::components::ModalHeaderProps::new("Create New Block")
-        .with_subtitle("Blocks are shared spaces where you and others can communicate.");
+    let header_props = crate::tui::components::ModalHeaderProps::new("Create New Home")
+        .with_subtitle("Homes are shared spaces where you and others can communicate.");
 
     // Input field props
     let name_input =
-        crate::tui::components::LabeledInputProps::new("Block Name:", "Enter block name...")
+        crate::tui::components::LabeledInputProps::new("Home Name:", "Enter home name...")
             .with_value(name)
             .with_focused(active_field == 0);
     let description_input = crate::tui::components::LabeledInputProps::new(
@@ -61,7 +61,7 @@ pub fn BlockCreateModal(props: &BlockCreateModalProps) -> impl Into<AnyElement<'
     let status = if let Some(err) = error {
         crate::tui::components::ModalStatus::Error(err)
     } else if creating {
-        crate::tui::components::ModalStatus::Loading("Creating block...".to_string())
+        crate::tui::components::ModalStatus::Loading("Creating home...".to_string())
     } else {
         crate::tui::components::ModalStatus::Idle
     };

@@ -7,6 +7,7 @@ use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use uuid::Uuid;
+use std::collections::VecDeque;
 
 /// Configuration for broadcast behavior
 #[derive(Debug, Clone)]
@@ -19,6 +20,8 @@ pub struct BroadcastConfig {
     pub eager_push_enabled: bool,
     /// Enable lazy pull on request
     pub lazy_pull_enabled: bool,
+    /// Maximum number of ops to keep in the in-memory oplog cache
+    pub max_oplog_entries: usize,
 }
 
 impl Default for BroadcastConfig {
@@ -28,6 +31,7 @@ impl Default for BroadcastConfig {
             max_pending_announcements: 1000,
             eager_push_enabled: true,
             lazy_pull_enabled: true,
+            max_oplog_entries: 10_000,
         }
     }
 }
@@ -45,6 +49,8 @@ pub struct BroadcasterHandler {
     config: BroadcastConfig,
     /// Local operation store
     oplog: Arc<RwLock<BTreeMap<Hash32, AttestedOp>>>,
+    /// Insertion order for oplog eviction
+    oplog_order: Arc<RwLock<VecDeque<Hash32>>>,
     peers: Arc<RwLock<BTreeSet<Uuid>>>,
     /// Pending announcements (CID -> set of peers that need it)
     pending_announcements: Arc<RwLock<BTreeMap<Hash32, BTreeSet<Uuid>>>>,
@@ -61,6 +67,7 @@ impl BroadcasterHandler {
         Self {
             config,
             oplog: Arc::new(RwLock::new(BTreeMap::new())),
+            oplog_order: Arc::new(RwLock::new(VecDeque::new())),
             peers: Arc::new(RwLock::new(BTreeSet::new())),
             pending_announcements: Arc::new(RwLock::new(BTreeMap::new())),
             rate_limits: Arc::new(RwLock::new(BTreeMap::new())),
@@ -78,6 +85,7 @@ impl BroadcasterHandler {
         Self {
             config,
             oplog: Arc::new(RwLock::new(BTreeMap::new())),
+            oplog_order: Arc::new(RwLock::new(VecDeque::new())),
             peers: Arc::new(RwLock::new(BTreeSet::new())),
             pending_announcements: Arc::new(RwLock::new(BTreeMap::new())),
             rate_limits: Arc::new(RwLock::new(BTreeMap::new())),
@@ -145,8 +153,18 @@ impl BroadcasterHandler {
 
     /// Add operation to local store
     pub async fn add_op(&self, op: AttestedOp) {
+        let cid = Hash32::from(op.op.parent_commitment);
         let mut oplog = self.oplog.write().await;
-        oplog.insert(Hash32::from(op.op.parent_commitment), op);
+        let mut order = self.oplog_order.write().await;
+        if !oplog.contains_key(&cid) {
+            order.push_back(cid);
+        }
+        oplog.insert(cid, op);
+        while order.len() > self.config.max_oplog_entries {
+            if let Some(oldest) = order.pop_front() {
+                oplog.remove(&oldest);
+            }
+        }
     }
 
     /// Add peer to known peer set
@@ -223,11 +241,20 @@ impl SyncEffects for BroadcasterHandler {
 
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
         let mut oplog = self.oplog.write().await;
+        let mut order = self.oplog_order.write().await;
 
         for op in ops {
             let cid = Hash32::from(op.op.parent_commitment);
             // Deduplicate - only insert if not already present
+            if !oplog.contains_key(&cid) {
+                order.push_back(cid);
+            }
             oplog.entry(cid).or_insert(op);
+        }
+        while order.len() > self.config.max_oplog_entries {
+            if let Some(oldest) = order.pop_front() {
+                oplog.remove(&oldest);
+            }
         }
 
         Ok(())

@@ -144,7 +144,7 @@ mod tests {
         assert!(new_state.neighborhood.input_buffer.is_empty());
         assert!(commands.iter().any(|c| matches!(
             c,
-            TuiCommand::Dispatch(DispatchCommand::SendBlockMessage { content })
+            TuiCommand::Dispatch(DispatchCommand::SendHomeMessage { content })
             if content == "hello"
         )));
     }

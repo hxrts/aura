@@ -256,19 +256,19 @@ This identifier enables threshold signature coordination. It is scoped to signin
 
 ## 7. Social Topology Identifiers
 
-### 7.1 BlockId
+### 7.1 HomeId
 
-`BlockId` uniquely identifies a block in the urban social topology. Each user resides in exactly one block. The identifier is a 32-byte array.
+`HomeId` uniquely identifies a home in the urban social topology. Each user resides in exactly one home. The identifier is a 32-byte array.
 
 ```rust
-pub struct BlockId([u8; 32]);
+pub struct HomeId([u8; 32]);
 ```
 
-This identifier enables block membership management. See [Social Architecture](114_social_architecture.md) for the complete model.
+This identifier enables home membership management. See [Social Architecture](114_social_architecture.md) for the complete model.
 
 ### 7.2 NeighborhoodId
 
-`NeighborhoodId` uniquely identifies a neighborhood. Neighborhoods are collections of blocks with adjacency relationships. The identifier is a 32-byte array.
+`NeighborhoodId` uniquely identifies a neighborhood. Neighborhoods are collections of homes with adjacency relationships. The identifier is a 32-byte array.
 
 ```rust
 pub struct NeighborhoodId([u8; 32]);
@@ -328,4 +328,4 @@ The derivation inputs never include device identifiers. Derived keys inherit the
 
 ## See Also
 
-[Authority and Identity](100_authority_and_identity.md) describes the authority model in detail. [Relational Contexts](103_relational_contexts.md) covers cross-authority relationships. [Transport and Information Flow](108_transport_and_information_flow.md) documents receipt chains and flow budgets. [Social Architecture](114_social_architecture.md) defines blocks and neighborhoods.
+[Authority and Identity](100_authority_and_identity.md) describes the authority model in detail. [Relational Contexts](103_relational_contexts.md) covers cross-authority relationships. [Transport and Information Flow](108_transport_and_information_flow.md) documents receipt chains and flow budgets. [Social Architecture](114_social_architecture.md) defines homes and neighborhoods.

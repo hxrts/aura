@@ -97,7 +97,7 @@ pub async fn create_guardian_invitation(
 pub async fn create_channel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
-    block_id: String,
+    home_id: String,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
@@ -109,7 +109,7 @@ pub async fn create_channel_invitation(
     };
 
     runtime
-        .create_channel_invitation(receiver, block_id, message, ttl_ms)
+        .create_channel_invitation(receiver, home_id, message, ttl_ms)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to create channel invitation: {}", e)))
 }
@@ -342,15 +342,15 @@ pub async fn import_invitation(
         .map_err(|e| AuraError::agent(format!("Failed to import invitation: {}", e)))
 }
 
-/// Accept the first pending block/channel invitation
+/// Accept the first pending home/channel invitation
 ///
 /// **What it does**: Finds and accepts the first pending channel invitation
 /// **Returns**: Invitation ID that was accepted
 /// **Signal pattern**: RuntimeBridge handles signal emission
 ///
-/// This is used by UI to quickly accept a pending block invitation without
+/// This is used by UI to quickly accept a pending home invitation without
 /// requiring the user to select a specific invitation ID.
-pub async fn accept_pending_block_invitation(
+pub async fn accept_pending_home_invitation(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<String, AuraError> {
     let runtime = {
@@ -365,12 +365,12 @@ pub async fn accept_pending_block_invitation(
 
     // Find a channel invitation that we received (sender is not us)
     let our_authority = runtime.authority_id();
-    let block_invitation = pending.iter().find(|inv| {
+    let home_invitation = pending.iter().find(|inv| {
         matches!(inv.invitation_type, InvitationBridgeType::Channel { .. })
             && inv.sender_id != our_authority
     });
 
-    match block_invitation {
+    match home_invitation {
         Some(inv) => {
             runtime
                 .accept_invitation(&inv.invitation_id)
@@ -378,7 +378,7 @@ pub async fn accept_pending_block_invitation(
                 .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {}", e)))?;
             Ok(inv.invitation_id.clone())
         }
-        None => Err(AuraError::agent("No pending block invitation found")),
+        None => Err(AuraError::agent("No pending home invitation found")),
     }
 }
 

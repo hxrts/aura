@@ -45,14 +45,13 @@ use std::sync::LazyLock;
 
 use crate::errors::AppError;
 use crate::queries::{
-    BlocksQuery, BoundSignal, ChatQuery, ContactsQuery, GuardiansQuery, InvitationsQuery,
+    HomesQuery, BoundSignal, ChatQuery, ContactsQuery, GuardiansQuery, InvitationsQuery,
     NeighborhoodQuery, RecoveryQuery,
 };
 use crate::views::{
-    BlockState, BlocksState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
-    RecoveryState,
+    HomesState, ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
 };
-use crate::workflows::budget::BlockFlowBudget;
+use crate::workflows::budget::HomeFlowBudget;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Application Signal Definitions
@@ -73,19 +72,16 @@ pub static INVITATIONS_SIGNAL: LazyLock<Signal<InvitationsState>> =
 pub static CONTACTS_SIGNAL: LazyLock<Signal<ContactsState>> =
     LazyLock::new(|| Signal::new("app:contacts"));
 
-/// Signal for current block state (backwards compatibility)
-pub static BLOCK_SIGNAL: LazyLock<Signal<BlockState>> = LazyLock::new(|| Signal::new("app:block"));
-
-/// Signal for multi-block state (all blocks the user has created/joined)
-pub static BLOCKS_SIGNAL: LazyLock<Signal<BlocksState>> =
-    LazyLock::new(|| Signal::new("app:blocks"));
+/// Signal for multi-home state (all homes the user has created/joined)
+pub static HOMES_SIGNAL: LazyLock<Signal<HomesState>> =
+    LazyLock::new(|| Signal::new("app:homes"));
 
 /// Signal for neighborhood state (nearby peers, relay info)
 pub static NEIGHBORHOOD_SIGNAL: LazyLock<Signal<NeighborhoodState>> =
     LazyLock::new(|| Signal::new("app:neighborhood"));
 
-/// Signal for block storage budget (resident/neighborhood/pinned allocations)
-pub static BUDGET_SIGNAL: LazyLock<Signal<BlockFlowBudget>> =
+/// Signal for home storage budget (resident/neighborhood/pinned allocations)
+pub static BUDGET_SIGNAL: LazyLock<Signal<HomeFlowBudget>> =
     LazyLock::new(|| Signal::new("app:budget"));
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,9 +116,9 @@ pub fn create_chat_bound() -> BoundSignal<ChatQuery> {
     BoundSignal::with_name("app:chat:bound", ChatQuery::default())
 }
 
-/// Create bound signal for blocks state (updates when block facts change)
-pub fn create_blocks_bound() -> BoundSignal<BlocksQuery> {
-    BoundSignal::with_name("app:blocks:bound", BlocksQuery::default())
+/// Create bound signal for homes state (updates when home facts change)
+pub fn create_homes_bound() -> BoundSignal<HomesQuery> {
+    BoundSignal::with_name("app:homes:bound", HomesQuery::default())
 }
 
 /// Create bound signal for neighborhood state (updates when neighbor facts change)
@@ -314,10 +310,7 @@ pub async fn register_app_signals<R: ReactiveEffects>(handler: &R) -> Result<(),
         .register(&*CONTACTS_SIGNAL, ContactsState::default())
         .await?;
     handler
-        .register(&*BLOCK_SIGNAL, BlockState::default())
-        .await?;
-    handler
-        .register(&*BLOCKS_SIGNAL, BlocksState::default())
+        .register(&*HOMES_SIGNAL, HomesState::default())
         .await?;
     handler
         .register(&*NEIGHBORHOOD_SIGNAL, NeighborhoodState::default())
@@ -367,7 +360,7 @@ pub async fn register_app_signals_with_queries<R: QuerySignalEffects>(
     handler: &R,
 ) -> Result<(), ReactiveError> {
     use crate::queries::{
-        BlocksQuery, ChatQuery, ContactsQuery, InvitationsQuery, NeighborhoodQuery, RecoveryQuery,
+        HomesQuery, ChatQuery, ContactsQuery, InvitationsQuery, NeighborhoodQuery, RecoveryQuery,
     };
 
     // Register domain signals bound to queries
@@ -393,15 +386,9 @@ pub async fn register_app_signals_with_queries<R: QuerySignalEffects>(
         .register_query_signal(&*CONTACTS_SIGNAL, ContactsQuery::default())
         .await?;
 
-    // Block signal - single block state (backwards compatibility)
-    // Note: For multi-block state, use BLOCKS_SIGNAL with BlocksQuery
+    // Homes signal - bound to HomesQuery for multi-home updates
     handler
-        .register(&*BLOCK_SIGNAL, BlockState::default())
-        .await?;
-
-    // Blocks signal - bound to BlocksQuery for multi-block updates
-    handler
-        .register_query_signal(&*BLOCKS_SIGNAL, BlocksQuery::default())
+        .register_query_signal(&*HOMES_SIGNAL, HomesQuery::default())
         .await?;
 
     // Neighborhood signal - bound to NeighborhoodQuery for neighbor updates
@@ -451,8 +438,8 @@ pub struct BoundSignals {
     pub recovery: BoundSignal<RecoveryQuery>,
     /// Chat bound signal
     pub chat: BoundSignal<ChatQuery>,
-    /// Blocks bound signal
-    pub blocks: BoundSignal<BlocksQuery>,
+    /// Homes bound signal
+    pub homes: BoundSignal<HomesQuery>,
     /// Neighborhood bound signal
     pub neighborhood: BoundSignal<NeighborhoodQuery>,
 }
@@ -466,7 +453,7 @@ impl BoundSignals {
             invitations: create_invitations_bound(),
             recovery: create_recovery_bound(),
             chat: create_chat_bound(),
-            blocks: create_blocks_bound(),
+            homes: create_homes_bound(),
             neighborhood: create_neighborhood_bound(),
         }
     }
@@ -490,8 +477,7 @@ mod tests {
             RECOVERY_SIGNAL.id().to_string(),
             INVITATIONS_SIGNAL.id().to_string(),
             CONTACTS_SIGNAL.id().to_string(),
-            BLOCK_SIGNAL.id().to_string(),
-            BLOCKS_SIGNAL.id().to_string(),
+            HOMES_SIGNAL.id().to_string(),
             NEIGHBORHOOD_SIGNAL.id().to_string(),
             CONNECTION_STATUS_SIGNAL.id().to_string(),
             SYNC_STATUS_SIGNAL.id().to_string(),

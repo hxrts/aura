@@ -17,7 +17,7 @@ use aura_core::{
 /// # Selection Strategy
 ///
 /// When `prefer_proximity` is true (default):
-/// 1. Block peers are preferred (highest trust, lowest latency)
+/// 1. Home peers are preferred (highest trust, lowest latency)
 /// 2. Neighborhood peers are next (established traversal rights)
 /// 3. Guardians are fallback (explicit relay capability)
 ///
@@ -48,7 +48,7 @@ impl DeterministicRandomSelector {
     /// Create a new selector with proximity preference.
     ///
     /// # Arguments
-    /// * `prefer_proximity` - If true, prefer block peers over neighborhood
+    /// * `prefer_proximity` - If true, prefer home peers over neighborhood
     ///   peers over guardians. If false, treat all candidates equally.
     pub fn new(prefer_proximity: bool) -> Self {
         Self {
@@ -219,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn test_proximity_prefers_block_peers() {
+    fn test_proximity_prefers_home_peers() {
         let selector = DeterministicRandomSelector::proximity().with_max_per_tier(1);
         let context = test_context();
         let candidates = vec![
@@ -230,7 +230,7 @@ mod tests {
 
         let result = selector.select(&context, &candidates);
 
-        // Block peer should be first even though listed last
+        // Home peer should be first even though listed last
         assert!(!result.is_empty());
         assert_eq!(result[0], test_authority(3));
     }
@@ -312,7 +312,7 @@ mod tests {
 
         let result = selector.select(&context, &candidates);
 
-        // Should select 1 block peer + 1 neighborhood peer
+        // Should select 1 home peer + 1 neighborhood peer
         assert_eq!(result.len(), 2);
     }
 

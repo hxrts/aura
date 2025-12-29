@@ -7,7 +7,7 @@
 //! # TUI Callback Wiring E2E Tests - Batch 3
 //!
 //! Deep validation tests for:
-//! 1. **Block Operations** - CreateBlock, BLOCK_SIGNAL/BLOCKS_SIGNAL, resident management
+//! 1. **Home Operations** - CreateHome, HOMES_SIGNAL/HOMES_SIGNAL, resident management
 //! 2. **Recovery Flow** - Full recovery lifecycle (start → approve → complete/cancel)
 //! 3. **Channel Lifecycle** - Create → Join → Send → Leave → Close
 //! 4. **Contact Management** - Nickname updates, guardian toggle, contact operations
@@ -22,7 +22,7 @@ use async_lock::RwLock;
 use std::sync::Arc;
 
 use aura_app::signal_defs::{
-    BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
+    HOMES_SIGNAL, HOMES_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
     RECOVERY_SIGNAL, UNREAD_COUNT_SIGNAL,
 };
 use aura_app::views::RecoveryProcessStatus;
@@ -74,59 +74,59 @@ fn cleanup_test_dir(name: &str) {
 }
 
 // ============================================================================
-// Block Operations Tests
+// Home Operations Tests
 // ============================================================================
 
-/// Test that BLOCK_SIGNAL and BLOCKS_SIGNAL are properly initialized
+/// Test that HOMES_SIGNAL and HOMES_SIGNAL are properly initialized
 #[tokio::test]
 async fn test_block_signals_initialization() {
-    println!("\n=== Block Signals Initialization Test ===\n");
+    println!("\n=== Home Signals Initialization Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("block-init").await;
+    let (ctx, app_core) = setup_test_env("home-init").await;
 
-    // Phase 1: Read initial BLOCK_SIGNAL state
-    println!("Phase 1: Check BLOCK_SIGNAL initial state");
+    // Phase 1: Read initial HOMES_SIGNAL state
+    println!("Phase 1: Check HOMES_SIGNAL initial state");
     let core = app_core.read().await;
-    let block_state = core.read(&*BLOCK_SIGNAL).await;
+    let home_state = core.read(&*HOMES_SIGNAL).await;
 
-    match block_state {
+    match home_state {
         Ok(state) => {
-            println!("  BLOCK_SIGNAL initialized");
-            println!("  Block ID: {}", state.id);
-            println!("  Block name: {}", state.name);
+            println!("  HOMES_SIGNAL initialized");
+            println!("  Home ID: {}", state.id);
+            println!("  Home name: {}", state.name);
             println!("  Resident count: {}", state.resident_count);
             // Default state should have empty/default values
             assert!(
                 state.residents.is_empty() || state.id == ChannelId::default(),
-                "Initial block state should be empty or default"
+                "Initial home state should be empty or default"
             );
         }
         Err(e) => {
             println!(
-                "  BLOCK_SIGNAL read error (expected for uninitialized): {:?}",
+                "  HOMES_SIGNAL read error (expected for uninitialized): {:?}",
                 e
             );
         }
     }
 
-    // Phase 2: Read initial BLOCKS_SIGNAL state
-    println!("\nPhase 2: Check BLOCKS_SIGNAL initial state");
-    let blocks_state = core.read(&*BLOCKS_SIGNAL).await;
+    // Phase 2: Read initial HOMES_SIGNAL state
+    println!("\nPhase 2: Check HOMES_SIGNAL initial state");
+    let blocks_state = core.read(&*HOMES_SIGNAL).await;
 
     match blocks_state {
         Ok(state) => {
-            println!("  BLOCKS_SIGNAL initialized");
-            println!("  Total blocks: {}", state.blocks.len());
-            println!("  Current block ID: {:?}", state.current_block_id);
+            println!("  HOMES_SIGNAL initialized");
+            println!("  Total blocks: {}", state.homes.len());
+            println!("  Current home ID: {:?}", state.current_home_id);
             // Should start with no blocks
             assert!(
-                state.blocks.is_empty(),
+                state.homes.is_empty(),
                 "Initial blocks state should be empty"
             );
         }
         Err(e) => {
             println!(
-                "  BLOCKS_SIGNAL read error (expected for uninitialized): {:?}",
+                "  HOMES_SIGNAL read error (expected for uninitialized): {:?}",
                 e
             );
         }
@@ -134,92 +134,92 @@ async fn test_block_signals_initialization() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("block-init");
-    println!("\n=== Block Signals Initialization Test PASSED ===\n");
+    cleanup_test_dir("home-init");
+    println!("\n=== Home Signals Initialization Test PASSED ===\n");
 }
 
-/// Test CreateBlock command creates a block and updates signals
+/// Test CreateHome command creates a home and updates signals
 #[tokio::test]
-async fn test_create_block_updates_signals() {
-    println!("\n=== Create Block Updates Signals Test ===\n");
+async fn test_create_home_updates_signals() {
+    println!("\n=== Create Home Updates Signals Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("create-block").await;
+    let (ctx, app_core) = setup_test_env("create-home").await;
 
     // Phase 1: Get initial blocks count
     println!("Phase 1: Get initial state");
     let core = app_core.read().await;
     let initial_blocks = core
-        .read(&*BLOCKS_SIGNAL)
+        .read(&*HOMES_SIGNAL)
         .await
         .map(|s| s.blocks.len())
         .unwrap_or(0);
     println!("  Initial blocks count: {}", initial_blocks);
     drop(core);
 
-    // Phase 2: Create a block
-    println!("\nPhase 2: Create a block");
+    // Phase 2: Create a home
+    println!("\nPhase 2: Create a home");
     let result = ctx
-        .dispatch(EffectCommand::CreateBlock {
-            name: Some("Test Block".to_string()),
+        .dispatch(EffectCommand::CreateHome {
+            name: Some("Test Home".to_string()),
         })
         .await;
 
-    // CreateBlock requires Sensitive authorization, may fail in test env
+    // CreateHome requires Sensitive authorization, may fail in test env
     match &result {
         Ok(response) => {
-            println!("  CreateBlock succeeded: {:?}", response);
+            println!("  CreateHome succeeded: {:?}", response);
         }
         Err(e) => {
             let err_msg = format!("{:?}", e);
             if err_msg.contains("authorization") || err_msg.contains("Sensitive") {
-                println!("  CreateBlock requires elevated authorization (expected)");
+                println!("  CreateHome requires elevated authorization (expected)");
                 println!("  Test validates authorization is enforced");
             } else {
-                println!("  CreateBlock error: {:?}", e);
+                println!("  CreateHome error: {:?}", e);
             }
         }
     }
 
-    // Phase 3: Verify block was created (if succeeded) or authorization enforced
+    // Phase 3: Verify home was created (if succeeded) or authorization enforced
     println!("\nPhase 3: Verify state");
     let core = app_core.read().await;
-    let blocks_state = core.read(&*BLOCKS_SIGNAL).await;
+    let blocks_state = core.read(&*HOMES_SIGNAL).await;
 
     if let Ok(state) = blocks_state {
-        println!("  Blocks count after create: {}", state.blocks.len());
-        if state.blocks.len() > initial_blocks {
-            println!("  New block was created successfully");
-            // Find the new block
-            for (id, block) in &state.blocks {
-                println!("    Block: {} ({})", block.name, id);
+        println!("  Blocks count after create: {}", state.homes.len());
+        if state.homes.len() > initial_blocks {
+            println!("  New home was created successfully");
+            // Find the new home
+            for (id, home_state) in &state.homes {
+                println!("    Home: {} ({})", home_state.name, id);
             }
         }
     }
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("create-block");
-    println!("\n=== Create Block Updates Signals Test PASSED ===\n");
+    cleanup_test_dir("create-home");
+    println!("\n=== Create Home Updates Signals Test PASSED ===\n");
 }
 
-/// Test block resident management
+/// Test home resident management
 #[tokio::test]
 async fn test_block_resident_operations() {
-    println!("\n=== Block Resident Operations Test ===\n");
+    println!("\n=== Home Resident Operations Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("block-residents").await;
+    let (ctx, app_core) = setup_test_env("home-residents").await;
 
-    // Phase 1: Check initial block state for residents
+    // Phase 1: Check initial home state for residents
     println!("Phase 1: Check initial resident state");
     let core = app_core.read().await;
 
-    if let Ok(block_state) = core.read(&*BLOCK_SIGNAL).await {
-        println!("  Block ID: {}", block_state.id);
-        println!("  Initial residents: {}", block_state.residents.len());
-        println!("  My role: {:?}", block_state.my_role);
+    if let Ok(home_state) = core.read(&*HOMES_SIGNAL).await {
+        println!("  Home ID: {}", home_state.id);
+        println!("  Initial residents: {}", home_state.residents.len());
+        println!("  My role: {:?}", home_state.my_role);
 
-        // User should be owner/steward of their own block
-        for resident in &block_state.residents {
+        // User should be owner/steward of their own home
+        for resident in &home_state.residents {
             println!("    Resident: {} ({:?})", resident.name, resident.role);
         }
     }
@@ -266,8 +266,8 @@ async fn test_block_resident_operations() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("block-residents");
-    println!("\n=== Block Resident Operations Test PASSED ===\n");
+    cleanup_test_dir("home-residents");
+    println!("\n=== Home Resident Operations Test PASSED ===\n");
 }
 
 // ============================================================================
@@ -1044,13 +1044,13 @@ async fn test_pin_unpin_message() {
 
     let (ctx, app_core) = setup_test_env("pin-msg").await;
 
-    // Phase 1: Get initial block state for pinned messages
+    // Phase 1: Get initial home state for pinned messages
     println!("Phase 1: Check initial pinned messages");
     let core = app_core.read().await;
-    if let Ok(block_state) = core.read(&*BLOCK_SIGNAL).await {
+    if let Ok(home_state) = core.read(&*HOMES_SIGNAL).await {
         println!(
             "  Initial pinned messages: {}",
-            block_state.pinned_messages.len()
+            home_state.pinned_messages.len()
         );
     }
     drop(core);

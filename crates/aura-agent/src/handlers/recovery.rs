@@ -371,6 +371,17 @@ impl RecoveryHandler {
     ) -> AgentResult<RecoveryResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
+        let policy = aura_core::threshold::policy_for(
+            aura_core::threshold::CeremonyFlow::RecoveryExecution,
+        );
+        if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized)
+            && !effects.is_testing()
+        {
+            return Err(AgentError::effects(
+                "Recovery execution requires consensus finalization".to_string(),
+            ));
+        }
+
         // Enforce guard (unless testing)
         if !effects.is_testing() {
             let guard = create_send_guard(
@@ -429,14 +440,19 @@ impl RecoveryHandler {
             completed_at: current_time,
         };
 
-        Ok(RecoveryResult {
+        let result = RecoveryResult {
             success: true,
             recovery_id: recovery_id.to_string(),
             state: recovery.state.clone(),
             key_material: None, // Would be populated from actual key reconstruction
             approvals: recovery.approvals.clone(),
             error: None,
-        })
+        };
+
+        // Remove completed recovery from active set
+        recoveries.remove(recovery_id);
+
+        Ok(result)
     }
 
     /// Cancel a recovery ceremony
@@ -516,6 +532,24 @@ impl RecoveryHandler {
             .iter()
             .map(|(id, r)| (id.clone(), r.state.clone()))
             .collect()
+    }
+
+    /// Cleanup expired recovery ceremonies.
+    ///
+    /// Removes recoveries that have passed their expiration time.
+    /// Returns the number of recoveries removed.
+    pub async fn cleanup_expired(&self, current_time: u64) -> usize {
+        let mut recoveries = self.active_recoveries.write().await;
+        let before = recoveries.len();
+        recoveries.retain(|_, r| {
+            // Keep if no expiration or not yet expired
+            r.request.expires_at.map_or(true, |exp| exp > current_time)
+        });
+        let removed = before - recoveries.len();
+        if removed > 0 {
+            tracing::debug!(removed, "Cleaned up expired recovery ceremonies");
+        }
+        removed
     }
 }
 

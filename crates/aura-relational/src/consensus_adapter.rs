@@ -6,7 +6,9 @@
 
 use aura_consensus::relational::{
     run_consensus as run_relational_consensus,
+    run_consensus_with_commit as run_relational_consensus_with_commit,
     run_consensus_with_config as run_relational_consensus_with_config,
+    run_consensus_with_config_and_commit as run_relational_consensus_with_config_and_commit,
 };
 use aura_core::{
     epochs::Epoch,
@@ -21,7 +23,7 @@ use std::collections::HashMap;
 /// Consensus configuration for relational contexts
 ///
 /// Re-exported from aura-consensus for API compatibility
-pub use aura_consensus::types::ConsensusConfig;
+pub use aura_consensus::types::{CommitFact, ConsensusConfig};
 
 /// Run consensus on an operation for relational contexts
 ///
@@ -49,6 +51,28 @@ pub async fn run_consensus<T: Serialize>(
     .await
 }
 
+/// Run consensus and return both consensus proof and commit fact.
+pub async fn run_consensus_with_commit<T: Serialize>(
+    prestate: &Prestate,
+    operation: &T,
+    key_packages: HashMap<AuthorityId, Share>,
+    group_public_key: PublicKeyPackage,
+    epoch: Epoch,
+) -> Result<(ConsensusProof, CommitFact)> {
+    let random = RealRandomHandler;
+    let time = PhysicalTimeHandler;
+    run_relational_consensus_with_commit(
+        prestate,
+        operation,
+        key_packages,
+        group_public_key,
+        epoch,
+        &random,
+        &time,
+    )
+    .await
+}
+
 /// Run consensus with explicit configuration for relational contexts
 ///
 /// This provides fine-grained control over consensus parameters while
@@ -63,6 +87,28 @@ pub async fn run_consensus_with_config<T: Serialize>(
     let random = RealRandomHandler;
     let time = PhysicalTimeHandler;
     run_relational_consensus_with_config(
+        prestate,
+        operation,
+        config,
+        key_packages,
+        group_public_key,
+        &random,
+        &time,
+    )
+    .await
+}
+
+/// Run consensus with explicit configuration and return proof + commit fact.
+pub async fn run_consensus_with_config_and_commit<T: Serialize>(
+    prestate: &Prestate,
+    operation: &T,
+    config: ConsensusConfig,
+    key_packages: HashMap<AuthorityId, Share>,
+    group_public_key: PublicKeyPackage,
+) -> Result<(ConsensusProof, CommitFact)> {
+    let random = RealRandomHandler;
+    let time = PhysicalTimeHandler;
+    run_relational_consensus_with_config_and_commit(
         prestate,
         operation,
         config,

@@ -1,27 +1,27 @@
-//! # Block View State
+//! # Home View State
 //!
-//! This module contains block state types including moderation functionality
+//! This module contains home state types including moderation functionality
 //! (bans, mutes, kicks) that were previously in TUI-only demo code.
 
-use crate::workflows::budget::BlockFlowBudget;
+use crate::workflows::budget::HomeFlowBudget;
 use aura_core::identifiers::{AuthorityId, ChannelId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Resident role in the block
+/// Resident role in the home
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum ResidentRole {
     /// Regular resident
     #[default]
     Resident,
-    /// Block admin
+    /// Home admin
     Admin,
-    /// Block owner/creator
+    /// Home owner/creator
     Owner,
 }
 
-/// A block resident
+/// A home resident
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Resident {
@@ -29,7 +29,7 @@ pub struct Resident {
     pub id: AuthorityId,
     /// Display name
     pub name: String,
-    /// Role in the block
+    /// Role in the home
     pub role: ResidentRole,
     /// Whether resident is online
     pub is_online: bool,
@@ -121,28 +121,28 @@ pub struct PinnedMessageMeta {
 }
 
 // =============================================================================
-// Block State
+// Home State
 // =============================================================================
 
-/// Block state with full moderation support
+/// Home state with full moderation support
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct BlockState {
-    /// Block identifier
+pub struct HomeState {
+    /// Home identifier
     pub id: ChannelId,
-    /// Block name
+    /// Home name
     pub name: String,
     /// All residents
     pub residents: Vec<Resident>,
     /// Current user's role
     pub my_role: ResidentRole,
-    /// Storage budget (uses comprehensive BlockFlowBudget from budget module)
-    pub storage: BlockFlowBudget,
+    /// Storage budget (uses comprehensive HomeFlowBudget from budget module)
+    pub storage: HomeFlowBudget,
     /// Number of online residents
     pub online_count: u32,
     /// Total resident count
     pub resident_count: u32,
-    /// Whether this is the user's primary block
+    /// Whether this is the user's primary home
     pub is_primary: bool,
     /// Channel topic (optional)
     pub topic: Option<String>,
@@ -162,14 +162,14 @@ pub struct BlockState {
     /// Kick log for audit trail
     #[serde(default)]
     pub kick_log: Vec<KickRecord>,
-    /// When the block was created (ms since epoch)
+    /// When the home was created (ms since epoch)
     pub created_at: u64,
     /// Relational context identifier for journal integration
     #[serde(default)]
     pub context_id: String,
 }
 
-impl BlockState {
+impl HomeState {
     /// Default storage limit: 10 MB
     pub const DEFAULT_STORAGE_BUDGET: u64 = 10 * 1024 * 1024;
     /// Default resident allocation: 200 KB
@@ -177,7 +177,7 @@ impl BlockState {
     /// Maximum number of kick records retained in memory.
     const MAX_KICK_LOG: usize = 200;
 
-    /// Create a new block with the creator as steward
+    /// Create a new home with the creator as steward
     pub fn new(
         id: ChannelId,
         name: Option<String>,
@@ -196,7 +196,7 @@ impl BlockState {
         };
 
         // Initialize budget with one resident (the creator)
-        let mut budget = BlockFlowBudget::new(id.to_string());
+        let mut budget = HomeFlowBudget::new(id.to_string());
         let _ = budget.add_resident(); // Creator is first resident
 
         Self {
@@ -230,7 +230,7 @@ impl BlockState {
         self.residents.iter_mut().find(|r| r.id == *id)
     }
 
-    /// Add a resident to the block
+    /// Add a resident to the home
     pub fn add_resident(&mut self, resident: Resident) {
         // Charge storage budget for new resident
         let _ = self.storage.add_resident();
@@ -241,7 +241,7 @@ impl BlockState {
         self.residents.push(resident);
     }
 
-    /// Remove a resident from the block
+    /// Remove a resident from the home
     pub fn remove_resident(&mut self, id: &AuthorityId) -> Option<Resident> {
         if let Some(pos) = self.residents.iter().position(|r| r.id == *id) {
             let resident = self.residents.remove(pos);
@@ -267,7 +267,7 @@ impl BlockState {
         matches!(self.my_role, ResidentRole::Admin | ResidentRole::Owner)
     }
 
-    /// Set block name
+    /// Set home name
     pub fn set_name(&mut self, name: String) {
         self.name = name;
     }
@@ -353,105 +353,105 @@ impl BlockState {
 }
 
 // =============================================================================
-// Multi-Block State
+// Multi-Home State
 // =============================================================================
 
-/// State for managing multiple blocks
+/// State for managing multiple homes
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct BlocksState {
-    /// All blocks the user has created or joined (keyed by block ID)
+pub struct HomesState {
+    /// All homes the user has created or joined (keyed by home ID)
     #[serde(default)]
-    pub blocks: HashMap<ChannelId, BlockState>,
-    /// Currently selected block ID
-    pub current_block_id: Option<ChannelId>,
+    pub homes: HashMap<ChannelId, HomeState>,
+    /// Currently selected home ID
+    pub current_home_id: Option<ChannelId>,
 }
 
-impl BlocksState {
-    /// Create a new empty BlocksState
+impl HomesState {
+    /// Create a new empty HomesState
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Get the current block
-    pub fn current_block(&self) -> Option<&BlockState> {
-        self.current_block_id
+    /// Get the current home
+    pub fn current_home(&self) -> Option<&HomeState> {
+        self.current_home_id
             .as_ref()
-            .and_then(|id| self.blocks.get(id))
+            .and_then(|id| self.homes.get(id))
     }
 
-    /// Get a mutable reference to the current block
-    pub fn current_block_mut(&mut self) -> Option<&mut BlockState> {
-        if let Some(id) = &self.current_block_id {
-            self.blocks.get_mut(id)
+    /// Get a mutable reference to the current home
+    pub fn current_home_mut(&mut self) -> Option<&mut HomeState> {
+        if let Some(id) = &self.current_home_id {
+            self.homes.get_mut(id)
         } else {
             None
         }
     }
 
-    /// Get a block by ID
-    pub fn block(&self, id: &ChannelId) -> Option<&BlockState> {
-        self.blocks.get(id)
+    /// Get a home by ID
+    pub fn home_state(&self, id: &ChannelId) -> Option<&HomeState> {
+        self.homes.get(id)
     }
 
-    /// Get a mutable reference to a block by ID
-    pub fn block_mut(&mut self, id: &ChannelId) -> Option<&mut BlockState> {
-        self.blocks.get_mut(id)
+    /// Get a mutable reference to a home by ID
+    pub fn home_mut(&mut self, id: &ChannelId) -> Option<&mut HomeState> {
+        self.homes.get_mut(id)
     }
 
-    /// Add a block
-    pub fn add_block(&mut self, block: BlockState) {
-        let is_first = self.blocks.is_empty();
-        let id = block.id;
-        self.blocks.insert(id, block);
-        // Auto-select first block
+    /// Add a home
+    pub fn add_home(&mut self, home_state: HomeState) {
+        let is_first = self.homes.is_empty();
+        let id = home_state.id;
+        self.homes.insert(id, home_state);
+        // Auto-select first home
         if is_first {
-            self.current_block_id = Some(id);
+            self.current_home_id = Some(id);
         }
     }
 
-    /// Remove a block
-    pub fn remove_block(&mut self, id: &ChannelId) -> Option<BlockState> {
-        let block = self.blocks.remove(id);
-        // Clear selection if current block was removed
-        if self.current_block_id.as_ref() == Some(id) {
-            self.current_block_id = self.blocks.keys().next().cloned();
+    /// Remove a home
+    pub fn remove_home(&mut self, id: &ChannelId) -> Option<HomeState> {
+        let home = self.homes.remove(id);
+        // Clear selection if current home was removed
+        if self.current_home_id.as_ref() == Some(id) {
+            self.current_home_id = self.homes.keys().next().cloned();
         }
-        block
+        home
     }
 
-    /// Select a block by ID
-    pub fn select_block(&mut self, id: Option<ChannelId>) {
-        self.current_block_id = id;
+    /// Select a home by ID
+    pub fn select_home(&mut self, id: Option<ChannelId>) {
+        self.current_home_id = id;
     }
 
-    /// Check if a block exists
-    pub fn has_block(&self, id: &ChannelId) -> bool {
-        self.blocks.contains_key(id)
+    /// Check if a home exists
+    pub fn has_home(&self, id: &ChannelId) -> bool {
+        self.homes.contains_key(id)
     }
 
-    /// Get number of blocks
+    /// Get number of homes
     pub fn count(&self) -> usize {
-        self.blocks.len()
+        self.homes.len()
     }
 
     /// Check if empty
     pub fn is_empty(&self) -> bool {
-        self.blocks.is_empty()
+        self.homes.is_empty()
     }
 
-    /// Get all block IDs
-    pub fn block_ids(&self) -> Vec<&ChannelId> {
-        self.blocks.keys().collect()
+    /// Get all home IDs
+    pub fn home_ids(&self) -> Vec<&ChannelId> {
+        self.homes.keys().collect()
     }
 
-    /// Iterate over all blocks
-    pub fn iter(&self) -> impl Iterator<Item = (&ChannelId, &BlockState)> {
-        self.blocks.iter()
+    /// Iterate over all homes
+    pub fn iter(&self) -> impl Iterator<Item = (&ChannelId, &HomeState)> {
+        self.homes.iter()
     }
 
-    /// Iterate over all blocks mutably
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&ChannelId, &mut BlockState)> {
-        self.blocks.iter_mut()
+    /// Iterate over all homes mutably
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&ChannelId, &mut HomeState)> {
+        self.homes.iter_mut()
     }
 }

@@ -64,7 +64,7 @@ pub struct ChatFactKey {
 pub enum ChatFact {
     /// Channel created in a relational context
     ChannelCreated {
-        /// Relational context (block/group) where the channel exists
+        /// Relational context (home/group) where the channel exists
         context_id: ContextId,
         /// Unique channel identifier
         channel_id: ChannelId,

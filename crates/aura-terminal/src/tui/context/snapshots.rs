@@ -12,7 +12,7 @@ use async_lock::RwLock;
 use aura_app::AppCore;
 
 use crate::tui::hooks::{
-    BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
+    HomeSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
 
@@ -122,28 +122,19 @@ impl SnapshotHelper {
         }
     }
 
-    pub fn snapshot_block(&self) -> BlockSnapshot {
-        use aura_app::views::block::ResidentRole;
-        use aura_core::identifiers::ChannelId;
+    pub fn snapshot_home(&self) -> HomeSnapshot {
+        use aura_app::views::home::ResidentRole;
 
         if let Some(snapshot) = self.try_state_snapshot() {
-            let block = snapshot.blocks.current_block().cloned().or_else(|| {
-                // Check if block has default (empty) ID
-                if snapshot.block.id == ChannelId::default() {
-                    None
-                } else {
-                    Some(snapshot.block)
-                }
-            });
-
-            let my_role = block.as_ref().map(|b| b.my_role);
-            BlockSnapshot {
-                block,
+            let home_state = snapshot.homes.current_home().cloned();
+            let my_role = home_state.as_ref().map(|b| b.my_role);
+            HomeSnapshot {
+                home_state,
                 is_resident: my_role.is_some(),
                 is_steward: matches!(my_role, Some(ResidentRole::Admin | ResidentRole::Owner)),
             }
         } else {
-            BlockSnapshot::default()
+            HomeSnapshot::default()
         }
     }
 
@@ -159,12 +150,12 @@ impl SnapshotHelper {
 
     pub fn snapshot_neighborhood(&self) -> NeighborhoodSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
-            let home_id = snapshot.neighborhood.home_block_id.clone();
-            let home_name = snapshot.neighborhood.home_block_name.clone();
+            let home_id = snapshot.neighborhood.home_home_id.clone();
+            let home_name = snapshot.neighborhood.home_name.clone();
             let position = snapshot.neighborhood.position.unwrap_or_else(|| {
                 aura_app::views::neighborhood::TraversalPosition {
-                    current_block_id: home_id.clone(),
-                    current_block_name: home_name.clone(),
+                    current_home_id: home_id.clone(),
+                    current_home_name: home_name.clone(),
                     depth: 0,
                     path: Vec::new(),
                 }
@@ -172,7 +163,7 @@ impl SnapshotHelper {
             NeighborhoodSnapshot {
                 neighborhood_id: Some(home_id.to_string()),
                 neighborhood_name: Some(home_name),
-                blocks: snapshot.neighborhood.neighbors,
+                homes: snapshot.neighborhood.neighbors,
                 position,
             }
         } else {

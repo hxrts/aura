@@ -54,6 +54,26 @@ pub fn finalize_transcript(config: &DkgConfig, packages: Vec<DealerPackage>) -> 
     })
 }
 
+pub fn compute_transcript_hash_from_transcript(
+    transcript: &DkgTranscript,
+) -> Result<Hash32> {
+    let digest = TranscriptDigest {
+        epoch: transcript.epoch,
+        membership_hash: transcript.membership_hash,
+        cutoff: transcript.cutoff,
+        prestate_hash: transcript.prestate_hash,
+        operation_hash: transcript.operation_hash,
+        participants: &transcript.participants,
+        packages: &transcript.packages,
+    };
+    let encoded =
+        to_vec(&digest).map_err(|e| AuraError::serialization(e.to_string()))?;
+    let mut hasher = hash::hasher();
+    hasher.update(b"AURA_DKG_TRANSCRIPT");
+    hasher.update(&encoded);
+    Ok(Hash32(hasher.finalize()))
+}
+
 pub fn build_transcript_commit(
     context: ContextId,
     transcript: &DkgTranscript,

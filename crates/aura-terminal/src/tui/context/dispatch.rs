@@ -292,10 +292,10 @@ impl DispatchHelper {
     /// Best-effort authorization gate for Admin-level commands.
     ///
     /// This does not replace Biscuit enforcement (guard chain); it provides
-    /// immediate UX feedback and avoids attempting admin ops outside a block.
+    /// immediate UX feedback and avoids attempting admin ops outside a home.
     fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
         use crate::tui::effects::CommandAuthorizationLevel;
-        use aura_app::views::block::ResidentRole;
+        use aura_app::views::home::ResidentRole;
 
         let level = command.authorization_level();
         match level {
@@ -304,7 +304,7 @@ impl DispatchHelper {
             | CommandAuthorizationLevel::Sensitive => Ok(()),
             CommandAuthorizationLevel::Admin => {
                 let snapshot = self.snapshots.try_state_snapshot();
-                let role = snapshot.map(|s| s.blocks.current_block().unwrap_or(&s.block).my_role);
+                let role = snapshot.and_then(|s| s.homes.current_home().map(|h| h.my_role));
                 match role {
                     Some(ResidentRole::Admin | ResidentRole::Owner) => Ok(()),
                     Some(ResidentRole::Resident) => Err(format!(
@@ -312,7 +312,7 @@ impl DispatchHelper {
                         command_name(command)
                     )),
                     None => Err(format!(
-                        "Permission denied: {} requires a block context",
+                        "Permission denied: {} requires a home context",
                         command_name(command)
                     )),
                 }

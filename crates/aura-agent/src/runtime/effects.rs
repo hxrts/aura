@@ -37,7 +37,8 @@ use aura_guards::prelude::create_send_guard_op;
 use aura_guards::{GuardContextProvider, GuardOperation, JournalCoupler};
 use aura_journal::commitment_tree::state::TreeState as JournalTreeState;
 use aura_journal::extensibility::{DomainFact, FactRegistry};
-use aura_journal::fact::{Fact as TypedFact, FactContent, RelationalFact};
+use aura_journal::fact::{DkgTranscriptCommit, Fact as TypedFact, FactContent, RelationalFact};
+use aura_journal::protocol_facts::ProtocolRelationalFact;
 use aura_protocol::amp::{AmpJournalEffects, ChannelMembershipFact, ChannelParticipantEvent};
 use aura_protocol::effects::{
     AuraEffects, AuthorizationEffects, BloomDigest, ChoreographicEffects, ChoreographicRole,
@@ -452,6 +453,57 @@ impl AuraEffectSystem {
 
         facts.sort();
         Ok(facts)
+    }
+
+    /// Check whether a consensus-finalized DKG transcript commit exists for an epoch.
+    pub async fn has_dkg_transcript_commit(
+        &self,
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        epoch: u64,
+    ) -> Result<bool, AuraError> {
+        let facts = self.load_committed_facts(authority_id).await?;
+        for fact in facts {
+            let FactContent::Relational(RelationalFact::Protocol(
+                ProtocolRelationalFact::DkgTranscriptCommit(commit),
+            )) = &fact.content
+            else {
+                continue;
+            };
+
+            if commit.context == context_id && commit.epoch == epoch {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Return the latest DKG transcript commit for a context, if any.
+    pub async fn latest_dkg_transcript_commit(
+        &self,
+        authority_id: AuthorityId,
+        context_id: ContextId,
+    ) -> Result<Option<DkgTranscriptCommit>, AuraError> {
+        let facts = self.load_committed_facts(authority_id).await?;
+        let mut latest: Option<DkgTranscriptCommit> = None;
+        for fact in facts {
+            let FactContent::Relational(RelationalFact::Protocol(
+                ProtocolRelationalFact::DkgTranscriptCommit(commit),
+            )) = &fact.content
+            else {
+                continue;
+            };
+
+            if commit.context != context_id {
+                continue;
+            }
+
+            match &latest {
+                Some(existing) if existing.epoch >= commit.epoch => {}
+                _ => latest = Some(commit.clone()),
+            }
+        }
+        Ok(latest)
     }
 
     /// Default crypto seed for deterministic testing.
@@ -2520,21 +2572,62 @@ impl AmpChannelEffects for AuraEffectSystem {
         let state = aura_protocol::amp::get_channel_state(self, params.context, params.channel)
             .await
             .map_err(map_amp_err)?;
-        let committed = aura_journal::fact::CommittedChannelEpochBump {
+        let bump_nonce = self.random_uuid().await.as_bytes().to_vec();
+        let bump_id = Hash32(hash(&bump_nonce));
+        let proposal = aura_journal::fact::ProposedChannelEpochBump {
             context: params.context,
             channel: params.channel,
             parent_epoch: state.chan_epoch,
             new_epoch: state.chan_epoch + 1,
-            chosen_bump_id: Default::default(),
-            consensus_id: Default::default(),
-            transcript_ref: None,
+            bump_id,
+            reason: aura_journal::fact::ChannelBumpReason::Routine,
         };
 
-        self.insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
-            aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(committed),
-        ))
-        .await
-        .map_err(map_amp_err)?;
+        aura_protocol::amp::emit_proposed_bump(self, proposal.clone())
+            .await
+            .map_err(map_amp_err)?;
+
+        let policy = aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::AmpEpochBump);
+        if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized) {
+            let tree_state = self.get_current_state().await.map_err(map_amp_err)?;
+            let journal = self
+                .fetch_context_journal(params.context)
+                .await
+                .map_err(map_amp_err)?;
+            let mut hasher = aura_core::hash::hasher();
+            hasher.update(b"RELATIONAL_CONTEXT_FACTS");
+            hasher.update(params.context.as_bytes());
+            for fact in journal.facts.iter() {
+                let bytes = aura_core::util::serialization::to_vec(fact)
+                    .map_err(map_amp_err)?;
+                hasher.update(&bytes);
+            }
+            let context_commitment = Hash32(hasher.finalize());
+            let prestate = aura_core::Prestate::new(
+                vec![(self.authority_id, tree_state.root_commitment)],
+                context_commitment,
+            );
+            let consensus_params =
+                crate::runtime::consensus::build_consensus_params(self, self.authority_id, self)
+                    .await
+                    .map_err(map_amp_err)?;
+            let transcript_ref = self
+                .latest_dkg_transcript_commit(self.authority_id, params.context)
+                .await
+                .map_err(map_amp_err)?
+                .and_then(|commit| commit.blob_ref.or(Some(commit.transcript_hash)));
+
+            aura_protocol::amp::commit_bump_with_consensus(
+                self,
+                &prestate,
+                &proposal,
+                consensus_params.key_packages,
+                consensus_params.group_public_key,
+                transcript_ref,
+            )
+            .await
+            .map_err(map_amp_err)?;
+        }
 
         let policy = aura_journal::fact::ChannelPolicy {
             context: params.context,
@@ -2934,7 +3027,6 @@ impl AuraEffectSystem {
             threshold,
             total_participants,
             participants: participants.to_vec(),
-            guardian_ids: Vec::new(),
             agreement_mode,
         };
 
@@ -3021,9 +3113,6 @@ struct ThresholdMetadata {
     /// Participants (in protocol participant order)
     #[serde(default)]
     participants: Vec<aura_core::threshold::ParticipantIdentity>,
-    /// Legacy guardian IDs (for backward-compatible deserialization)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    guardian_ids: Vec<String>,
     /// Agreement mode (A1/A2/A3) for the stored epoch
     #[serde(default)]
     agreement_mode: aura_core::threshold::AgreementMode,
@@ -3031,15 +3120,7 @@ struct ThresholdMetadata {
 
 impl ThresholdMetadata {
     fn resolved_participants(&self) -> Vec<aura_core::threshold::ParticipantIdentity> {
-        if !self.participants.is_empty() {
-            return self.participants.clone();
-        }
-
-        self.guardian_ids
-            .iter()
-            .filter_map(|s| s.parse::<AuthorityId>().ok())
-            .map(aura_core::threshold::ParticipantIdentity::guardian)
-            .collect()
+        self.participants.clone()
     }
 }
 

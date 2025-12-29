@@ -10,6 +10,15 @@ Rendezvous does not establish global identity. All operations are scoped to a `C
 
 Rendezvous descriptor exchange can run in provisional (A1) or soft-safe (A2) modes to enable rapid connectivity under poor network conditions, but durable channel epochs and membership changes must be finalized via consensus (A3). Soft-safe flows should emit convergence and reversion facts so participants can reason about reversion risk while channels are warming.
 
+### 1.1 Secure‑Channel Lifecycle (A1/A2/A3)
+
+- **A1**: Provisional `Descriptor` / handshake facts allow immediate connectivity.
+- **A2**: Coordinator soft‑safe convergence certs indicate bounded divergence.
+- **A3**: `ChannelEstablished` is finalized by consensus and accompanied by a `CommitFact`.
+
+Rendezvous must treat A1/A2 outputs as provisional until A3 evidence is merged.
+See `docs/104_consensus.md` for commit evidence binding.
+
 ## 2. Architecture
 
 The rendezvous crate follows Aura's fact-based architecture:
@@ -207,23 +216,23 @@ let stale_peers = adapter.peers_needing_refresh(context_id, now_ms);
 Aura uses a progressive disclosure model for peer discovery. The `aura-social` crate provides `SocialTopology` which determines the appropriate discovery layer based on the caller's social relationships. The four layers in priority order:
 
 1. **Direct** (priority 0): Target is a known peer with existing relationship. Directly accessible with minimal cost.
-2. **Block** (priority 1): Target is unknown but reachable through block peers. Block peers can relay messages.
-3. **Neighborhood** (priority 2): Target is unknown but reachable through neighborhood traversal. Multiple hops across adjacent blocks.
+2. **Home** (priority 1): Target is unknown but reachable through home peers. Home peers can relay messages.
+3. **Neighborhood** (priority 2): Target is unknown but reachable through neighborhood traversal. Multiple hops across adjacent homes.
 4. **Rendezvous** (priority 3): No social presence - requires global flooding through rendezvous infrastructure.
 
 ```rust
 use aura_social::{DiscoveryLayer, SocialTopology};
 
-let topology = SocialTopology::new(local_authority, block, neighborhoods);
+let topology = SocialTopology::new(local_authority, home, neighborhoods);
 
 // Determine discovery strategy for target
 match topology.discovery_layer(&target) {
     DiscoveryLayer::Direct => {
         // Direct connection, minimal cost
     }
-    DiscoveryLayer::Block => {
-        // Relay through block peers
-        let relays = topology.block_peers();
+    DiscoveryLayer::Home => {
+        // Relay through home peers
+        let relays = topology.home_peers();
     }
     DiscoveryLayer::Neighborhood => {
         // Multi-hop through neighborhood

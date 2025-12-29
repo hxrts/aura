@@ -135,6 +135,9 @@ impl AuraAgent {
     /// Number of acceptances processed and number of ceremonies completed
     pub async fn process_ceremony_acceptances(&self) -> AgentResult<(usize, usize)> {
         use aura_core::effects::{ThresholdSigningEffects, TransportEffects};
+        use aura_core::hash;
+        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
+        use aura_core::ContextId;
         use aura_protocol::effects::TreeEffects;
 
         let ceremony_tracker = self.ceremony_tracker().await;
@@ -230,6 +233,40 @@ impl AuraAgent {
                     }
 
                     let new_epoch = ceremony_state.new_epoch;
+                    let policy = policy_for(CeremonyFlow::GuardianSetupRotation);
+                    if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
+                        let context_id =
+                            ContextId::new_from_entropy(hash::hash(&authority_id.to_bytes()));
+                        match effects
+                            .has_dkg_transcript_commit(authority_id, context_id, new_epoch)
+                            .await
+                        {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                let _ = ceremony_tracker
+                                    .mark_failed(
+                                        ceremony_id,
+                                        Some("Missing consensus DKG transcript".to_string()),
+                                    )
+                                    .await;
+                                continue;
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    ceremony_id = %ceremony_id,
+                                    error = %e,
+                                    "Failed to verify DKG transcript commit"
+                                );
+                                let _ = ceremony_tracker
+                                    .mark_failed(
+                                        ceremony_id,
+                                        Some(format!("Transcript check failed: {e}")),
+                                    )
+                                    .await;
+                                continue;
+                            }
+                        }
+                    }
                     if let Err(e) = effects.commit_key_rotation(&authority_id, new_epoch).await {
                         tracing::error!(
                             ceremony_id = %ceremony_id,
@@ -734,6 +771,40 @@ impl AuraAgent {
                     }
 
                     let new_epoch = ceremony_state.new_epoch;
+                    let policy = policy_for(CeremonyFlow::DeviceMfaRotation);
+                    if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
+                        let context_id =
+                            ContextId::new_from_entropy(hash::hash(&authority_id.to_bytes()));
+                        match effects
+                            .has_dkg_transcript_commit(authority_id, context_id, new_epoch)
+                            .await
+                        {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                let _ = ceremony_tracker
+                                    .mark_failed(
+                                        ceremony_id,
+                                        Some("Missing consensus DKG transcript".to_string()),
+                                    )
+                                    .await;
+                                continue;
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    ceremony_id = %ceremony_id,
+                                    error = %e,
+                                    "Failed to verify DKG transcript commit"
+                                );
+                                let _ = ceremony_tracker
+                                    .mark_failed(
+                                        ceremony_id,
+                                        Some(format!("Transcript check failed: {e}")),
+                                    )
+                                    .await;
+                                continue;
+                            }
+                        }
+                    }
                     if let Err(e) = effects.commit_key_rotation(&authority_id, new_epoch).await {
                         tracing::error!(
                             ceremony_id = %ceremony_id,
@@ -872,6 +943,139 @@ impl AuraAgent {
 
                     if ceremony_state.is_committed {
                         continue;
+                    }
+
+                    let (flow, requires_dkg) = match ceremony_state.kind {
+                        aura_app::runtime_bridge::CeremonyKind::DeviceRotation => (
+                            aura_core::threshold::CeremonyFlow::DeviceMfaRotation,
+                            true,
+                        ),
+                        aura_app::runtime_bridge::CeremonyKind::DeviceRemoval => (
+                            aura_core::threshold::CeremonyFlow::DeviceRemoval,
+                            true,
+                        ),
+                        _ => (aura_core::threshold::CeremonyFlow::DeviceEnrollment, false),
+                    };
+
+                    let policy = aura_core::threshold::policy_for(flow);
+                    if requires_dkg
+                        && policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
+                    {
+                        let context_id = aura_core::identifiers::ContextId::new_from_entropy(
+                            aura_core::hash::hash(&authority_id.to_bytes()),
+                        );
+                        let has_commit = effects
+                            .has_dkg_transcript_commit(authority_id, context_id, ceremony_state.new_epoch)
+                            .await
+                            .map_err(|e| {
+                                AgentError::effects(format!(
+                                    "Failed to verify DKG transcript commit: {e}"
+                                ))
+                            })?;
+                        if !has_commit {
+                            tracing::error!(
+                                ceremony_id = %ceremony_id,
+                                "Missing consensus DKG transcript commit"
+                            );
+                            let _ = ceremony_tracker
+                                .mark_failed(
+                                    ceremony_id,
+                                    Some("Missing consensus DKG transcript".to_string()),
+                                )
+                                .await;
+                            continue;
+                        }
+                    }
+
+                    if ceremony_state.kind == aura_app::runtime_bridge::CeremonyKind::DeviceRemoval
+                    {
+                        let Some(target_device_id) = ceremony_state.enrollment_device_id else {
+                            tracing::error!(
+                                ceremony_id = %ceremony_id,
+                                "Missing device id for device removal ceremony"
+                            );
+                            let _ = ceremony_tracker
+                                .mark_failed(
+                                    ceremony_id,
+                                    Some("Missing device id for removal".to_string()),
+                                )
+                                .await;
+                            continue;
+                        };
+
+                        let tree_state = match effects.get_current_state().await {
+                            Ok(state) => state,
+                            Err(e) => {
+                                tracing::error!(
+                                    ceremony_id = %ceremony_id,
+                                    error = %e,
+                                    "Failed to read tree state for device removal"
+                                );
+                                let _ = ceremony_tracker
+                                    .mark_failed(
+                                        ceremony_id,
+                                        Some(format!("Failed to read tree state: {e}")),
+                                    )
+                                    .await;
+                                continue;
+                            }
+                        };
+
+                        let leaf_to_remove = tree_state.leaves.iter().find_map(|(leaf_id, leaf)| {
+                            if leaf.role == aura_core::tree::LeafRole::Device
+                                && leaf.device_id == target_device_id
+                            {
+                                Some(*leaf_id)
+                            } else {
+                                None
+                            }
+                        });
+
+                        let Some(leaf_to_remove) = leaf_to_remove else {
+                            tracing::error!(
+                                ceremony_id = %ceremony_id,
+                                device_id = %target_device_id,
+                                "Device removal target not found in commitment tree"
+                            );
+                            let _ = ceremony_tracker
+                                .mark_failed(
+                                    ceremony_id,
+                                    Some("Device not found in commitment tree".to_string()),
+                                )
+                                .await;
+                            continue;
+                        };
+
+                        let op = aura_core::tree::TreeOp {
+                            parent_epoch: tree_state.epoch,
+                            parent_commitment: tree_state.root_commitment,
+                            op: aura_core::tree::TreeOpKind::RemoveLeaf {
+                                leaf: leaf_to_remove,
+                                reason: 0,
+                            },
+                            version: 1,
+                        };
+
+                        let attested = aura_core::tree::AttestedOp {
+                            op,
+                            agg_sig: Vec::new(),
+                            signer_count: 1,
+                        };
+
+                        if let Err(e) = effects.apply_attested_op(attested).await {
+                            tracing::error!(
+                                ceremony_id = %ceremony_id,
+                                error = %e,
+                                "Failed to apply tree op for device removal"
+                            );
+                            let _ = ceremony_tracker
+                                .mark_failed(
+                                    ceremony_id,
+                                    Some(format!("Failed to apply tree op: {e}")),
+                                )
+                                .await;
+                            continue;
+                        }
                     }
 
                     let new_epoch = ceremony_state.new_epoch;

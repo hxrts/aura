@@ -463,6 +463,63 @@ impl JournalSyncProtocol {
             failed_peers: failed,
         }
     }
+
+    /// Prune peer state entries to avoid unbounded growth.
+    ///
+    /// Removes entries older than `stale_ms` (for Synced/Failed).
+    /// If still above `max_peers`, evicts oldest timestamped entries first.
+    pub fn prune_peer_states(&mut self, now_ms: u64, stale_ms: u64, max_peers: usize) -> usize {
+        let before = self.peer_states.len();
+
+        // First remove stale synced/failed entries.
+        self.peer_states.retain(|_, state| {
+            let ts = match state {
+                SyncState::Synced { last_sync, .. } => Some(last_sync.ts_ms),
+                SyncState::Failed { failed_at, .. } => Some(failed_at.ts_ms),
+                _ => None,
+            };
+            match ts {
+                Some(t) => now_ms.saturating_sub(t) <= stale_ms,
+                None => true,
+            }
+        });
+
+        // If still above cap, evict oldest timestamped entries first.
+        if self.peer_states.len() > max_peers {
+            let mut by_time: Vec<(DeviceId, u64)> = self
+                .peer_states
+                .iter()
+                .filter_map(|(id, state)| {
+                    match state {
+                        SyncState::Synced { last_sync, .. } => Some((*id, last_sync.ts_ms)),
+                        SyncState::Failed { failed_at, .. } => Some((*id, failed_at.ts_ms)),
+                        _ => None,
+                    }
+                })
+                .collect();
+            by_time.sort_by_key(|(_, ts)| *ts);
+            for (id, _) in by_time {
+                if self.peer_states.len() <= max_peers {
+                    break;
+                }
+                self.peer_states.remove(&id);
+            }
+        }
+
+        // If still above cap, evict remaining entries arbitrarily.
+        if self.peer_states.len() > max_peers {
+            let mut ids: Vec<DeviceId> = self.peer_states.keys().copied().collect();
+            while self.peer_states.len() > max_peers {
+                if let Some(id) = ids.pop() {
+                    self.peer_states.remove(&id);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        before.saturating_sub(self.peer_states.len())
+    }
 }
 
 impl Default for JournalSyncProtocol {

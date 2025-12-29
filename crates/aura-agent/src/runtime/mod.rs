@@ -34,6 +34,7 @@ pub mod propagation;
 
 // Runtime services
 pub mod services;
+pub mod consensus;
 
 // Effect system implementation
 pub mod effects;

@@ -1,5 +1,6 @@
 //! Transcript storage interface for DKG payloads.
 
+use super::transcript::compute_transcript_hash_from_transcript;
 use super::types::DkgTranscript;
 use async_trait::async_trait;
 use aura_core::{
@@ -42,10 +43,17 @@ impl DkgTranscriptStore for MemoryTranscriptStore {
             .transcripts
             .lock()
             .map_err(|_| aura_core::AuraError::invalid("transcript store lock poisoned"))?;
-        guard
+        let transcript = guard
             .get(reference)
             .cloned()
-            .ok_or_else(|| aura_core::AuraError::not_found("transcript not found"))
+            .ok_or_else(|| aura_core::AuraError::not_found("transcript not found"))?;
+        let computed = compute_transcript_hash_from_transcript(&transcript)?;
+        if computed != transcript.transcript_hash {
+            return Err(aura_core::AuraError::invalid(
+                "transcript hash mismatch",
+            ));
+        }
+        Ok(transcript)
     }
 }
 
@@ -96,6 +104,10 @@ impl<S: StorageEffects + ?Sized> DkgTranscriptStore for StorageTranscriptStore<S
             .ok_or_else(|| AuraError::not_found("transcript not found"))?;
         let transcript =
             from_slice(&blob).map_err(|e| AuraError::serialization(e.to_string()))?;
+        let computed = compute_transcript_hash_from_transcript(&transcript)?;
+        if computed != transcript.transcript_hash {
+            return Err(AuraError::invalid("transcript hash mismatch"));
+        }
         Ok(transcript)
     }
 }

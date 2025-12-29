@@ -43,7 +43,7 @@ use crate::tui::tasks::UiTaskRegistry;
 use crate::tui::types::ChannelMode;
 
 use crate::tui::hooks::{
-    BlockSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
+    HomeSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
 
@@ -382,7 +382,7 @@ impl IoContext {
             .enable_all()
             .build()
             .expect("Failed to build tokio runtime for IoContext::with_defaults")
-            .block_on(InitializedAppCore::new(app_core))
+            .home_on(InitializedAppCore::new(app_core))
             .expect("Failed to init signals for IoContext::with_defaults");
 
         let mode = TuiMode::Production;
@@ -583,8 +583,8 @@ impl IoContext {
         self.snapshots.snapshot_neighborhood()
     }
 
-    pub fn snapshot_block(&self) -> BlockSnapshot {
-        self.snapshots.snapshot_block()
+    pub fn snapshot_home(&self) -> HomeSnapshot {
+        self.snapshots.snapshot_home()
     }
 
     pub fn snapshot_invitations(&self) -> InvitationsSnapshot {
@@ -978,16 +978,16 @@ impl IoContext {
     // Capability checking (best-effort, snapshot-based)
     // =========================================================================
 
-    pub fn get_current_role(&self) -> Option<aura_app::views::block::ResidentRole> {
-        // Prefer multi-block state if available; fall back to legacy singular.
+    pub fn get_current_role(&self) -> Option<aura_app::views::home::ResidentRole> {
+        // Prefer multi-home state if available; fall back to legacy singular.
         let snapshot = self.snapshots.try_state_snapshot()?;
-        let block = snapshot.blocks.current_block().unwrap_or(&snapshot.block);
-        Some(block.my_role)
+        let home_state = snapshot.homes.current_home().unwrap_or(&snapshot.home_state);
+        Some(home_state.my_role)
     }
 
     pub fn has_capability(&self, capability: &crate::tui::commands::CommandCapability) -> bool {
         use crate::tui::commands::CommandCapability;
-        use aura_app::views::block::ResidentRole;
+        use aura_app::views::home::ResidentRole;
 
         if matches!(capability, CommandCapability::None) {
             return true;
@@ -1029,7 +1029,7 @@ impl IoContext {
     /// remains the source of truth.
     pub fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
         use crate::tui::effects::CommandAuthorizationLevel;
-        use aura_app::views::block::ResidentRole;
+        use aura_app::views::home::ResidentRole;
 
         let level = command.authorization_level();
         match level {
@@ -1045,7 +1045,7 @@ impl IoContext {
                         command_name(command)
                     )),
                     None => Err(format!(
-                        "Permission denied: {} requires a block context",
+                        "Permission denied: {} requires a home context",
                         command_name(command)
                     )),
                 }

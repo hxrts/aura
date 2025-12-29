@@ -801,6 +801,23 @@ impl TryFrom<PublicKeyPackage> for frost_ed25519::keys::PublicKeyPackage {
     }
 }
 
+/// Deserialize a FROST public key package from bytes.
+pub fn public_key_package_from_bytes(bytes: &[u8]) -> Result<PublicKeyPackage, String> {
+    let frost_pkg =
+        frost_ed25519::keys::PublicKeyPackage::deserialize(bytes).map_err(|e| {
+            format!("Failed to deserialize public key package: {}", e)
+        })?;
+    Ok(PublicKeyPackage::from(frost_pkg))
+}
+
+/// Deserialize a FROST key package from bytes and convert to an Aura signing share.
+pub fn share_from_key_package_bytes(bytes: &[u8]) -> Result<Share, String> {
+    let frost_pkg = frost_ed25519::keys::KeyPackage::deserialize(bytes).map_err(|e| {
+        format!("Failed to deserialize key package: {}", e)
+    })?;
+    Ok(Share::from(frost_pkg))
+}
+
 impl From<frost_ed25519::keys::KeyPackage> for Share {
     fn from(frost_key_pkg: frost_ed25519::keys::KeyPackage) -> Self {
         let identifier = frost_key_pkg.identifier();

@@ -513,13 +513,13 @@ Indexes update on fact commit. Performance target is less than 10ms for 10k fact
 
 ### 9.1 Three-Tier Structure
 
-Aura's social organization uses a digital urban metaphor with three tiers. Messages are communication contexts. Blocks are semi-public communities. Neighborhoods are collections of blocks connected via adjacency.
+Aura's social organization uses a digital urban metaphor with three tiers. Messages are communication contexts. Homes are semi-public communities. Neighborhoods are collections of homes connected via adjacency.
 
-Direct messages are private relational contexts. Block messages are semi-public messaging for block residents with historical sync. Blocks have a 10 MB storage allocation. Neighborhoods receive 1 MB donated per member block.
+Direct messages are private relational contexts. Home messages are semi-public messaging for home residents with historical sync. Homes have a 10 MB storage allocation. Neighborhoods receive 1 MB donated per member home.
 
 ### 9.2 Position and Traversal
 
-Traversal works like walking through a city. Position tracks neighborhood, block, traversal depth, capabilities, and entry time. Movement requires Biscuit capability authorization and adjacency edge existence.
+Traversal works like walking through a city. Position tracks neighborhood, home, traversal depth, capabilities, and entry time. Movement requires Biscuit capability authorization and adjacency edge existence.
 
 ```rust
 pub enum TraversalDepth {
@@ -533,9 +533,9 @@ Street depth allows seeing frontage. Frontage depth allows limited interaction. 
 
 ### 9.3 Storage Constraints
 
-Blocks have fixed 10 MB total size. Resident storage is 200 KB each with maximum 8 residents. Neighborhood donation is 1 MB each with maximum 4 neighborhoods. These constraints create natural scarcity and meaningful trade-offs.
+Homes have fixed 10 MB total size. Resident storage is 200 KB each with maximum 8 residents. Neighborhood donation is 1 MB each with maximum 4 neighborhoods. These constraints create natural scarcity and meaningful trade-offs.
 
-Storage constraints are enforced via the flow budget system. Spent counters are persisted as journal facts. Limits are derived at runtime from block policy and Biscuit capabilities.
+Storage constraints are enforced via the flow budget system. Spent counters are persisted as journal facts. Limits are derived at runtime from home policy and Biscuit capabilities.
 
 ## 10. Terminal User Interface
 
@@ -625,7 +625,7 @@ Operations where partial state is dangerous. These block until consensus complet
 - Add contact / Create group (establishes cryptographic context)
 - Add member to group (changes group encryption keys)
 
-See `docs/117_operation_categories.md` for the full category framework and `docs/118_key_rotation_ceremonies.md` for the shared contract used by key rotation and membership-change ceremonies (guardians, devices, groups, blocks).
+See `docs/117_operation_categories.md` for the full category framework and `docs/118_key_rotation_ceremonies.md` for the shared contract used by key rotation and membership-change ceremonies (guardians, devices, groups, homes).
 
 ### 11.4 Key Insight
 
@@ -648,6 +648,6 @@ See [Consensus - Operation Categories](104_consensus.md#17-operation-categories)
 
 Core documentation covers foundational concepts and formal models. [Theoretical Model](002_theoretical_model.md) provides mathematical foundations. [Privacy and Information Flow](003_information_flow_contract.md) documents the privacy framework. [Distributed Systems Contract](004_distributed_systems_contract.md) specifies safety and liveness guarantees. [System Invariants](005_system_invariants.md) indexes critical properties that must always hold.
 
-System documentation covers major components. [Authority and Identity](100_authority_and_identity.md) describes the authority model. [Journal System](102_journal.md) documents fact storage and reduction. [Relational Contexts](103_relational_contexts.md) covers cross-authority relationships. [Consensus](104_consensus.md) describes the agreement protocol. [Database Architecture](113_database.md) covers query and indexing systems. [Social Architecture](114_social_architecture.md) defines blocks and neighborhoods.
+System documentation covers major components. [Authority and Identity](100_authority_and_identity.md) describes the authority model. [Journal System](102_journal.md) documents fact storage and reduction. [Relational Contexts](103_relational_contexts.md) covers cross-authority relationships. [Consensus](104_consensus.md) describes the agreement protocol. [Database Architecture](113_database.md) covers query and indexing systems. [Social Architecture](114_social_architecture.md) defines homes and neighborhoods.
 
 Implementation documentation covers practical patterns. [Effect System and Runtime](106_effect_system_and_runtime.md) details effect implementation. [MPST and Choreography](107_mpst_and_choreography.md) covers protocol design. [Authorization](109_authorization.md) describes capability evaluation. [CLI and Terminal User Interface](115_cli_tui.md) specifies the CLI and TUI architecture. [Project Structure](999_project_structure.md) provides comprehensive crate organization.

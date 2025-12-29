@@ -518,7 +518,7 @@ impl From<AppInvitationType> for InvitationType {
         match t {
             AppInvitationType::Guardian => Self::Guardian,
             AppInvitationType::Chat => Self::Channel,
-            AppInvitationType::Block => Self::Contact, // Block invitations → Contact in TUI
+            AppInvitationType::Home => Self::Contact, // Home invitations → Contact in TUI
         }
     }
 }
@@ -1166,10 +1166,10 @@ impl Contact {
 }
 
 // =============================================================================
-// Block Types
+// Home Types
 // =============================================================================
 
-/// A resident in a block
+/// A resident in a home
 #[derive(Clone, Debug, Default)]
 pub struct Resident {
     pub id: String,
@@ -1198,8 +1198,8 @@ impl Resident {
     }
 }
 
-impl From<&aura_app::views::block::Resident> for Resident {
-    fn from(r: &aura_app::views::block::Resident) -> Self {
+impl From<&aura_app::views::home::Resident> for Resident {
+    fn from(r: &aura_app::views::home::Resident) -> Self {
         Self {
             id: r.id.to_string(),
             name: r.name.clone(),
@@ -1209,16 +1209,16 @@ impl From<&aura_app::views::block::Resident> for Resident {
     }
 }
 
-/// Block storage budget
+/// Home storage budget
 #[derive(Clone, Debug, Default)]
-pub struct BlockBudget {
+pub struct HomeBudget {
     pub total: u64,
     pub used: u64,
     pub resident_count: u8,
     pub max_residents: u8,
 }
 
-impl BlockBudget {
+impl HomeBudget {
     pub fn usage_percent(&self) -> f32 {
         if self.total == 0 {
             0.0
@@ -1228,8 +1228,8 @@ impl BlockBudget {
     }
 }
 
-impl From<&aura_app::BlockFlowBudget> for BlockBudget {
-    fn from(budget: &aura_app::BlockFlowBudget) -> Self {
+impl From<&aura_app::HomeFlowBudget> for HomeBudget {
+    fn from(budget: &aura_app::HomeFlowBudget) -> Self {
         Self {
             total: budget.total_allocation(),
             used: budget.total_used(),
@@ -1243,7 +1243,7 @@ impl From<&aura_app::BlockFlowBudget> for BlockBudget {
 // Neighborhood Types
 // =============================================================================
 
-/// Block visibility/access level
+/// Home visibility/access level
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TraversalDepth {
     #[default]
@@ -1278,9 +1278,9 @@ impl TraversalDepth {
     }
 }
 
-/// Block summary for neighborhood view
+/// Home summary for neighborhood view
 #[derive(Clone, Debug, Default)]
-pub struct BlockSummary {
+pub struct HomeSummary {
     pub id: String,
     pub name: Option<String>,
     pub resident_count: u8,
@@ -1289,7 +1289,7 @@ pub struct BlockSummary {
     pub can_enter: bool,
 }
 
-impl BlockSummary {
+impl HomeSummary {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),

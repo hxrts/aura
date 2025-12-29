@@ -277,6 +277,46 @@ impl ReplicationCoordinator {
         }
     }
 
+    /// Evict stale storage nodes and clean up chunk placements that reference them.
+    pub fn evict_stale_nodes(&mut self, now_ms: u64, stale_ms: u64) -> usize {
+        let before = self.storage_nodes.len();
+        let mut stale_ids = Vec::new();
+        for (id, node) in &self.storage_nodes {
+            if now_ms.saturating_sub(node.last_seen) > stale_ms {
+                stale_ids.push(*id);
+            }
+        }
+        for id in &stale_ids {
+            self.storage_nodes.remove(id);
+        }
+        if !stale_ids.is_empty() {
+            self.chunk_placement.retain(|_, nodes| {
+                for id in &stale_ids {
+                    nodes.remove(id);
+                }
+                !nodes.is_empty()
+            });
+        }
+        before.saturating_sub(self.storage_nodes.len())
+    }
+
+    /// Prune chunk placement tracking to a maximum number of entries.
+    pub fn prune_chunk_placements(&mut self, max_chunks: usize) -> usize {
+        let before = self.chunk_placement.len();
+        if self.chunk_placement.len() <= max_chunks {
+            return 0;
+        }
+        let mut keys: Vec<ChunkId> = self.chunk_placement.keys().cloned().collect();
+        while self.chunk_placement.len() > max_chunks {
+            if let Some(id) = keys.pop() {
+                self.chunk_placement.remove(&id);
+            } else {
+                break;
+            }
+        }
+        before.saturating_sub(self.chunk_placement.len())
+    }
+
     /// Get coordinator information
     pub fn info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();

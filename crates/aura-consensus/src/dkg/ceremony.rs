@@ -6,7 +6,10 @@ use super::{
     types::{DealerPackage, DkgConfig, DkgTranscript},
     verifier::verify_dealer_package,
 };
-use aura_core::{AuraError, ContextId, Result};
+use crate::protocol::{run_consensus, ConsensusParams};
+use crate::types::CommitFact;
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
+use aura_core::{AuraError, ContextId, Prestate, Result};
 use aura_journal::fact::DkgTranscriptCommit;
 use std::collections::BTreeSet;
 
@@ -28,6 +31,23 @@ pub async fn persist_transcript<S: DkgTranscriptStore + ?Sized>(
 ) -> Result<DkgTranscriptCommit> {
     let blob_ref = store.put(transcript).await?;
     Ok(build_transcript_commit(context, transcript, blob_ref))
+}
+
+/// Run a consensus-backed DKG transcript finalization.
+pub async fn run_consensus_dkg<S: DkgTranscriptStore + ?Sized>(
+    prestate: &Prestate,
+    context: ContextId,
+    config: &DkgConfig,
+    packages: Vec<DealerPackage>,
+    store: &S,
+    params: ConsensusParams,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
+) -> Result<(DkgTranscriptCommit, CommitFact)> {
+    let transcript = run_dkg_ceremony(config, packages)?;
+    let commit = persist_transcript(store, context, &transcript).await?;
+    let consensus_commit = run_consensus(prestate, &commit, params, random, time).await?;
+    Ok((commit, consensus_commit))
 }
 
 fn validate_config(config: &DkgConfig) -> Result<()> {

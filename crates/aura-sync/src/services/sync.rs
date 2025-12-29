@@ -38,6 +38,7 @@ use crate::core::{sync_session_error, MetricsCollector, SessionManager, SyncResu
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol, SyncProtocolEffects};
 use aura_core::effects::{PhysicalTimeEffects, TimeError};
+use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, DeviceId};
 
 fn time_error_to_aura(err: TimeError) -> AuraError {
@@ -107,6 +108,13 @@ pub struct SyncServiceHealth {
 
     /// Service uptime
     pub uptime: Duration,
+}
+
+/// Maintenance cleanup statistics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SyncMaintenanceStats {
+    pub sessions_removed: usize,
+    pub peer_states_pruned: usize,
 }
 
 // =============================================================================
@@ -252,6 +260,31 @@ impl SyncService {
 
         tracing::info!("Completed journal sync with {} peers", sync_results.len());
         Ok(())
+    }
+
+    /// Run maintenance cleanup for long-lived state.
+    pub async fn maintenance_cleanup(
+        &self,
+        now_ms: u64,
+        peer_state_ttl_ms: u64,
+        max_peer_states: usize,
+    ) -> SyncResult<SyncMaintenanceStats> {
+        let now = PhysicalTime {
+            ts_ms: now_ms,
+            uncertainty: None,
+        };
+
+        let mut session_manager = self.session_manager.write();
+        let sessions_removed = session_manager.cleanup_stale_sessions(&now)?;
+
+        let mut journal_sync = self.journal_sync.write();
+        let peer_states_pruned =
+            journal_sync.prune_peer_states(now_ms, peer_state_ttl_ms, max_peer_states);
+
+        Ok(SyncMaintenanceStats {
+            sessions_removed,
+            peer_states_pruned,
+        })
     }
 
     /// Discover and sync with available peers

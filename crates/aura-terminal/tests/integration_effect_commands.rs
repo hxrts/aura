@@ -886,47 +886,47 @@ async fn test_send_message_propagates_to_chat_signal() {
 // ============================================================================
 
 // ============================================================================
-// Social Graph Flow Tests - Contact-Block Relationships
+// Social Graph Flow Tests - Contact-Home Relationships
 // ============================================================================
 
-/// Property: CreateBlock creates a new block and updates BLOCK_SIGNAL
+/// Property: CreateHome creates a new home and updates HOMES_SIGNAL
 #[tokio::test]
-async fn test_create_block_propagates_to_block_signal() {
-    use aura_app::signal_defs::BLOCK_SIGNAL;
+async fn test_create_home_propagates_to_block_signal() {
+    use aura_app::signal_defs::HOMES_SIGNAL;
 
-    println!("\n=== CreateBlock → BLOCK_SIGNAL Propagation Test ===\n");
+    println!("\n=== CreateHome → HOMES_SIGNAL Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("create-block").await;
+    let (ctx, app_core) = setup_test_env("create-home").await;
 
-    // Get initial block state
-    let initial_block = {
+    // Get initial home state
+    let initial_home = {
         let core = app_core.read().await;
-        core.read(&*BLOCK_SIGNAL).await.unwrap()
+        core.read(&*HOMES_SIGNAL).await.unwrap()
     };
-    println!("  Initial block id: {:?}", initial_block.id);
+    println!("  Initial home id: {:?}", initial_block.id);
 
-    // Create a new block
+    // Create a new home
     let result = ctx
-        .dispatch(EffectCommand::CreateBlock {
-            name: Some("My Test Block".to_string()),
+        .dispatch(EffectCommand::CreateHome {
+            name: Some("My Test Home".to_string()),
         })
         .await;
 
-    println!("  CreateBlock result: {:?}", result);
+    println!("  CreateHome result: {:?}", result);
 
-    // Check BLOCK_SIGNAL was updated
-    let final_block = {
+    // Check HOMES_SIGNAL was updated
+    let final_home = {
         let core = app_core.read().await;
-        core.read(&*BLOCK_SIGNAL).await.unwrap()
+        core.read(&*HOMES_SIGNAL).await.unwrap()
     };
 
-    println!("  Final block id: {:?}", final_block.id);
-    println!("  Final block name: {:?}", final_block.name);
+    println!("  Final home id: {:?}", final_block.id);
+    println!("  Final home name: {:?}", final_home_state.name);
 
-    // If command succeeded, verify block was created
+    // If command succeeded, verify home was created
     if result.is_ok() {
-        // Block should have a non-empty id or name after creation
-        println!("  CreateBlock succeeded - block state updated");
+        // Home should have a non-empty id or name after creation
+        println!("  CreateHome succeeded - home state updated");
     } else {
         println!(
             "  Note: Command failed (may need authority context): {:?}",
@@ -934,18 +934,18 @@ async fn test_create_block_propagates_to_block_signal() {
         );
     }
 
-    cleanup_test_dir("create-block");
+    cleanup_test_dir("create-home");
     println!("\n=== Test PASSED ===\n");
 }
 
-/// Property: SendBlockInvitation sends invitation to contact for block membership
+/// Property: SendHomeInvitation sends invitation to contact for home membership
 #[tokio::test]
 async fn test_send_block_invitation_propagates_to_signals() {
-    use aura_app::signal_defs::BLOCK_SIGNAL;
+    use aura_app::signal_defs::HOMES_SIGNAL;
 
-    println!("\n=== SendBlockInvitation → BLOCK_SIGNAL + CONTACTS_SIGNAL Test ===\n");
+    println!("\n=== SendHomeInvitation → HOMES_SIGNAL + CONTACTS_SIGNAL Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("block-invite").await;
+    let (ctx, app_core) = setup_test_env("home-invite").await;
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // First import Alice as a contact
@@ -966,49 +966,49 @@ async fn test_send_block_invitation_propagates_to_signals() {
     };
     println!("  Alice contact ID: {}", alice_id);
 
-    // Create a block first (if supported)
-    let block_result = ctx
-        .dispatch(EffectCommand::CreateBlock {
-            name: Some("Social Block".to_string()),
+    // Create a home first (if supported)
+    let home_result = ctx
+        .dispatch(EffectCommand::CreateHome {
+            name: Some("Social Home".to_string()),
         })
         .await;
-    println!("  CreateBlock result: {:?}", block_result);
+    println!("  CreateHome result: {:?}", home_result);
 
-    // Now try to send block invitation to Alice
+    // Now try to send home invitation to Alice
     let result = ctx
-        .dispatch(EffectCommand::SendBlockInvitation {
+        .dispatch(EffectCommand::SendHomeInvitation {
             contact_id: alice_id.to_string(),
         })
         .await;
 
-    println!("  SendBlockInvitation result: {:?}", result);
+    println!("  SendHomeInvitation result: {:?}", result);
 
-    // Check BLOCK_SIGNAL for invited contacts
-    let block_state = {
+    // Check HOMES_SIGNAL for invited contacts
+    let home_state = {
         let core = app_core.read().await;
-        core.read(&*BLOCK_SIGNAL).await.unwrap()
+        core.read(&*HOMES_SIGNAL).await.unwrap()
     };
-    println!("  Block state: {:?}", block_state);
+    println!("  Home state: {:?}", home_state);
 
     // The test verifies the command path exists and signals update
-    // Success depends on full block/invitation infrastructure
+    // Success depends on full home/invitation infrastructure
     if result.is_ok() {
-        println!("  SendBlockInvitation succeeded - signals should be updated");
+        println!("  SendHomeInvitation succeeded - signals should be updated");
     } else {
         println!(
-            "  Note: Command failed (expected without full block context): {:?}",
+            "  Note: Command failed (expected without full home context): {:?}",
             result
         );
     }
 
-    cleanup_test_dir("block-invite");
+    cleanup_test_dir("home-invite");
     println!("\n=== Test PASSED ===\n");
 }
 
-/// Property: Full Social Graph flow - Import contact, create block, update nickname
+/// Property: Full Social Graph flow - Import contact, create home, update nickname
 #[tokio::test]
 async fn test_social_graph_full_flow() {
-    use aura_app::signal_defs::BLOCK_SIGNAL;
+    use aura_app::signal_defs::HOMES_SIGNAL;
 
     println!("\n=== Full Social Graph Flow Test ===\n");
 
@@ -1062,23 +1062,23 @@ async fn test_social_graph_full_flow() {
         }
     }
 
-    // Step 3: Create a block (for social graph organization)
-    println!("Step 3: Creating block...");
-    let block_result = ctx
-        .dispatch(EffectCommand::CreateBlock {
+    // Step 3: Create a home (for social graph organization)
+    println!("Step 3: Creating home...");
+    let home_result = ctx
+        .dispatch(EffectCommand::CreateHome {
             name: Some("Friends".to_string()),
         })
         .await;
-    println!("  CreateBlock result: {:?}", block_result);
+    println!("  CreateHome result: {:?}", home_result);
 
-    // Verify block state
-    let block_state = {
+    // Verify home state
+    let home_state = {
         let core = app_core.read().await;
-        core.read(&*BLOCK_SIGNAL).await.unwrap()
+        core.read(&*HOMES_SIGNAL).await.unwrap()
     };
     println!(
-        "  Block state after creation: id={:?}, name={:?}",
-        block_state.id, block_state.name
+        "  Home state after creation: id={:?}, name={:?}",
+        home_state.id, home_state.name
     );
 
     // Step 4: Verify all signals are consistent
@@ -1117,8 +1117,8 @@ async fn test_command_coverage_documentation() {
         ("DeclineInvitation", "INVITATIONS_SIGNAL", true),
         ("UpdateContactNickname", "CONTACTS_SIGNAL", true),
         ("ToggleContactGuardian", "CONTACTS_SIGNAL+RECOVERY", true),
-        ("CreateBlock", "BLOCK_SIGNAL", true),
-        ("SendBlockInvitation", "BLOCK+CONTACTS", true),
+        ("CreateHome", "HOMES_SIGNAL", true),
+        ("SendHomeInvitation", "HOME+CONTACTS", true),
     ];
 
     println!("| Command              | Signal             | Has Test |");

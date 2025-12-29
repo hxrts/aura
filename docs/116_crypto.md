@@ -118,6 +118,26 @@ The following direct imports are allowed in Layer 3:
 - `frost_ed25519`
 - `chacha20poly1305`
 - `aes_gcm`
+
+## 2.3 Threshold Lifecycle (K1/K2/K3) and Transcript Binding
+
+Aura separates **key generation** from **agreement/finality**:
+
+- **K1**: Single‑signer (Ed25519) — no DKG.
+- **K2**: Dealer‑based DKG — trusted coordinator produces dealer packages.
+- **K3**: Consensus‑finalized DKG — BFT‑DKG transcript finalized by consensus.
+
+**Transcript hashing**
+- All DKG transcripts are hashed using **canonical DAG‑CBOR** encoding.
+- `DkgTranscriptCommit` binds `transcript_hash`, `prestate_hash`, and `operation_hash`.
+
+**Dealer packages (K2)**
+- Deterministic dealer packages are acceptable in trusted settings.
+- Dealer packages must include encrypted shares for every participant.
+
+**BFT‑DKG (K3)**
+- A transcript is only usable once **consensus finalizes** the commit fact.
+- All K3 ceremonies must reference the finalized transcript (hash or blob ref).
 - `getrandom`
 - `rand_core::OsRng`
 - `rand_chacha`

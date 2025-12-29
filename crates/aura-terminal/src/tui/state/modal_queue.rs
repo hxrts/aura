@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use crate::tui::screens::Screen;
 
 use super::views::{
-    AccountSetupModalState, AddDeviceModalState, BlockCreateModalState, ChannelInfoModalState,
+    AccountSetupModalState, AddDeviceModalState, HomeCreateModalState, ChannelInfoModalState,
     ConfirmRemoveModalState, CreateChannelModalState, CreateInvitationModalState,
     DeviceEnrollmentCeremonyModalState, DisplayNameModalState, GuardianSetupModalState,
     ImportInvitationModalState, InvitationCodeModalState, NicknameModalState, TopicModalState,
@@ -112,8 +112,8 @@ pub enum QueuedModal {
     // ========================================================================
     // Neighborhood Screen Modals
     // ========================================================================
-    /// Create a new block
-    NeighborhoodBlockCreate(BlockCreateModalState),
+    /// Create a new home
+    NeighborhoodHomeCreate(HomeCreateModalState),
 }
 
 /// Action to perform on confirmation

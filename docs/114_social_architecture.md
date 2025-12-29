@@ -1,6 +1,6 @@
 # Social Architecture
 
-This document defines Aura's social organization model using a digital urban metaphor. The system layers social organization, privacy, consent, and governance into three tiers: messages, blocks, and neighborhoods.
+This document defines Aura's social organization model using a digital urban metaphor. The system layers social organization, privacy, consent, and governance into three tiers: messages, homes, and neighborhoods.
 
 ## 1. Overview
 
@@ -10,11 +10,11 @@ The model produces human-scaled social structures with natural scarcity based on
 
 ### 1.2 Three-Tier Structure
 
-Messages are communication contexts. Direct messages are private relational contexts. Block messages are semi-public messaging for block residents.
+Messages are communication contexts. Direct messages are private relational contexts. Home messages are semi-public messaging for home residents.
 
-Blocks are semi-public communities capped by storage constraints. Each block has a 10 MB total allocation. Residents allocate storage to participate.
+Homes are semi-public communities capped by storage constraints. Each home has a 10 MB total allocation. Residents allocate storage to participate.
 
-Neighborhoods are collections of blocks connected via adjacency and traversal policies. Blocks donate storage to neighborhood infrastructure.
+Neighborhoods are collections of homes connected via adjacency and traversal policies. Homes donate storage to neighborhood infrastructure.
 
 ### 1.3 Terminology
 
@@ -28,15 +28,15 @@ A contact suggestion is metadata an authority optionally shares when connecting 
 
 Direct messages are small private relational contexts built on AMP. There is no public frontage or traversal. All participants must be explicitly added. New members do not receive historical message sync.
 
-### 2.2 Block Messages
+### 2.2 Home Messages
 
-Block messages are semi-public messaging for block residents. They use the same AMP infrastructure as direct messages. When a new resident joins, current members send a window of recent messages.
+Home messages are semi-public messaging for home residents. They use the same AMP infrastructure as direct messages. When a new resident joins, current members send a window of recent messages.
 
-Membership is tied to block residency. Leaving the block revokes access. Multiple channels may exist per block for different purposes.
+Membership is tied to home residency. Leaving the home revokes access. Multiple channels may exist per home for different purposes.
 
 ```rust
-pub struct BlockMessage {
-    block_id: BlockId,
+pub struct HomeMessage {
+    home_id: HomeId,
     channel: String,
     content: Vec<u8>,
     author: AuthorityId,
@@ -44,17 +44,17 @@ pub struct BlockMessage {
 }
 ```
 
-The message structure identifies the block, channel, content, author, and timestamp. Historical sync is configurable, typically the last 500 messages.
+The message structure identifies the home, channel, content, author, and timestamp. Historical sync is configurable, typically the last 500 messages.
 
-## 3. Block Architecture
+## 3. Home Architecture
 
-### 3.1 Block Structure
+### 3.1 Home Structure
 
-A block is a relational context with its own journal. The total storage allocation is 10 MB. Capability templates define visitor, frontage, guest, resident, and steward patterns. Local governance is encoded via policy facts.
+A home is a relational context with its own journal. The total storage allocation is 10 MB. Capability templates define visitor, frontage, guest, resident, and steward patterns. Local governance is encoded via policy facts.
 
 ```rust
-pub struct Block {
-    block_id: BlockId,
+pub struct Home {
+    home_id: HomeId,
     storage_limit: u64,
     residents: Vec<AuthorityId>,
     stewards: Vec<AuthorityId>,
@@ -62,37 +62,37 @@ pub struct Block {
 }
 ```
 
-The block structure contains the identifier, storage limit, resident list, steward list, and message channels.
+The home structure contains the identifier, storage limit, resident list, steward list, and message channels.
 
 ### 3.2 Residency
 
-Block membership derives from possessing capability bundles, meeting entry requirements defined by policy, and allocating resident-specific storage. In v1, each user belongs to exactly one block.
+Home membership derives from possessing capability bundles, meeting entry requirements defined by policy, and allocating resident-specific storage. In v1, each user belongs to exactly one home.
 
-Joining a block follows a defined sequence. The authority requests capability. Block governance approves using local policy via Biscuit evaluation and consensus. The authority accepts the capability bundle and allocates storage. Historical block messages sync from current residents.
+Joining a home follows a defined sequence. The authority requests capability. Home governance approves using local policy via Biscuit evaluation and consensus. The authority accepts the capability bundle and allocates storage. Historical home messages sync from current residents.
 
 ### 3.3 Stewardship
 
-Stewards emerge via governance decisions in the block. Steward capability bundles include moderation, pin and unpin operations, and governance facilitation. Stewardship is auditable because capability issuance is visible via relational facts.
+Stewards emerge via governance decisions in the home. Steward capability bundles include moderation, pin and unpin operations, and governance facilitation. Stewardship is auditable because capability issuance is visible via relational facts.
 
 ## 4. Neighborhood Architecture
 
 ### 4.1 Neighborhood Structure
 
-A neighborhood is a relational context linking multiple blocks. It contains a combined pinned infrastructure pool equal to the number of blocks times 1 MB. An adjacency graph connects blocks. Traversal and inter-block policy logic define movement rules.
+A neighborhood is a relational context linking multiple homes. It contains a combined pinned infrastructure pool equal to the number of homes times 1 MB. An adjacency graph connects homes. Traversal and inter-home policy logic define movement rules.
 
 ```rust
 pub struct Neighborhood {
     neighborhood_id: NeighborhoodId,
-    blocks: Vec<BlockId>,
-    adjacency: Vec<(BlockId, BlockId)>,
+    homes: Vec<HomeId>,
+    adjacency: Vec<(HomeId, HomeId)>,
 }
 ```
 
-The neighborhood structure contains the identifier, member blocks, and adjacency edges.
+The neighborhood structure contains the identifier, member homes, and adjacency edges.
 
-### 4.2 Block Membership
+### 4.2 Home Membership
 
-Blocks donate 1 MB of their budget per neighborhood joined. In v1, each block may join a maximum of 4 neighborhoods. This limits adjacency graph complexity and effect delegation routing.
+Homes donate 1 MB of their budget per neighborhood joined. In v1, each home may join a maximum of 4 neighborhoods. This limits adjacency graph complexity and effect delegation routing.
 
 ## 5. Position and Traversal
 
@@ -103,7 +103,7 @@ Position is represented as a structured type.
 ```rust
 pub struct TraversalPosition {
     neighborhood: Option<NeighborhoodId>,
-    block: Option<BlockId>,
+    home: Option<HomeId>,
     depth: TraversalDepth,
     capabilities: BiscuitToken,
     entered_at: TimeStamp,
@@ -116,19 +116,19 @@ pub enum TraversalDepth {
 }
 ```
 
-The position tracks current neighborhood, current block, traversal depth, capabilities, and entry time. Street depth allows seeing frontage with no interior access. Frontage depth allows limited interaction. Interior depth provides full resident-level access.
+The position tracks current neighborhood, current home, traversal depth, capabilities, and entry time. Street depth allows seeing frontage with no interior access. Frontage depth allows limited interaction. Interior depth provides full resident-level access.
 
 ### 5.2 Movement Rules
 
-Movement is possible when a Biscuit capability authorizes entry, neighborhood policy allows traversal along an adjacency edge, and block frontage or invitations allow deeper entry. Traversal does not replicate pinned data. Visitors operate on ephemeral local state.
+Movement is possible when a Biscuit capability authorizes entry, neighborhood policy allows traversal along an adjacency edge, and home frontage or invitations allow deeper entry. Traversal does not replicate pinned data. Visitors operate on ephemeral local state.
 
-Traversal does not reveal global identity. Only contextual identities within encountered blocks are visible.
+Traversal does not reveal global identity. Only contextual identities within encountered homes are visible.
 
 ## 6. Storage Constraints
 
 ### 6.1 Block-Level Allocation
 
-Blocks have a fixed size of 10 MB total. Allocation depends on neighborhood participation.
+Homes have a fixed size of 10 MB total. Allocation depends on neighborhood participation.
 
 | Neighborhoods | Donation | Resident Storage | Public Space |
 |---------------|----------|------------------|--------------|
@@ -137,48 +137,48 @@ Blocks have a fixed size of 10 MB total. Allocation depends on neighborhood part
 | 3             | 3.0 MB   | 1.6 MB           | 5.4 MB       |
 | 4             | 4.0 MB   | 1.6 MB           | 4.4 MB       |
 
-More neighborhood connections mean less local storage for block culture. This creates meaningful trade-offs.
+More neighborhood connections mean less local storage for home culture. This creates meaningful trade-offs.
 
 ### 6.2 Flow Budget Integration
 
 Storage constraints are enforced via the flow budget system.
 
 ```rust
-pub struct BlockFlowBudget {
-    block_id: BlockId,
+pub struct HomeFlowBudget {
+    home_id: HomeId,
     resident_storage_spent: u64,
     pinned_storage_spent: u64,
     neighborhood_donations: u64,
 }
 ```
 
-The spent counters are persisted as journal facts. Limits are derived at runtime from block policy and Biscuit capabilities. Resident storage limit is 1.6 MB for 8 residents at 200 KB each.
+The spent counters are persisted as journal facts. Limits are derived at runtime from home policy and Biscuit capabilities. Resident storage limit is 1.6 MB for 8 residents at 200 KB each.
 
 ## 7. Fact Schema
 
-### 7.1 Block Facts
+### 7.1 Home Facts
 
-Block facts enable Datalog queries.
+Home facts enable Datalog queries.
 
 ```datalog
-block(block_id, created_at, storage_limit).
-block_config(block_id, max_residents, neighborhood_limit).
-resident(authority_id, block_id, joined_at, storage_allocated).
-steward(authority_id, block_id, granted_at, capabilities).
-pinned_content(content_hash, block_id, pinned_by, pinned_at, size_bytes).
+home(home_id, created_at, storage_limit).
+home_config(home_id, max_residents, neighborhood_limit).
+resident(authority_id, home_id, joined_at, storage_allocated).
+steward(authority_id, home_id, granted_at, capabilities).
+pinned_content(content_hash, home_id, pinned_by, pinned_at, size_bytes).
 ```
 
-These facts express block existence, configuration, residency, stewardship, and pinned content.
+These facts express home existence, configuration, residency, stewardship, and pinned content.
 
 ### 7.2 Neighborhood Facts
 
-Neighborhood facts express neighborhood existence, block membership, adjacency, and traversal permissions.
+Neighborhood facts express neighborhood existence, home membership, adjacency, and traversal permissions.
 
 ```datalog
 neighborhood(neighborhood_id, created_at).
-block_member(block_id, neighborhood_id, joined_at, donated_storage).
-adjacent(block_a, block_b, neighborhood_id).
-traversal_allowed(from_block, to_block, capability_requirement).
+home_member(home_id, neighborhood_id, joined_at, donated_storage).
+adjacent(home_a, home_b, neighborhood_id).
+traversal_allowed(from_home, to_home, capability_requirement).
 ```
 
 ### 7.3 Query Examples
@@ -186,7 +186,7 @@ traversal_allowed(from_block, to_block, capability_requirement).
 Queries use Biscuit Datalog.
 
 ```datalog
-residents_of(Block) <- resident(Auth, Block, _, _).
+residents_of(Home) <- resident(Auth, Home, _, _).
 
 visitable(Target) <-
     resident(Me, Current, _, _),
@@ -195,7 +195,7 @@ visitable(Target) <-
     has_capability(Me, Cap).
 ```
 
-The first query finds all residents of a block. The second finds blocks a user can visit from their current position.
+The first query finds all residents of a home. The second finds homes a user can visit from their current position.
 
 ## 8. IRC-Style Commands
 
@@ -217,8 +217,8 @@ Moderator commands require steward capabilities.
 
 | Command | Description | Capability |
 |---------|-------------|------------|
-| `/kick <user>` | Remove from block | `moderate:kick` |
-| `/ban <user>` | Ban from block | `moderate:ban` |
+| `/kick <user>` | Remove from home | `moderate:kick` |
+| `/ban <user>` | Ban from home | `moderate:ban` |
 | `/mute <user>` | Silence user | `moderate:mute` |
 | `/pin <msg>` | Pin message | `pin_content` |
 
@@ -238,53 +238,53 @@ The command is parsed into a structured type. CapGuard checks capability require
 
 ## 9. Governance
 
-### 9.1 Block Governance
+### 9.1 Home Governance
 
-Blocks govern themselves through capability issuance, consensus-based decisions, stewardship roles, and moderation. Block governance uses Aura Consensus for irreversible or collective decisions.
+Homes govern themselves through capability issuance, consensus-based decisions, stewardship roles, and moderation. Home governance uses Aura Consensus for irreversible or collective decisions.
 
 ### 9.2 Neighborhood Governance
 
-Neighborhoods govern block admission, adjacency graph maintenance, traversal rules, and shared civic norms. High-stakes actions use Aura Consensus.
+Neighborhoods govern home admission, adjacency graph maintenance, traversal rules, and shared civic norms. High-stakes actions use Aura Consensus.
 
 ## 10. Privacy Model
 
 ### 10.1 Contextual Identity
 
-Identity in Aura is contextual and relational. Joining a block reveals a block-scoped identity. Leaving a block causes that contextual identity to disappear. Profile data shared inside a context stays local to that context.
+Identity in Aura is contextual and relational. Joining a home reveals a home-scoped identity. Leaving a home causes that contextual identity to disappear. Profile data shared inside a context stays local to that context.
 
 ### 10.2 Consent Model
 
-Disclosure is consensual. The device issues a join request. Block governance approves using local policy. The authority accepts the capability bundle. This sequence ensures all participation is explicit.
+Disclosure is consensual. The device issues a join request. Home governance approves using local policy. The authority accepts the capability bundle. This sequence ensures all participation is explicit.
 
 ## 11. V1 Constraints
 
 For the initial release, the model is simplified with three constraints.
 
-Each user resides in exactly one block. This eliminates multi-residency complexity and allows core infrastructure to stabilize.
+Each user resides in exactly one home. This eliminates multi-residency complexity and allows core infrastructure to stabilize.
 
-Each block has a maximum of 8 residents. This human-scale limit enables strong community bonds and manageable governance.
+Each home has a maximum of 8 residents. This human-scale limit enables strong community bonds and manageable governance.
 
-Each block may join a maximum of 4 neighborhoods. This limits adjacency graph complexity and effect delegation routing overhead.
+Each home may join a maximum of 4 neighborhoods. This limits adjacency graph complexity and effect delegation routing overhead.
 
 ## 12. Infrastructure Roles
 
-Blocks and neighborhoods provide infrastructure services beyond social organization. The `aura-social` crate implements these roles through materialized views and relay selection.
+Homes and neighborhoods provide infrastructure services beyond social organization. The `aura-social` crate implements these roles through materialized views and relay selection.
 
-### 12.1 Block Infrastructure
+### 12.1 Home Infrastructure
 
-Blocks provide data availability and relay services for residents:
+Homes provide data availability and relay services for residents:
 
-- **Data Replication**: Block residents replicate pinned data across available devices. The `BlockAvailability` type coordinates replication factor and failover.
-- **Message Relay**: Block peers serve as first-hop relays for unknown destinations. The `SocialTopology::block_peers()` method returns available relays.
+- **Data Replication**: Home residents replicate pinned data across available devices. The `HomeAvailability` type coordinates replication factor and failover.
+- **Message Relay**: Home peers serve as first-hop relays for unknown destinations. The `SocialTopology::home_peers()` method returns available relays.
 - **Storage Coordination**: The `StorageService` enforces storage budgets per resident and tracks usage facts.
 
 ### 12.2 Neighborhood Infrastructure
 
-Neighborhoods enable multi-hop routing and cross-block coordination:
+Neighborhoods enable multi-hop routing and cross-home coordination:
 
-- **Descriptor Propagation**: Neighborhood adjacency edges define descriptor propagation paths. Adjacent blocks exchange routing information.
-- **Traversal Capabilities**: `TraversalAllowedFact` grants movement between blocks. Traversal depth limits constrain routing overhead.
-- **Multi-Hop Relay**: When block-level relay fails, neighborhood traversal provides alternate paths.
+- **Descriptor Propagation**: Neighborhood adjacency edges define descriptor propagation paths. Adjacent homes exchange routing information.
+- **Traversal Capabilities**: `TraversalAllowedFact` grants movement between homes. Traversal depth limits constrain routing overhead.
+- **Multi-Hop Relay**: When home-level relay fails, neighborhood traversal provides alternate paths.
 
 ### 12.3 Progressive Discovery Layers
 
@@ -293,14 +293,14 @@ The `aura-social` crate implements a four-layer discovery model:
 | Layer | Priority | Resources Required | Flow Cost |
 |-------|----------|-------------------|-----------|
 | Direct | 0 | Known peer relationship | Minimal |
-| Block | 1 | Block peers available | Low |
+| Home | 1 | Home peers available | Low |
 | Neighborhood | 2 | Neighborhood traversal | Medium |
 | Rendezvous | 3 | Global flooding | High |
 
 Discovery layer selection uses `SocialTopology::discovery_layer()`:
 
 ```rust
-let topology = SocialTopology::new(local_authority, block, neighborhoods);
+let topology = SocialTopology::new(local_authority, home, neighborhoods);
 let layer = topology.discovery_layer(&target);
 ```
 
@@ -315,7 +315,7 @@ let builder = RelayCandidateBuilder::from_topology(topology);
 let candidates = builder.build_candidates(&context, &reachability);
 ```
 
-Candidates are returned in priority order: block peers first, then neighborhood peers, then guardians. Reachability checks filter unreachable peers.
+Candidates are returned in priority order: home peers first, then neighborhood peers, then guardians. Reachability checks filter unreachable peers.
 
 ## See Also
 

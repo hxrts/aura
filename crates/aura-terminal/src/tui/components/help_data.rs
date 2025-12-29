@@ -104,7 +104,7 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         HelpCommand::new("a", "a", "Accept invitation code", "Contacts"),
         HelpCommand::new("n", "n", "Create invitation code", "Contacts"),
         // Neighborhood screen
-        HelpCommand::new("Enter", "Enter", "Enter selected block", "Neighborhood"),
+        HelpCommand::new("Enter", "Enter", "Enter selected home", "Neighborhood"),
         HelpCommand::new("Esc", "Esc", "Return to map view", "Neighborhood"),
         HelpCommand::new("a", "a", "Accept invitation code", "Neighborhood"),
         HelpCommand::new(
@@ -114,7 +114,7 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
             "Neighborhood",
         ),
         HelpCommand::new("d", "d", "Cycle traversal depth", "Neighborhood"),
-        HelpCommand::new("g", "g", "Go to home block", "Neighborhood"),
+        HelpCommand::new("g", "g", "Go to primary home", "Neighborhood"),
         // Traversal depth descriptions
         HelpCommand::new("Street", "", "View blocks, no interaction", "Neighborhood"),
         HelpCommand::new(

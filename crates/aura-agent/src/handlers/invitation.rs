@@ -1112,7 +1112,7 @@ mod tests {
                 &effects,
                 receiver_id,
                 InvitationType::Channel {
-                    block_id: "block-123".to_string(),
+                    home_id: "home-123".to_string(),
                 },
                 None,
                 None,
@@ -1486,7 +1486,7 @@ mod tests {
             invitation_id: "inv-channel-789".to_string(),
             sender_id,
             invitation_type: InvitationType::Channel {
-                block_id: "block-xyz".to_string(),
+                home_id: "home-xyz".to_string(),
             },
             expires_at: Some(1800000000000),
             message: Some("Join my channel!".to_string()),
@@ -1496,8 +1496,8 @@ mod tests {
         let decoded = ShareableInvitation::from_code(&code).unwrap();
 
         match decoded.invitation_type {
-            InvitationType::Channel { block_id } => {
-                assert_eq!(block_id, "block-xyz");
+            InvitationType::Channel { home_id } => {
+                assert_eq!(home_id, "home-xyz");
             }
             _ => panic!("wrong invitation type"),
         }

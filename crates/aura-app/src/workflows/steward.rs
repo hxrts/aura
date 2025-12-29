@@ -1,9 +1,9 @@
 //! Steward Workflow - Portable Business Logic
 //!
 //! This module contains steward role management operations that are portable across all frontends.
-//! Stewards (Admins) have elevated permissions within a block.
+//! Stewards (Admins) have elevated permissions within a home.
 
-use crate::{views::block::ResidentRole, AppCore};
+use crate::{views::home::ResidentRole, AppCore};
 use async_lock::RwLock;
 use aura_core::{identifiers::AuthorityId, AuraError};
 use std::sync::Arc;
@@ -12,20 +12,20 @@ use std::sync::Arc;
 ///
 /// **What it does**: Promotes a resident to Admin role
 /// **Returns**: Unit result
-/// **Signal pattern**: Updates blocks view state directly
+/// **Signal pattern**: Updates homes view state directly
 ///
 /// Authorization: Only Owner or Admin can grant steward role.
 /// Cannot promote Owner (Owner is immutable).
 pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result<(), AuraError> {
     let mut core = app_core.write().await;
-    let mut blocks = core.views().get_blocks().clone();
+    let mut homes = core.views().get_homes().clone();
 
-    let block = blocks
-        .current_block_mut()
-        .ok_or_else(|| AuraError::not_found("No current block selected"))?;
+    let home_state = homes
+        .current_home_mut()
+        .ok_or_else(|| AuraError::not_found("No current home selected"))?;
 
     // Check if actor is authorized (must be Owner or Admin)
-    if !block.is_admin() {
+    if !home_state.is_admin() {
         return Err(AuraError::permission_denied(
             "Only stewards can grant steward role",
         ));
@@ -37,7 +37,7 @@ pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Res
         .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {}", target)))?;
 
     // Find and update the target resident
-    let resident = block
+    let resident = home_state
         .resident_mut(&target_id)
         .ok_or_else(|| AuraError::not_found(format!("Resident not found: {}", target)))?;
 
@@ -48,10 +48,7 @@ pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Res
 
     // Promote to Admin
     resident.role = ResidentRole::Admin;
-    if let Some(block) = blocks.current_block() {
-        core.views_mut().set_block(block.clone());
-    }
-    core.views_mut().set_blocks(blocks);
+    core.views_mut().set_homes(homes);
 
     Ok(())
 }
@@ -60,7 +57,7 @@ pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Res
 ///
 /// **What it does**: Demotes an Admin to Resident role
 /// **Returns**: Unit result
-/// **Signal pattern**: Updates blocks view state directly
+/// **Signal pattern**: Updates homes view state directly
 ///
 /// Authorization: Only Owner or Admin can revoke steward role.
 /// Can only demote Admin, not Owner or Resident.
@@ -69,14 +66,14 @@ pub async fn revoke_steward(
     target: &str,
 ) -> Result<(), AuraError> {
     let mut core = app_core.write().await;
-    let mut blocks = core.views().get_blocks().clone();
+    let mut homes = core.views().get_homes().clone();
 
-    let block = blocks
-        .current_block_mut()
-        .ok_or_else(|| AuraError::not_found("No current block selected"))?;
+    let home_state = homes
+        .current_home_mut()
+        .ok_or_else(|| AuraError::not_found("No current home selected"))?;
 
     // Check if actor is authorized (must be Owner or Admin)
-    if !block.is_admin() {
+    if !home_state.is_admin() {
         return Err(AuraError::permission_denied(
             "Only stewards can revoke steward role",
         ));
@@ -88,7 +85,7 @@ pub async fn revoke_steward(
         .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {}", target)))?;
 
     // Find and update the target resident
-    let resident = block
+    let resident = home_state
         .resident_mut(&target_id)
         .ok_or_else(|| AuraError::not_found(format!("Resident not found: {}", target)))?;
 
@@ -101,26 +98,23 @@ pub async fn revoke_steward(
 
     // Demote to Resident
     resident.role = ResidentRole::Resident;
-    if let Some(block) = blocks.current_block() {
-        core.views_mut().set_block(block.clone());
-    }
-    core.views_mut().set_blocks(blocks);
+    core.views_mut().set_homes(homes);
 
     Ok(())
 }
 
-/// Check if current user is admin in current block
+/// Check if current user is admin in current home
 ///
-/// **What it does**: Checks admin status in current block
+/// **What it does**: Checks admin status in current home
 /// **Returns**: Boolean indicating admin status
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn is_admin(app_core: &Arc<RwLock<AppCore>>) -> bool {
     let core = app_core.read().await;
-    let blocks = core.views().get_blocks();
+    let homes = core.views().get_homes();
 
-    blocks
-        .current_block()
-        .map(|block| block.is_admin())
+    homes
+        .current_home()
+        .map(|home_state| home_state.is_admin())
         .unwrap_or(false)
 }
 
@@ -130,7 +124,7 @@ mod tests {
     use crate::AppConfig;
 
     #[tokio::test]
-    async fn test_is_admin_no_block() {
+    async fn test_is_admin_no_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
@@ -139,7 +133,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_grant_steward_no_block() {
+    async fn test_grant_steward_no_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
@@ -148,7 +142,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_revoke_steward_no_block() {
+    async fn test_revoke_steward_no_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 

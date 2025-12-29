@@ -1,7 +1,7 @@
 //! Layer 1: Relay Selection Effect Trait Definitions
 //!
 //! This module defines the pure trait interface for relay selection in Aura's
-//! social infrastructure. Relay is **neighborhood-scoped**: both block peers
+//! social infrastructure. Relay is **neighborhood-scoped**: both home peers
 //! and neighborhood peers can relay for anyone in the neighborhood.
 //!
 //! **Effect Classification**: Application Effect
@@ -11,7 +11,7 @@
 //!
 //! # Design Principles
 //!
-//! **Tiered selection**: Block peers are preferred (closest trust), then
+//! **Tiered selection**: Home peers are preferred (closest trust), then
 //! neighborhood peers, then guardians as fallback.
 //!
 //! **Deterministic**: Selection uses `hash(context_id, epoch, nonce)` for
@@ -66,20 +66,20 @@ impl RelayContext {
 /// How we know a potential relay peer.
 ///
 /// Relay capability derives from social relationships. The relationship
-/// type affects selection priority: block peers are preferred over
+/// type affects selection priority: home peers are preferred over
 /// neighborhood peers, which are preferred over guardians.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RelayRelationship {
-    /// Co-resident in the same block.
+    /// Co-resident in the same home.
     ///
-    /// Block peers share block context and have high mutual trust.
+    /// Home peers share home context and have high mutual trust.
     /// They can relay for any member of shared neighborhoods.
-    BlockPeer {
-        /// The block ID (opaque 32-byte identifier)
-        block_id: [u8; 32],
+    HomePeer {
+        /// The home ID (opaque 32-byte identifier)
+        home_id: [u8; 32],
     },
 
-    /// Member of an adjacent block in a shared neighborhood.
+    /// Member of an adjacent home in a shared neighborhood.
     ///
     /// Neighborhood peers share neighborhood context and have
     /// established traversal rights. They can relay for any
@@ -103,15 +103,15 @@ impl RelayRelationship {
     /// Lower values are higher priority (selected first).
     pub fn priority(&self) -> u8 {
         match self {
-            Self::BlockPeer { .. } => 0,        // Highest priority
+            Self::HomePeer { .. } => 0,        // Highest priority
             Self::NeighborhoodPeer { .. } => 1, // Medium priority
             Self::Guardian => 2,                // Fallback
         }
     }
 
-    /// Check if this is a block peer relationship.
-    pub fn is_block_peer(&self) -> bool {
-        matches!(self, Self::BlockPeer { .. })
+    /// Check if this is a home peer relationship.
+    pub fn is_home_peer(&self) -> bool {
+        matches!(self, Self::HomePeer { .. })
     }
 
     /// Check if this is a neighborhood peer relationship.
@@ -156,11 +156,11 @@ impl RelayCandidate {
         }
     }
 
-    /// Create a reachable block peer candidate.
-    pub fn block_peer(authority_id: AuthorityId, block_id: [u8; 32]) -> Self {
+    /// Create a reachable home peer candidate.
+    pub fn block_peer(authority_id: AuthorityId, home_id: [u8; 32]) -> Self {
         Self::new(
             authority_id,
-            RelayRelationship::BlockPeer { block_id },
+            RelayRelationship::HomePeer { home_id },
             true,
         )
     }
@@ -235,7 +235,7 @@ impl std::error::Error for RelayError {}
 ///
 /// Implementations should:
 /// - Filter out unreachable candidates (unless building fallback lists)
-/// - Prefer candidates by relationship priority (block > neighborhood > guardian)
+/// - Prefer candidates by relationship priority (home > neighborhood > guardian)
 /// - Use deterministic selection for reproducibility in tests
 /// - Return an ordered list: first choice, then fallbacks
 ///
@@ -303,36 +303,36 @@ mod tests {
 
     #[test]
     fn test_relay_relationship_priority() {
-        let block = RelayRelationship::BlockPeer {
-            block_id: [1u8; 32],
+        let home_rel = RelayRelationship::HomePeer {
+            home_id: [1u8; 32],
         };
         let neighborhood = RelayRelationship::NeighborhoodPeer {
             neighborhood_id: [2u8; 32],
         };
         let guardian = RelayRelationship::Guardian;
 
-        assert!(block.priority() < neighborhood.priority());
+        assert!(home_rel.priority() < neighborhood.priority());
         assert!(neighborhood.priority() < guardian.priority());
     }
 
     #[test]
     fn test_relay_relationship_checks() {
-        let block = RelayRelationship::BlockPeer {
-            block_id: [1u8; 32],
+        let home_rel = RelayRelationship::HomePeer {
+            home_id: [1u8; 32],
         };
-        assert!(block.is_block_peer());
-        assert!(!block.is_neighborhood_peer());
-        assert!(!block.is_guardian());
+        assert!(home_rel.is_home_peer());
+        assert!(!home_rel.is_neighborhood_peer());
+        assert!(!home_rel.is_guardian());
 
         let neighborhood = RelayRelationship::NeighborhoodPeer {
             neighborhood_id: [2u8; 32],
         };
-        assert!(!neighborhood.is_block_peer());
+        assert!(!neighborhood.is_home_peer());
         assert!(neighborhood.is_neighborhood_peer());
         assert!(!neighborhood.is_guardian());
 
         let guardian = RelayRelationship::Guardian;
-        assert!(!guardian.is_block_peer());
+        assert!(!guardian.is_home_peer());
         assert!(!guardian.is_neighborhood_peer());
         assert!(guardian.is_guardian());
     }
@@ -343,7 +343,7 @@ mod tests {
 
         let block_peer = RelayCandidate::block_peer(auth, [1u8; 32]);
         assert!(block_peer.reachable);
-        assert!(block_peer.relationship.is_block_peer());
+        assert!(block_peer.relationship.is_home_peer());
 
         let neighborhood_peer = RelayCandidate::neighborhood_peer(auth, [2u8; 32]);
         assert!(neighborhood_peer.reachable);

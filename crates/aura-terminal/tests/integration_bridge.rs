@@ -16,7 +16,7 @@ fn test_event_filter_all() {
     assert!(filter.account);
     assert!(filter.chat);
     assert!(filter.sync);
-    assert!(filter.block);
+    assert!(filter.home);
     assert!(filter.invitation);
     assert!(filter.settings);
     assert!(filter.moderation);
@@ -33,7 +33,7 @@ fn test_event_filter_essential() {
     assert!(!filter.account);
     assert!(!filter.chat);
     assert!(!filter.sync);
-    assert!(!filter.block);
+    assert!(!filter.home);
     assert!(!filter.invitation);
     assert!(!filter.settings);
     assert!(!filter.authorization);

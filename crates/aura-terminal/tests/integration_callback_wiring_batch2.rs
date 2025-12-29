@@ -14,7 +14,7 @@
 //! 2. **Direct Messaging** - StartDirectChat, DM channel creation
 //! 3. **Channel Mode** - SetChannelMode, mode persistence
 //! 4. **Peer Management** - AddPeer, RemovePeer, ListPeers
-//! 5. **Block Operations** - Steward grant/revoke, resident management
+//! 5. **Home Operations** - Steward grant/revoke, resident management
 //! 6. **Sync Operations** - ForceSync, sync status
 //! 7. **Connection Status** - Connection state tracking
 //! 8. **Toast Notifications** - Success/error toast display
@@ -644,7 +644,7 @@ async fn test_connection_status_tracking() {
 }
 
 // ============================================================================
-// BLOCK OPERATIONS TESTS
+// HOME OPERATIONS TESTS
 // ============================================================================
 
 /// Test steward grant and revoke operations
@@ -831,7 +831,7 @@ async fn test_all_snapshots_consistent() {
     let contacts = ctx.snapshot_contacts();
     let recovery = ctx.snapshot_recovery();
     let neighborhood = ctx.snapshot_neighborhood();
-    let block = ctx.snapshot_block();
+    let home = ctx.snapshot_home();
     let invitations = ctx.snapshot_invitations();
     let devices = ctx.snapshot_devices();
     let guardians = ctx.snapshot_guardians();
@@ -844,7 +844,7 @@ async fn test_all_snapshots_consistent() {
     println!("  Contacts: {} contacts", contacts.contacts.len());
     println!("  Recovery: in_progress={}", recovery.is_in_progress);
     println!("  Neighborhood: {} blocks", neighborhood.blocks.len());
-    println!("  Block: {} residents", block.residents().len());
+    println!("  Home: {} residents", home_state.residents().len());
     println!(
         "  Invitations: {} invitations",
         invitations.invitations.len()

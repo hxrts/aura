@@ -152,7 +152,7 @@ pub use crate::runtime_bridge::{
     RuntimeStatus, SyncStatus,
 };
 pub use crate::views::{
-    BlockState, Channel, ChannelType, ChatState, ContactsState, InvitationsState, Message,
+    HomeState, Channel, ChannelType, ChatState, ContactsState, InvitationsState, Message,
     NeighborhoodState, RecoveryState, ViewState,
 };
 
@@ -164,7 +164,7 @@ pub use crate::reactive_state::{ReactiveState, ReactiveVec};
 
 // Re-export budget types (from workflows module)
 pub use crate::workflows::budget::{
-    BlockFlowBudget, BudgetBreakdown, BudgetError, BLOCK_TOTAL_SIZE, KB, MAX_NEIGHBORHOODS,
+    HomeFlowBudget, BudgetBreakdown, BudgetError, HOME_TOTAL_SIZE, KB, MAX_NEIGHBORHOODS,
     MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION, RESIDENT_ALLOCATION,
 };
 
@@ -180,7 +180,7 @@ pub use crate::effects::unified_handler::UnifiedHandler;
 // Note: SyncStatus and ConnectionStatus are signal-specific types in signal_defs module.
 // The runtime_bridge::SyncStatus is different (runtime status).
 pub use crate::signal_defs::{
-    register_app_signals, BLOCKS_SIGNAL, BLOCK_SIGNAL, BUDGET_SIGNAL, CHAT_SIGNAL,
+    register_app_signals, HOMES_SIGNAL, BUDGET_SIGNAL, CHAT_SIGNAL,
     CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
     NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL, SYNC_STATUS_SIGNAL, UNREAD_COUNT_SIGNAL,
 };

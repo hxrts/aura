@@ -123,10 +123,10 @@ pub enum OperationType {
     /// Activate OTA hard fork
     ActivateOTA,
 
-    // === Social Block Operations ===
-    /// Join a social block
+    // === Social Home Operations ===
+    /// Join a social home
     JoinSocialBlock,
-    /// Propose block adjacency
+    /// Propose home adjacency
     ProposeBlockAdjacency,
 }
 

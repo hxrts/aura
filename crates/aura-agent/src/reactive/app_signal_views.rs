@@ -10,11 +10,10 @@
 
 use aura_app::errors::AppError;
 use aura_app::signal_defs::{
-    BLOCKS_SIGNAL, BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
-    RECOVERY_SIGNAL,
+    HOMES_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
 };
 use aura_app::views::{
-    block::{BanRecord, BlockState, BlocksState, KickRecord, MuteRecord, PinnedMessageMeta},
+    home::{BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
     chat::{Channel, ChannelType, ChatState, Message},
     contacts::{Contact, ContactsState},
     invitations::{
@@ -36,12 +35,12 @@ use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use aura_social::moderation::facts::{
-    BlockPinFact, BlockUnpinFact, BLOCK_PIN_FACT_TYPE_ID, BLOCK_UNPIN_FACT_TYPE_ID,
+    HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
 use aura_social::moderation::{
-    BlockBanFact, BlockKickFact, BlockMuteFact, BlockUnbanFact, BlockUnmuteFact,
-    BLOCK_BAN_FACT_TYPE_ID, BLOCK_KICK_FACT_TYPE_ID, BLOCK_MUTE_FACT_TYPE_ID,
-    BLOCK_UNBAN_FACT_TYPE_ID, BLOCK_UNMUTE_FACT_TYPE_ID,
+    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
+    HOME_BAN_FACT_TYPE_ID, HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID,
+    HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
 };
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
@@ -74,11 +73,11 @@ impl InvitationsSignalView {
 
     fn map_invitation_type(inv_type: &str) -> InvitationType {
         match inv_type.to_lowercase().as_str() {
-            // Legacy mapping: the TUI maps aura-app Block → "Contact".
-            "contact" => InvitationType::Block,
+            // Legacy mapping: the TUI maps aura-app Home → "Contact".
+            "contact" => InvitationType::Home,
             "guardian" => InvitationType::Guardian,
             "channel" | "chat" => InvitationType::Chat,
-            _ => InvitationType::Block,
+            _ => InvitationType::Home,
         }
     }
 }
@@ -144,8 +143,8 @@ impl ReactiveView for InvitationsSignalView {
                         created_at: sent_at.ts_ms,
                         expires_at: expires_at.map(|t| t.ts_ms),
                         message,
-                        block_id: None,
-                        block_name: None,
+                        home_id: None,
+                        home_name: None,
                     };
 
                     state.add_invitation(invitation);
@@ -506,35 +505,35 @@ impl ReactiveView for RecoverySignalView {
 }
 
 // =============================================================================
-// Blocks (Moderation + Pins)
+// Homes (Moderation + Pins)
 // =============================================================================
 
-pub struct BlockSignalView {
+pub struct HomeSignalView {
     reactive: ReactiveHandler,
 }
 
-impl BlockSignalView {
+impl HomeSignalView {
     pub fn new(reactive: ReactiveHandler) -> Self {
         Self { reactive }
     }
 
-    fn block_for_context<'a>(
-        blocks: &'a mut BlocksState,
+    fn home_for_context<'a>(
+        homes: &'a mut HomesState,
         context_id: &str,
-    ) -> Option<&'a mut BlockState> {
-        blocks
-            .blocks
+    ) -> Option<&'a mut HomeState> {
+        homes
+            .homes
             .values_mut()
-            .find(|block| block.context_id == context_id)
+            .find(|home_state| home_state.context_id == context_id)
     }
 }
 
-impl ReactiveView for BlockSignalView {
+impl ReactiveView for HomeSignalView {
     async fn update(&self, facts: &[Fact]) {
-        let mut blocks = match self.reactive.read(&*BLOCKS_SIGNAL).await {
+        let mut homes = match self.reactive.read(&*HOMES_SIGNAL).await {
             Ok(state) => state,
             Err(e) => {
-                emit_internal_error(&self.reactive, format!("Failed to read BLOCKS_SIGNAL: {e}"))
+                emit_internal_error(&self.reactive, format!("Failed to read HOMES_SIGNAL: {e}"))
                     .await;
                 return;
             }
@@ -553,33 +552,33 @@ impl ReactiveView for BlockSignalView {
             };
 
             let context_key = context_id.to_string();
-            let Some(block) = Self::block_for_context(&mut blocks, &context_key) else {
+            let Some(home_state) = Self::home_for_context(&mut homes, &context_key) else {
                 continue;
             };
 
             match binding_type.as_str() {
-                BLOCK_BAN_FACT_TYPE_ID => {
-                    if let Some(ban) = BlockBanFact::from_bytes(binding_data) {
+                HOME_BAN_FACT_TYPE_ID => {
+                    if let Some(ban) = HomeBanFact::from_bytes(binding_data) {
                         let record = BanRecord {
                             authority_id: ban.banned_authority,
                             reason: ban.reason,
                             actor: ban.actor_authority,
                             banned_at: ban.banned_at.ts_ms,
                         };
-                        block.add_ban(record);
-                        let _ = block.remove_resident(&ban.banned_authority);
+                        home_state.add_ban(record);
+                        let _ = home_state.remove_resident(&ban.banned_authority);
                         changed = true;
                     }
                 }
-                BLOCK_UNBAN_FACT_TYPE_ID => {
-                    if let Some(unban) = BlockUnbanFact::from_bytes(binding_data) {
-                        if block.remove_ban(&unban.unbanned_authority).is_some() {
+                HOME_UNBAN_FACT_TYPE_ID => {
+                    if let Some(unban) = HomeUnbanFact::from_bytes(binding_data) {
+                        if home_state.remove_ban(&unban.unbanned_authority).is_some() {
                             changed = true;
                         }
                     }
                 }
-                BLOCK_MUTE_FACT_TYPE_ID => {
-                    if let Some(mute) = BlockMuteFact::from_bytes(binding_data) {
+                HOME_MUTE_FACT_TYPE_ID => {
+                    if let Some(mute) = HomeMuteFact::from_bytes(binding_data) {
                         let record = MuteRecord {
                             authority_id: mute.muted_authority,
                             duration_secs: mute.duration_secs,
@@ -587,19 +586,19 @@ impl ReactiveView for BlockSignalView {
                             expires_at: mute.expires_at.as_ref().map(|t| t.ts_ms),
                             actor: mute.actor_authority,
                         };
-                        block.add_mute(record);
+                        home_state.add_mute(record);
                         changed = true;
                     }
                 }
-                BLOCK_UNMUTE_FACT_TYPE_ID => {
-                    if let Some(unmute) = BlockUnmuteFact::from_bytes(binding_data) {
-                        if block.remove_mute(&unmute.unmuted_authority).is_some() {
+                HOME_UNMUTE_FACT_TYPE_ID => {
+                    if let Some(unmute) = HomeUnmuteFact::from_bytes(binding_data) {
+                        if home_state.remove_mute(&unmute.unmuted_authority).is_some() {
                             changed = true;
                         }
                     }
                 }
-                BLOCK_KICK_FACT_TYPE_ID => {
-                    if let Some(kick) = BlockKickFact::from_bytes(binding_data) {
+                HOME_KICK_FACT_TYPE_ID => {
+                    if let Some(kick) = HomeKickFact::from_bytes(binding_data) {
                         let record = KickRecord {
                             authority_id: kick.kicked_authority,
                             channel: kick.channel_id,
@@ -607,14 +606,14 @@ impl ReactiveView for BlockSignalView {
                             actor: kick.actor_authority,
                             kicked_at: kick.kicked_at.ts_ms,
                         };
-                        block.add_kick(record);
-                        let _ = block.remove_resident(&kick.kicked_authority);
+                        home_state.add_kick(record);
+                        let _ = home_state.remove_resident(&kick.kicked_authority);
                         changed = true;
                     }
                 }
-                BLOCK_PIN_FACT_TYPE_ID => {
-                    if let Some(pin) = BlockPinFact::from_bytes(binding_data) {
-                        block.pin_message_with_meta(PinnedMessageMeta {
+                HOME_PIN_FACT_TYPE_ID => {
+                    if let Some(pin) = HomePinFact::from_bytes(binding_data) {
+                        home_state.pin_message_with_meta(PinnedMessageMeta {
                             message_id: pin.message_id,
                             pinned_by: pin.actor_authority,
                             pinned_at: pin.pinned_at.ts_ms,
@@ -622,9 +621,9 @@ impl ReactiveView for BlockSignalView {
                         changed = true;
                     }
                 }
-                BLOCK_UNPIN_FACT_TYPE_ID => {
-                    if let Some(unpin) = BlockUnpinFact::from_bytes(binding_data) {
-                        if block.unpin_message(&unpin.message_id) {
+                HOME_UNPIN_FACT_TYPE_ID => {
+                    if let Some(unpin) = HomeUnpinFact::from_bytes(binding_data) {
+                        if home_state.unpin_message(&unpin.message_id) {
                             changed = true;
                         }
                     }
@@ -637,21 +636,16 @@ impl ReactiveView for BlockSignalView {
             return;
         }
 
-        let snapshot = blocks.clone();
-        drop(blocks);
+        let snapshot = homes.clone();
+        drop(homes);
 
-        if let Err(e) = self.reactive.emit(&*BLOCKS_SIGNAL, snapshot.clone()).await {
-            emit_internal_error(&self.reactive, format!("Failed to emit BLOCKS_SIGNAL: {e}")).await;
-        }
-
-        let block_snapshot = snapshot.current_block().cloned().unwrap_or_default();
-        if let Err(e) = self.reactive.emit(&*BLOCK_SIGNAL, block_snapshot).await {
-            emit_internal_error(&self.reactive, format!("Failed to emit BLOCK_SIGNAL: {e}")).await;
+        if let Err(e) = self.reactive.emit(&*HOMES_SIGNAL, snapshot.clone()).await {
+            emit_internal_error(&self.reactive, format!("Failed to emit HOMES_SIGNAL: {e}")).await;
         }
     }
 
     fn view_id(&self) -> &str {
-        "signals:blocks"
+        "signals:homes"
     }
 }
 
@@ -722,7 +716,7 @@ impl ReactiveView for ChatSignalView {
                         channel_type: if is_dm {
                             ChannelType::DirectMessage
                         } else {
-                            ChannelType::Block
+                            ChannelType::Home
                         },
                         unread_count: 0,
                         is_dm,
@@ -902,33 +896,33 @@ impl ReactiveView for ChatSignalView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_app::signal_defs::{register_app_signals, BLOCKS_SIGNAL};
+    use aura_app::signal_defs::{register_app_signals, HOMES_SIGNAL};
     use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
-    use aura_social::moderation::facts::{BlockPinFact, BlockUnpinFact};
-    use aura_social::moderation::BlockBanFact;
+    use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
+    use aura_social::moderation::HomeBanFact;
 
-    async fn setup_blocks(reactive: &ReactiveHandler, context: ContextId) -> BlocksState {
+    async fn setup_homes(reactive: &ReactiveHandler, context: ContextId) -> HomesState {
         register_app_signals(reactive).await.unwrap();
 
-        let block_id = ChannelId::from_bytes([7u8; 32]);
-        let block = BlockState::new(
-            block_id,
-            Some("test-block".to_string()),
+        let home_id = ChannelId::from_bytes([7u8; 32]);
+        let home_state = HomeState::new(
+            home_id,
+            Some("test-home".to_string()),
             AuthorityId::default(),
             0,
             context.to_string(),
         );
 
-        let mut blocks = BlocksState::new();
-        blocks.add_block(block);
+        let mut homes = HomesState::new();
+        homes.add_home(home_state);
         reactive
-            .emit(&*BLOCKS_SIGNAL, blocks.clone())
+            .emit(&*HOMES_SIGNAL, homes.clone())
             .await
             .unwrap();
-        blocks
+        homes
     }
 
     fn fact_from_relational(relational: RelationalFact) -> Fact {
@@ -943,17 +937,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn block_signal_view_updates_pins() {
+    async fn home_signal_view_updates_pins() {
         let reactive = ReactiveHandler::new();
         let context_id = ContextId::default();
-        let blocks = setup_blocks(&reactive, context_id).await;
-        let block_id = blocks.current_block().unwrap().id;
+        let homes = setup_homes(&reactive, context_id).await;
+        let home_id = homes.current_home().unwrap().id;
 
-        let view = BlockSignalView::new(reactive.clone());
+        let view = HomeSignalView::new(reactive.clone());
 
-        let pin = BlockPinFact::new_ms(
+        let pin = HomePinFact::new_ms(
             context_id,
-            block_id,
+            home_id,
             "msg-1".to_string(),
             AuthorityId::default(),
             123,
@@ -961,13 +955,13 @@ mod tests {
         .to_generic();
         view.update(&[fact_from_relational(pin)]).await;
 
-        let updated = reactive.read(&*BLOCKS_SIGNAL).await.unwrap();
-        let block = updated.current_block().unwrap();
-        assert!(block.pinned_messages.contains(&"msg-1".to_string()));
+        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home_state = updated.current_home().unwrap();
+        assert!(home_state.pinned_messages.contains(&"msg-1".to_string()));
 
-        let unpin = BlockUnpinFact::new_ms(
+        let unpin = HomeUnpinFact::new_ms(
             context_id,
-            block_id,
+            home_id,
             "msg-1".to_string(),
             AuthorityId::default(),
             124,
@@ -975,22 +969,22 @@ mod tests {
         .to_generic();
         view.update(&[fact_from_relational(unpin)]).await;
 
-        let updated = reactive.read(&*BLOCKS_SIGNAL).await.unwrap();
-        let block = updated.current_block().unwrap();
-        assert!(!block.pinned_messages.contains(&"msg-1".to_string()));
+        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home_state = updated.current_home().unwrap();
+        assert!(!home_state.pinned_messages.contains(&"msg-1".to_string()));
     }
 
     #[tokio::test]
-    async fn block_signal_view_updates_bans() {
+    async fn home_signal_view_updates_bans() {
         let reactive = ReactiveHandler::new();
         let context_id = ContextId::default();
-        let blocks = setup_blocks(&reactive, context_id).await;
-        let block_id = blocks.current_block().unwrap().id;
+        let homes = setup_homes(&reactive, context_id).await;
+        let home_id = homes.current_home().unwrap().id;
         let target = AuthorityId::new_from_entropy([9u8; 32]);
 
-        let view = BlockSignalView::new(reactive.clone());
+        let view = HomeSignalView::new(reactive.clone());
 
-        let ban = BlockBanFact::new_ms(
+        let ban = HomeBanFact::new_ms(
             context_id,
             None,
             target,
@@ -1002,10 +996,10 @@ mod tests {
         .to_generic();
         view.update(&[fact_from_relational(ban)]).await;
 
-        let updated = reactive.read(&*BLOCKS_SIGNAL).await.unwrap();
-        let block = updated.current_block().unwrap();
-        assert!(block.ban_list.contains_key(&target));
-        assert_eq!(block.ban_list.get(&target).unwrap().reason, "spamming");
-        assert_eq!(block.id, block_id);
+        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home_state = updated.current_home().unwrap();
+        assert!(home_state.ban_list.contains_key(&target));
+        assert_eq!(home_state.ban_list.get(&target).unwrap().reason, "spamming");
+        assert_eq!(home_state.id, home_id);
     }
 }

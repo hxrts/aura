@@ -428,10 +428,37 @@ impl RendezvousHandler {
         })
     }
 
-    /// Cleanup expired descriptors
+    /// Cleanup expired descriptors and stale pending channels.
+    ///
+    /// Removes descriptors that are no longer valid and pending channels
+    /// that have been waiting longer than the max age.
     pub async fn cleanup_expired(&self, now_ms: u64) {
-        let mut cache = self.descriptor_cache.write().await;
-        cache.retain(|_, descriptor| descriptor.is_valid(now_ms));
+        // Maximum age for pending channels before cleanup (5 minutes)
+        const PENDING_CHANNEL_MAX_AGE_MS: u64 = 300_000;
+
+        // Cleanup expired descriptors
+        {
+            let mut cache = self.descriptor_cache.write().await;
+            let before = cache.len();
+            cache.retain(|_, descriptor| descriptor.is_valid(now_ms));
+            let removed = before - cache.len();
+            if removed > 0 {
+                tracing::debug!(removed, "Cleaned up expired descriptors");
+            }
+        }
+
+        // Cleanup stale pending channels
+        {
+            let mut pending = self.pending_channels.write().await;
+            let before = pending.len();
+            pending.retain(|_, channel| {
+                now_ms.saturating_sub(channel.initiated_at) < PENDING_CHANNEL_MAX_AGE_MS
+            });
+            let removed = before - pending.len();
+            if removed > 0 {
+                tracing::debug!(removed, "Cleaned up stale pending channels");
+            }
+        }
     }
 }
 

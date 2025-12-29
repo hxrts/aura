@@ -62,7 +62,7 @@ impl RelayCandidateBuilder {
     /// Build relay candidates for a context.
     ///
     /// Returns candidates in priority order:
-    /// 1. Block peers (highest priority)
+    /// 1. Home peers (highest priority)
     /// 2. Neighborhood peers
     /// 3. Guardians (fallback)
     ///
@@ -120,7 +120,7 @@ impl RelayCandidateBuilder {
 mod tests {
     use super::*;
     use aura_core::{effects::relay::RelayRelationship, identifiers::ContextId};
-    use crate::facts::BlockId;
+    use crate::facts::HomeId;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
@@ -170,19 +170,19 @@ mod tests {
         let peer2 = test_authority(3);
         let target = test_authority(99);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
 
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer1,
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
             peer2,
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
 
@@ -200,13 +200,13 @@ mod tests {
         let peer1 = test_authority(2);
         let target = test_authority(99);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
 
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer1,
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
 
@@ -229,19 +229,19 @@ mod tests {
         let peer2 = test_authority(3);
         let target = test_authority(99);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
 
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer1,
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
             peer2,
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
 

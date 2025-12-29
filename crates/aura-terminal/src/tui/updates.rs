@@ -196,10 +196,10 @@ pub enum UiUpdate {
     // =========================================================================
     // Navigation
     // =========================================================================
-    /// Entered a block
-    BlockEntered {
-        /// The block ID
-        block_id: String,
+    /// Entered a home
+    HomeEntered {
+        /// The home ID
+        home_id: String,
     },
 
     /// Navigated to home/default view
@@ -298,18 +298,18 @@ pub enum UiUpdate {
     NotificationsCountChanged(usize),
 
     // =========================================================================
-    // Block Operations
+    // Home Operations
     // =========================================================================
-    /// A message was sent in a block
-    BlockMessageSent {
-        /// The block ID
-        block_id: String,
+    /// A message was sent in a home
+    HomeMessageSent {
+        /// The home ID
+        home_id: String,
         /// The message content
         content: String,
     },
 
-    /// An invite was sent from a block
-    BlockInviteSent {
+    /// An invite was sent from a home
+    HomeInviteSent {
         /// The contact ID that was invited
         contact_id: String,
     },

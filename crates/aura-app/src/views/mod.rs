@@ -9,7 +9,7 @@
 
 mod state;
 
-pub mod block;
+pub mod home;
 pub mod chat;
 pub mod contacts;
 pub mod invitations;
@@ -19,15 +19,15 @@ pub mod recovery;
 pub use state::ViewState;
 
 // Re-export state types for convenience
-pub use block::{
-    BanRecord, BlockState, BlocksState, KickRecord, MuteRecord, Resident, ResidentRole,
+pub use home::{
+    BanRecord, HomeState, HomesState, KickRecord, MuteRecord, Resident, ResidentRole,
 };
 pub use chat::{Channel, ChannelType, ChatState, Message};
 pub use contacts::{Contact, ContactsState, MySuggestion, SuggestionPolicy};
 pub use invitations::{
     Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
 };
-pub use neighborhood::{AdjacencyType, NeighborBlock, NeighborhoodState, TraversalPosition};
+pub use neighborhood::{AdjacencyType, NeighborHome, NeighborhoodState, TraversalPosition};
 pub use recovery::{
     Guardian, GuardianStatus, RecoveryApproval, RecoveryProcess, RecoveryProcessStatus,
     RecoveryState,

@@ -20,7 +20,7 @@ pub use authority_manager::{
 pub use ceremony_tracker::CeremonyTracker;
 pub use context_manager::ContextManager;
 pub use flow_budget_manager::FlowBudgetManager;
-pub use receipt_manager::ReceiptManager;
+pub use receipt_manager::{ReceiptManager, ReceiptManagerConfig};
 pub use rendezvous_manager::{RendezvousManager, RendezvousManagerConfig};
 pub use runtime_tasks::RuntimeTaskRegistry;
 pub use social_manager::{SocialManager, SocialManagerConfig, SocialManagerState};

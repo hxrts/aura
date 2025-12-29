@@ -39,14 +39,14 @@ pub fn hash_relay_seed(context: &RelayContext) -> [u8; 32] {
 
 /// Partition candidates by their relationship type.
 ///
-/// Returns three vectors: block peers, neighborhood peers, and guardians.
+/// Returns three vectors: home peers, neighborhood peers, and guardians.
 /// Only reachable candidates are included in the result.
 ///
 /// # Arguments
 /// * `candidates` - All relay candidates to partition
 ///
 /// # Returns
-/// Tuple of (block_peers, neighborhood_peers, guardians)
+/// Tuple of (home_peers, neighborhood_peers, guardians)
 pub fn partition_by_relationship(
     candidates: &[RelayCandidate],
 ) -> (
@@ -54,7 +54,7 @@ pub fn partition_by_relationship(
     Vec<&RelayCandidate>,
     Vec<&RelayCandidate>,
 ) {
-    let mut block_peers = Vec::new();
+    let mut home_peers = Vec::new();
     let mut neighborhood_peers = Vec::new();
     let mut guardians = Vec::new();
 
@@ -64,13 +64,13 @@ pub fn partition_by_relationship(
         }
 
         match &candidate.relationship {
-            RelayRelationship::BlockPeer { .. } => block_peers.push(candidate),
+            RelayRelationship::HomePeer { .. } => home_peers.push(candidate),
             RelayRelationship::NeighborhoodPeer { .. } => neighborhood_peers.push(candidate),
             RelayRelationship::Guardian => guardians.push(candidate),
         }
     }
 
-    (block_peers, neighborhood_peers, guardians)
+    (home_peers, neighborhood_peers, guardians)
 }
 
 /// Select one candidate from a tier using deterministic randomness.
@@ -81,7 +81,7 @@ pub fn partition_by_relationship(
 /// # Arguments
 /// * `tier` - Candidates in this tier (should all have same relationship type)
 /// * `seed` - 32-byte seed for deterministic selection
-/// * `tier_index` - Which tier this is (0=block, 1=neighborhood, 2=guardian)
+/// * `tier_index` - Which tier this is (0=home, 1=neighborhood, 2=guardian)
 ///
 /// # Returns
 /// The selected candidate's authority ID, or None if tier is empty
@@ -120,7 +120,7 @@ pub fn select_one_from_tier(
 /// Select relays from candidates using tier-based priority.
 ///
 /// Selects up to `max_per_tier` candidates from each tier, starting with
-/// block peers (highest priority), then neighborhood peers, then guardians.
+/// home peers (highest priority), then neighborhood peers, then guardians.
 ///
 /// # Arguments
 /// * `candidates` - All relay candidates
@@ -134,13 +134,13 @@ pub fn select_by_tiers(
     seed: &[u8; 32],
     max_per_tier: usize,
 ) -> Vec<AuthorityId> {
-    let (block_peers, neighborhood_peers, guardians) = partition_by_relationship(candidates);
+    let (home_peers, neighborhood_peers, guardians) = partition_by_relationship(candidates);
 
     let mut result = Vec::new();
 
-    // Select from block peers first
+    // Select from home peers first
     result.extend(select_multiple_from_tier(
-        &block_peers,
+        &home_peers,
         seed,
         0,
         max_per_tier,
@@ -319,9 +319,9 @@ mod tests {
 
         let selected = select_by_tiers(&candidates, &seed, 1);
 
-        // Should select one from each tier, block first
+        // Should select one from each tier, home first
         assert_eq!(selected.len(), 3);
-        assert_eq!(selected[0], test_authority(1)); // Block peer
+        assert_eq!(selected[0], test_authority(1)); // Home peer
         assert_eq!(selected[1], test_authority(2)); // Neighborhood peer
         assert_eq!(selected[2], test_authority(3)); // Guardian
     }
@@ -338,7 +338,7 @@ mod tests {
 
         let selected = select_by_tiers(&candidates, &seed, 2);
 
-        // Should select 2 block peers + 1 neighborhood peer
+        // Should select 2 home peers + 1 neighborhood peer
         assert_eq!(selected.len(), 3);
     }
 

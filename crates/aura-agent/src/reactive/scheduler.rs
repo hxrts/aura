@@ -324,7 +324,7 @@ impl ReactiveScheduler {
                 0 // Will be ignored by guard
             };
 
-            // Clone time_effects for use in select! block
+            // Clone time_effects for use in select! statement
             let time_effects = self.time_effects.clone();
 
             tokio::select! {
@@ -880,25 +880,25 @@ impl ViewReduction<InvitationDelta> for InvitationReduction {
     }
 }
 
-/// Delta type for block view
+/// Delta type for home view
 #[derive(Debug, Clone, PartialEq)]
-pub enum BlockDelta {
-    /// A new block was created
-    BlockCreated {
-        block_id: String,
+pub enum HomeDelta {
+    /// A new home was created
+    HomeCreated {
+        home_id: String,
         name: String,
         created_at: u64,
         creator_id: String,
     },
-    /// A resident joined the block
+    /// A resident joined the home
     ResidentAdded {
         authority_id: String,
         name: String,
         joined_at: u64,
     },
-    /// A resident left the block
+    /// A resident left the home
     ResidentRemoved { authority_id: String, left_at: u64 },
-    /// Block storage statistics updated
+    /// Home storage statistics updated
     StorageUpdated {
         used_bytes: u64,
         total_bytes: u64,
@@ -906,11 +906,11 @@ pub enum BlockDelta {
     },
 }
 
-/// Reduction function for block view
-pub struct BlockReduction;
+/// Reduction function for home view
+pub struct HomeReduction;
 
-impl ViewReduction<BlockDelta> for BlockReduction {
-    fn reduce(&self, facts: &[Fact], _own_authority: Option<AuthorityId>) -> Vec<BlockDelta> {
+impl ViewReduction<HomeDelta> for HomeReduction {
+    fn reduce(&self, facts: &[Fact], _own_authority: Option<AuthorityId>) -> Vec<HomeDelta> {
         facts
             .iter()
             .filter_map(|fact| match &fact.content {
@@ -928,14 +928,14 @@ impl ViewReduction<BlockDelta> for BlockReduction {
                     let social_fact = SocialFact::from_bytes(binding_data)?;
 
                     match social_fact {
-                        SocialFact::BlockCreated {
-                            block_id,
+                        SocialFact::HomeCreated {
+                            home_id,
                             created_at,
                             creator_id,
                             name,
                             ..
-                        } => Some(BlockDelta::BlockCreated {
-                            block_id: format!("{}", block_id),
+                        } => Some(HomeDelta::HomeCreated {
+                            home_id: format!("{}", home_id),
                             name,
                             created_at: created_at.ts_ms,
                             creator_id: creator_id.to_string(),
@@ -945,7 +945,7 @@ impl ViewReduction<BlockDelta> for BlockReduction {
                             joined_at,
                             name,
                             ..
-                        } => Some(BlockDelta::ResidentAdded {
+                        } => Some(HomeDelta::ResidentAdded {
                             authority_id: authority_id.to_string(),
                             name,
                             joined_at: joined_at.ts_ms,
@@ -954,7 +954,7 @@ impl ViewReduction<BlockDelta> for BlockReduction {
                             authority_id,
                             left_at,
                             ..
-                        } => Some(BlockDelta::ResidentRemoved {
+                        } => Some(HomeDelta::ResidentRemoved {
                             authority_id: authority_id.to_string(),
                             left_at: left_at.ts_ms,
                         }),
@@ -963,12 +963,12 @@ impl ViewReduction<BlockDelta> for BlockReduction {
                             total_bytes,
                             updated_at,
                             ..
-                        } => Some(BlockDelta::StorageUpdated {
+                        } => Some(HomeDelta::StorageUpdated {
                             used_bytes,
                             total_bytes,
                             updated_at: updated_at.ts_ms,
                         }),
-                        // Other social facts don't map to BlockDelta
+                        // Other social facts don't map to HomeDelta
                         _ => None,
                     }
                 }
@@ -990,7 +990,7 @@ mod tests {
     use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_journal::DomainFact;
-    use aura_social::BlockId;
+    use aura_social::HomeId;
     use tokio::sync::mpsc;
 
     /// Helper to create a test context ID
@@ -998,9 +998,9 @@ mod tests {
         ContextId::new_from_entropy([0u8; 32])
     }
 
-    /// Helper to create a test block ID
-    fn test_block_id() -> BlockId {
-        BlockId::from_bytes([1u8; 32])
+    /// Helper to create a test home ID
+    fn test_home_id() -> HomeId {
+        HomeId::from_bytes([1u8; 32])
     }
 
     /// Helper to create a test authority ID
@@ -1390,28 +1390,28 @@ mod tests {
     }
 
     #[test]
-    fn test_block_reduction() {
-        let reduction = BlockReduction;
+    fn test_home_reduction() {
+        let reduction = HomeReduction;
 
         // Create properly serialized SocialFact instances
-        let block_created = SocialFact::block_created_ms(
-            test_block_id(),
+        let home_created = SocialFact::home_created_ms(
+            test_home_id(),
             test_context_id(),
             1000,
             test_authority_id(),
-            "Test Block".to_string(),
+            "Test Home".to_string(),
         );
 
         let resident_joined = SocialFact::resident_joined_ms(
             test_authority_id(),
-            test_block_id(),
+            test_home_id(),
             test_context_id(),
             2000,
             "Alice".to_string(),
         );
 
         let storage_updated = SocialFact::storage_updated_ms(
-            test_block_id(),
+            test_home_id(),
             test_context_id(),
             1024 * 1024,      // 1 MB used
             10 * 1024 * 1024, // 10 MB total
@@ -1424,7 +1424,7 @@ mod tests {
                 FactContent::Relational(RelationalFact::Generic {
                     context_id: test_context_id(),
                     binding_type: SOCIAL_FACT_TYPE_ID.to_string(),
-                    binding_data: block_created.to_bytes(),
+                    binding_data: home_created.to_bytes(),
                 }),
             ),
             make_test_fact(
@@ -1448,11 +1448,11 @@ mod tests {
         let deltas = reduction.reduce(&facts, None);
         assert_eq!(deltas.len(), 3);
         assert!(
-            matches!(&deltas[0], BlockDelta::BlockCreated { name, .. } if name == "Test Block")
+            matches!(&deltas[0], HomeDelta::HomeCreated { name, .. } if name == "Test Home")
         );
-        assert!(matches!(&deltas[1], BlockDelta::ResidentAdded { name, .. } if name == "Alice"));
+        assert!(matches!(&deltas[1], HomeDelta::ResidentAdded { name, .. } if name == "Alice"));
         assert!(
-            matches!(&deltas[2], BlockDelta::StorageUpdated { used_bytes, total_bytes, .. }
+            matches!(&deltas[2], HomeDelta::StorageUpdated { used_bytes, total_bytes, .. }
             if *used_bytes == 1024 * 1024 && *total_bytes == 10 * 1024 * 1024)
         );
     }

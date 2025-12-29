@@ -11,7 +11,8 @@
 
 Aura is a threshold identity and encrypted storage platform built on relational security principles. It uses threshold cryptography and social recovery to eliminate the traditional choice between trusting a single device or a centralized entity.
 
-**Architecture**: Choreographic programming with session types for coordinating distributed protocols. Uses algebraic effects for modular runtime composition. See `docs/001_system_architecture.md` and `docs/999_project_structure.md` for the latest crate breakdown.
+**Architecture**: Choreographic programming with session types for coordinating distributed protocols. Uses algebraic effects for modular runtime composition. The `docs/` directory is the **primary, authoritative spec**; `work/` is non-authoritative scratch and may be removed.
+See `docs/001_system_architecture.md` and `docs/999_project_structure.md` for the latest crate breakdown.
 
 ## Development Setup
 
@@ -104,7 +105,7 @@ Aura now models identity via opaque authorities (`AuthorityId`) and relational c
 - Guard chain sequence: `AuthorizationEffects` (Biscuit/capabilities) → `FlowBudgetEffects` (charge-before-send) → `LeakageEffects` (`docs/003_information_flow_contract.md`) → `JournalEffects` (fact commit) → `TransportEffects`.
 - Flow budgets: only the `spent` counters are facts; limits are derived at runtime from Biscuit + policy.
 - **Hybrid journal model**: fact journal (join) + capability frontier (meet) combined as `JournalState` for effects/runtime use.
-- **Transaction Model**: Database operations coordinate via two orthogonal dimensions: (1) Authority Scope (Single vs Cross-authority) and (2) Agreement Level (Monotone/CRDT vs Consensus). Monotone operations use CRDT merge (0 RTT). Non-monotone operations use consensus (1-3 RTT). Cross-authority operations work with both. Consensus is NOT linearizable - use session types for operation sequencing. See `docs/113_database.md` §8 and `work/reactive.md` §7.4.
+- **Transaction Model**: Database operations coordinate via two orthogonal dimensions: (1) Authority Scope (Single vs Cross-authority) and (2) Agreement Level (Monotone/CRDT vs Consensus). Monotone operations use CRDT merge (0 RTT). Non-monotone operations use consensus (1-3 RTT). Cross-authority operations work with both. Consensus is NOT linearizable - use session types for operation sequencing. See `docs/113_database.md` §8.
 
 ## Threshold Lifecycle Taxonomy
 
@@ -166,10 +167,12 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - Privacy: `docs/003_information_flow_contract.md`
 - Distributed systems contract: `docs/004_distributed_systems_contract.md`
 - Authority/Relational identity: `docs/100_authority_and_identity.md`, `docs/103_relational_contexts.md`
-- Consensus: `docs/104_consensus.md`
+- Consensus & BFT-DKG: `docs/104_consensus.md`
 - Transport/receipts: `docs/108_transport_and_information_flow.md`, `docs/110_rendezvous.md`
+- AMP messaging: `docs/112_amp.md`
 - Developer guides: `docs/107_mpst_and_choreography.md`, `docs/106_effect_system_and_runtime.md`
-- Cryptography: `docs/116_crypto.md`
+- Cryptography & VSS: `docs/116_crypto.md`
+- Key rotation ceremonies: `docs/118_key_rotation_ceremonies.md`
 - Reference: `docs/999_project_structure.md`
 
 ## Agent Quick Reference
@@ -246,7 +249,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **How relational contexts work** → `docs/103_relational_contexts.md`
 - **How transport and receipts work** → `docs/108_transport_and_information_flow.md`
 - **How rendezvous and peer discovery work** → `docs/110_rendezvous.md`
-- **How social topology and blocks work** → `docs/114_social_architecture.md`
+- **How social topology and homes work** → `docs/114_social_architecture.md`
 - **How state reduction works** → `docs/110_state_reduction.md`
 - **How the mathematical model works** → `docs/002_theoretical_model.md`
 - **How identifiers and boundaries work** → `docs/105_identifiers_and_boundaries.md`

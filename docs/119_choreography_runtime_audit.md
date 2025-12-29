@@ -18,8 +18,3 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 | `crates/aura-invitation/src/protocol.rs` | InvitationProtocol | Spec-only | CHOREO-INV-001 | Invitation choreography not executed via MPST runtime. |
 | `crates/aura-invitation/src/protocol.rs` | InvitationCompletion | Spec-only | CHOREO-INV-002 | Completion choreography not wired. |
 | `crates/aura-sync/src/protocols/epochs.rs` | EpochSync | Spec-only | CHOREO-SYNC-001 | Sync choreography not wired to runtime adapter. |
-
-## Next Steps
-
-- Add MPST runners per migration ticket using `aura-protocol::choreography::MpstExecutor`.
-- Wire each protocol to the choreographic runtime and add end-to-end tests similar to consensus.

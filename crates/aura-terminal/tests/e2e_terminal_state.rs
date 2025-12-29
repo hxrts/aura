@@ -859,7 +859,7 @@ fn test_text_input_state_machine() {
 /// 2. Issue moderation commands (ban, mute, kick)
 /// 3. Verify the commands are properly dispatched
 ///
-/// Note: The block_id is injected via IntentContext during intent mapping,
+/// Note: The home_id is injected via IntentContext during intent mapping,
 /// not via the EffectCommand fields. The command uses 'target' for user.
 #[tokio::test]
 async fn test_moderation_commands_dispatch() {
@@ -909,7 +909,7 @@ async fn test_moderation_commands_dispatch() {
             reason: Some("Test ban reason".to_string()),
         })
         .await;
-    // The command should be dispatched (even if the actual ban fails due to no real block)
+    // The command should be dispatched (even if the actual ban fails due to no real home)
     println!(
         "  BanUser dispatch result: {:?}",
         ban_result.as_ref().map(|_| "ok")
@@ -1353,12 +1353,12 @@ async fn test_threshold_configuration_flow() {
     println!("\n=== Threshold Configuration Flow Test PASSED ===\n");
 }
 
-/// Test block messaging and navigation flow
+/// Test home messaging and navigation flow
 ///
 /// This test validates:
-/// 1. SendMessage command dispatches for block channels
+/// 1. SendMessage command dispatches for home channels
 /// 2. MovePosition updates neighborhood state
-/// 3. Block channel naming convention (block:<block_id>)
+/// 3. Home channel naming convention (home:<home_id>)
 #[tokio::test]
 async fn test_block_messaging_flow() {
     use async_lock::RwLock;
@@ -1369,9 +1369,9 @@ async fn test_block_messaging_flow() {
     use aura_testkit::MockRuntimeBridge;
     use std::sync::Arc;
 
-    println!("\n=== Block Messaging Flow Test ===\n");
+    println!("\n=== Home Messaging Flow Test ===\n");
 
-    let test_dir = std::env::temp_dir().join(format!("aura-block-test-{}", std::process::id()));
+    let test_dir = std::env::temp_dir().join(format!("aura-home-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -1390,7 +1390,7 @@ async fn test_block_messaging_flow() {
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
-        "test-device-block".to_string(),
+        "test-device-home".to_string(),
         TuiMode::Production,
     );
 
@@ -1400,16 +1400,16 @@ async fn test_block_messaging_flow() {
         .expect("Failed to create account");
     println!("  ✓ Account created");
 
-    // Phase 2: Test SendMessage command for block channel
-    println!("\nPhase 2: Testing SendMessage for block channel");
+    // Phase 2: Test SendMessage command for home channel
+    println!("\nPhase 2: Testing SendMessage for home channel");
 
-    // Block channels use block:<block_id> format
-    let block_channel = "block:home".to_string();
-    let message_content = "Hello from the block!".to_string();
+    // Home channels use home:<home_id> format
+    let home_channel = "home:main".to_string();
+    let message_content = "Hello from the home!".to_string();
 
     let result = ctx
         .dispatch(EffectCommand::SendMessage {
-            channel: block_channel.clone(),
+            channel: home_channel.clone(),
             content: message_content.clone(),
         })
         .await;
@@ -1418,7 +1418,7 @@ async fn test_block_messaging_flow() {
     // may succeed (mock has authority) or fail with various errors.
     match &result {
         Ok(_) => {
-            println!("  ✓ SendMessage to block:home dispatched successfully");
+            println!("  ✓ SendMessage to home:main dispatched successfully");
         }
         Err(e) => {
             println!("  ✓ SendMessage command processed (error: {})", e);
@@ -1428,11 +1428,11 @@ async fn test_block_messaging_flow() {
     // Phase 3: Test MovePosition command
     println!("\nPhase 3: Testing MovePosition navigation");
 
-    // Navigate to a different block
+    // Navigate to a different home
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
-            block_id: "home".to_string(),
+            home_id: "home".to_string(),
             depth: "Interior".to_string(),
         })
         .await;
@@ -1450,7 +1450,7 @@ async fn test_block_messaging_flow() {
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
-            block_id: "current".to_string(),
+            home_id: "current".to_string(),
             depth: "Street".to_string(),
         })
         .await;
@@ -1458,15 +1458,15 @@ async fn test_block_messaging_flow() {
     assert!(result.is_ok(), "MovePosition to Street should succeed");
     println!("  ✓ MovePosition to Street view dispatched successfully");
 
-    // Phase 5: Test block channel naming convention
-    println!("\nPhase 5: Testing block channel naming conventions");
+    // Phase 5: Test home channel naming convention
+    println!("\nPhase 5: Testing home channel naming conventions");
 
-    // Test with UUID-style block ID
-    let uuid_block_channel = format!("block:{}", "550e8400-e29b-41d4-a716-446655440000");
+    // Test with UUID-style home ID
+    let uuid_home_channel = format!("home:{}", "550e8400-e29b-41d4-a716-446655440000");
     let result = ctx
         .dispatch(EffectCommand::SendMessage {
             channel: uuid_block_channel.clone(),
-            content: "Message to UUID block".to_string(),
+            content: "Message to UUID home".to_string(),
         })
         .await;
 
@@ -1476,15 +1476,15 @@ async fn test_block_messaging_flow() {
             e.contains("Unauthorized") || e.contains("authority") || e.contains("failed"),
             "Error should be auth-related for journaled intent"
         );
-        println!("  ✓ UUID block channel naming convention validated (auth required)");
+        println!("  ✓ UUID home channel naming convention validated (auth required)");
     } else {
-        println!("  ✓ SendMessage to UUID block channel dispatched successfully");
+        println!("  ✓ SendMessage to UUID home channel dispatched successfully");
     }
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&test_dir);
 
-    println!("\n=== Block Messaging Flow Test PASSED ===\n");
+    println!("\n=== Home Messaging Flow Test PASSED ===\n");
 }
 
 /// Test SetContext command flow
@@ -1542,10 +1542,10 @@ async fn test_set_context_flow() {
     // Phase 3: Set context via SetContext command
     println!("\nPhase 3: Testing SetContext command");
 
-    let block_context = "block:home".to_string();
+    let home_context = "home:main".to_string();
     let result = ctx
         .dispatch(EffectCommand::SetContext {
-            context_id: block_context.clone(),
+            context_id: home_context.clone(),
         })
         .await;
 
@@ -1558,8 +1558,8 @@ async fn test_set_context_flow() {
     let current_context = ctx.get_current_context().await;
     assert_eq!(
         current_context,
-        Some(block_context.clone()),
-        "Context should be set to block:home"
+        Some(home_context.clone()),
+        "Context should be set to home:main"
     );
     println!("  ✓ Context persisted: {:?}", current_context);
 
@@ -1638,7 +1638,7 @@ async fn test_set_context_flow() {
 #[tokio::test]
 async fn test_steward_role_flow() {
     use async_lock::RwLock;
-    use aura_app::views::block::{BlockState, Resident, ResidentRole};
+    use aura_app::views::home::{HomeState, Resident, ResidentRole};
     use aura_app::AppCore;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
@@ -1675,11 +1675,11 @@ async fn test_steward_role_flow() {
         .expect("Failed to create account");
     println!("  ✓ Account created");
 
-    // Phase 2: Set up a block with residents
-    println!("\nPhase 2: Setting up block with residents");
+    // Phase 2: Set up a home with residents
+    println!("\nPhase 2: Setting up home with residents");
 
-    let block_id = "test-block-1".parse::<ChannelId>().unwrap_or_default();
-    let block_context_id = ContextId::new_from_entropy([9u8; 32]);
+    let home_id = "test-home-1".parse::<ChannelId>().unwrap_or_default();
+    let home_context_id = ContextId::new_from_entropy([9u8; 32]);
     let owner_id = AuthorityId::new_from_entropy([1u8; 32]);
     let resident1_id = AuthorityId::new_from_entropy([2u8; 32]);
     let resident2_id = AuthorityId::new_from_entropy([3u8; 32]);
@@ -1688,13 +1688,13 @@ async fn test_steward_role_flow() {
     {
         let core = app_core.write().await;
 
-        // Create a block with the current user as owner
-        let mut block = BlockState::new(
-            block_id.clone(),
-            Some("Test Block".to_string()),
+        // Create a home with the current user as owner
+        let mut home = BlockState::new(
+            home_id.clone(),
+            Some("Test Home".to_string()),
             owner_id.clone(),
             0,
-            block_context_id.to_string(),
+            home_context_id.to_string(),
         );
 
         // Add some residents
@@ -1718,18 +1718,18 @@ async fn test_steward_role_flow() {
             storage_allocated: 200 * 1024,
         };
 
-        block.add_resident(resident1);
-        block.add_resident(resident2);
+        home_state.add_resident(resident1);
+        home_state.add_resident(resident2);
 
         // Set as owner so we have permission to grant/revoke
-        block.my_role = ResidentRole::Owner;
+        home_state.my_role = ResidentRole::Owner;
 
-        // Add block and select it
-        core.views().add_block(block);
-        core.views().select_block(Some(block_id.clone()));
+        // Add home and select it
+        core.views().add_home(home_state);
+        core.views().select_block(Some(home_id.clone()));
     }
 
-    println!("  ✓ Block created with 3 residents (1 owner, 2 residents)");
+    println!("  ✓ Home created with 3 residents (1 owner, 2 residents)");
 
     // Phase 3: Test GrantSteward command
     println!("\nPhase 3: Testing GrantSteward command");
@@ -1747,8 +1747,8 @@ async fn test_steward_role_flow() {
     {
         let core = app_core.read().await;
         let blocks = core.views().get_blocks();
-        let block = blocks.current_block().expect("Block should exist");
-        let resident = block
+        let home = blocks.current_block().expect("Home should exist");
+        let resident = home_state
             .resident(&resident1_id)
             .expect("Resident should exist");
         assert!(
@@ -1774,8 +1774,8 @@ async fn test_steward_role_flow() {
     {
         let core = app_core.read().await;
         let blocks = core.views().get_blocks();
-        let block = blocks.current_block().expect("Block should exist");
-        let resident = block
+        let home = blocks.current_block().expect("Home should exist");
+        let resident = home_state
             .resident(&resident1_id)
             .expect("Resident should exist");
         assert!(
@@ -1848,9 +1848,9 @@ async fn test_steward_role_flow() {
 /// Test neighborhood navigation flow
 ///
 /// Tests:
-/// 1. Setting up neighborhood with home block and neighbors
+/// 1. Setting up neighborhood with home home and neighbors
 /// 2. MovePosition command updates traversal position
-/// 3. Navigate to specific block (enter block)
+/// 3. Navigate to specific home (enter home)
 /// 4. Go home navigation
 /// 5. Back to street navigation (depth change)
 /// 6. Position persistence across navigation
@@ -1900,44 +1900,44 @@ async fn test_neighborhood_navigation_flow() {
     // Phase 2: Set up neighborhood with blocks
     println!("\nPhase 2: Setting up neighborhood with blocks");
 
-    let home_block_id = "home-block".parse::<ChannelId>().unwrap_or_default();
-    let alice_block_id = "alice-block".parse::<ChannelId>().unwrap_or_default();
-    let bob_block_id = "bob-block".parse::<ChannelId>().unwrap_or_default();
-    let locked_block_id = "locked-block".parse::<ChannelId>().unwrap_or_default();
+    let home_home_id = "home-main".parse::<ChannelId>().unwrap_or_default();
+    let alice_home_id = "alice-home".parse::<ChannelId>().unwrap_or_default();
+    let bob_home_id = "bob-home".parse::<ChannelId>().unwrap_or_default();
+    let locked_home_id = "locked-home".parse::<ChannelId>().unwrap_or_default();
 
     {
         let core = app_core.write().await;
 
         // Create neighborhood state with home and neighbors
         let neighborhood = NeighborhoodState {
-            home_block_id: home_block_id.clone(),
-            home_block_name: "My Home".to_string(),
+            home_home_id: home_home_id.clone(),
+            home_name: "My Home".to_string(),
             position: Some(TraversalPosition {
-                current_block_id: home_block_id.clone(),
-                current_block_name: "My Home".to_string(),
+                current_home_id: home_home_id.clone(),
+                current_home_name: "My Home".to_string(),
                 depth: 2, // Interior depth
-                path: vec![home_block_id.clone()],
+                path: vec![home_home_id.clone()],
             }),
             neighbors: vec![
-                NeighborBlock {
-                    id: alice_block_id.clone(),
-                    name: "Alice's Block".to_string(),
+                NeighborHome {
+                    id: alice_home_id.clone(),
+                    name: "Alice's Home".to_string(),
                     adjacency: AdjacencyType::Direct,
                     shared_contacts: 3,
                     resident_count: Some(5),
                     can_traverse: true,
                 },
-                NeighborBlock {
-                    id: bob_block_id.clone(),
-                    name: "Bob's Block".to_string(),
+                NeighborHome {
+                    id: bob_home_id.clone(),
+                    name: "Bob's Home".to_string(),
                     adjacency: AdjacencyType::Direct,
                     shared_contacts: 2,
                     resident_count: Some(4),
                     can_traverse: true,
                 },
-                NeighborBlock {
-                    id: locked_block_id.clone(),
-                    name: "Private Block".to_string(),
+                NeighborHome {
+                    id: locked_home_id.clone(),
+                    name: "Private Home".to_string(),
                     adjacency: AdjacencyType::TwoHop,
                     shared_contacts: 0,
                     resident_count: Some(8),
@@ -1951,15 +1951,15 @@ async fn test_neighborhood_navigation_flow() {
         core.views().set_neighborhood(neighborhood);
     }
 
-    println!("  ✓ Neighborhood created with 3 neighbor blocks");
+    println!("  ✓ Neighborhood created with 3 neighbor homes");
 
-    // Phase 3: Test MovePosition to navigate to a neighbor block
-    println!("\nPhase 3: Testing MovePosition to enter a block");
+    // Phase 3: Test MovePosition to navigate to a neighbor home
+    println!("\nPhase 3: Testing MovePosition to enter a home");
 
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
-            block_id: "alice-block".to_string(),
+            home_id: "alice-home".to_string(),
             depth: "Interior".to_string(),
         })
         .await;
@@ -1976,15 +1976,15 @@ async fn test_neighborhood_navigation_flow() {
             .position
             .expect("Should have position after navigation");
         assert_eq!(
-            position.current_block_id, alice_block_id,
-            "Should be at Alice's block"
+            position.current_home_id, alice_home_id,
+            "Should be at Alice's home"
         );
         assert_eq!(
-            position.current_block_name, "Alice's Block",
-            "Block name should match"
+            position.current_home_name, "Alice's Home",
+            "Home name should match"
         );
         assert_eq!(position.depth, 2, "Interior depth should be 2");
-        println!("  ✓ Position updated to Alice's block at Interior depth");
+        println!("  ✓ Position updated to Alice's home at Interior depth");
     }
 
     // Phase 4: Test Go Home navigation
@@ -1993,7 +1993,7 @@ async fn test_neighborhood_navigation_flow() {
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
-            block_id: "home".to_string(),
+            home_id: "home".to_string(),
             depth: "Interior".to_string(),
         })
         .await;
@@ -2012,29 +2012,29 @@ async fn test_neighborhood_navigation_flow() {
             .clone()
             .expect("Should have position after going home");
         assert_eq!(
-            position.current_block_id, home_block_id,
-            "Should be at home block"
+            position.current_home_id, home_home_id,
+            "Should be at home home"
         );
-        println!("  ✓ Returned to home block");
+        println!("  ✓ Returned to home home");
     }
 
     // Phase 5: Test Back to Street (depth change)
     println!("\nPhase 5: Testing Back to Street navigation");
 
-    // First enter a block
+    // First enter a home
     ctx.dispatch(EffectCommand::MovePosition {
         neighborhood_id: "current".to_string(),
-        block_id: "bob-block".to_string(),
+        home_id: "bob-home".to_string(),
         depth: "Interior".to_string(),
     })
     .await
-    .expect("Should enter Bob's block");
+    .expect("Should enter Bob's home");
 
     // Now back to street view
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
-            block_id: "current".to_string(), // Stay on current block
+            home_id: "current".to_string(), // Stay on current home
             depth: "Street".to_string(),     // But change to street depth
         })
         .await;
@@ -2049,11 +2049,11 @@ async fn test_neighborhood_navigation_flow() {
 
         let position = neighborhood.position.expect("Should have position");
         assert_eq!(
-            position.current_block_id, bob_block_id,
-            "Should still be at Bob's block"
+            position.current_home_id, bob_home_id,
+            "Should still be at Bob's home"
         );
         assert_eq!(position.depth, 0, "Street depth should be 0");
-        println!("  ✓ Depth changed to Street (0) while staying at Bob's block");
+        println!("  ✓ Depth changed to Street (0) while staying at Bob's home");
     }
 
     // Phase 6: Test Frontage depth navigation
@@ -2062,7 +2062,7 @@ async fn test_neighborhood_navigation_flow() {
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
-            block_id: "current".to_string(),
+            home_id: "current".to_string(),
             depth: "Frontage".to_string(),
         })
         .await;
@@ -2321,7 +2321,7 @@ async fn test_channel_mode_operations() {
     println!("\nPhase 5: Testing IoContext channel mode storage");
 
     use async_lock::RwLock;
-    use aura_app::views::block::{BlockState, ResidentRole};
+    use aura_app::views::home::{HomeState, ResidentRole};
     use aura_app::AppCore;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use std::sync::Arc;
@@ -2350,23 +2350,23 @@ async fn test_channel_mode_operations() {
         .await
         .expect("Failed to create account");
 
-    let block_id = "test-block-mode".parse::<ChannelId>().unwrap_or_default();
+    let home_id = "test-home-mode".parse::<ChannelId>().unwrap_or_default();
     let owner_id = "owner-id".parse::<AuthorityId>().unwrap_or_default();
-    let block_context_id = ContextId::new_from_entropy([10u8; 32]);
+    let home_context_id = ContextId::new_from_entropy([10u8; 32]);
 
-    // Set up a block with the user as owner (required for SetChannelMode)
+    // Set up a home with the user as owner (required for SetChannelMode)
     {
         let core = app_core.write().await;
-        let mut block = BlockState::new(
-            block_id.clone(),
-            Some("Test Block".to_string()),
+        let mut home = BlockState::new(
+            home_id.clone(),
+            Some("Test Home".to_string()),
             owner_id.clone(),
             0,
-            block_context_id.to_string(),
+            home_context_id.to_string(),
         );
-        block.my_role = ResidentRole::Owner;
-        core.views().add_block(block);
-        core.views().select_block(Some(block_id.clone()));
+        home_state.my_role = ResidentRole::Owner;
+        core.views().add_home(home_state);
+        core.views().select_block(Some(home_id.clone()));
     }
 
     // Initially no mode set
@@ -3270,8 +3270,8 @@ async fn test_device_management() {
 #[tokio::test]
 async fn test_snapshot_data_accuracy() {
     use async_lock::RwLock;
-    use aura_app::signal_defs::BLOCK_SIGNAL;
-    use aura_app::views::block::BlockState;
+    use aura_app::signal_defs::HOMES_SIGNAL;
+    use aura_app::views::home::HomeState;
     use aura_app::views::contacts::{Contact, ContactsState};
     use aura_app::AppCore;
     use aura_core::effects::reactive::ReactiveEffects;
@@ -3317,45 +3317,45 @@ async fn test_snapshot_data_accuracy() {
 
     println!("Phase 1: Testing BlockInfo.created_at");
 
-    // Create a block with a specific created_at timestamp
+    // Create a home with a specific created_at timestamp
     let test_created_at = 1702000000000u64; // A specific timestamp
-    let block_id = "test-block-1".parse::<ChannelId>().unwrap_or_default();
+    let home_id = "test-home-1".parse::<ChannelId>().unwrap_or_default();
     let _block_context_id = ContextId::new_from_entropy([9u8; 32]);
-    let block_state = BlockState::new(
-        block_id,
-        Some("Test Block".to_string()),
+    let home_state = BlockState::new(
+        home_id,
+        Some("Test Home".to_string()),
         authority_id.clone(),
         test_created_at,
         "ctx-1".to_string(),
     );
 
-    // Emit block state via signal
+    // Emit home state via signal
     {
         let core = app_core.read().await;
-        core.emit(&*BLOCK_SIGNAL, block_state.clone())
+        core.emit(&*HOMES_SIGNAL, home_state.clone())
             .await
-            .expect("Failed to emit block state");
+            .expect("Failed to emit home state");
     }
 
     // Get snapshot and verify created_at
-    let block_snapshot = ctx.snapshot_block();
-    if let Some(block_info) = &block_snapshot.block {
+    let home_snapshot = ctx.snapshot_home();
+    if let Some(home_info) = &home_snapshot.home {
         assert_eq!(
-            block_info.created_at, test_created_at,
+            home_info.created_at, test_created_at,
             "BlockInfo.created_at should match the BlockState value"
         );
         println!(
             "  ✓ BlockInfo.created_at is correct: {}",
-            block_info.created_at
+            home_info.created_at
         );
     } else {
-        println!("  ⚠ No block info in snapshot (block may not have been set)");
+        println!("  ⚠ No home info in snapshot (home may not have been set)");
     }
 
     println!("\nPhase 2: Testing Resident list");
 
-    // The block's residents should include the creator
-    let residents = block_snapshot.residents();
+    // The home's residents should include the creator
+    let residents = home_snapshot.residents();
     let self_resident = residents.iter().find(|r| r.id == authority_id);
     if let Some(resident) = self_resident {
         println!(
@@ -3498,7 +3498,7 @@ async fn test_intent_creates_journal_facts() {
     // Dispatch CreateChannel intent - this should create a journal fact
     let result = app_core.dispatch(Intent::CreateChannel {
         name: "test-channel".to_string(),
-        channel_type: IntentChannelType::Block,
+        channel_type: IntentChannelType::Home,
     });
     assert!(result.is_ok(), "CreateChannel dispatch should succeed");
 
@@ -3591,7 +3591,7 @@ async fn test_journal_save_load_roundtrip() {
     app_core
         .dispatch(Intent::CreateChannel {
             name: "channel-1".to_string(),
-            channel_type: IntentChannelType::Block,
+            channel_type: IntentChannelType::Home,
         })
         .expect("CreateChannel should succeed");
 
@@ -3800,7 +3800,7 @@ async fn test_settings_persistence() {
     app_core
         .dispatch(Intent::CreateChannel {
             name: "general".to_string(),
-            channel_type: IntentChannelType::Block,
+            channel_type: IntentChannelType::Home,
         })
         .expect("CreateChannel should succeed");
 
@@ -3899,7 +3899,7 @@ async fn test_channel_lifecycle() {
     println!("Step 1: Creating channel...");
     let result = app_core.dispatch(Intent::CreateChannel {
         name: "test-room".to_string(),
-        channel_type: IntentChannelType::Block,
+        channel_type: IntentChannelType::Home,
     });
     assert!(result.is_ok(), "CreateChannel should succeed");
     assert_eq!(

@@ -103,28 +103,32 @@ pub async fn handle_invitations(
                     }
                 }
                 "channel" | "chat" | "group" => {
-                    let block_id = if let Some(id) = extra {
+                    let home_id = if let Some(id) = extra {
                         id
                     } else {
-                        // Best effort: use the currently-selected block/channel from the reactive view.
+                        // Best effort: use the currently-selected home/channel from the reactive view.
                         let core = app_core.read().await;
-                        let block = core
-                            .read(&*aura_app::signal_defs::BLOCK_SIGNAL)
+                        let homes_state = core
+                            .read(&*aura_app::signal_defs::HOMES_SIGNAL)
                             .await
                             .unwrap_or_default();
-                        block.id.to_string()
+                        homes_state
+                            .current_home_id
+                            .as_ref()
+                            .map(|id| id.to_string())
+                            .unwrap_or_else(|| "home".to_string())
                     };
 
-                    if block_id.trim().is_empty() {
+                    if home_id.trim().is_empty() {
                         return Some(Err(OpError::InvalidArgument(
-                            "No active block/channel to invite to".to_string(),
+                            "No active home/channel to invite to".to_string(),
                         )));
                     }
 
                     match create_channel_invitation(
                         app_core,
                         receiver,
-                        block_id,
+                        home_id,
                         message.clone(),
                         ttl_ms,
                     )
@@ -159,7 +163,7 @@ pub async fn handle_invitations(
             }
         }
 
-        EffectCommand::SendBlockInvitation { contact_id } => {
+        EffectCommand::SendHomeInvitation { contact_id } => {
             let receiver: aura_core::identifiers::AuthorityId = match contact_id.parse() {
                 Ok(id) => id,
                 Err(_) => {
@@ -170,32 +174,30 @@ pub async fn handle_invitations(
                 }
             };
 
-            // Best effort: use the currently-selected block from the reactive view.
-            let block_id = {
+            // Best effort: use the currently-selected home from the reactive view.
+            let home_id = {
                 use aura_core::effects::reactive::ReactiveEffects;
 
                 let core = app_core.read().await;
 
-                if let Ok(blocks) = core.read(&*aura_app::signal_defs::BLOCKS_SIGNAL).await {
-                    blocks
-                        .current_block_id
+                if let Ok(homes) = core.read(&*aura_app::signal_defs::HOMES_SIGNAL).await {
+                    homes
+                        .current_home_id
                         .as_ref()
                         .map(|id| id.to_string())
                         .unwrap_or_else(|| "home".to_string())
-                } else if let Ok(block) = core.read(&*aura_app::signal_defs::BLOCK_SIGNAL).await {
-                    block.id.to_string()
                 } else {
                     "home".to_string()
                 }
             };
 
-            match create_channel_invitation(app_core, receiver, block_id, None, None).await {
+            match create_channel_invitation(app_core, receiver, home_id, None, None).await {
                 Ok(info) => Some(Ok(OpResponse::Data(format!(
-                    "Block invitation sent: {}",
+                    "Home invitation sent: {}",
                     info.invitation_id
                 )))),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to send block invitation: {}",
+                    "Failed to send home invitation: {}",
                     e
                 )))),
             }
@@ -239,8 +241,8 @@ pub async fn handle_invitations(
 
                     // Format invitation type for display
                     let invitation_type = match &invitation.invitation_type {
-                        InvitationBridgeType::Channel { block_id } => {
-                            format!("channel:{}", block_id)
+                        InvitationBridgeType::Channel { home_id } => {
+                            format!("channel:{}", home_id)
                         }
                         InvitationBridgeType::Guardian { .. } => "guardian".to_string(),
                         InvitationBridgeType::Contact { nickname } => {

@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum InvitationType {
-    /// Block membership invitation
+    /// Home membership invitation
     #[default]
-    Block,
+    Home,
     /// Guardian invitation
     Guardian,
     /// Chat/DM invitation
@@ -70,10 +70,10 @@ pub struct Invitation {
     pub expires_at: Option<u64>,
     /// Optional message from sender
     pub message: Option<String>,
-    /// Block ID (for block invitations)
-    pub block_id: Option<ChannelId>,
-    /// Block name (for block invitations)
-    pub block_name: Option<String>,
+    /// Home ID (for home invitations)
+    pub home_id: Option<ChannelId>,
+    /// Home name (for home invitations)
+    pub home_name: Option<String>,
 }
 
 /// Invitations state

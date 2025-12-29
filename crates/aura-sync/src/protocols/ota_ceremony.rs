@@ -635,6 +635,9 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         )
         .await?;
 
+        // Remove terminal ceremony state to prevent unbounded growth.
+        self.ceremonies.remove(&ceremony_id);
+
         Ok(activation_epoch)
     }
 
@@ -666,6 +669,9 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
 
         // Emit aborted fact
         self.emit_ceremony_aborted_fact(ceremony_id, reason).await?;
+
+        // Remove terminal ceremony state to prevent unbounded growth.
+        self.ceremonies.remove(&ceremony_id);
 
         Ok(())
     }
@@ -1008,6 +1014,20 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             })
             .collect()
     }
+
+    /// Cleanup ceremonies that have completed or timed out.
+    pub fn cleanup_stale_ceremonies(&mut self, now_ms: u64) -> usize {
+        let before = self.ceremonies.len();
+        self.ceremonies.retain(|_, ceremony| {
+            let timed_out = now_ms > ceremony.started_at_ms.saturating_add(ceremony.timeout_ms);
+            let terminal = matches!(
+                ceremony.status,
+                OTACeremonyStatus::Committed | OTACeremonyStatus::Aborted { .. }
+            );
+            !(timed_out || terminal)
+        });
+        before.saturating_sub(self.ceremonies.len())
+    }
 }
 
 // =============================================================================
@@ -1017,6 +1037,13 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
+    use aura_core::time::PhysicalTime;
+    use aura_core::types::epochs::Epoch;
+    use aura_core::{AuraError, ContextId, FlowBudget, Journal};
+    use aura_core::threshold::{ParticipantIdentity, ThresholdConfig, ThresholdState};
+    use std::sync::{Arc, Mutex};
 
     fn test_prestate() -> Hash32 {
         Hash32([1u8; 32])
@@ -1028,6 +1055,178 @@ mod tests {
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    #[derive(Clone)]
+    struct TestEffects {
+        journal: Arc<Mutex<Journal>>,
+        time_ms: Arc<Mutex<u64>>,
+    }
+
+    impl TestEffects {
+        fn new() -> Self {
+            Self {
+                journal: Arc::new(Mutex::new(Journal::new())),
+                time_ms: Arc::new(Mutex::new(1_700_000_000_000)),
+            }
+        }
+
+        fn snapshot_journal(&self) -> Journal {
+            let journal = self.journal.lock().unwrap();
+            let mut copy = Journal::new();
+            copy.facts = journal.facts.clone();
+            copy.caps = journal.caps.clone();
+            copy
+        }
+    }
+
+    #[async_trait]
+    impl JournalEffects for TestEffects {
+        async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
+            let mut merged = Journal::new();
+            merged.facts = target.facts.clone();
+            merged.caps = target.caps.clone();
+            merged.merge_facts(delta.read_facts().clone());
+            Ok(merged)
+        }
+
+        async fn refine_caps(&self, target: &Journal, refinement: &Journal) -> Result<Journal, AuraError> {
+            let mut refined = Journal::new();
+            refined.facts = target.facts.clone();
+            refined.caps = target.caps.clone();
+            refined.refine_caps(refinement.read_caps().clone());
+            Ok(refined)
+        }
+
+        async fn get_journal(&self) -> Result<Journal, AuraError> {
+            Ok(self.snapshot_journal())
+        }
+
+        async fn persist_journal(&self, journal: &Journal) -> Result<(), AuraError> {
+            let mut stored = self.journal.lock().unwrap();
+            stored.facts = journal.facts.clone();
+            stored.caps = journal.caps.clone();
+            Ok(())
+        }
+
+        async fn get_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+        ) -> Result<FlowBudget, AuraError> {
+            Ok(FlowBudget::new(1_000, Epoch::new(0)))
+        }
+
+        async fn update_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+            budget: &FlowBudget,
+        ) -> Result<FlowBudget, AuraError> {
+            Ok(*budget)
+        }
+
+        async fn charge_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+            cost: u32,
+        ) -> Result<FlowBudget, AuraError> {
+            let mut budget = FlowBudget::new(1_000, Epoch::new(0));
+            budget.spent = cost as u64;
+            Ok(budget)
+        }
+    }
+
+    #[async_trait]
+    impl PhysicalTimeEffects for TestEffects {
+        async fn physical_time(&self) -> Result<PhysicalTime, aura_core::effects::time::TimeError> {
+            let mut time = self.time_ms.lock().unwrap();
+            *time += 1;
+            Ok(PhysicalTime {
+                ts_ms: *time,
+                uncertainty: None,
+            })
+        }
+
+        async fn sleep_ms(
+            &self,
+            _ms: u64,
+        ) -> Result<(), aura_core::effects::time::TimeError> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl ThresholdSigningEffects for TestEffects {
+        async fn bootstrap_authority(
+            &self,
+            _authority: &AuthorityId,
+        ) -> Result<Vec<u8>, AuraError> {
+            Ok(vec![0u8; 32])
+        }
+
+        async fn sign(
+            &self,
+            _context: SigningContext,
+        ) -> Result<ThresholdSignature, AuraError> {
+            Ok(ThresholdSignature::single_signer(
+                vec![0u8; 64],
+                vec![0u8; 32],
+                0,
+            ))
+        }
+
+        async fn threshold_config(&self, _authority: &AuthorityId) -> Option<ThresholdConfig> {
+            Some(ThresholdConfig {
+                threshold: 1,
+                total_participants: 1,
+            })
+        }
+
+        async fn threshold_state(&self, authority: &AuthorityId) -> Option<ThresholdState> {
+            Some(ThresholdState {
+                epoch: 0,
+                threshold: 1,
+                total_participants: 1,
+                participants: vec![ParticipantIdentity::guardian(*authority)],
+                agreement_mode: AgreementMode::Provisional,
+            })
+        }
+
+        async fn has_signing_capability(&self, _authority: &AuthorityId) -> bool {
+            true
+        }
+
+        async fn public_key_package(&self, _authority: &AuthorityId) -> Option<Vec<u8>> {
+            Some(vec![0u8; 32])
+        }
+
+        async fn rotate_keys(
+            &self,
+            _authority: &AuthorityId,
+            _new_threshold: u16,
+            _new_total_participants: u16,
+            _participants: &[ParticipantIdentity],
+        ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
+            Ok((1, vec![vec![0u8; 32]], vec![0u8; 32]))
+        }
+
+        async fn commit_key_rotation(
+            &self,
+            _authority: &AuthorityId,
+            _new_epoch: u64,
+        ) -> Result<(), AuraError> {
+            Ok(())
+        }
+
+        async fn rollback_key_rotation(
+            &self,
+            _authority: &AuthorityId,
+            _failed_epoch: u64,
+        ) -> Result<(), AuraError> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -1209,5 +1408,58 @@ mod tests {
             ..proposal1.clone()
         };
         assert_ne!(proposal1.compute_hash(), proposal3.compute_hash());
+    }
+
+    #[tokio::test]
+    async fn test_ota_ceremony_commit_emits_fact() {
+        let effects = TestEffects::new();
+        let config = OTACeremonyConfig {
+            threshold: 1,
+            quorum_size: 1,
+            timeout_ms: 1_000,
+            min_activation_notice_epochs: 0,
+        };
+        let mut executor = OTACeremonyExecutor::new(effects.clone(), config);
+
+        let proposal = UpgradeProposal {
+            proposal_id: Uuid::from_bytes(1u128.to_be_bytes()),
+            package_id: Uuid::from_bytes(2u128.to_be_bytes()),
+            version: SemanticVersion::new(2, 0, 0),
+            kind: UpgradeKind::HardFork,
+            package_hash: Hash32([9u8; 32]),
+            activation_epoch: Epoch::new(10),
+            coordinator: DeviceId::from_bytes([8u8; 32]),
+        };
+
+        let ceremony_id = executor
+            .initiate_ceremony(proposal, Epoch::new(0))
+            .await
+            .unwrap();
+
+        let commitment = executor
+            .create_readiness_commitment(
+                ceremony_id,
+                DeviceId::from_bytes([1u8; 32]),
+                test_authority(9),
+                true,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let threshold_reached = executor
+            .process_commitment(ceremony_id, commitment)
+            .await
+            .unwrap();
+        assert!(threshold_reached);
+
+        executor.commit_ceremony(ceremony_id).await.unwrap();
+
+        let journal = effects.snapshot_journal();
+        let key = format!("ota:committed:{}", hex::encode(ceremony_id.0.as_bytes()));
+        assert!(
+            journal.facts.contains_key(&key),
+            "Expected committed fact in journal"
+        );
     }
 }

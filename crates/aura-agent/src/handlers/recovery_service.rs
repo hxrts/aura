@@ -319,8 +319,29 @@ impl RecoveryService {
     pub async fn commit_guardian_keys(&self, new_epoch: u64) -> AgentResult<()> {
         use crate::core::AgentError;
         use aura_core::effects::ThresholdSigningEffects;
+        use aura_core::hash;
+        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
+        use aura_core::ContextId;
 
         let authority_id = self.handler.authority_context().authority_id;
+        let policy = policy_for(CeremonyFlow::GuardianSetupRotation);
+        if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
+            let context_id = ContextId::new_from_entropy(hash::hash(&authority_id.to_bytes()));
+            let has_commit = self
+                .effects
+                .has_dkg_transcript_commit(authority_id, context_id, new_epoch)
+                .await
+                .map_err(|e| {
+                    AgentError::internal(format!(
+                        "Failed to verify DKG transcript commit: {e}"
+                    ))
+                })?;
+            if !has_commit {
+                return Err(AgentError::invalid(
+                    "Missing consensus DKG transcript".to_string(),
+                ));
+            }
+        }
 
         self.effects
             .commit_key_rotation(&authority_id, new_epoch)

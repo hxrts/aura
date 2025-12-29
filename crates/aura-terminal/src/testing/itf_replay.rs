@@ -233,7 +233,7 @@ impl ITFTraceReplayer {
             .ok_or("Screen missing tag")?;
 
         match tag {
-            "Block" => Ok(Screen::Neighborhood),
+            "Home" => Ok(Screen::Neighborhood),
             "Chat" => Ok(Screen::Chat),
             "Contacts" => Ok(Screen::Contacts),
             "Invitations" => Ok(Screen::Contacts),
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn test_parse_screen() {
-        let value = serde_json::json!({"tag": "Block", "value": {"#tup": []}});
+        let value = serde_json::json!({"tag": "Home", "value": {"#tup": []}});
         assert_eq!(
             ITFTraceReplayer::parse_screen(&value).unwrap(),
             Screen::Neighborhood

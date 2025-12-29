@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum Screen {
-    /// Block/home screen
-    Block,
+    /// Home screen
+    Home,
     /// Chat screen
     Chat,
     /// Recovery screen
@@ -44,8 +44,8 @@ pub enum Screen {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum ChannelType {
-    /// Block-level messaging
-    Block,
+    /// Home-level messaging
+    Home,
     /// Direct message
     DirectMessage,
     /// Guardian chat
@@ -56,8 +56,8 @@ pub enum ChannelType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum InvitationType {
-    /// Invite to block
-    Block,
+    /// Invite to home
+    Home,
     /// Invite as guardian
     Guardian,
     /// Invite to chat
@@ -248,123 +248,123 @@ pub enum Intent {
     },
 
     // =========================================================================
-    // Block Intents
+    // Home Intents
     // =========================================================================
-    /// Create a new block
-    CreateBlock {
-        /// Block name
+    /// Create a new home
+    CreateHome {
+        /// Home name
         name: String,
     },
 
-    /// Invite someone to a block
-    InviteToBlock {
-        /// Block ID to invite to
-        block_id: ContextId,
+    /// Invite someone to a home
+    InviteToHome {
+        /// Home ID to invite to
+        home_id: ContextId,
         /// Authority ID to invite
         invitee_id: String,
     },
 
-    /// Set the block name
-    SetBlockName {
-        /// Block ID
-        block_id: ContextId,
+    /// Set the home name
+    SetHomeName {
+        /// Home ID
+        home_id: ContextId,
         /// New name
         name: String,
     },
 
-    /// Update block storage settings
-    UpdateBlockStorage {
-        /// Block ID
-        block_id: ContextId,
+    /// Update home storage settings
+    UpdateHomeStorage {
+        /// Home ID
+        home_id: ContextId,
         /// New storage budget in bytes
         storage_budget: u64,
     },
 
-    /// Set block topic
-    SetBlockTopic {
-        /// Block ID
-        block_id: ContextId,
+    /// Set home topic
+    SetHomeTopic {
+        /// Home ID
+        home_id: ContextId,
         /// Topic text
         topic: String,
     },
 
     // =========================================================================
-    // Block Moderation Intents
+    // Home Moderation Intents
     // =========================================================================
-    /// Ban a user from a block
+    /// Ban a user from a home
     BanUser {
-        /// Block ID
-        block_id: ContextId,
+        /// Home ID
+        home_id: ContextId,
         /// Authority ID to ban
         target_id: String,
         /// Reason for ban
         reason: String,
     },
 
-    /// Unban a user from a block
+    /// Unban a user from a home
     UnbanUser {
-        /// Block ID
-        block_id: ContextId,
+        /// Home ID
+        home_id: ContextId,
         /// Authority ID to unban
         target_id: String,
     },
 
-    /// Mute a user in a block
+    /// Mute a user in a home
     MuteUser {
-        /// Block ID
-        block_id: ContextId,
+        /// Home ID
+        home_id: ContextId,
         /// Authority ID to mute
         target_id: String,
         /// Duration in seconds (None = permanent)
         duration_secs: Option<u64>,
     },
 
-    /// Unmute a user in a block
+    /// Unmute a user in a home
     UnmuteUser {
-        /// Block ID
-        block_id: ContextId,
+        /// Home ID
+        home_id: ContextId,
         /// Authority ID to unmute
         target_id: String,
     },
 
-    /// Kick a user from a block
+    /// Kick a user from a home
     KickUser {
-        /// Block ID
-        block_id: ContextId,
+        /// Home ID
+        home_id: ContextId,
         /// Authority ID to kick
         target_id: String,
         /// Reason for kick
         reason: String,
     },
 
-    /// Pin a message in a block
+    /// Pin a message in a home
     PinMessage {
-        /// Block ID
-        block_id: ContextId,
+        /// Home ID
+        home_id: ContextId,
         /// Message ID to pin
         message_id: String,
     },
 
-    /// Unpin a message in a block
+    /// Unpin a message in a home
     UnpinMessage {
-        /// Block ID
-        block_id: ContextId,
+        /// Home ID
+        home_id: ContextId,
         /// Message ID to unpin
         message_id: String,
     },
 
     /// Grant steward (admin) privileges to a resident
     GrantSteward {
-        /// Block ID
-        block_id: ContextId,
+        /// Home ID
+        home_id: ContextId,
         /// Target authority ID to grant steward status
         target_id: String,
     },
 
     /// Revoke steward (admin) privileges from a resident
     RevokeSteward {
-        /// Block ID
-        block_id: ContextId,
+        /// Home ID
+        home_id: ContextId,
         /// Target authority ID to revoke steward status
         target_id: String,
     },
@@ -605,19 +605,19 @@ impl Intent {
             Self::CompleteRecovery {
                 recovery_context, ..
             } => Some(*recovery_context),
-            Self::SetBlockName { block_id, .. } => Some(*block_id),
-            Self::UpdateBlockStorage { block_id, .. } => Some(*block_id),
-            Self::InviteToBlock { block_id, .. } => Some(*block_id),
-            Self::SetBlockTopic { block_id, .. } => Some(*block_id),
-            Self::BanUser { block_id, .. } => Some(*block_id),
-            Self::UnbanUser { block_id, .. } => Some(*block_id),
-            Self::MuteUser { block_id, .. } => Some(*block_id),
-            Self::UnmuteUser { block_id, .. } => Some(*block_id),
-            Self::KickUser { block_id, .. } => Some(*block_id),
-            Self::PinMessage { block_id, .. } => Some(*block_id),
-            Self::UnpinMessage { block_id, .. } => Some(*block_id),
-            Self::GrantSteward { block_id, .. } => Some(*block_id),
-            Self::RevokeSteward { block_id, .. } => Some(*block_id),
+            Self::SetHomeName { home_id, .. } => Some(*home_id),
+            Self::UpdateHomeStorage { home_id, .. } => Some(*home_id),
+            Self::InviteToHome { home_id, .. } => Some(*home_id),
+            Self::SetHomeTopic { home_id, .. } => Some(*home_id),
+            Self::BanUser { home_id, .. } => Some(*home_id),
+            Self::UnbanUser { home_id, .. } => Some(*home_id),
+            Self::MuteUser { home_id, .. } => Some(*home_id),
+            Self::UnmuteUser { home_id, .. } => Some(*home_id),
+            Self::KickUser { home_id, .. } => Some(*home_id),
+            Self::PinMessage { home_id, .. } => Some(*home_id),
+            Self::UnpinMessage { home_id, .. } => Some(*home_id),
+            Self::GrantSteward { home_id, .. } => Some(*home_id),
+            Self::RevokeSteward { home_id, .. } => Some(*home_id),
             _ => None,
         }
     }
@@ -647,11 +647,11 @@ impl Intent {
             Self::SetNickname { .. } => "set nickname",
             Self::RemoveContact { .. } => "remove contact",
             Self::ToggleGuardian { .. } => "toggle guardian",
-            Self::CreateBlock { .. } => "create block",
-            Self::InviteToBlock { .. } => "invite to block",
-            Self::SetBlockName { .. } => "set block name",
-            Self::UpdateBlockStorage { .. } => "update block storage",
-            Self::SetBlockTopic { .. } => "set block topic",
+            Self::CreateHome { .. } => "create home",
+            Self::InviteToHome { .. } => "invite to home",
+            Self::SetHomeName { .. } => "set home name",
+            Self::UpdateHomeStorage { .. } => "update home storage",
+            Self::SetHomeTopic { .. } => "set home topic",
             Self::BanUser { .. } => "ban user",
             Self::UnbanUser { .. } => "unban user",
             Self::MuteUser { .. } => "mute user",
@@ -734,7 +734,7 @@ impl Intent {
             }
             Self::CreateChannel { name, channel_type } => {
                 let ct = match channel_type {
-                    ChannelType::Block => "Block",
+                    ChannelType::Home => "Home",
                     ChannelType::DirectMessage => "DirectMessage",
                     ChannelType::Guardian => "Guardian",
                 };
@@ -846,7 +846,7 @@ impl Intent {
             // Actual unique IDs are assigned when the fact is created via content hash.
             Self::CreateInvitation { invitation_type } => {
                 let it = match invitation_type {
-                    InvitationType::Block => "Block",
+                    InvitationType::Home => "Home",
                     InvitationType::Guardian => "Guardian",
                     InvitationType::Chat => "Chat",
                 };
@@ -882,54 +882,54 @@ impl Intent {
                 )
             }
 
-            // Block intents
-            Self::CreateBlock { name } => {
-                format!("CreateBlock::name={}", name)
+            // Home intents
+            Self::CreateHome { name } => {
+                format!("CreateHome::name={}", name)
             }
-            Self::InviteToBlock {
-                block_id,
+            Self::InviteToHome {
+                home_id,
                 invitee_id,
             } => {
                 format!(
-                    "InviteToBlock::block_id={}&invitee_id={}",
-                    block_id, invitee_id
+                    "InviteToHome::home_id={}&invitee_id={}",
+                    home_id, invitee_id
                 )
             }
-            Self::SetBlockName { block_id, name } => {
-                format!("SetBlockName::block_id={}&name={}", block_id, name)
+            Self::SetHomeName { home_id, name } => {
+                format!("SetHomeName::home_id={}&name={}", home_id, name)
             }
-            Self::UpdateBlockStorage {
-                block_id,
+            Self::UpdateHomeStorage {
+                home_id,
                 storage_budget,
             } => {
                 format!(
-                    "UpdateBlockStorage::block_id={}&storage_budget={}",
-                    block_id, storage_budget
+                    "UpdateHomeStorage::home_id={}&storage_budget={}",
+                    home_id, storage_budget
                 )
             }
-            Self::SetBlockTopic { block_id, topic } => {
-                format!("SetBlockTopic::block_id={}&topic={}", block_id, topic)
+            Self::SetHomeTopic { home_id, topic } => {
+                format!("SetHomeTopic::home_id={}&topic={}", home_id, topic)
             }
 
-            // Block moderation intents
+            // Home moderation intents
             Self::BanUser {
-                block_id,
+                home_id,
                 target_id,
                 reason,
             } => {
                 format!(
-                    "BanUser::block_id={}&target_id={}&reason={}",
-                    block_id, target_id, reason
+                    "BanUser::home_id={}&target_id={}&reason={}",
+                    home_id, target_id, reason
                 )
             }
             Self::UnbanUser {
-                block_id,
+                home_id,
                 target_id,
             } => {
-                format!("UnbanUser::block_id={}&target_id={}", block_id, target_id)
+                format!("UnbanUser::home_id={}&target_id={}", home_id, target_id)
             }
             Self::MuteUser {
-                block_id,
+                home_id,
                 target_id,
                 duration_secs,
             } => {
@@ -937,60 +937,60 @@ impl Intent {
                     .map(|d| d.to_string())
                     .unwrap_or_else(|| "permanent".to_string());
                 format!(
-                    "MuteUser::block_id={}&target_id={}&duration={}",
-                    block_id, target_id, duration
+                    "MuteUser::home_id={}&target_id={}&duration={}",
+                    home_id, target_id, duration
                 )
             }
             Self::UnmuteUser {
-                block_id,
+                home_id,
                 target_id,
             } => {
-                format!("UnmuteUser::block_id={}&target_id={}", block_id, target_id)
+                format!("UnmuteUser::home_id={}&target_id={}", home_id, target_id)
             }
             Self::KickUser {
-                block_id,
+                home_id,
                 target_id,
                 reason,
             } => {
                 format!(
-                    "KickUser::block_id={}&target_id={}&reason={}",
-                    block_id, target_id, reason
+                    "KickUser::home_id={}&target_id={}&reason={}",
+                    home_id, target_id, reason
                 )
             }
             Self::PinMessage {
-                block_id,
+                home_id,
                 message_id,
             } => {
                 format!(
-                    "PinMessage::block_id={}&message_id={}",
-                    block_id, message_id
+                    "PinMessage::home_id={}&message_id={}",
+                    home_id, message_id
                 )
             }
             Self::UnpinMessage {
-                block_id,
+                home_id,
                 message_id,
             } => {
                 format!(
-                    "UnpinMessage::block_id={}&message_id={}",
-                    block_id, message_id
+                    "UnpinMessage::home_id={}&message_id={}",
+                    home_id, message_id
                 )
             }
             Self::GrantSteward {
-                block_id,
+                home_id,
                 target_id,
             } => {
                 format!(
-                    "GrantSteward::block_id={}&target_id={}",
-                    block_id, target_id
+                    "GrantSteward::home_id={}&target_id={}",
+                    home_id, target_id
                 )
             }
             Self::RevokeSteward {
-                block_id,
+                home_id,
                 target_id,
             } => {
                 format!(
-                    "RevokeSteward::block_id={}&target_id={}",
-                    block_id, target_id
+                    "RevokeSteward::home_id={}&target_id={}",
+                    home_id, target_id
                 )
             }
 
@@ -1200,9 +1200,9 @@ impl Intent {
             | Self::RevokeInvitation { .. }
             | Self::SetNickname { .. }
             | Self::RemoveContact { .. }
-            | Self::CreateBlock { .. }
-            | Self::SetBlockName { .. }
-            | Self::SetBlockTopic { .. } => AuthorizationLevel::Basic,
+            | Self::CreateHome { .. }
+            | Self::SetHomeName { .. }
+            | Self::SetHomeTopic { .. } => AuthorizationLevel::Basic,
 
             // Recovery and moderation are sensitive
             Self::InitiateRecovery
@@ -1218,10 +1218,10 @@ impl Intent {
             | Self::KickUser { .. }
             | Self::InviteMember { .. }
             | Self::RemoveMember { .. }
-            | Self::InviteToBlock { .. }
+            | Self::InviteToHome { .. }
             | Self::PinMessage { .. }
             | Self::UnpinMessage { .. }
-            | Self::UpdateBlockStorage { .. } => AuthorizationLevel::Sensitive,
+            | Self::UpdateHomeStorage { .. } => AuthorizationLevel::Sensitive,
 
             // Admin operations require elevated privileges
             Self::ReplaceAdmin { .. }

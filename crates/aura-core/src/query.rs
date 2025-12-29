@@ -927,7 +927,7 @@ mod tests {
             "eq",
             vec![
                 DatalogValue::var("type"),
-                DatalogValue::String("block".to_string()),
+                DatalogValue::String("home".to_string()),
             ],
         );
 

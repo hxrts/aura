@@ -19,7 +19,7 @@
 use crate::core::IntentError;
 use crate::errors::AppError;
 use crate::views::{
-    BlockState, ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
+    HomesState, ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
 };
 use std::sync::Arc;
 
@@ -42,8 +42,8 @@ pub trait StateObserver: Send + Sync {
     /// Called when contacts state changes
     fn on_contacts_changed(&self, state: ContactsState);
 
-    /// Called when block state changes
-    fn on_block_changed(&self, state: BlockState);
+    /// Called when homes state changes
+    fn on_homes_changed(&self, state: HomesState);
 
     /// Called when neighborhood state changes
     fn on_neighborhood_changed(&self, state: NeighborhoodState);
@@ -161,10 +161,10 @@ impl ObserverRegistry {
         }
     }
 
-    /// Notify all observers of block state change
-    pub fn notify_block(&self, state: &BlockState) {
+    /// Notify all observers of homes state change
+    pub fn notify_homes(&self, state: &HomesState) {
         for (_, observer) in &self.observers {
-            observer.on_block_changed(state.clone());
+            observer.on_homes_changed(state.clone());
         }
     }
 

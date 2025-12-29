@@ -3,8 +3,8 @@
 //! Query functions for deriving moderation state from journal facts
 
 use super::facts::{
-    BlockBanFact, BlockKickFact, BlockMuteFact, BlockUnbanFact, BlockUnmuteFact,
-    BLOCK_BAN_FACT_TYPE_ID, BLOCK_KICK_FACT_TYPE_ID, BLOCK_UNBAN_FACT_TYPE_ID,
+    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
+    HOME_BAN_FACT_TYPE_ID, HOME_KICK_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
 };
 use super::types::{BanStatus, KickRecord, MuteStatus};
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -14,12 +14,12 @@ use std::collections::HashMap;
 
 /// Query current bans in a context
 ///
-/// Processes BlockBan and BlockUnban facts in order to derive the current set
+/// Processes HomeBan and HomeUnban facts in order to derive the current set
 /// of banned users. Unbans remove bans if they happened after the ban.
 ///
 /// # Arguments
 /// * `facts` - Ordered list of facts from the journal
-/// * `context_id` - Context (block) to query
+/// * `context_id` - Context (home) to query
 /// * `current_time_ms` - Current time for expiration checking (ms since epoch)
 ///
 /// # Returns
@@ -37,17 +37,17 @@ pub fn query_current_bans(
                 context_id: fact_context,
                 binding_type,
                 binding_data,
-            }) if fact_context == context_id && binding_type == BLOCK_BAN_FACT_TYPE_ID => {
-                if let Some(block_ban) = BlockBanFact::from_bytes(binding_data) {
-                    let banned_at_ms = block_ban.banned_at_ms();
-                    let expires_at_ms = block_ban.expires_at_ms();
+            }) if fact_context == context_id && binding_type == HOME_BAN_FACT_TYPE_ID => {
+                if let Some(home_ban) = HomeBanFact::from_bytes(binding_data) {
+                    let banned_at_ms = home_ban.banned_at_ms();
+                    let expires_at_ms = home_ban.expires_at_ms();
                     let ban = BanStatus {
-                        banned_authority: block_ban.banned_authority,
-                        actor_authority: block_ban.actor_authority,
-                        reason: block_ban.reason,
+                        banned_authority: home_ban.banned_authority,
+                        actor_authority: home_ban.actor_authority,
+                        reason: home_ban.reason,
                         banned_at_ms,
                         expires_at_ms,
-                        channel_id: block_ban.channel_id,
+                        channel_id: home_ban.channel_id,
                     };
                     bans.insert(ban.banned_authority, ban);
                 }
@@ -56,12 +56,12 @@ pub fn query_current_bans(
                 context_id: fact_context,
                 binding_type,
                 binding_data,
-            }) if fact_context == context_id && binding_type == BLOCK_UNBAN_FACT_TYPE_ID => {
-                if let Some(block_unban) = BlockUnbanFact::from_bytes(binding_data) {
+            }) if fact_context == context_id && binding_type == HOME_UNBAN_FACT_TYPE_ID => {
+                if let Some(home_unban) = HomeUnbanFact::from_bytes(binding_data) {
                     // Remove ban if unban happened after the ban
-                    if let Some(ban) = bans.get(&block_unban.unbanned_authority) {
-                        if block_unban.unbanned_at_ms() >= ban.banned_at_ms {
-                            bans.remove(&block_unban.unbanned_authority);
+                    if let Some(ban) = bans.get(&home_unban.unbanned_authority) {
+                        if home_unban.unbanned_at_ms() >= ban.banned_at_ms {
+                            bans.remove(&home_unban.unbanned_authority);
                         }
                     }
                 }
@@ -78,13 +78,13 @@ pub fn query_current_bans(
 
 /// Query current mutes in a context
 ///
-/// Processes BlockMute and BlockUnmute facts in order to derive the current set
+/// Processes HomeMute and HomeUnmute facts in order to derive the current set
 /// of muted users. Unmutes remove mutes if they happened after the mute.
 /// Also filters out expired mutes based on current time.
 ///
 /// # Arguments
 /// * `facts` - Ordered list of facts from the journal
-/// * `context_id` - Context (block) to query
+/// * `context_id` - Context (home) to query
 /// * `current_time_ms` - Current time for expiration checking (ms since epoch)
 ///
 /// # Returns
@@ -102,15 +102,15 @@ pub fn query_current_mutes(
                 context_id: fact_context,
                 binding_type,
                 binding_data,
-            }) if fact_context == context_id && binding_type == "moderation:block-mute" => {
-                if let Some(block_mute) = BlockMuteFact::from_bytes(binding_data) {
+            }) if fact_context == context_id && binding_type == "moderation:home-mute" => {
+                if let Some(home_mute) = HomeMuteFact::from_bytes(binding_data) {
                     let mute = MuteStatus {
-                        muted_authority: block_mute.muted_authority,
-                        actor_authority: block_mute.actor_authority,
-                        duration_secs: block_mute.duration_secs,
-                        muted_at_ms: block_mute.muted_at_ms(),
-                        expires_at_ms: block_mute.expires_at_ms(),
-                        channel_id: block_mute.channel_id,
+                        muted_authority: home_mute.muted_authority,
+                        actor_authority: home_mute.actor_authority,
+                        duration_secs: home_mute.duration_secs,
+                        muted_at_ms: home_mute.muted_at_ms(),
+                        expires_at_ms: home_mute.expires_at_ms(),
+                        channel_id: home_mute.channel_id,
                     };
                     mutes.insert(mute.muted_authority, mute);
                 }
@@ -119,10 +119,10 @@ pub fn query_current_mutes(
                 context_id: fact_context,
                 binding_type,
                 binding_data,
-            }) if fact_context == context_id && binding_type == "moderation:block-unmute" => {
-                if let Some(block_unmute) = BlockUnmuteFact::from_bytes(binding_data) {
-                    let unmuted_authority = block_unmute.unmuted_authority;
-                    let unmuted_at_ms = block_unmute.unmuted_at_ms();
+            }) if fact_context == context_id && binding_type == "moderation:home-unmute" => {
+                if let Some(home_unmute) = HomeUnmuteFact::from_bytes(binding_data) {
+                    let unmuted_authority = home_unmute.unmuted_authority;
+                    let unmuted_at_ms = home_unmute.unmuted_at_ms();
                     // Remove mute if unmute happened after the mute
                     if let Some(mute) = mutes.get(&unmuted_authority) {
                         if unmuted_at_ms >= mute.muted_at_ms {
@@ -143,12 +143,12 @@ pub fn query_current_mutes(
 
 /// Query kick history (audit log) for a context
 ///
-/// Returns all BlockKick facts in chronological order. Kicks are immutable
+/// Returns all HomeKick facts in chronological order. Kicks are immutable
 /// audit log entries and are never removed.
 ///
 /// # Arguments
 /// * `facts` - Ordered list of facts from the journal
-/// * `context_id` - Context (block) to query
+/// * `context_id` - Context (home) to query
 ///
 /// # Returns
 /// Vector of KickRecord in chronological order
@@ -162,14 +162,14 @@ pub fn query_kick_history(facts: &[Fact], context_id: &ContextId) -> Vec<KickRec
             binding_data,
         }) = &fact.content
         {
-            if fact_context == context_id && binding_type == BLOCK_KICK_FACT_TYPE_ID {
-                if let Some(block_kick) = BlockKickFact::from_bytes(binding_data) {
-                    let kicked_at_ms = block_kick.kicked_at_ms();
+            if fact_context == context_id && binding_type == HOME_KICK_FACT_TYPE_ID {
+                if let Some(home_kick) = HomeKickFact::from_bytes(binding_data) {
+                    let kicked_at_ms = home_kick.kicked_at_ms();
                     kicks.push(KickRecord {
-                        kicked_authority: block_kick.kicked_authority,
-                        actor_authority: block_kick.actor_authority,
-                        channel_id: block_kick.channel_id,
-                        reason: block_kick.reason,
+                        kicked_authority: home_kick.kicked_authority,
+                        actor_authority: home_kick.actor_authority,
+                        channel_id: home_kick.channel_id,
+                        reason: home_kick.reason,
                         kicked_at_ms,
                     });
                 }
@@ -187,10 +187,10 @@ pub fn query_kick_history(facts: &[Fact], context_id: &ContextId) -> Vec<KickRec
 ///
 /// # Arguments
 /// * `facts` - Ordered list of facts from the journal
-/// * `context_id` - Context (block) to check
+/// * `context_id` - Context (home) to check
 /// * `authority` - Authority to check for ban status
 /// * `current_time_ms` - Current time for expiration checking
-/// * `channel_id` - Optional channel to check (None = check block-wide ban)
+/// * `channel_id` - Optional channel to check (None = check home-wide ban)
 ///
 /// # Returns
 /// true if the user is currently banned, false otherwise
@@ -207,7 +207,7 @@ pub fn is_user_banned(
         if let Some(channel) = channel_id {
             ban.applies_to_channel(channel)
         } else {
-            true // If no channel specified, check block-wide ban
+            true // If no channel specified, check home-wide ban
         }
     } else {
         false
@@ -221,10 +221,10 @@ pub fn is_user_banned(
 ///
 /// # Arguments
 /// * `facts` - Ordered list of facts from the journal
-/// * `context_id` - Context (block) to check
+/// * `context_id` - Context (home) to check
 /// * `authority` - Authority to check for mute status
 /// * `current_time_ms` - Current time for expiration checking
-/// * `channel_id` - Optional channel to check (None = check block-wide mute)
+/// * `channel_id` - Optional channel to check (None = check home-wide mute)
 ///
 /// # Returns
 /// true if the user is currently muted, false otherwise
@@ -241,7 +241,7 @@ pub fn is_user_muted(
         if let Some(channel) = channel_id {
             mute.applies_to_channel(channel)
         } else {
-            true // If no channel specified, check block-wide mute
+            true // If no channel specified, check home-wide mute
         }
     } else {
         false
@@ -291,7 +291,7 @@ mod tests {
         let user1 = test_authority(1);
         let steward = test_authority(2);
 
-        let ban_fact = BlockBanFact {
+        let ban_fact = HomeBanFact {
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
@@ -315,7 +315,7 @@ mod tests {
         let user1 = test_authority(1);
         let steward = test_authority(2);
 
-        let ban_fact = BlockBanFact {
+        let ban_fact = HomeBanFact {
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
@@ -324,7 +324,7 @@ mod tests {
             banned_at: pt(1000),
             expires_at: None,
         };
-        let unban_fact = BlockUnbanFact {
+        let unban_fact = HomeUnbanFact {
             context_id: context.clone(),
             channel_id: None,
             unbanned_authority: user1.clone(),
@@ -347,7 +347,7 @@ mod tests {
         let user1 = test_authority(1);
         let steward = test_authority(2);
 
-        let ban_fact = BlockBanFact {
+        let ban_fact = HomeBanFact {
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
@@ -374,7 +374,7 @@ mod tests {
         let user1 = test_authority(1);
         let steward = test_authority(2);
 
-        let mute_fact = BlockMuteFact {
+        let mute_fact = HomeMuteFact {
             context_id: context.clone(),
             channel_id: None,
             muted_authority: user1.clone(),
@@ -401,7 +401,7 @@ mod tests {
         let user1 = test_authority(1);
         let steward = test_authority(2);
 
-        let mute_fact = BlockMuteFact {
+        let mute_fact = HomeMuteFact {
             context_id: context.clone(),
             channel_id: None,
             muted_authority: user1.clone(),
@@ -410,7 +410,7 @@ mod tests {
             muted_at: pt(1000),
             expires_at: None,
         };
-        let unmute_fact = BlockUnmuteFact {
+        let unmute_fact = HomeUnmuteFact {
             context_id: context.clone(),
             channel_id: None,
             unmuted_authority: user1.clone(),
@@ -435,7 +435,7 @@ mod tests {
         let steward = test_authority(2);
         let channel = test_channel(1);
 
-        let kick_fact1 = BlockKickFact {
+        let kick_fact1 = HomeKickFact {
             context_id: context.clone(),
             channel_id: channel.clone(),
             kicked_authority: user1.clone(),
@@ -443,7 +443,7 @@ mod tests {
             reason: "first kick".to_string(),
             kicked_at: pt(1000),
         };
-        let kick_fact2 = BlockKickFact {
+        let kick_fact2 = HomeKickFact {
             context_id: context.clone(),
             channel_id: channel.clone(),
             kicked_authority: user2.clone(),
@@ -471,7 +471,7 @@ mod tests {
         let user1 = test_authority(1);
         let steward = test_authority(2);
 
-        let ban_fact = BlockBanFact {
+        let ban_fact = HomeBanFact {
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
@@ -495,7 +495,7 @@ mod tests {
         let user1 = test_authority(1);
         let steward = test_authority(2);
 
-        let mute_fact = BlockMuteFact {
+        let mute_fact = HomeMuteFact {
             context_id: context.clone(),
             channel_id: None,
             muted_authority: user1.clone(),
@@ -521,7 +521,7 @@ mod tests {
         let channel1 = test_channel(1);
         let channel2 = test_channel(2);
 
-        let ban_fact = BlockBanFact {
+        let ban_fact = HomeBanFact {
             context_id: context.clone(),
             channel_id: Some(channel1.clone()),
             banned_authority: user1.clone(),

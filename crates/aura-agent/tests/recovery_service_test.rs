@@ -3,8 +3,11 @@
 //! Tests for the RecoveryService public API exposed through AuraAgent.
 
 use aura_agent::{
-    AgentBuilder, AuthorityId, EffectContext, ExecutionMode, GuardianApproval, RecoveryState,
+    AgentBuilder, AuraEffectSystem, AuthorityId, EffectContext, ExecutionMode, GuardianApproval,
+    RecoveryState,
 };
+use aura_agent::core::{AgentConfig, AuthorityContext};
+use aura_agent::handlers::RecoveryHandler;
 use aura_core::hash::hash;
 use aura_core::identifiers::ContextId;
 
@@ -300,5 +303,30 @@ async fn test_get_state_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     // Non-existent recovery should return None
     let non_existent = recovery.get_state("non-existent-id").await;
     assert!(non_existent.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_recovery_execution_requires_consensus_in_production(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let authority_id = AuthorityId::new_from_entropy([120u8; 32]);
+    let mut config = AgentConfig::default();
+    config.storage.base_path = std::env::temp_dir()
+        .join(format!("aura-test-recovery-{}", authority_id));
+    config.storage.encryption_enabled = false;
+
+    let effects = AuraEffectSystem::production_for_authority(config, authority_id)?;
+    let handler = RecoveryHandler::new(AuthorityContext::new(authority_id))?;
+
+    let err = handler
+        .complete(&effects, "recovery-missing")
+        .await
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("consensus finalization"),
+        "Expected consensus finalization error, got: {err}"
+    );
+
     Ok(())
 }

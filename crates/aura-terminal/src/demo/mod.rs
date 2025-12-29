@@ -1062,7 +1062,7 @@ impl SimulatedBridge {
                             id: channel_id,
                             name: name.clone(),
                             topic: topic.clone(),
-                            channel_type: aura_app::ChannelType::Block,
+                            channel_type: aura_app::ChannelType::Home,
                             unread_count: 0,
                             is_dm: members.len() == 1,
                             member_count: (members.len() as u32).saturating_add(1),

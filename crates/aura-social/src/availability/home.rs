@@ -1,9 +1,9 @@
-//! Block-Level Data Availability
+//! Home-Level Data Availability
 //!
 //! Implements data availability for blocks. All residents replicate all
-//! block-level shared data.
+//! home-level shared data.
 
-use crate::block::Block;
+use crate::home::Home;
 use crate::storage::StorageService;
 use async_trait::async_trait;
 use aura_core::{
@@ -15,13 +15,13 @@ use aura_core::{
     },
     identifiers::AuthorityId,
 };
-use crate::facts::BlockId;
+use crate::facts::HomeId;
 use std::sync::Arc;
 
-/// Block-level data availability.
+/// Home-level data availability.
 ///
-/// Implements `DataAvailability` for block-scoped data. All residents
-/// replicate all block data, providing redundancy equal to block size.
+/// Implements `DataAvailability` for home-scoped data. All residents
+/// replicate all home data, providing redundancy equal to home size.
 ///
 /// # Type Parameters
 ///
@@ -31,17 +31,17 @@ use std::sync::Arc;
 /// # Example
 ///
 /// ```ignore
-/// let block_da = BlockAvailability::new(block, local_authority, storage, network);
+/// let home_da = HomeAvailability::new(home_instance, local_authority, storage, network);
 ///
-/// // Store data to the block
-/// let hash = block_da.store(block_id, &content).await?;
+/// // Store data to the home
+/// let hash = home_da.store(home_id, &content).await?;
 ///
 /// // Retrieve data (tries local, then peers)
-/// let data = block_da.retrieve(block_id, &hash).await?;
+/// let data = home_da.retrieve(home_id, &hash).await?;
 /// ```
-pub struct BlockAvailability<S, N> {
-    /// The block this availability service is for.
-    block: Block,
+pub struct HomeAvailability<S, N> {
+    /// The home this availability service is for.
+    home_instance: Home,
     /// Our local authority ID.
     local_authority: AuthorityId,
     /// Storage effects for local data access.
@@ -50,51 +50,51 @@ pub struct BlockAvailability<S, N> {
     network: Arc<N>,
 }
 
-impl<S, N> BlockAvailability<S, N>
+impl<S, N> HomeAvailability<S, N>
 where
     S: StorageEffects,
     N: NetworkEffects,
 {
-    /// Create a new block availability service.
+    /// Create a new home availability service.
     pub fn new(
-        block: Block,
+        home_instance: Home,
         local_authority: AuthorityId,
         storage: Arc<S>,
         network: Arc<N>,
     ) -> Self {
         Self {
-            block,
+            home_instance,
             local_authority,
             storage,
             network,
         }
     }
 
-    /// Get the block this service is for.
-    pub fn block(&self) -> &Block {
-        &self.block
+    /// Get the home this service is for.
+    pub fn home(&self) -> &Home {
+        &self.home_instance
     }
 
-    /// Check if we are a resident of this block.
+    /// Check if we are a resident of this home.
     pub fn is_resident(&self) -> bool {
-        self.block.is_resident(&self.local_authority)
+        self.home_instance.is_resident(&self.local_authority)
     }
 
     /// Get replication peers (other residents).
     fn replication_peers_internal(&self) -> Vec<AuthorityId> {
-        self.block.block_peers(&self.local_authority)
+        self.home_instance.home_peers(&self.local_authority)
     }
 
     /// Check storage capacity for a store operation.
     fn check_capacity(&self, size: u64) -> Result<(), AvailabilityError> {
-        let budget = &self.block.storage_budget;
+        let budget = &self.home_instance.storage_budget;
         if !StorageService::can_pin(budget, size) {
             let used = budget.resident_storage_spent
                 + budget.neighborhood_donations
                 + budget.pinned_storage_spent;
             return Err(AvailabilityError::CapacityExceeded {
                 used,
-                limit: self.block.storage_limit,
+                limit: self.home_instance.storage_limit,
                 requested: size,
             });
         }
@@ -108,12 +108,12 @@ where
 }
 
 #[async_trait]
-impl<S, N> DataAvailability for BlockAvailability<S, N>
+impl<S, N> DataAvailability for HomeAvailability<S, N>
 where
     S: StorageEffects + Send + Sync,
     N: NetworkEffects + Send + Sync,
 {
-    type UnitId = BlockId;
+    type UnitId = HomeId;
 
     fn replication_peers(&self, _unit: Self::UnitId) -> Vec<AuthorityId> {
         self.replication_peers_internal()
@@ -226,7 +226,7 @@ mod tests {
         StorageCoreEffects, StorageExtendedEffects,
     };
     use aura_core::time::{PhysicalTime, TimeStamp};
-    use crate::facts::{BlockFact, ResidentFact, StewardFact};
+    use crate::facts::{HomeFact, ResidentFact, StewardFact};
     use std::collections::HashMap;
 
     fn test_timestamp() -> TimeStamp {
@@ -236,29 +236,29 @@ mod tests {
         })
     }
 
-    fn test_block() -> Block {
-        let block_id = BlockId::from_bytes([1u8; 32]);
+    fn test_home() -> Home {
+        let home_id = HomeId::from_bytes([1u8; 32]);
         let steward = AuthorityId::new_from_entropy([1u8; 32]);
 
-        let block_fact = BlockFact::new(block_id, test_timestamp());
+        let home_fact = HomeFact::new(home_id, test_timestamp());
 
         let residents = vec![
-            ResidentFact::new(steward, block_id, test_timestamp()),
+            ResidentFact::new(steward, home_id, test_timestamp()),
             ResidentFact::new(
                 AuthorityId::new_from_entropy([2u8; 32]),
-                block_id,
+                home_id,
                 test_timestamp(),
             ),
             ResidentFact::new(
                 AuthorityId::new_from_entropy([3u8; 32]),
-                block_id,
+                home_id,
                 test_timestamp(),
             ),
         ];
 
-        let stewards = vec![StewardFact::new(steward, block_id, test_timestamp())];
+        let stewards = vec![StewardFact::new(steward, home_id, test_timestamp())];
 
-        Block::from_facts(&block_fact, None, &residents, &stewards)
+        Home::from_facts(&home_fact, None, &residents, &stewards)
     }
 
     struct DummyStorage;
@@ -350,33 +350,33 @@ mod tests {
 
     #[test]
     fn test_replication_peers_excludes_self() {
-        let block = test_block();
+        let home_instance = test_home();
         let local = AuthorityId::new_from_entropy([1u8; 32]);
 
         let da =
-            BlockAvailability::new(block, local, Arc::new(DummyStorage), Arc::new(DummyNetwork));
+            HomeAvailability::new(home_instance, local, Arc::new(DummyStorage), Arc::new(DummyNetwork));
 
-        let peers = da.replication_peers(BlockId::from_bytes([1u8; 32]));
+        let peers = da.replication_peers(HomeId::from_bytes([1u8; 32]));
         assert_eq!(peers.len(), 2); // 3 residents - 1 self = 2 peers
         assert!(!peers.contains(&local));
     }
 
     #[test]
     fn test_is_resident() {
-        let block = test_block();
+        let home_instance = test_home();
         let resident = AuthorityId::new_from_entropy([1u8; 32]);
         let non_resident = AuthorityId::new_from_entropy([99u8; 32]);
 
-        let da_resident = BlockAvailability::new(
-            block.clone(),
+        let da_resident = HomeAvailability::new(
+            home_instance.clone(),
             resident,
             Arc::new(DummyStorage),
             Arc::new(DummyNetwork),
         );
         assert!(da_resident.is_resident());
 
-        let da_non_resident = BlockAvailability::new(
-            block,
+        let da_non_resident = HomeAvailability::new(
+            home_instance,
             non_resident,
             Arc::new(DummyStorage),
             Arc::new(DummyNetwork),

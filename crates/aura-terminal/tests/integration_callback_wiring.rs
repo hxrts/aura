@@ -753,7 +753,7 @@ async fn test_neighborhood_position_tracking() {
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "downtown".to_string(),
-            block_id: "library".to_string(),
+            home_id: "library".to_string(),
             depth: "Interior".to_string(),
         })
         .await;
@@ -767,7 +767,7 @@ async fn test_neighborhood_position_tracking() {
         let core = app_core.read().await;
         let neighborhood = core.read(&*NEIGHBORHOOD_SIGNAL).await.unwrap();
 
-        println!("  Home block: {:?}", neighborhood.home_block_id);
+        println!("  Home: {:?}", neighborhood.home_home_id);
         println!("  Position: {:?}", neighborhood.position);
         println!("  Neighbors: {} entries", neighborhood.neighbors.len());
 
@@ -780,7 +780,7 @@ async fn test_neighborhood_position_tracking() {
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
-            block_id: "current".to_string(),
+            home_id: "current".to_string(),
             depth: "Street".to_string(),
         })
         .await;
@@ -788,13 +788,13 @@ async fn test_neighborhood_position_tracking() {
     assert!(result.is_ok(), "MovePosition to Street should succeed");
     println!("  Navigation to Street succeeded");
 
-    // Phase 4: Navigate back (go to home block)
+    // Phase 4: Navigate back (go to home home)
     println!("\nPhase 4: Navigate back to home");
     // Use MovePosition with empty/default values to navigate back
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "home".to_string(),
-            block_id: "home".to_string(),
+            home_id: "home".to_string(),
             depth: "Interior".to_string(),
         })
         .await;
@@ -832,11 +832,11 @@ async fn test_context_switching_works() {
     assert!(initial.is_none(), "Initial context should be None");
     println!("  Initial context: None");
 
-    // Phase 2: Set context to a block
-    println!("\nPhase 2: Set context to 'block:home'");
+    // Phase 2: Set context to a home
+    println!("\nPhase 2: Set context to 'home:main'");
     let result = ctx
         .dispatch(EffectCommand::SetContext {
-            context_id: "block:home".to_string(),
+            context_id: "home:main".to_string(),
         })
         .await;
     assert!(result.is_ok(), "SetContext should succeed: {:?}", result);
@@ -847,8 +847,8 @@ async fn test_context_switching_works() {
     let current = ctx.get_current_context().await;
     assert_eq!(
         current,
-        Some("block:home".to_string()),
-        "Context should be 'block:home'"
+        Some("home:main".to_string()),
+        "Context should be 'home:main'"
     );
     println!("  Current context: {:?}", current);
 
@@ -1062,9 +1062,9 @@ async fn test_snapshot_methods_return_current_state() {
         neighborhood.blocks.len()
     );
 
-    let block = ctx.snapshot_block();
-    println!("  Block snapshot accessible");
-    let _ = block; // silence unused warning
+    let home = ctx.snapshot_home();
+    println!("  Home snapshot accessible");
+    let _ = home_state; // silence unused warning
 
     let invitations = ctx.snapshot_invitations();
     println!(

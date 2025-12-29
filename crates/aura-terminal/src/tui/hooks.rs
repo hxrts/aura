@@ -443,39 +443,39 @@ impl Default for InvitationsSnapshot {
     }
 }
 
-/// Snapshot of block-related data for rendering
+/// Snapshot of home-related data for rendering
 #[derive(Debug, Clone)]
-pub struct BlockSnapshot {
-    /// Block state (contains id, name, residents, storage, etc.)
-    pub block: Option<aura_app::views::block::BlockState>,
+pub struct HomeSnapshot {
+    /// Home state (contains id, name, residents, storage, etc.)
+    pub home_state: Option<aura_app::views::home::HomeState>,
     /// Whether user is a resident
     pub is_resident: bool,
     /// Whether user is a steward
     pub is_steward: bool,
 }
 
-impl Default for BlockSnapshot {
+impl Default for HomeSnapshot {
     fn default() -> Self {
         Self {
-            block: None,
+            home_state: None,
             is_resident: false,
             is_steward: false,
         }
     }
 }
 
-impl BlockSnapshot {
-    /// Get residents list from block state
-    pub fn residents(&self) -> &[aura_app::views::block::Resident] {
-        self.block
+impl HomeSnapshot {
+    /// Get residents list from home state
+    pub fn residents(&self) -> &[aura_app::views::home::Resident] {
+        self.home_state
             .as_ref()
             .map(|b| b.residents.as_slice())
             .unwrap_or(&[])
     }
 
-    /// Get storage info from block state
-    pub fn storage(&self) -> aura_app::BlockFlowBudget {
-        self.block
+    /// Get storage info from home state
+    pub fn storage(&self) -> aura_app::HomeFlowBudget {
+        self.home_state
             .as_ref()
             .map(|b| b.storage.clone())
             .unwrap_or_default()
@@ -504,8 +504,8 @@ pub struct NeighborhoodSnapshot {
     pub neighborhood_id: Option<String>,
     /// Neighborhood name
     pub neighborhood_name: Option<String>,
-    /// Blocks in neighborhood
-    pub blocks: Vec<aura_app::views::neighborhood::NeighborBlock>,
+    /// Homes in neighborhood
+    pub homes: Vec<aura_app::views::neighborhood::NeighborHome>,
     /// Current traversal position
     pub position: aura_app::views::neighborhood::TraversalPosition,
 }
@@ -515,7 +515,7 @@ impl Default for NeighborhoodSnapshot {
         Self {
             neighborhood_id: None,
             neighborhood_name: None,
-            blocks: Vec::new(),
+            homes: Vec::new(),
             position: aura_app::views::neighborhood::TraversalPosition::default(),
         }
     }
@@ -642,13 +642,13 @@ mod tests {
         let invitations = InvitationsSnapshot::default();
         assert!(invitations.invitations.is_empty());
 
-        let block = BlockSnapshot::default();
-        assert!(block.block.is_none());
+        let home_snapshot = HomeSnapshot::default();
+        assert!(home_snapshot.home_state.is_none());
 
         let contacts = ContactsSnapshot::default();
         assert!(contacts.contacts.is_empty());
 
         let neighborhood = NeighborhoodSnapshot::default();
-        assert!(neighborhood.blocks.is_empty());
+        assert!(neighborhood.homes.is_empty());
     }
 }

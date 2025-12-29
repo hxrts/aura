@@ -90,11 +90,11 @@ pub use budget::{
     get_current_budget,
     update_budget,
     // Types
-    BlockFlowBudget,
+    HomeFlowBudget,
     BudgetBreakdown,
     BudgetError,
     // Constants
-    BLOCK_TOTAL_SIZE,
+    HOME_TOTAL_SIZE,
     BYTE,
     KB,
     MAX_NEIGHBORHOODS,
@@ -110,7 +110,7 @@ pub use ceremonies::{
 pub use contacts::update_contact_nickname;
 pub use context::{get_current_position, get_neighborhood_state, move_position, set_context};
 pub use invitation::{
-    accept_invitation, accept_pending_block_invitation, cancel_invitation,
+    accept_invitation, accept_pending_home_invitation, cancel_invitation,
     create_channel_invitation, create_contact_invitation, create_guardian_invitation,
     decline_invitation, export_invitation, import_invitation, import_invitation_details,
     list_invitations, list_pending_invitations,

@@ -46,7 +46,7 @@ pub struct Contact {
     pub suggested_name: Option<String>,
     /// Whether this contact is a guardian
     pub is_guardian: bool,
-    /// Whether this contact is a block resident
+    /// Whether this contact is a home resident
     pub is_resident: bool,
     /// Last interaction time (ms since epoch)
     pub last_interaction: Option<u64>,

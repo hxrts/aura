@@ -457,6 +457,23 @@ pub struct LifecycleManager {
 
 If richer component-aware lifecycle orchestration becomes necessary (init ordering, explicit phase transitions), it should be introduced via a dedicated design pass rather than assuming a more complex manager by default.
 
+### 6.1 Runtime Maintenance Tasks
+
+Long-lived runtimes must periodically prune caches and stale in-memory state. Aura handles this in **Layer 6** (runtime composition) via background maintenance tasks scheduled by the `RuntimeTaskRegistry`. Domain crates expose cleanup APIs, but **do not self-schedule**. The agent runtime wires these up during startup.
+
+Example (conceptual):
+
+```rust
+// In aura-agent runtime builder
+system.start_maintenance_tasks();
+
+// Internally, maintenance tasks call:
+// - sync_service.maintenance_cleanup(...)
+// - ceremony_tracker.cleanup_timed_out()
+```
+
+This keeps time-based policy in the runtime layer, preserves deterministic testing (simulator controls time), and avoids leaking runtime coupling into Layer 4/5 crates.
+
 ## 7. Layers and Crates
 
 The effect system spans several crates. Each crate defines a specific role in the architecture. These crates maintain strict dependency boundaries.
@@ -693,7 +710,7 @@ registry.register(
 );
 ```
 
-This code shows how `aura-chat` registers its fact type. Registered domains include Chat for message threading, Invitation for device invitations, Contact for relationship management, and Moderation for block/mute facts.
+This code shows how `aura-chat` registers its fact type. Registered domains include Chat for message threading, Invitation for device invitations, Contact for relationship management, and Moderation for home/mute facts.
 
 ### 13.3 Reactive Scheduling
 

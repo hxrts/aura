@@ -17,7 +17,7 @@
 //! to prevent amplification from retransmitted packets.
 //!
 //! **Social topology routing**: Packets propagate along social relationships
-//! (block peers, then neighborhood peers) for natural flood boundaries.
+//! (home peers, then neighborhood peers) for natural flood boundaries.
 //!
 //! # Example
 //!

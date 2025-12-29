@@ -31,11 +31,11 @@ impl InvitationService {
         Ok(Self { handler, effects })
     }
 
-    /// Create an invitation to a channel/block
+    /// Create an invitation to a channel/home
     ///
     /// # Arguments
     /// * `receiver_id` - Authority to invite
-    /// * `block_id` - Block/channel ID to invite to
+    /// * `home_id` - Home/channel ID to invite to
     /// * `message` - Optional message
     /// * `expires_in_ms` - Optional expiration time in milliseconds
     ///
@@ -44,7 +44,7 @@ impl InvitationService {
     pub async fn invite_to_channel(
         &self,
         receiver_id: AuthorityId,
-        block_id: String,
+        home_id: String,
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
@@ -52,7 +52,7 @@ impl InvitationService {
             .create_invitation(
                 &self.effects,
                 receiver_id,
-                InvitationType::Channel { block_id },
+                InvitationType::Channel { home_id },
                 message,
                 expires_in_ms,
             )

@@ -1,6 +1,6 @@
 //! Moderation Workflow - Portable Business Logic
 //!
-//! This module contains block moderation operations (kick/ban/mute/pin) that are
+//! This module contains home moderation operations (kick/ban/mute/pin) that are
 //! portable across all frontends.
 //!
 //! These operations delegate to the RuntimeBridge to commit moderation facts.
@@ -23,7 +23,7 @@ fn parse_authority(target: &str) -> Result<AuthorityId, AuraError> {
 fn parse_context_id(context_id: &str) -> Result<ContextId, AuraError> {
     let trimmed = context_id.trim();
     if trimmed.is_empty() {
-        return Err(AuraError::not_found("Block context not available"));
+        return Err(AuraError::not_found("Home context not available"));
     }
 
     trimmed
@@ -31,27 +31,27 @@ fn parse_context_id(context_id: &str) -> Result<ContextId, AuraError> {
         .map_err(|_| AuraError::invalid(format!("Invalid context ID: {}", trimmed)))
 }
 
-async fn current_block_context(
+async fn current_home_context(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(ContextId, ChannelId, bool), AuraError> {
     let core = app_core.read().await;
-    let blocks = core.views().get_blocks();
-    let block = blocks
-        .current_block()
-        .ok_or_else(|| AuraError::not_found("No current block selected"))?;
+    let homes = core.views().get_homes();
+    let home_state = homes
+        .current_home()
+        .ok_or_else(|| AuraError::not_found("No current home selected"))?;
 
-    let context_id = parse_context_id(&block.context_id)?;
-    Ok((context_id, block.id, block.is_admin()))
+    let context_id = parse_context_id(&home_state.context_id)?;
+    Ok((context_id, home_state.id, home_state.is_admin()))
 }
 
-/// Kick a user from the current block.
+/// Kick a user from the current home.
 pub async fn kick_user(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
     reason: Option<&str>,
     _kicked_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
+    let (context_id, channel_id, is_admin) = current_home_context(app_core).await?;
     if !is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can kick residents",
@@ -79,14 +79,14 @@ pub async fn kick_user(
     Ok(())
 }
 
-/// Ban a user from the current block.
+/// Ban a user from the current home.
 pub async fn ban_user(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
     reason: Option<&str>,
     _banned_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
+    let (context_id, channel_id, is_admin) = current_home_context(app_core).await?;
     if !is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can ban residents",
@@ -114,9 +114,9 @@ pub async fn ban_user(
     Ok(())
 }
 
-/// Unban a user from the current block.
+/// Unban a user from the current home.
 pub async fn unban_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result<(), AuraError> {
-    let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
+    let (context_id, channel_id, is_admin) = current_home_context(app_core).await?;
     if !is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can unban residents",
@@ -139,14 +139,14 @@ pub async fn unban_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result
     Ok(())
 }
 
-/// Mute a user in the current block.
+/// Mute a user in the current home.
 pub async fn mute_user(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
     duration_secs: Option<u64>,
     _muted_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
+    let (context_id, channel_id, is_admin) = current_home_context(app_core).await?;
     if !is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can mute residents",
@@ -169,9 +169,9 @@ pub async fn mute_user(
     Ok(())
 }
 
-/// Unmute a user in the current block.
+/// Unmute a user in the current home.
 pub async fn unmute_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result<(), AuraError> {
-    let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
+    let (context_id, channel_id, is_admin) = current_home_context(app_core).await?;
     if !is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can unmute residents",
@@ -194,12 +194,12 @@ pub async fn unmute_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Resul
     Ok(())
 }
 
-/// Pin a message in the current block.
+/// Pin a message in the current home.
 pub async fn pin_message(
     app_core: &Arc<RwLock<AppCore>>,
     message_id: &str,
 ) -> Result<(), AuraError> {
-    let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
+    let (context_id, channel_id, is_admin) = current_home_context(app_core).await?;
     if !is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can pin messages",
@@ -221,12 +221,12 @@ pub async fn pin_message(
     Ok(())
 }
 
-/// Unpin a message in the current block.
+/// Unpin a message in the current home.
 pub async fn unpin_message(
     app_core: &Arc<RwLock<AppCore>>,
     message_id: &str,
 ) -> Result<(), AuraError> {
-    let (context_id, channel_id, is_admin) = current_block_context(app_core).await?;
+    let (context_id, channel_id, is_admin) = current_home_context(app_core).await?;
     if !is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can unpin messages",
@@ -254,7 +254,7 @@ mod tests {
     use crate::AppConfig;
 
     #[tokio::test]
-    async fn moderation_requires_block() {
+    async fn moderation_requires_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 

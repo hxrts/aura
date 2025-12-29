@@ -1,11 +1,11 @@
 //! # Flow Budget Domain Logic & Workflows
 //!
-//! Block storage budget tracking, enforcement, and portable business logic.
+//! Home storage budget tracking, enforcement, and portable business logic.
 //! See `work/neighbor.md` Section 8 for the storage model.
 //!
 //! ## Storage Model (v1)
 //!
-//! - **Block total**: 10 MB fixed allocation
+//! - **Home total**: 10 MB fixed allocation
 //! - **Resident storage**: 200 KB per resident (max 8 = 1.6 MB)
 //! - **Neighborhood donation**: 1 MB per neighborhood (max 4 = 4 MB)
 //! - **Public-good space**: Remainder after residents + donations
@@ -19,9 +19,9 @@
 //! ## Usage
 //!
 //! ```rust,ignore
-//! use aura_app::workflows::budget::{BlockFlowBudget, BudgetError};
+//! use aura_app::workflows::budget::{HomeFlowBudget, BudgetError};
 //!
-//! let mut budget = BlockFlowBudget::new("block-123");
+//! let mut budget = HomeFlowBudget::new("home-123");
 //!
 //! // Check capacity
 //! if budget.can_add_resident() {
@@ -58,30 +58,30 @@ pub const MB: u64 = 1024 * KB;
 
 /// v1 constraints
 ///
-/// Total block storage allocation (10 MB)
-pub const BLOCK_TOTAL_SIZE: u64 = 10 * MB;
+/// Total home storage allocation (10 MB)
+pub const HOME_TOTAL_SIZE: u64 = 10 * MB;
 /// Storage allocated per resident (200 KB)
 pub const RESIDENT_ALLOCATION: u64 = 200 * KB;
-/// Maximum number of residents per block
+/// Maximum number of residents per home
 pub const MAX_RESIDENTS: u8 = 8;
 /// Storage donated per neighborhood membership (1 MB)
 pub const NEIGHBORHOOD_DONATION: u64 = MB;
-/// Maximum number of neighborhoods a block can join
+/// Maximum number of neighborhoods a home can join
 pub const MAX_NEIGHBORHOODS: u8 = 4;
 
 // =============================================================================
-// Block Flow Budget
+// Home Flow Budget
 // =============================================================================
 
-/// Block storage budget
+/// Home storage budget
 ///
 /// Tracks current usage and calculates limits based on configuration.
 /// This is the canonical budget type used across all frontends.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct BlockFlowBudget {
-    /// Block ID
-    pub block_id: String,
+pub struct HomeFlowBudget {
+    /// Home ID
+    pub home_id: String,
     /// Current number of residents
     pub resident_count: u8,
     /// Storage used by residents (spent counter as fact)
@@ -94,11 +94,11 @@ pub struct BlockFlowBudget {
     pub pinned_storage_spent: u64,
 }
 
-impl BlockFlowBudget {
-    /// Create a new empty budget for a block
-    pub fn new(block_id: impl Into<String>) -> Self {
+impl HomeFlowBudget {
+    /// Create a new empty budget for a home
+    pub fn new(home_id: impl Into<String>) -> Self {
         Self {
-            block_id: block_id.into(),
+            home_id: home_id.into(),
             resident_count: 0,
             resident_storage_spent: 0,
             neighborhood_count: 0,
@@ -107,9 +107,9 @@ impl BlockFlowBudget {
         }
     }
 
-    /// Total block allocation (fixed at 10 MB in v1)
+    /// Total home allocation (fixed at 10 MB in v1)
     pub fn total_allocation(&self) -> u64 {
-        BLOCK_TOTAL_SIZE
+        HOME_TOTAL_SIZE
     }
 
     /// Maximum resident storage (8 × 200 KB = 1.6 MB)
@@ -132,7 +132,7 @@ impl BlockFlowBudget {
     ///
     /// Formula: 10 MB - neighborhood_donations - resident_limit
     pub fn pinned_storage_limit(&self) -> u64 {
-        BLOCK_TOTAL_SIZE
+        HOME_TOTAL_SIZE
             .saturating_sub(self.neighborhood_donations)
             .saturating_sub(self.resident_storage_limit())
     }
@@ -150,27 +150,27 @@ impl BlockFlowBudget {
 
     /// Total storage remaining
     pub fn total_remaining(&self) -> u64 {
-        BLOCK_TOTAL_SIZE.saturating_sub(self.total_used())
+        HOME_TOTAL_SIZE.saturating_sub(self.total_used())
     }
 
     /// Usage percentage (0.0 - 1.0)
     pub fn usage_fraction(&self) -> f64 {
-        self.total_used() as f64 / BLOCK_TOTAL_SIZE as f64
+        self.total_used() as f64 / HOME_TOTAL_SIZE as f64
     }
 
-    /// Check if block can add another resident
+    /// Check if home can add another resident
     pub fn can_add_resident(&self) -> bool {
         self.resident_count < MAX_RESIDENTS
             && self.resident_storage_remaining() >= RESIDENT_ALLOCATION
     }
 
-    /// Check if block can join another neighborhood
+    /// Check if home can join another neighborhood
     pub fn can_join_neighborhood(&self) -> bool {
         self.neighborhood_count < MAX_NEIGHBORHOODS
             && self.pinned_storage_remaining() >= NEIGHBORHOOD_DONATION
     }
 
-    /// Check if block can pin content of given size
+    /// Check if home can pin content of given size
     pub fn can_pin(&self, size: u64) -> bool {
         self.pinned_storage_remaining() >= size
     }
@@ -251,7 +251,7 @@ impl BlockFlowBudget {
     /// Get a breakdown summary for display
     pub fn breakdown(&self) -> BudgetBreakdown {
         BudgetBreakdown {
-            total: BLOCK_TOTAL_SIZE,
+            total: HOME_TOTAL_SIZE,
             resident_limit: self.resident_storage_limit(),
             resident_used: self.resident_storage_spent,
             neighborhood_donations: self.neighborhood_donations,
@@ -262,7 +262,7 @@ impl BlockFlowBudget {
     }
 }
 
-impl Default for BlockFlowBudget {
+impl Default for HomeFlowBudget {
     fn default() -> Self {
         Self::new("default")
     }
@@ -276,7 +276,7 @@ impl Default for BlockFlowBudget {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct BudgetBreakdown {
-    /// Total block allocation
+    /// Total home allocation
     pub total: u64,
     /// Resident storage limit
     pub resident_limit: u64,
@@ -345,11 +345,11 @@ impl fmt::Display for BudgetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ResidentCapacityExceeded { current, max } => {
-                write!(f, "Block at resident capacity ({}/{})", current, max)
+                write!(f, "Home at resident capacity ({}/{})", current, max)
             }
             Self::NoResidentsToRemove => write!(f, "No residents to remove"),
             Self::NeighborhoodCapacityExceeded { current, max } => {
-                write!(f, "Block at neighborhood capacity ({}/{})", current, max)
+                write!(f, "Home at neighborhood capacity ({}/{})", current, max)
             }
             Self::NoNeighborhoodsToLeave => write!(f, "No neighborhoods to leave"),
             Self::PinnedStorageExceeded {
@@ -373,15 +373,15 @@ impl std::error::Error for BudgetError {}
 // Workflow Functions
 // =============================================================================
 
-/// Get the current budget for the active block
+/// Get the current budget for the active home
 ///
 /// **What it does**: Reads budget state from BUDGET_SIGNAL
-/// **Returns**: Domain type (BlockFlowBudget)
+/// **Returns**: Domain type (HomeFlowBudget)
 /// **Signal pattern**: Read-only operation (no emission)
 ///
 /// This is the primary method for getting budget data across all frontends.
 /// Falls back to default budget if signal is not available.
-pub async fn get_current_budget(app_core: &Arc<RwLock<AppCore>>) -> BlockFlowBudget {
+pub async fn get_current_budget(app_core: &Arc<RwLock<AppCore>>) -> HomeFlowBudget {
     let core = app_core.read().await;
 
     // Try to read from BUDGET_SIGNAL, fallback to default
@@ -400,7 +400,7 @@ pub async fn get_budget_breakdown(app_core: &Arc<RwLock<AppCore>>) -> BudgetBrea
     budget.breakdown()
 }
 
-/// Check if a new resident can be added to the block
+/// Check if a new resident can be added to the home
 ///
 /// **What it does**: Validates budget capacity for new resident
 /// **Returns**: Boolean (true if capacity available)
@@ -412,7 +412,7 @@ pub async fn can_add_resident(app_core: &Arc<RwLock<AppCore>>) -> bool {
     budget.can_add_resident()
 }
 
-/// Check if current block can join a neighborhood
+/// Check if current home can join a neighborhood
 ///
 /// **What it does**: Validates budget capacity for neighborhood membership
 /// **Returns**: Boolean (true if capacity available)
@@ -424,7 +424,7 @@ pub async fn can_join_neighborhood(app_core: &Arc<RwLock<AppCore>>) -> bool {
     budget.can_join_neighborhood()
 }
 
-/// Check if content can be pinned to the block
+/// Check if content can be pinned to the home
 ///
 /// **What it does**: Validates budget capacity for pinning content
 /// **Returns**: Result with available capacity or error
@@ -458,7 +458,7 @@ pub async fn can_pin_content(
 /// adding a resident, pinning content, or receiving budget updates).
 pub async fn update_budget(
     app_core: &Arc<RwLock<AppCore>>,
-    budget: BlockFlowBudget,
+    budget: HomeFlowBudget,
 ) -> Result<(), AuraError> {
     let core = app_core.read().await;
     core.emit(&*BUDGET_SIGNAL, budget)
@@ -482,8 +482,8 @@ mod tests {
 
     #[test]
     fn test_new_budget() {
-        let budget = BlockFlowBudget::new("test_block");
-        assert_eq!(budget.block_id, "test_block");
+        let budget = HomeFlowBudget::new("test_home");
+        assert_eq!(budget.home_id, "test_home");
         assert_eq!(budget.resident_count, 0);
         assert_eq!(budget.neighborhood_count, 0);
         assert_eq!(budget.total_used(), 0);
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn test_constants() {
-        assert_eq!(BLOCK_TOTAL_SIZE, 10 * MB);
+        assert_eq!(HOME_TOTAL_SIZE, 10 * MB);
         assert_eq!(RESIDENT_ALLOCATION, 200 * KB);
         assert_eq!(MAX_RESIDENTS, 8);
         assert_eq!(NEIGHBORHOOD_DONATION, MB);
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn test_add_resident() {
-        let mut budget = BlockFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new("test");
         assert!(budget.can_add_resident());
 
         budget.add_resident().unwrap();
@@ -528,7 +528,7 @@ mod tests {
 
     #[test]
     fn test_remove_resident() {
-        let mut budget = BlockFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new("test");
         budget.add_resident().unwrap();
         budget.add_resident().unwrap();
 
@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_join_neighborhood() {
-        let mut budget = BlockFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new("test");
         assert!(budget.can_join_neighborhood());
 
         budget.join_neighborhood().unwrap();
@@ -567,13 +567,13 @@ mod tests {
 
     #[test]
     fn test_pinned_storage() {
-        let mut budget = BlockFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new("test");
 
         // With no neighborhoods, pinned limit = 10 MB - 1.6 MB = 8.4 MB
         let initial_limit = budget.pinned_storage_limit();
         assert_eq!(
             initial_limit,
-            BLOCK_TOTAL_SIZE - budget.resident_storage_limit()
+            HOME_TOTAL_SIZE - budget.resident_storage_limit()
         );
 
         // Join a neighborhood reduces pinned limit by 1 MB
@@ -597,7 +597,7 @@ mod tests {
     #[test]
     fn test_storage_arithmetic_v1() {
         // Verify Section 8.3 table: 4 neighborhoods case
-        let mut budget = BlockFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new("test");
 
         // Join 4 neighborhoods
         for _ in 0..4 {
@@ -609,7 +609,7 @@ mod tests {
         assert_eq!(budget.resident_storage_limit(), 1_638_400); // 1.6 MB (8 × 200 KB)
 
         // Public-good space = 10 MB - 4 MB - 1.6 MB = 4.4 MB
-        let expected_pinned_limit = BLOCK_TOTAL_SIZE - (4 * MB) - 1_638_400;
+        let expected_pinned_limit = HOME_TOTAL_SIZE - (4 * MB) - 1_638_400;
         assert_eq!(budget.pinned_storage_limit(), expected_pinned_limit);
 
         assert!(budget.pinned_storage_limit() >= 4 * MB);
@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn test_usage_fraction() {
-        let mut budget = BlockFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new("test");
         assert_eq!(budget.usage_fraction(), 0.0);
 
         budget.add_resident().unwrap();
@@ -684,13 +684,13 @@ mod tests {
         // Register signal
         {
             let core = app_core.read().await;
-            core.register(&*BUDGET_SIGNAL, BlockFlowBudget::default())
+            core.register(&*BUDGET_SIGNAL, HomeFlowBudget::default())
                 .await
                 .unwrap();
         }
 
         // Update budget
-        let mut new_budget = BlockFlowBudget::new("test-block");
+        let mut new_budget = HomeFlowBudget::new("test-home");
         new_budget.add_resident().unwrap();
         new_budget.add_resident().unwrap();
 

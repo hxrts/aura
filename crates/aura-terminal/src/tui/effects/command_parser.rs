@@ -103,21 +103,21 @@ pub enum EffectCommand {
         require_mfa: bool,
     },
 
-    // === Block Commands ===
+    // === Home Commands ===
     /// Set the active AMP context for channel operations
     SetContext {
         /// Context ID (UUID string or named context like "default", "dm")
         context_id: String,
     },
-    /// Create a new block
-    CreateBlock {
-        /// Optional block name
+    /// Create a new home
+    CreateHome {
+        /// Optional home name
         name: Option<String>,
     },
-    /// Accept pending block invitation
-    AcceptPendingBlockInvitation,
-    /// Send block invitation to contact
-    SendBlockInvitation {
+    /// Accept pending home invitation
+    AcceptPendingHomeInvitation,
+    /// Send home invitation to contact
+    SendHomeInvitation {
         /// Contact ID to invite
         contact_id: String,
     },
@@ -213,7 +213,7 @@ pub enum EffectCommand {
         /// Optional reason
         reason: Option<String>,
     },
-    /// Ban user from block
+    /// Ban user from home
     BanUser {
         /// Target user
         target: String,
@@ -221,7 +221,7 @@ pub enum EffectCommand {
         /// Optional reason
         reason: Option<String>,
     },
-    /// Unban user from block
+    /// Unban user from home
     UnbanUser {
         /// Target user
         target: String,
@@ -239,7 +239,7 @@ pub enum EffectCommand {
         /// Target user
         target: String,
     },
-    /// Invite user to channel/block
+    /// Invite user to channel/home
     InviteUser {
         /// Target user
         target: String,
@@ -382,8 +382,8 @@ pub enum EffectCommand {
     MovePosition {
         /// Target neighborhood ID
         neighborhood_id: String,
-        /// Target block ID
-        block_id: String,
+        /// Target home ID
+        home_id: String,
         /// Traversal depth (Street, Frontage, Interior)
         depth: String,
     },
@@ -461,8 +461,8 @@ impl EffectCommand {
             | Self::AcceptInvitation { .. }
             | Self::DeclineInvitation { .. }
             | Self::CancelInvitation { .. }
-            | Self::AcceptPendingBlockInvitation
-            | Self::SendBlockInvitation { .. }
+            | Self::AcceptPendingHomeInvitation
+            | Self::SendHomeInvitation { .. }
             | Self::InviteLanPeer { .. }
             | Self::SetContext { .. }
             | Self::RemoveContact { .. } => CommandAuthorizationLevel::Basic,
@@ -472,7 +472,7 @@ impl EffectCommand {
             Self::CreateAccount { .. } => CommandAuthorizationLevel::Basic,
 
             // Sensitive - elevated authorization (requires existing account/elevated token)
-            Self::CreateBlock { .. }
+            Self::CreateHome { .. }
             | Self::UpdateThreshold { .. }
             | Self::AddDevice { .. }
             | Self::RemoveDevice { .. }
@@ -670,18 +670,18 @@ pub enum AuraEvent {
         total: u32,
     },
 
-    // === Block Events ===
-    /// Block created
-    BlockCreated {
-        /// Block ID
-        block_id: String,
-        /// Block name
+    // === Home Events ===
+    /// Home created
+    HomeCreated {
+        /// Home ID
+        home_id: String,
+        /// Home name
         name: Option<String>,
     },
-    /// Joined a block
-    BlockJoined {
-        /// Block ID
-        block_id: String,
+    /// Joined a home
+    HomeJoined {
+        /// Home ID
+        home_id: String,
     },
 
     // === LAN Discovery Events ===
@@ -795,7 +795,7 @@ pub enum AuraEvent {
         /// Optional reason
         reason: Option<String>,
     },
-    /// User banned from block
+    /// User banned from home
     UserBanned {
         /// Target user ID
         target: String,
@@ -804,7 +804,7 @@ pub enum AuraEvent {
         /// Optional reason
         reason: Option<String>,
     },
-    /// User unbanned from block
+    /// User unbanned from home
     UserUnbanned {
         /// Target user ID
         target: String,
@@ -827,7 +827,7 @@ pub enum AuraEvent {
         /// Actor who performed the unmute
         actor: String,
     },
-    /// User invited to block/channel
+    /// User invited to home/channel
     UserInvited {
         /// Target user ID
         target: String,
@@ -840,8 +840,8 @@ pub enum AuraEvent {
         target: String,
         /// Actor who granted the role
         actor: String,
-        /// Block ID where role was granted
-        block_id: String,
+        /// Home ID where role was granted
+        home_id: String,
     },
     /// Steward role revoked
     StewardRevoked {
@@ -849,8 +849,8 @@ pub enum AuraEvent {
         target: String,
         /// Actor who revoked the role
         actor: String,
-        /// Block ID where role was revoked
-        block_id: String,
+        /// Home ID where role was revoked
+        home_id: String,
     },
 
     // === Contacts & Nicknames Events ===
@@ -886,8 +886,8 @@ pub enum AuraEvent {
     PositionUpdated {
         /// Neighborhood ID
         neighborhood_id: String,
-        /// Block ID
-        block_id: String,
+        /// Home ID
+        home_id: String,
         /// Traversal depth
         depth: String,
     },
@@ -895,7 +895,7 @@ pub enum AuraEvent {
     // === Channel Management Events ===
     /// Channel topic set
     TopicSet {
-        /// Channel/block ID
+        /// Channel/home ID
         channel: String,
         /// Topic text
         text: String,
@@ -906,7 +906,7 @@ pub enum AuraEvent {
     MessagePinned {
         /// Message ID
         message_id: String,
-        /// Channel/block ID where message was pinned
+        /// Channel/home ID where message was pinned
         channel: String,
         /// Actor who pinned the message
         actor: String,
@@ -915,14 +915,14 @@ pub enum AuraEvent {
     MessageUnpinned {
         /// Message ID
         message_id: String,
-        /// Channel/block ID where message was unpinned
+        /// Channel/home ID where message was unpinned
         channel: String,
         /// Actor who unpinned the message
         actor: String,
     },
     /// Channel mode set
     ChannelModeSet {
-        /// Channel/block ID
+        /// Channel/home ID
         channel: String,
         /// Mode flags
         flags: String,
@@ -979,8 +979,8 @@ pub struct EventFilter {
     pub chat: bool,
     /// Include sync events
     pub sync: bool,
-    /// Include block events
-    pub block: bool,
+    /// Include home events
+    pub home: bool,
     /// Include invitation events
     pub invitation: bool,
     /// Include settings events
@@ -1006,7 +1006,7 @@ impl EventFilter {
             account: true,
             chat: true,
             sync: true,
-            block: true,
+            home: true,
             invitation: true,
             settings: true,
             moderation: true,
@@ -1069,7 +1069,7 @@ impl EventFilter {
             | AuraEvent::PeerRemoved { .. }
             | AuraEvent::PeersListed { .. }
             | AuraEvent::PeersDiscovered { .. } => self.sync,
-            AuraEvent::BlockCreated { .. } | AuraEvent::BlockJoined { .. } => self.block,
+            AuraEvent::HomeCreated { .. } | AuraEvent::HomeJoined { .. } => self.home,
             AuraEvent::InvitationCreated { .. }
             | AuraEvent::InvitationCodeExported { .. }
             | AuraEvent::InvitationImported { .. }

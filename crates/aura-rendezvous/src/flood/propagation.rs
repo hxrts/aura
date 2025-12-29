@@ -7,7 +7,7 @@
 //! # Design
 //!
 //! **Social topology routing**: Packets are flooded along social relationships:
-//! first to block peers, then to neighborhood peers. This provides natural
+//! first to home peers, then to neighborhood peers. This provides natural
 //! flood boundaries while ensuring coverage.
 //!
 //! **Deduplication**: An LRU cache of seen nonces prevents packet amplification
@@ -186,15 +186,15 @@ where
 
     /// Get flood targets from the social topology.
     ///
-    /// Returns authorities to flood to, prioritizing block peers
+    /// Returns authorities to flood to, prioritizing home peers
     /// over neighborhood peers.
     pub async fn flood_targets(&self) -> Vec<AuthorityId> {
         let topology = self.topology.read().await;
 
         let mut targets = Vec::new();
 
-        // First add block peers (highest priority)
-        targets.extend(topology.block_peers());
+        // First add home peers (highest priority)
+        targets.extend(topology.home_peers());
 
         // Then neighborhood peers
         targets.extend(topology.neighborhood_peers());

@@ -262,6 +262,7 @@ fn test_receipt_verification_configuration() {
         max_chain_depth: 10,
         require_chronological: true,
         verify_signatures: true,
+        require_consensus_finalization: false,
     };
     assert_eq!(custom_config.max_chain_depth, 10);
     assert!(custom_config.require_chronological);

@@ -193,16 +193,16 @@ mod neighborhood_screen_map {
         // Enter detail mode, then insert mode and type message
         tui.send_enter();
         tui.send_char('i');
-        tui.type_text("Hello, Block!");
+        tui.type_text("Hello, Home!");
 
-        assert_eq!(tui.state.neighborhood.input_buffer, "Hello, Block!");
+        assert_eq!(tui.state.neighborhood.input_buffer, "Hello, Home!");
 
         // Send message with Enter
         tui.clear_commands();
         tui.send_enter();
 
         // Verify dispatch command
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::SendBlockMessage { content } if content == "Hello, Block!")));
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::SendHomeMessage { content } if content == "Hello, Home!")));
 
         // Buffer should be cleared
         assert!(tui.state.neighborhood.input_buffer.is_empty());
@@ -225,13 +225,13 @@ mod neighborhood_screen_map {
         tui.send_enter();
 
         // No dispatch should occur for empty message
-        assert!(!tui.has_dispatch(|d| matches!(d, DispatchCommand::SendBlockMessage { .. })));
+        assert!(!tui.has_dispatch(|d| matches!(d, DispatchCommand::SendHomeMessage { .. })));
     }
 
     #[test]
     fn test_neighborhood_resident_navigation() {
         let mut tui = TestTui::new();
-        tui.state.neighborhood.block_count = 1;
+        tui.state.neighborhood.home_count = 1;
         tui.send_enter();
         tui.state.neighborhood.detail_focus = DetailFocus::Residents;
 
@@ -756,13 +756,13 @@ mod neighborhood_screen {
     fn test_neighborhood_enter_block() {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Neighborhood);
-        tui.state.neighborhood.block_count = 1;
+        tui.state.neighborhood.home_count = 1;
 
         tui.clear_commands();
 
-        // Enter selected block
+        // Enter selected home
         tui.send_enter();
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::EnterBlock { .. })));
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::EnterHome { .. })));
     }
 
     #[test]
@@ -1340,7 +1340,7 @@ proptest! {
         // All indices are always >= 0 since they're usize - no need to check
     }
 
-    /// Insert mode only on Block and Chat
+    /// Insert mode only on Home and Chat
     #[test]
     fn prop_insert_mode_screens(screen in screen_key_strategy()) {
         let mut tui = TestTui::new();
@@ -1498,7 +1498,7 @@ mod integration {
     fn test_neighborhood_exploration() {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Neighborhood);
-        tui.state.neighborhood.block_count = 1;
+        tui.state.neighborhood.home_count = 1;
 
         // Navigate around the grid
         tui.send_char('l');
@@ -1506,10 +1506,10 @@ mod integration {
         tui.send_char('j');
         tui.send_char('j');
 
-        // Enter a block
+        // Enter a home
         tui.clear_commands();
         tui.send_enter();
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::EnterBlock { .. })));
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::EnterHome { .. })));
 
         // Go home
         tui.clear_commands();

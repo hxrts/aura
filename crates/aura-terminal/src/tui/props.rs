@@ -677,9 +677,9 @@ pub struct NeighborhoodViewProps {
     pub enter_depth: TraversalDepth,
     pub selected_neighborhood: usize,
     pub neighborhood_count: usize,
-    pub selected_block: usize,
-    pub block_count: usize,
-    pub entered_block_id: Option<String>,
+    pub selected_home: usize,
+    pub home_count: usize,
+    pub entered_home_id: Option<String>,
     pub selected_channel: usize,
     pub channel_count: usize,
     pub selected_resident: usize,
@@ -689,27 +689,27 @@ pub struct NeighborhoodViewProps {
     pub message_scroll: usize,
     pub message_count: usize,
     pub steward_actions_enabled: bool,
-    // Block create modal
-    pub block_create_modal_visible: bool,
-    pub block_create_modal_name: String,
-    pub block_create_modal_description: String,
-    pub block_create_modal_active_field: usize,
-    pub block_create_modal_error: Option<String>,
-    pub block_create_modal_creating: bool,
+    // Home create modal
+    pub home_create_modal_visible: bool,
+    pub home_create_modal_name: String,
+    pub home_create_modal_description: String,
+    pub home_create_modal_active_field: usize,
+    pub home_create_modal_error: Option<String>,
+    pub home_create_modal_creating: bool,
 }
 
 /// Extract NeighborhoodScreen view props from TuiState
 pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProps {
-    // Block create modal (from queue)
+    // Home create modal (from queue)
     let (
-        block_create_visible,
-        block_create_name,
-        block_create_description,
-        block_create_active_field,
-        block_create_error,
-        block_create_creating,
+        home_create_visible,
+        home_create_name,
+        home_create_description,
+        home_create_active_field,
+        home_create_error,
+        home_create_creating,
     ) = match state.modal_queue.current() {
-        Some(QueuedModal::NeighborhoodBlockCreate(s)) => (
+        Some(QueuedModal::NeighborhoodHomeCreate(s)) => (
             true,
             s.name.clone(),
             s.description.clone(),
@@ -729,9 +729,9 @@ pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProp
         enter_depth: state.neighborhood.enter_depth,
         selected_neighborhood: state.neighborhood.selected_neighborhood,
         neighborhood_count: state.neighborhood.neighborhood_count,
-        selected_block: state.neighborhood.selected_block,
-        block_count: state.neighborhood.block_count,
-        entered_block_id: state.neighborhood.entered_block_id.clone(),
+        selected_home: state.neighborhood.selected_home,
+        home_count: state.neighborhood.home_count,
+        entered_home_id: state.neighborhood.entered_home_id.clone(),
         selected_channel: state.neighborhood.selected_channel,
         channel_count: state.neighborhood.channel_count,
         selected_resident: state.neighborhood.selected_resident,
@@ -741,13 +741,13 @@ pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProp
         message_scroll: state.neighborhood.message_scroll,
         message_count: state.neighborhood.message_count,
         steward_actions_enabled: state.neighborhood.steward_actions_enabled,
-        // Block create modal
-        block_create_modal_visible: block_create_visible,
-        block_create_modal_name: block_create_name,
-        block_create_modal_description: block_create_description,
-        block_create_modal_active_field: block_create_active_field,
-        block_create_modal_error: block_create_error,
-        block_create_modal_creating: block_create_creating,
+        // Home create modal
+        home_create_modal_visible: home_create_visible,
+        home_create_modal_name: home_create_name,
+        home_create_modal_description: home_create_description,
+        home_create_modal_active_field: home_create_active_field,
+        home_create_modal_error: home_create_error,
+        home_create_modal_creating: home_create_creating,
     }
 }
 

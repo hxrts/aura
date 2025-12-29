@@ -131,7 +131,7 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
                 modal_state.value.push_str(&text);
                 return;
             }
-            QueuedModal::NeighborhoodBlockCreate(modal_state) => {
+            QueuedModal::NeighborhoodHomeCreate(modal_state) => {
                 if modal_state.active_field == 0 {
                     modal_state.name.push_str(&text);
                 } else {
@@ -261,7 +261,7 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                     if !state.neighborhood.input_buffer.is_empty() {
                         let content = state.neighborhood.input_buffer.clone();
                         state.neighborhood.input_buffer.clear();
-                        commands.push(TuiCommand::Dispatch(DispatchCommand::SendBlockMessage {
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::SendHomeMessage {
                             content,
                         }));
                         state.neighborhood.insert_mode = false;

@@ -114,8 +114,8 @@ async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Er
 
     assert!(invitation.invitation_id.starts_with("inv-"));
     match &invitation.invitation_type {
-        InvitationType::Channel { block_id } => {
-            assert_eq!(block_id, "channel-123");
+        InvitationType::Channel { home_id } => {
+            assert_eq!(home_id, "channel-123");
         }
         _ => panic!("Expected Channel invitation type"),
     }

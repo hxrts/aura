@@ -9,8 +9,8 @@
 //! Selection uses `hash(domain, context_id, epoch, nonce)` to pick relays from
 //! candidates in a tier-based priority order:
 //!
-//! 1. **Block peers** - Co-residents with highest mutual trust
-//! 2. **Neighborhood peers** - Adjacent block members with traversal rights
+//! 1. **Home peers** - Co-residents with highest mutual trust
+//! 2. **Neighborhood peers** - Adjacent home members with traversal rights
 //! 3. **Guardians** - Fallback with explicit relay capability
 //!
 //! # Example

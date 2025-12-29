@@ -149,7 +149,7 @@ pub struct ReactiveViewModel {
     pub guardians: GuardiansView,
     pub recovery: RecoveryView,
     pub invitations: InvitationsView,
-    pub block: BlockView,
+    pub home: HomeView,
 }
 
 impl ReactiveViewModel {
@@ -168,7 +168,7 @@ impl ReactiveViewModel {
             total_channels: self.chat.get_channels().len(),
             total_guardians: self.guardians.get_guardians().len(),
             pending_invitations: self.invitations.pending_count(),
-            block_residents: self.block.get_residents().len(),
+            home_residents: self.home.get_residents().len(),
             storage_used_percent: /* calculate from block.get_storage() */,
         }
     }
@@ -335,7 +335,7 @@ impl ReactiveViewModel {
                 self.recovery.get_status().state,
                 RecoveryState::Initiated
             ) { 1 } else { 0 },
-            storage_critical: self.block.get_storage_percentage() > 90.0,
+            storage_critical: self.home.get_storage_percentage() > 90.0,
             recovery_ready: matches!(
                 self.recovery.get_status().state,
                 RecoveryState::ThresholdMet

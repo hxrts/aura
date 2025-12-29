@@ -19,7 +19,7 @@ module harness_flows {
   type AgentId = str
   type InvitationId = str
   type ChannelId = str
-  type BlockId = str
+  type HomeId = str
   type NeighborhoodId = str
   type RecoverySessionId = str
 
@@ -157,19 +157,19 @@ module harness_flows {
   // ============ SCENARIO: BLOCK FLOW ============
 
   // Bob creates block
-  action bobCreatesBlock(blockId: BlockId): bool = all {
+  action bobCreatesBlock(blockId: HomeId): bool = all {
     tui_flows::createBlock("bob", blockId),
     harnessUnchanged
   }
 
   // Alice joins block
-  action aliceJoinsBlock(blockId: BlockId): bool = all {
+  action aliceJoinsBlock(blockId: HomeId): bool = all {
     tui_flows::joinBlock("alice", blockId),
     harnessUnchanged
   }
 
   // Bob promotes alice to steward
-  action bobPromotesAlice(blockId: BlockId): bool = all {
+  action bobPromotesAlice(blockId: HomeId): bool = all {
     tui_flows::promoteSteward("bob", blockId, "alice"),
     markScenario("block_steward_promotion", true)
   }
@@ -183,7 +183,7 @@ module harness_flows {
   }
 
   // Bob links block to neighborhood
-  action bobLinksBlock(blockId: BlockId, neighborhoodId: NeighborhoodId): bool = all {
+  action bobLinksBlock(blockId: HomeId, neighborhoodId: NeighborhoodId): bool = all {
     tui_flows::linkBlockToNeighborhood("bob", blockId, neighborhoodId),
     markScenario("neighborhood_link", true)
   }
@@ -197,19 +197,19 @@ module harness_flows {
   }
 
   // Bob invites alice to block
-  action bobInvitesAliceToBlock(blockId: BlockId): bool = all {
+  action bobInvitesAliceToBlock(blockId: HomeId): bool = all {
     tui_flows::inviteContactToBlock("bob", blockId, "alice"),
     harnessUnchanged
   }
 
   // Bob removes alice from block
-  action bobRemovesAliceFromBlock(blockId: BlockId): bool = all {
+  action bobRemovesAliceFromBlock(blockId: HomeId): bool = all {
     tui_flows::removeContactFromBlock("bob", blockId, "alice"),
     harnessUnchanged
   }
 
   // Bob filters contacts by block
-  action bobFiltersContactsByBlock(blockId: BlockId): bool = all {
+  action bobFiltersContactsByBlock(blockId: HomeId): bool = all {
     tui_flows::filterContactsByBlock("bob", blockId),
     markScenario("social_graph_filter", true)
   }

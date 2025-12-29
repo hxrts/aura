@@ -5,17 +5,17 @@ use aura_core::time::PhysicalTime;
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
-/// Fact representing a block-wide mute or channel-specific mute.
+/// Fact representing a home-wide mute or channel-specific mute.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:block-mute",
+    type_id = "moderation:home-mute",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct BlockMuteFact {
+pub struct HomeMuteFact {
     /// Context where the mute applies
     pub context_id: ContextId,
-    /// Optional channel restriction (None = block-wide)
+    /// Optional channel restriction (None = home-wide)
     pub channel_id: Option<ChannelId>,
     /// Authority being muted
     pub muted_authority: AuthorityId,
@@ -29,7 +29,7 @@ pub struct BlockMuteFact {
     pub expires_at: Option<PhysicalTime>,
 }
 
-impl BlockMuteFact {
+impl HomeMuteFact {
     /// Backward-compat accessor for muted_at timestamp in milliseconds.
     pub fn muted_at_ms(&self) -> u64 {
         self.muted_at.ts_ms
@@ -68,17 +68,17 @@ impl BlockMuteFact {
     }
 }
 
-/// Fact representing the removal of a block mute.
+/// Fact representing the removal of a home mute.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:block-unmute",
+    type_id = "moderation:home-unmute",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct BlockUnmuteFact {
+pub struct HomeUnmuteFact {
     /// Context where the unmute applies
     pub context_id: ContextId,
-    /// Optional channel restriction (None = block-wide)
+    /// Optional channel restriction (None = home-wide)
     pub channel_id: Option<ChannelId>,
     /// Authority being unmuted
     pub unmuted_authority: AuthorityId,
@@ -88,7 +88,7 @@ pub struct BlockUnmuteFact {
     pub unmuted_at: PhysicalTime,
 }
 
-impl BlockUnmuteFact {
+impl HomeUnmuteFact {
     /// Backward-compat accessor for unmuted_at timestamp in milliseconds.
     pub fn unmuted_at_ms(&self) -> u64 {
         self.unmuted_at.ts_ms
@@ -115,17 +115,17 @@ impl BlockUnmuteFact {
     }
 }
 
-/// Fact representing a block-wide ban or channel-specific ban.
+/// Fact representing a home-wide ban or channel-specific ban.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:block-ban",
+    type_id = "moderation:home-ban",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct BlockBanFact {
+pub struct HomeBanFact {
     /// Context where the ban applies
     pub context_id: ContextId,
-    /// Optional channel restriction (None = block-wide)
+    /// Optional channel restriction (None = home-wide)
     pub channel_id: Option<ChannelId>,
     /// Authority being banned
     pub banned_authority: AuthorityId,
@@ -139,7 +139,7 @@ pub struct BlockBanFact {
     pub expires_at: Option<PhysicalTime>,
 }
 
-impl BlockBanFact {
+impl HomeBanFact {
     /// Backward-compat accessor for banned_at timestamp in milliseconds.
     pub fn banned_at_ms(&self) -> u64 {
         self.banned_at.ts_ms
@@ -178,17 +178,17 @@ impl BlockBanFact {
     }
 }
 
-/// Fact representing the removal of a block ban.
+/// Fact representing the removal of a home ban.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:block-unban",
+    type_id = "moderation:home-unban",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct BlockUnbanFact {
+pub struct HomeUnbanFact {
     /// Context where the unban applies
     pub context_id: ContextId,
-    /// Optional channel restriction (None = block-wide)
+    /// Optional channel restriction (None = home-wide)
     pub channel_id: Option<ChannelId>,
     /// Authority being unbanned
     pub unbanned_authority: AuthorityId,
@@ -198,7 +198,7 @@ pub struct BlockUnbanFact {
     pub unbanned_at: PhysicalTime,
 }
 
-impl BlockUnbanFact {
+impl HomeUnbanFact {
     /// Backward-compat accessor for unbanned_at timestamp in milliseconds.
     pub fn unbanned_at_ms(&self) -> u64 {
         self.unbanned_at.ts_ms
@@ -228,11 +228,11 @@ impl BlockUnbanFact {
 /// Fact representing a kick from a channel (audit log entry).
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:block-kick",
+    type_id = "moderation:home-kick",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct BlockKickFact {
+pub struct HomeKickFact {
     /// Context where the kick occurred
     pub context_id: ContextId,
     /// Channel from which the user was kicked
@@ -247,7 +247,7 @@ pub struct BlockKickFact {
     pub kicked_at: PhysicalTime,
 }
 
-impl BlockKickFact {
+impl HomeKickFact {
     /// Backward-compat accessor for kicked_at timestamp in milliseconds.
     pub fn kicked_at_ms(&self) -> u64 {
         self.kicked_at.ts_ms
@@ -276,14 +276,14 @@ impl BlockKickFact {
     }
 }
 
-/// Fact representing a pinned message in a block/channel.
+/// Fact representing a pinned message in a home/channel.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:block-pin",
+    type_id = "moderation:home-pin",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct BlockPinFact {
+pub struct HomePinFact {
     /// Context where the pin applies
     pub context_id: ContextId,
     /// Channel containing the pinned message
@@ -296,7 +296,7 @@ pub struct BlockPinFact {
     pub pinned_at: PhysicalTime,
 }
 
-impl BlockPinFact {
+impl HomePinFact {
     /// Backward-compat constructor using raw millisecond timestamps.
     pub fn new_ms(
         context_id: ContextId,
@@ -318,14 +318,14 @@ impl BlockPinFact {
     }
 }
 
-/// Fact representing an unpinned message in a block/channel.
+/// Fact representing an unpinned message in a home/channel.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:block-unpin",
+    type_id = "moderation:home-unpin",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct BlockUnpinFact {
+pub struct HomeUnpinFact {
     /// Context where the unpin applies
     pub context_id: ContextId,
     /// Channel containing the unpinned message
@@ -338,7 +338,7 @@ pub struct BlockUnpinFact {
     pub unpinned_at: PhysicalTime,
 }
 
-impl BlockUnpinFact {
+impl HomeUnpinFact {
     /// Backward-compat constructor using raw millisecond timestamps.
     pub fn new_ms(
         context_id: ContextId,
@@ -363,12 +363,12 @@ impl BlockUnpinFact {
 /// Fact representing granting steward (admin) privileges to a user.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:block-grant-steward",
+    type_id = "moderation:home-grant-steward",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct BlockGrantStewardFact {
-    /// Block context where steward is being granted
+pub struct HomeGrantStewardFact {
+    /// Home context where steward is being granted
     pub context_id: ContextId,
     /// Authority being granted steward status
     pub target_authority: AuthorityId,
@@ -378,7 +378,7 @@ pub struct BlockGrantStewardFact {
     pub granted_at: PhysicalTime,
 }
 
-impl BlockGrantStewardFact {
+impl HomeGrantStewardFact {
     /// Accessor for granted_at timestamp in milliseconds.
     pub fn granted_at_ms(&self) -> u64 {
         self.granted_at.ts_ms
@@ -406,12 +406,12 @@ impl BlockGrantStewardFact {
 /// Fact representing revoking steward (admin) privileges from a user.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:block-revoke-steward",
+    type_id = "moderation:home-revoke-steward",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct BlockRevokeStewardFact {
-    /// Block context where steward is being revoked
+pub struct HomeRevokeStewardFact {
+    /// Home context where steward is being revoked
     pub context_id: ContextId,
     /// Authority having steward status revoked
     pub target_authority: AuthorityId,
@@ -421,7 +421,7 @@ pub struct BlockRevokeStewardFact {
     pub revoked_at: PhysicalTime,
 }
 
-impl BlockRevokeStewardFact {
+impl HomeRevokeStewardFact {
     /// Accessor for revoked_at timestamp in milliseconds.
     pub fn revoked_at_ms(&self) -> u64 {
         self.revoked_at.ts_ms

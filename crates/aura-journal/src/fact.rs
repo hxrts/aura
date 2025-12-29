@@ -428,7 +428,7 @@ pub struct LeakageFact {
 /// - `aura-chat`: ChatFact (channels, messages)
 /// - `aura-invitation`: InvitationFact (invitation lifecycle)
 /// - `aura-relational`: ContactFact (contact management)
-/// - `aura-social/moderation`: Block/Mute/Ban/Kick facts
+/// - `aura-social/moderation`: Home/Mute/Ban/Kick facts
 ///
 /// Domain crates implement `DomainFact` trait and register reducers in
 /// `aura-agent/src/fact_registry.rs`.

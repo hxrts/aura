@@ -16,7 +16,7 @@ pub struct BanStatus {
     pub banned_at_ms: u64,
     /// Optional expiration timestamp (ms since epoch)
     pub expires_at_ms: Option<u64>,
-    /// Optional channel-specific ban (None = block-wide)
+    /// Optional channel-specific ban (None = home-wide)
     pub channel_id: Option<ChannelId>,
 }
 
@@ -33,7 +33,7 @@ pub struct MuteStatus {
     pub muted_at_ms: u64,
     /// Optional expiration timestamp (ms since epoch)
     pub expires_at_ms: Option<u64>,
-    /// Optional channel-specific mute (None = block-wide)
+    /// Optional channel-specific mute (None = home-wide)
     pub channel_id: Option<ChannelId>,
 }
 
@@ -65,7 +65,7 @@ impl BanStatus {
         self.channel_id
             .as_ref()
             .map(|ch| ch == channel)
-            .unwrap_or(true) // Block-wide bans apply to all channels
+            .unwrap_or(true) // Home-wide bans apply to all channels
     }
 }
 
@@ -82,6 +82,6 @@ impl MuteStatus {
         self.channel_id
             .as_ref()
             .map(|ch| ch == channel)
-            .unwrap_or(true) // Block-wide mutes apply to all channels
+            .unwrap_or(true) // Home-wide mutes apply to all channels
     }
 }

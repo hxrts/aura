@@ -1,13 +1,13 @@
 //! Layer 1: Data Availability Effect Trait Definitions
 //!
 //! This module defines the pure effect trait interface for data availability
-//! within replication units (blocks, neighborhoods). Data availability is
+//! within replication units (homes, neighborhoods). Data availability is
 //! scoped to the unit that owns the data:
-//! - Blocks provide DA for block-level shared data
+//! - Blocks provide DA for home-level shared data
 //! - Neighborhoods provide DA for neighborhood-level shared data
 //!
 //! **Effect Classification**: Application Effect
-//! - Implemented by protocol crates (aura-protocol provides block/neighborhood implementations)
+//! - Implemented by protocol crates (aura-protocol provides home/neighborhood implementations)
 //! - Used by feature crates (aura-social, aura-chat) for content retrieval
 //! - Core trait definition belongs in Layer 1 (foundation)
 //!
@@ -110,13 +110,13 @@ impl std::error::Error for AvailabilityError {}
 /// Effect trait for data availability within a replication unit.
 ///
 /// This trait defines the interface for storing and retrieving content
-/// from a fully-replicated unit (block or neighborhood). All members
+/// from a fully-replicated unit (home or neighborhood). All members
 /// of the unit maintain complete copies of the data.
 ///
 /// # Type Parameters
 ///
 /// The associated `UnitId` type identifies the replication unit. For blocks,
-/// this is `BlockId`. For neighborhoods, this is `NeighborhoodId`.
+/// this is `HomeId`. For neighborhoods, this is `NeighborhoodId`.
 ///
 /// # Implementation Notes
 ///
@@ -130,11 +130,11 @@ impl std::error::Error for AvailabilityError {}
 /// # Example
 ///
 /// ```ignore
-/// // Block availability implementation
-/// impl DataAvailability for BlockAvailability {
-///     type UnitId = BlockId;
+/// // Home availability implementation
+/// impl DataAvailability for HomeAvailability {
+///     type UnitId = HomeId;
 ///
-///     fn replication_peers(&self, _unit: BlockId) -> Vec<AuthorityId> {
+///     fn replication_peers(&self, _unit: HomeId) -> Vec<AuthorityId> {
 ///         self.residents.iter()
 ///             .filter(|a| *a != &self.local_authority)
 ///             .copied()
@@ -147,7 +147,7 @@ impl std::error::Error for AvailabilityError {}
 pub trait DataAvailability: Send + Sync {
     /// The identifier type for replication units.
     ///
-    /// For blocks: `BlockId`
+    /// For homes: `HomeId`
     /// For neighborhoods: `NeighborhoodId`
     type UnitId: Copy + Eq + Hash + Send + Sync;
 

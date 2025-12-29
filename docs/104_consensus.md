@@ -947,7 +947,68 @@ Once a relational context exists (established via Category C invitation ceremony
 
 See `work/optimistic.md` for detailed design and effect policy integration.
 
-## 18. Summary
+## 18. BFT‑DKG Transcript Finalization (K3)
+
+Consensus is also used to finalize **BFT‑DKG transcripts**. The output of the DKG
+is a `DkgTranscriptCommit` fact that is **consensus‑finalized** and then merged
+into the relevant journal.
+
+**Inputs**
+- `DkgConfig`: `epoch`, `threshold`, `max_signers`, `participants`, `membership_hash`.
+- `DealerPackage[]`: one package per dealer, containing encrypted shares for all
+  participants and a deterministic commitment.
+- `prestate_hash` and `operation_hash`: bind the transcript to the authority/context
+  state and the intended ceremony operation.
+
+**Transcript formation**
+1. Validate `DkgConfig` and dealer packages (unique dealers, complete share sets).
+2. Assemble the transcript deterministically.
+3. Hash the transcript using **canonical DAG‑CBOR** encoding.
+
+**Finalize with consensus**
+1. Build `DkgTranscriptCommit` with:
+   - `transcript_hash`
+   - `blob_ref` (optional, if stored out‑of‑line)
+   - `prestate_hash`
+   - `operation_hash`
+   - `config` and `participants`
+2. Run consensus over the commit fact itself.
+3. Insert both `CommitFact` evidence and the `DkgTranscriptCommit` fact into the
+   authority or context journal.
+
+The transcript commit is the **single durable artifact** used to bootstrap all
+subsequent threshold operations. Any K3 ceremony that depends on keys must bind
+to this commit by reference (direct hash or blob ref).
+
+## 19. Decentralized Coordinator Selection (Lottery)
+
+Coordinator‑based fast paths (A2) require a **deterministic, decentralized**
+selection mechanism so every participant can independently derive the same
+leader without extra coordination.
+
+**Round seed**
+- `round_seed` is a 32‑byte value shared by all participants for the round.
+- Sources:
+  - VRF output (preferred when available).
+  - Trusted oracle or beacon.
+  - Initiator‑provided seed (acceptable in trusted settings).
+
+**Selection rule**
+```
+score_i = H("AURA_COORD_LOTTERY" || round_seed || authority_id_i)
+winner = argmin_i score_i
+```
+
+**Fencing + safety**
+- The coordinator must hold a **monotonic fencing token** (`coord_epoch`).
+- Proposals are rejected if `coord_epoch` does not advance or if `prestate_hash`
+  mismatches local state.
+
+**Convergence**
+- Coordinators emit a `ConvergenceCert` once a quorum acks the proposal.
+- Fast‑path results remain **soft‑safe** until a consensus `CommitFact` is merged.
+
+## 20. Summary
 
 Aura Consensus produces monotone commit facts that represent non-monotone operations. It integrates with journals through set union. It uses FROST threshold signatures and CRDT evidence structures. It provides agreement, validity, and liveness. It supports authority updates and relational operations. It requires no global log and no central coordinator.
 The helper `HasEquivocatedInSet` excludes conflict batches that contain conflicting signatures from the same witness. `Fallback_Start` transitions the local state machine into fallback mode and arms gossip timers. Implementations must provide these utilities alongside the timers described earlier.

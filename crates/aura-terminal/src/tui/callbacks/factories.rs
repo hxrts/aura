@@ -946,49 +946,46 @@ impl SettingsCallbacks {
 }
 
 // =============================================================================
-// Block Messaging Callbacks
+// Home Messaging Callbacks
 // =============================================================================
 
-/// All callbacks for block messaging
+/// All callbacks for home messaging
 #[derive(Clone)]
-pub struct BlockCallbacks {
-    pub on_send: BlockSendCallback,
+pub struct HomeCallbacks {
+    pub on_send: HomeSendCallback,
 }
 
-impl BlockCallbacks {
+impl HomeCallbacks {
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_send: Self::make_send(ctx.clone(), tx.clone()),
         }
     }
-    fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> BlockSendCallback {
+    fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> HomeSendCallback {
         Arc::new(move |content: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let content_clone = content.clone();
             spawn_ctx(ctx.clone(), async move {
-                let block_id = {
-                    use aura_app::signal_defs::{BLOCKS_SIGNAL, BLOCK_SIGNAL};
+                let home_id = {
+                    use aura_app::signal_defs::HOMES_SIGNAL;
                     use aura_core::effects::reactive::ReactiveEffects;
 
                     let core = ctx.app_core_raw().read().await;
 
-                    // Prefer multi-block selection; fall back to legacy singular block.
-                    if let Ok(blocks) = core.read(&*BLOCKS_SIGNAL).await {
-                        blocks
-                            .current_block_id
+                    if let Ok(homes) = core.read(&*HOMES_SIGNAL).await {
+                        homes
+                            .current_home_id
                             .as_ref()
                             .map(|id| id.to_string())
                             .unwrap_or_else(|| "home".to_string())
-                    } else if let Ok(block) = core.read(&*BLOCK_SIGNAL).await {
-                        block.id.to_string()
                     } else {
                         "home".to_string()
                     }
                 };
 
-                let channel = format!("block:{}", block_id);
-                let block_id_clone = block_id.clone();
+                let channel = format!("home:{}", home_id);
+                let home_id_clone = home_id.clone();
 
                 let trimmed = content_clone.trim_start();
                 if trimmed.starts_with("/") {
@@ -1092,8 +1089,8 @@ impl BlockCallbacks {
 
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::BlockMessageSent {
-                            block_id: block_id_clone,
+                        let _ = tx.try_send(UiUpdate::HomeMessageSent {
+                            home_id: home_id_clone,
                             content: content_clone,
                         });
                     }
@@ -1113,7 +1110,7 @@ impl BlockCallbacks {
 /// All callbacks for the neighborhood screen
 #[derive(Clone)]
 pub struct NeighborhoodCallbacks {
-    pub on_enter_block: Arc<dyn Fn(String, TraversalDepth) + Send + Sync>,
+    pub on_enter_home: Arc<dyn Fn(String, TraversalDepth) + Send + Sync>,
     pub on_go_home: GoHomeCallback,
     pub on_back_to_street: GoHomeCallback,
 }
@@ -1121,20 +1118,20 @@ pub struct NeighborhoodCallbacks {
 impl NeighborhoodCallbacks {
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
-            on_enter_block: Self::make_enter_block(ctx.clone(), tx.clone()),
+            on_enter_home: Self::make_enter_home(ctx.clone(), tx.clone()),
             on_go_home: Self::make_go_home(ctx.clone(), tx.clone()),
             on_back_to_street: Self::make_back_to_street(ctx, tx),
         }
     }
 
-    fn make_enter_block(
+    fn make_enter_home(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
     ) -> Arc<dyn Fn(String, TraversalDepth) + Send + Sync> {
-        Arc::new(move |block_id: String, depth: TraversalDepth| {
+        Arc::new(move |home_id: String, depth: TraversalDepth| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let block_id_clone = block_id.clone();
+            let home_id_clone = home_id.clone();
             let depth_str = match depth {
                 TraversalDepth::Street => "Street",
                 TraversalDepth::Frontage => "Frontage",
@@ -1143,14 +1140,14 @@ impl NeighborhoodCallbacks {
             .to_string();
             let cmd = EffectCommand::MovePosition {
                 neighborhood_id: "current".to_string(),
-                block_id,
+                home_id,
                 depth: depth_str,
             };
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::BlockEntered {
-                            block_id: block_id_clone,
+                        let _ = tx.try_send(UiUpdate::HomeEntered {
+                            home_id: home_id_clone,
                         });
                     }
                     Err(_e) => {
@@ -1167,7 +1164,7 @@ impl NeighborhoodCallbacks {
             let tx = tx.clone();
             let cmd = EffectCommand::MovePosition {
                 neighborhood_id: "current".to_string(),
-                block_id: "home".to_string(),
+                home_id: "home".to_string(),
                 depth: "Interior".to_string(),
             };
             spawn_ctx(ctx.clone(), async move {
@@ -1189,7 +1186,7 @@ impl NeighborhoodCallbacks {
             let tx = tx.clone();
             let cmd = EffectCommand::MovePosition {
                 neighborhood_id: "current".to_string(),
-                block_id: "current".to_string(),
+                home_id: "current".to_string(),
                 depth: "Street".to_string(),
             };
             spawn_ctx(ctx.clone(), async move {
@@ -1232,7 +1229,7 @@ impl AppCallbacks {
                 match ctx.create_account(&display_name).await {
                     Ok(()) => {
                         // Then persist the display name to settings storage and emit SETTINGS_SIGNAL.
-                        // This is best-effort and does not block account creation.
+                        // This is best-effort and does not hold up account creation.
                         let _ = ctx
                             .dispatch(EffectCommand::UpdateNickname {
                                 name: display_name.clone(),
@@ -1281,7 +1278,7 @@ pub struct CallbackRegistry {
     pub invitations: InvitationsCallbacks,
     pub recovery: RecoveryCallbacks,
     pub settings: SettingsCallbacks,
-    pub block: BlockCallbacks,
+    pub home: HomeCallbacks,
     pub neighborhood: NeighborhoodCallbacks,
     pub app: AppCallbacks,
 }
@@ -1299,7 +1296,7 @@ impl CallbackRegistry {
             invitations: InvitationsCallbacks::new(ctx.clone(), tx.clone()),
             recovery: RecoveryCallbacks::new(ctx.clone(), tx.clone()),
             settings: SettingsCallbacks::new(ctx.clone(), tx.clone()),
-            block: BlockCallbacks::new(ctx.clone(), tx.clone()),
+            home: HomeCallbacks::new(ctx.clone(), tx.clone()),
             neighborhood: NeighborhoodCallbacks::new(ctx.clone(), tx.clone()),
             app: AppCallbacks::new(ctx, tx),
         }

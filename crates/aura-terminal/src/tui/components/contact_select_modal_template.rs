@@ -258,7 +258,7 @@ mod tests {
             Contact::new("c3", "Carol").with_status(ContactStatus::Active),
         ];
 
-        state.show("Invite to Block", contacts);
+        state.show("Invite to Home", contacts);
         assert!(state.visible);
         assert_eq!(state.contacts.len(), 3);
         assert_eq!(state.selected_index, 0);

@@ -1,6 +1,6 @@
 //! Neighborhood-Level Data Availability
 //!
-//! Implements data availability for neighborhoods. Each member block provides
+//! Implements data availability for neighborhoods. Each member home provides
 //! a representative, and neighborhood-level data is replicated across all
 //! representatives.
 
@@ -15,14 +15,14 @@ use aura_core::{
     },
     identifiers::AuthorityId,
 };
-use crate::facts::{BlockId, NeighborhoodId};
+use crate::facts::{HomeId, NeighborhoodId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Neighborhood-level data availability.
 ///
 /// Implements `DataAvailability` for neighborhood-scoped data. Each member
-/// block designates a representative who replicates neighborhood data.
+/// home designates a representative who replicates neighborhood data.
 ///
 /// # Type Parameters
 ///
@@ -36,7 +36,7 @@ use std::sync::Arc;
 ///     neighborhood,
 ///     representatives,
 ///     local_authority,
-///     local_block,
+///     local_home,
 ///     storage,
 ///     network,
 /// );
@@ -47,14 +47,14 @@ use std::sync::Arc;
 pub struct NeighborhoodAvailability<S, N> {
     /// The neighborhood this availability service is for.
     neighborhood: Neighborhood,
-    /// Representatives for each member block.
+    /// Representatives for each member home.
     ///
-    /// Maps BlockId -> AuthorityId of the representative.
-    representatives: HashMap<BlockId, AuthorityId>,
+    /// Maps HomeId -> AuthorityId of the representative.
+    representatives: HashMap<HomeId, AuthorityId>,
     /// Our local authority ID.
     local_authority: AuthorityId,
-    /// Our local block ID (if we're in a member block).
-    local_block: Option<BlockId>,
+    /// Our local home ID (if we're in a member home).
+    local_home: Option<HomeId>,
     /// Storage effects for local data access.
     storage: Arc<S>,
     /// Network effects for peer communication.
@@ -69,9 +69,9 @@ where
     /// Create a new neighborhood availability service.
     pub fn new(
         neighborhood: Neighborhood,
-        representatives: HashMap<BlockId, AuthorityId>,
+        representatives: HashMap<HomeId, AuthorityId>,
         local_authority: AuthorityId,
-        local_block: Option<BlockId>,
+        local_home: Option<HomeId>,
         storage: Arc<S>,
         network: Arc<N>,
     ) -> Self {
@@ -79,7 +79,7 @@ where
             neighborhood,
             representatives,
             local_authority,
-            local_block,
+            local_home,
             storage,
             network,
         }
@@ -90,11 +90,11 @@ where
         &self.neighborhood
     }
 
-    /// Check if we are a representative for our block.
+    /// Check if we are a representative for our home.
     pub fn is_representative(&self) -> bool {
-        if let Some(local_block) = self.local_block {
+        if let Some(local_home) = self.local_home {
             self.representatives
-                .get(&local_block)
+                .get(&local_home)
                 .map(|r| *r == self.local_authority)
                 .unwrap_or(false)
         } else {
@@ -111,14 +111,14 @@ where
             .collect()
     }
 
-    /// Get the representative for a specific block.
-    pub fn representative_for(&self, block_id: &BlockId) -> Option<AuthorityId> {
-        self.representatives.get(block_id).copied()
+    /// Get the representative for a specific home.
+    pub fn representative_for(&self, home_id: &HomeId) -> Option<AuthorityId> {
+        self.representatives.get(home_id).copied()
     }
 
     /// Get all member blocks.
-    pub fn member_blocks(&self) -> Vec<BlockId> {
-        self.neighborhood.member_blocks.clone()
+    pub fn member_homes(&self) -> Vec<HomeId> {
+        self.neighborhood.member_homes.clone()
     }
 
     /// Convert hash to storage key.
@@ -159,17 +159,17 @@ where
             return Ok(data);
         }
 
-        // Try representatives in deterministic order (sorted by block ID)
+        // Try representatives in deterministic order (sorted by home ID)
         let mut blocks: Vec<_> = self.representatives.keys().copied().collect();
         blocks.sort();
 
         let mut peers_tried = 0;
-        for block_id in blocks {
-            if Some(block_id) == self.local_block {
-                continue; // Skip our own block
+        for home_id in blocks {
+            if Some(home_id) == self.local_home {
+                continue; // Skip our own home
             }
 
-            if let Some(rep) = self.representatives.get(&block_id) {
+            if let Some(rep) = self.representatives.get(&home_id) {
                 peers_tried += 1;
 
                 // Request from representative
@@ -253,7 +253,7 @@ mod tests {
         StorageCoreEffects, StorageExtendedEffects,
     };
     use aura_core::time::{PhysicalTime, TimeStamp};
-    use crate::facts::{BlockMemberFact, NeighborhoodFact};
+    use crate::facts::{HomeMemberFact, NeighborhoodFact};
 
     fn test_timestamp() -> TimeStamp {
         TimeStamp::PhysicalClock(PhysicalTime {
@@ -262,18 +262,18 @@ mod tests {
         })
     }
 
-    fn test_neighborhood() -> (Neighborhood, Vec<BlockId>) {
+    fn test_neighborhood() -> (Neighborhood, Vec<HomeId>) {
         let neighborhood_id = NeighborhoodId::from_bytes([1u8; 32]);
-        let block1 = BlockId::from_bytes([1u8; 32]);
-        let block2 = BlockId::from_bytes([2u8; 32]);
-        let block3 = BlockId::from_bytes([3u8; 32]);
+        let block1 = HomeId::from_bytes([1u8; 32]);
+        let block2 = HomeId::from_bytes([2u8; 32]);
+        let block3 = HomeId::from_bytes([3u8; 32]);
 
         let neighborhood_fact = NeighborhoodFact::new(neighborhood_id, test_timestamp());
 
         let members = vec![
-            BlockMemberFact::new(block1, neighborhood_id, test_timestamp()),
-            BlockMemberFact::new(block2, neighborhood_id, test_timestamp()),
-            BlockMemberFact::new(block3, neighborhood_id, test_timestamp()),
+            HomeMemberFact::new(block1, neighborhood_id, test_timestamp()),
+            HomeMemberFact::new(block2, neighborhood_id, test_timestamp()),
+            HomeMemberFact::new(block3, neighborhood_id, test_timestamp()),
         ];
 
         let neighborhood = Neighborhood::from_facts(&neighborhood_fact, &members, &[]);

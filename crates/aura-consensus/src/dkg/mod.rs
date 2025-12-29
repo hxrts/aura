@@ -10,3 +10,4 @@ pub mod verifier;
 
 pub use types::{DealerPackage, DkgConfig, DkgTranscript};
 pub use storage::{DkgTranscriptStore, MemoryTranscriptStore, StorageTranscriptStore};
+pub use ceremony::run_consensus_dkg;

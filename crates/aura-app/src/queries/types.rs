@@ -185,7 +185,7 @@ impl Query for ChannelsQuery {
                 let channel_type = match get_string(&row, "type").as_str() {
                     "DirectMessage" => ChannelType::DirectMessage,
                     "Guardian" => ChannelType::Guardian,
-                    _ => ChannelType::Block,
+                    _ => ChannelType::Home,
                 };
 
                 Channel {
@@ -512,8 +512,8 @@ impl Query for InvitationsQuery {
                 let inv_type = match get_string(&row, "type").as_str() {
                     "guardian" => InvitationType::Guardian,
                     "chat" => InvitationType::Chat,
-                    "block" => InvitationType::Block,
-                    _ => InvitationType::Block,
+                    "home" => InvitationType::Home,
+                    _ => InvitationType::Home,
                 };
 
                 let status = match get_string(&row, "status").as_str() {
@@ -552,8 +552,8 @@ impl Query for InvitationsQuery {
                     created_at: get_int(&row, "created_at") as u64,
                     expires_at,
                     message: get_optional_string(&row, "message"),
-                    block_id: get_optional_channel_id(&row, "block_id"),
-                    block_name: get_optional_string(&row, "block_name"),
+                    home_id: get_optional_channel_id(&row, "home_id"),
+                    home_name: get_optional_string(&row, "home_name"),
                 }
             })
             .collect();
@@ -946,22 +946,22 @@ impl Query for RecoveryQuery {
     }
 }
 
-/// Query for blocks state
+/// Query for homes state
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct BlocksQuery {
-    /// Filter by block ID (optional)
-    pub block_id: Option<String>,
-    /// Include only blocks where user is admin
+pub struct HomesQuery {
+    /// Filter by home ID (optional)
+    pub home_id: Option<String>,
+    /// Include only homes where user is admin
     pub admin_only: bool,
 }
 
-impl Query for BlocksQuery {
-    type Result = crate::views::block::BlocksState;
+impl Query for HomesQuery {
+    type Result = crate::views::home::HomesState;
 
     fn to_datalog(&self) -> DatalogProgram {
         let mut body = vec![DatalogFact::new(
-            "block",
+            "home",
             vec![
                 DatalogValue::var("id"),
                 DatalogValue::var("name"),
@@ -973,12 +973,12 @@ impl Query for BlocksQuery {
             ],
         )];
 
-        if let Some(ref block_id) = self.block_id {
+        if let Some(ref home_id) = self.home_id {
             body.push(DatalogFact::new(
                 "eq",
                 vec![
                     DatalogValue::var("id"),
-                    DatalogValue::String(block_id.clone()),
+                    DatalogValue::String(home_id.clone()),
                 ],
             ));
         }
@@ -1013,23 +1013,23 @@ impl Query for BlocksQuery {
     }
 
     fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("blocks")]
+        vec![QueryCapability::read("homes")]
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {
         vec![
-            FactPredicate::new("block"),
-            FactPredicate::new("block_resident"),
-            FactPredicate::new("block_role"),
+            FactPredicate::new("home"),
+            FactPredicate::new("home_resident"),
+            FactPredicate::new("home_role"),
         ]
     }
 
     fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        use crate::views::block::{BlockState, BlocksState, ResidentRole};
-        use crate::workflows::budget::BlockFlowBudget;
+        use crate::views::home::{HomeState, HomesState, ResidentRole};
+        use crate::workflows::budget::HomeFlowBudget;
         use std::collections::HashMap;
 
-        let blocks_list: Vec<BlockState> = bindings
+        let homes_list: Vec<HomeState> = bindings
             .rows
             .into_iter()
             .map(|row| {
@@ -1039,12 +1039,12 @@ impl Query for BlocksQuery {
                     _ => ResidentRole::Resident,
                 };
 
-                BlockState {
+                HomeState {
                     id: get_channel_id(&row, "id"),
                     name: get_string(&row, "name"),
                     residents: Vec::new(), // Populated by separate query
                     my_role,
-                    storage: BlockFlowBudget::default(),
+                    storage: HomeFlowBudget::default(),
                     online_count: get_int(&row, "online_count") as u32,
                     resident_count: get_int(&row, "resident_count") as u32,
                     is_primary: get_bool(&row, "is_primary"),
@@ -1061,25 +1061,25 @@ impl Query for BlocksQuery {
             })
             .collect();
 
-        // Convert to HashMap and find current block
-        let mut blocks: HashMap<ChannelId, BlockState> = HashMap::new();
-        let mut current_block_id: Option<ChannelId> = None;
+        // Convert to HashMap and find current home
+        let mut homes: HashMap<ChannelId, HomeState> = HashMap::new();
+        let mut current_home_id: Option<ChannelId> = None;
 
-        for block in blocks_list {
-            if block.is_primary && current_block_id.is_none() {
-                current_block_id = Some(block.id);
+        for home in homes_list {
+            if home.is_primary && current_home_id.is_none() {
+                current_home_id = Some(home.id);
             }
-            blocks.insert(block.id, block);
+            homes.insert(home.id, home);
         }
 
-        // If no primary block, select first block
-        if current_block_id.is_none() {
-            current_block_id = blocks.keys().next().cloned();
+        // If no primary home, select first home
+        if current_home_id.is_none() {
+            current_home_id = homes.keys().next().cloned();
         }
 
-        Ok(BlocksState {
-            blocks,
-            current_block_id,
+        Ok(HomesState {
+            homes,
+            current_home_id,
         })
     }
 }
@@ -1088,8 +1088,8 @@ impl Query for BlocksQuery {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct NeighborhoodQuery {
-    /// Current position block ID (None = home block)
-    pub position_block_id: Option<String>,
+    /// Current position home ID (None = local home)
+    pub position_home_id: Option<String>,
     /// Maximum traversal depth
     pub max_depth: Option<u32>,
 }
@@ -1098,7 +1098,7 @@ impl Query for NeighborhoodQuery {
     type Result = crate::views::neighborhood::NeighborhoodState;
 
     fn to_datalog(&self) -> DatalogProgram {
-        // Query neighbor_block facts for the neighborhood view
+        // Query neighbor_home facts for the neighborhood view
         DatalogProgram::new(vec![DatalogRule {
             head: DatalogFact::new(
                 "result",
@@ -1111,7 +1111,7 @@ impl Query for NeighborhoodQuery {
                 ],
             ),
             body: vec![DatalogFact::new(
-                "neighbor_block",
+                "neighbor_home",
                 vec![
                     DatalogValue::var("id"),
                     DatalogValue::var("name"),
@@ -1129,14 +1129,14 @@ impl Query for NeighborhoodQuery {
 
     fn dependencies(&self) -> Vec<FactPredicate> {
         vec![
-            FactPredicate::new("neighbor_block"),
-            FactPredicate::new("block_adjacency"),
+            FactPredicate::new("neighbor_home"),
+            FactPredicate::new("home_adjacency"),
             FactPredicate::new("shared_contact"),
         ]
     }
 
     fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        use crate::views::neighborhood::{AdjacencyType, NeighborBlock, NeighborhoodState};
+        use crate::views::neighborhood::{AdjacencyType, NeighborHome, NeighborhoodState};
 
         let neighbors = bindings
             .rows
@@ -1148,7 +1148,7 @@ impl Query for NeighborhoodQuery {
                     _ => AdjacencyType::Distant,
                 };
 
-                NeighborBlock {
+                NeighborHome {
                     id: get_channel_id(&row, "id"),
                     name: get_string(&row, "name"),
                     adjacency,
@@ -1167,8 +1167,8 @@ impl Query for NeighborhoodQuery {
             .collect();
 
         Ok(NeighborhoodState {
-            home_block_id: ChannelId::default(), // Set by caller
-            home_block_name: String::new(),      // Set by caller
+            home_home_id: ChannelId::default(), // Set by caller
+            home_name: String::new(),      // Set by caller
             position: None,
             neighbors,
             max_depth: 3,
@@ -1238,7 +1238,7 @@ impl Query for ChatQuery {
                 let channel_type = match get_string(&row, "type").as_str() {
                     "DirectMessage" => ChannelType::DirectMessage,
                     "Guardian" => ChannelType::Guardian,
-                    _ => ChannelType::Block,
+                    _ => ChannelType::Home,
                 };
 
                 Channel {

@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 
 use super::ViewUpdate;
 use super::{
-    BlockSignalView, ChatSignalView, ContactsSignalView, InvitationsSignalView, RecoverySignalView,
+    HomeSignalView, ChatSignalView, ContactsSignalView, InvitationsSignalView, RecoverySignalView,
 };
 use super::{FactSource, ReactiveScheduler, SchedulerConfig};
 
@@ -59,7 +59,7 @@ impl ReactivePipeline {
         )));
         scheduler.register_view(Arc::new(ContactsSignalView::new(reactive.clone())));
         scheduler.register_view(Arc::new(RecoverySignalView::new(reactive.clone())));
-        scheduler.register_view(Arc::new(BlockSignalView::new(reactive)));
+        scheduler.register_view(Arc::new(HomeSignalView::new(reactive)));
 
         let updates = scheduler.subscribe();
 

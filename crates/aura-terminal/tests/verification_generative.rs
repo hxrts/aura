@@ -94,14 +94,14 @@ pub struct AgentState {
 pub struct FlowState {
     pub agents: HashMap<String, AgentState>,
     pub recovery_sessions: HashMap<String, RecoverySessionState>,
-    pub blocks: HashMap<String, BlockState>,
+    pub blocks: HashMap<String, HomeState>,
     pub neighborhoods: HashMap<String, NeighborhoodState>,
     pub invitations: HashMap<String, InvitationState>,
     pub channels: HashMap<String, ChannelState>,
     pub recovery_flow_phase: String,
     pub invitation_flow_phase: String,
     pub chat_flow_phase: String,
-    pub block_flow_phase: String,
+    pub home_flow_phase: String,
     pub neighborhood_flow_phase: String,
     pub social_graph_flow_phase: String,
 }
@@ -115,7 +115,7 @@ pub struct RecoverySessionState {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct BlockState {
+pub struct HomeState {
     pub owner: String,
     pub residents: Vec<String>,
     pub stewards: Vec<String>,
@@ -237,7 +237,7 @@ impl FlowTraceReplayer {
 
         // Extract blocks
         if let Some(blocks_val) = vars.get("blocks") {
-            state.blocks = Self::extract_blocks(blocks_val)?;
+            state.homes = Self::extract_blocks(blocks_val)?;
         }
 
         // Extract neighborhoods
@@ -251,7 +251,7 @@ impl FlowTraceReplayer {
         state.invitation_flow_phase =
             Self::extract_string(vars.get("invitationFlowPhase")).unwrap_or_default();
         state.chat_flow_phase = Self::extract_string(vars.get("chatFlowPhase")).unwrap_or_default();
-        state.block_flow_phase =
+        state.home_flow_phase =
             Self::extract_string(vars.get("blockFlowPhase")).unwrap_or_default();
         state.neighborhood_flow_phase =
             Self::extract_string(vars.get("neighborhoodFlowPhase")).unwrap_or_default();
@@ -382,7 +382,7 @@ impl FlowTraceReplayer {
     }
 
     /// Extract blocks map
-    fn extract_blocks(value: &serde_json::Value) -> Result<HashMap<String, BlockState>, String> {
+    fn extract_blocks(value: &serde_json::Value) -> Result<HashMap<String, HomeState>, String> {
         let mut blocks = HashMap::new();
 
         if let Some(map) = value.as_object() {
@@ -391,8 +391,8 @@ impl FlowTraceReplayer {
                     if let Some(pair) = entry.as_array() {
                         if pair.len() == 2 {
                             let key = pair[0].as_str().unwrap_or_default().to_string();
-                            let block = Self::extract_block_state(&pair[1])?;
-                            blocks.insert(key, block);
+                            let home = Self::extract_block_state(&pair[1])?;
+                            homes.insert(key, home_state);
                         }
                     }
                 }
@@ -402,22 +402,22 @@ impl FlowTraceReplayer {
         Ok(blocks)
     }
 
-    /// Extract block state
-    fn extract_block_state(value: &serde_json::Value) -> Result<BlockState, String> {
-        let mut block = BlockState::default();
+    /// Extract home state
+    fn extract_block_state(value: &serde_json::Value) -> Result<HomeState, String> {
+        let mut home = HomeState::default();
 
         if let Some(obj) = value.as_object() {
-            block.owner = obj
+            home_state.owner = obj
                 .get("owner")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
 
-            block.residents = Self::extract_string_set(obj.get("residents"));
-            block.stewards = Self::extract_string_set(obj.get("stewards"));
+            home_state.residents = Self::extract_string_set(obj.get("residents"));
+            home_state.stewards = Self::extract_string_set(obj.get("stewards"));
         }
 
-        Ok(block)
+        Ok(home_state)
     }
 
     /// Extract neighborhoods map
@@ -550,30 +550,30 @@ impl FlowTraceReplayer {
             }
         }
 
-        // Invariant 2: Block capacity (max 8 residents)
-        for (block_id, block) in &state.blocks {
-            if block.residents.len() <= 8 {
+        // Invariant 2: Home capacity (max 8 residents)
+        for (home_id, home_state) in &state.homes {
+            if home_state.residents.len() <= 8 {
                 results.passed_count += 1;
             } else {
                 results.failures.push(format!(
-                    "Block {} has {} residents (max 8)",
-                    block_id,
-                    block.residents.len()
+                    "Home {} has {} residents (max 8)",
+                    home_id,
+                    home_state.residents.len()
                 ));
             }
         }
 
         // Invariant 3: Stewards must be residents
-        for (block_id, block) in &state.blocks {
+        for (home_id, home_state) in &state.homes {
             let all_stewards_are_residents =
-                block.stewards.iter().all(|s| block.residents.contains(s));
+                home_state.stewards.iter().all(|s| home_state.residents.contains(s));
 
             if all_stewards_are_residents {
                 results.passed_count += 1;
             } else {
                 results.failures.push(format!(
-                    "Block {} has stewards who are not residents",
-                    block_id
+                    "Home {} has stewards who are not residents",
+                    home_id
                 ));
             }
         }
@@ -604,15 +604,15 @@ impl FlowTraceReplayer {
             }
         }
 
-        // Invariant 6: Block residents must be valid agents (Social Graph)
-        for (block_id, block) in &state.blocks {
-            for resident in &block.residents {
+        // Invariant 6: Home residents must be valid agents (Social Graph)
+        for (home_id, home_state) in &state.homes {
+            for resident in &home_state.residents {
                 if state.agents.contains_key(resident) {
                     results.passed_count += 1;
                 } else {
                     results.failures.push(format!(
-                        "Block {} has resident {} who is not a valid agent",
-                        block_id, resident
+                        "Home {} has resident {} who is not a valid agent",
+                        home_id, resident
                     ));
                 }
             }
@@ -717,7 +717,7 @@ fn test_flow_invariant_validation() {
     assert!(!results.all_passed, "Invalid state should fail");
 }
 
-/// Test block capacity invariant
+/// Test home capacity invariant
 #[test]
 fn test_block_capacity_invariant() {
     let mut state = FlowState::default();
@@ -734,9 +734,9 @@ fn test_block_capacity_invariant() {
     }
 
     // Valid: 8 residents
-    state.blocks.insert(
+    state.homes.insert(
         "block1".to_string(),
-        BlockState {
+        HomeState {
             owner: "bob".to_string(),
             residents: (0..8).map(|i| format!("user{}", i)).collect(),
             stewards: vec!["user0".to_string()],
@@ -778,9 +778,9 @@ fn test_stewards_are_residents_invariant() {
     }
 
     // Invalid: steward not a resident
-    state.blocks.insert(
+    state.homes.insert(
         "block1".to_string(),
-        BlockState {
+        HomeState {
             owner: "bob".to_string(),
             residents: vec!["alice".to_string()],
             stewards: vec!["carol".to_string()], // carol is not a resident
@@ -835,7 +835,7 @@ fn test_nicknames_for_contacts_invariant() {
         .any(|f| f.contains("who is not a contact")));
 }
 
-/// Test block-residents-are-agents invariant (Social Graph)
+/// Test home-residents-are-agents invariant (Social Graph)
 #[test]
 fn test_block_residents_are_agents_invariant() {
     let mut state = FlowState::default();
@@ -856,10 +856,10 @@ fn test_block_residents_are_agents_invariant() {
         },
     );
 
-    // Valid: block with valid agent residents
-    state.blocks.insert(
+    // Valid: home with valid agent residents
+    state.homes.insert(
         "block1".to_string(),
-        BlockState {
+        HomeState {
             owner: "bob".to_string(),
             residents: vec!["bob".to_string(), "alice".to_string()],
             stewards: vec!["bob".to_string()],
@@ -873,7 +873,7 @@ fn test_block_residents_are_agents_invariant() {
         results.failures
     );
 
-    // Invalid: block with non-existent agent as resident
+    // Invalid: home with non-existent agent as resident
     state
         .blocks
         .get_mut("block1")
@@ -912,7 +912,7 @@ fn test_social_graph_flow_state_extraction() {
               "guardians": {"#set": []},
               "pendingInvitations": {"#set": []},
               "channels": {"#set": []},
-              "emittedSignals": {"#set": ["CONTACTS_SIGNAL", "BLOCK_SIGNAL"]},
+              "emittedSignals": {"#set": ["CONTACTS_SIGNAL", "HOMES_SIGNAL"]},
               "contactNicknames": {"#map": [["alice", "My Friend"]]},
               "blocks": {"#set": ["block1"]}
             }],
@@ -956,8 +956,8 @@ fn test_social_graph_flow_state_extraction() {
         result.invariants_verified
     );
 
-    // Should have checked: agent validity, block capacity, stewards-are-residents,
-    // nicknames-for-contacts, and block-residents-are-agents
+    // Should have checked: agent validity, home capacity, stewards-are-residents,
+    // nicknames-for-contacts, and home-residents-are-agents
     assert!(
         result.invariants_verified >= 5,
         "Should verify multiple Social Graph invariants"
@@ -1077,7 +1077,7 @@ fn test_multi_scenario_generative() {
     let scenarios = [
         ("recovery", "fullGuardianRecoveryScenario"),
         ("invitation", "fullInvitationChatScenario"),
-        ("block", "fullBlockNeighborhoodScenario"),
+        ("home", "fullHomeNeighborhoodScenario"),
         ("social_graph", "fullSocialGraphScenario"),
     ];
 

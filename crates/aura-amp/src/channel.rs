@@ -11,12 +11,13 @@ use aura_core::effects::amp::{
     AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, ChannelCloseParams,
     ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
+use aura_core::effects::random::RandomExtendedEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{OrderTime, TimeStamp};
 use aura_journal::fact::{
-    ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, RelationalFact,
+    ChannelBumpReason, ChannelCheckpoint, ChannelPolicy, ProposedChannelEpochBump, RelationalFact,
 };
 use aura_journal::DomainFact;
 use aura_macros::DomainFact;
@@ -38,7 +39,7 @@ impl<E> AmpChannelCoordinator<E> {
 #[async_trait::async_trait]
 impl<E> AmpChannelEffects for AmpChannelCoordinator<E>
 where
-    E: AmpJournalEffects + Send + Sync,
+    E: AmpJournalEffects + RandomExtendedEffects + Send + Sync,
 {
     async fn create_channel(
         &self,
@@ -106,20 +107,32 @@ where
             .await
             .map_err(map_err)?;
 
-        // Bump epoch to mark closure and set a restrictive policy
-        let committed = CommittedChannelEpochBump {
+        let policy = policy_for(CeremonyFlow::AmpEpochBump);
+        if !policy.allows_mode(AgreementMode::Provisional) {
+            return Err(AmpChannelError::InvalidState(
+                "AMP epoch bump policy does not allow provisional mode".to_string(),
+            ));
+        }
+
+        let bump_nonce = self
+            .effects
+            .random_uuid()
+            .await
+            .as_bytes()
+            .to_vec();
+        let bump_id = aura_core::Hash32(hash(&bump_nonce));
+        let proposal = ProposedChannelEpochBump {
             context: params.context,
             channel: params.channel,
             parent_epoch: state.chan_epoch,
             new_epoch: state.chan_epoch + 1,
-            chosen_bump_id: Default::default(),
-            consensus_id: Default::default(),
-            transcript_ref: None,
+            bump_id,
+            reason: ChannelBumpReason::Routine,
         };
 
         self.effects
             .insert_relational_fact(RelationalFact::Protocol(
-                aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(committed),
+                aura_journal::ProtocolRelationalFact::AmpProposedChannelEpochBump(proposal),
             ))
             .await
             .map_err(map_err)?;

@@ -256,7 +256,7 @@ impl BiscuitAuthorizationBridge {
         // Authority block (0) + N delegation blocks = depth N
         let count = token.block_count();
         if count > 0 {
-            // Block count includes authority block, so delegation depth is count - 1
+            // Home count includes authority block, so delegation depth is count - 1
             Some((count - 1) as u32)
         } else {
             Some(0) // Only authority block

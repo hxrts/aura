@@ -426,6 +426,9 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             self.apply_command(command).await?;
         }
 
+        // Remove terminal ceremony state to prevent unbounded growth.
+        self.ceremonies.remove(&ceremony_id);
+
         Ok(relationship_id)
     }
 
@@ -448,6 +451,9 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         for command in commands {
             self.apply_command(command).await?;
         }
+
+        // Remove terminal ceremony state to prevent unbounded growth.
+        self.ceremonies.remove(&ceremony_id);
 
         Ok(())
     }
@@ -722,6 +728,17 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     /// Check if a ceremony exists.
     pub fn has_ceremony(&self, ceremony_id: &InvitationCeremonyId) -> bool {
         self.ceremonies.contains_key(ceremony_id)
+    }
+
+    /// Cleanup ceremonies that have completed or timed out.
+    pub fn cleanup_stale_ceremonies(&mut self, now_ms: u64) -> usize {
+        let before = self.ceremonies.len();
+        self.ceremonies.retain(|_, ceremony| {
+            let timed_out = now_ms > ceremony.started_at_ms.saturating_add(ceremony.timeout_ms);
+            let terminal = matches!(ceremony.status, CeremonyStatus::Committed | CeremonyStatus::Aborted { .. });
+            !(timed_out || terminal)
+        });
+        before.saturating_sub(self.ceremonies.len())
     }
 }
 

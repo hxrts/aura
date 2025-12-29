@@ -96,10 +96,10 @@ impl InvitationPolicy {
 /// Type of invitation
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvitationType {
-    /// Invitation to join a block/channel
+    /// Invitation to join a home/channel
     Channel {
-        /// Block/channel identifier
-        block_id: String,
+        /// Home/channel identifier
+        home_id: String,
     },
     /// Invitation to become a guardian
     Guardian {
@@ -652,7 +652,7 @@ mod tests {
     fn test_invitation_type_as_string() {
         assert_eq!(
             InvitationType::Channel {
-                block_id: "b".to_string()
+                home_id: "b".to_string()
             }
             .as_type_string(),
             "channel"

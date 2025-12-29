@@ -35,8 +35,8 @@ pub async fn set_context(
 /// **Signal pattern**: Updates neighborhood view state directly
 ///
 /// This operation:
-/// 1. Determines target block (home, current, or specific ID)
-/// 2. Resolves block name from neighbor list
+/// 1. Determines target home (home, current, or specific ID)
+/// 2. Resolves home name from neighbor list
 /// 3. Creates/updates TraversalPosition
 /// 4. Updates neighborhood view state
 ///
@@ -46,7 +46,7 @@ pub async fn set_context(
 /// - 2: Interior level
 pub async fn move_position(
     app_core: &Arc<RwLock<AppCore>>,
-    block_id: &str,
+    home_id: &str,
     depth: &str,
 ) -> Result<(), AuraError> {
     // Parse the depth string to determine traversal depth
@@ -62,42 +62,42 @@ pub async fn move_position(
     // Get current neighborhood state
     let mut neighborhood = core.views().get_neighborhood().clone();
 
-    // Determine target block ID
-    let target_block_id = if block_id == "home" {
-        neighborhood.home_block_id
-    } else if block_id == "current" {
-        // Stay on current block, just change depth
+    // Determine target home ID
+    let target_home_id = if home_id == "home" {
+        neighborhood.home_home_id
+    } else if home_id == "current" {
+        // Stay on current home, just change depth
         neighborhood
             .position
             .as_ref()
-            .map(|p| p.current_block_id)
-            .unwrap_or(neighborhood.home_block_id)
+            .map(|p| p.current_home_id)
+            .unwrap_or(neighborhood.home_home_id)
     } else {
-        // Parse block_id as ChannelId, fall back to home if invalid
-        block_id
+        // Parse home_id as ChannelId, fall back to home if invalid
+        home_id
             .parse::<ChannelId>()
-            .unwrap_or(neighborhood.home_block_id)
+            .unwrap_or(neighborhood.home_home_id)
     };
 
-    // Get block name from neighbors or use the ID
-    let block_name = neighborhood
-        .neighbor(&target_block_id)
+    // Get home name from neighbors or use the ID
+    let home_name = neighborhood
+        .neighbor(&target_home_id)
         .map(|n| n.name.clone())
         .unwrap_or_else(|| {
             // Check if it's home
-            if target_block_id == neighborhood.home_block_id {
-                neighborhood.home_block_name.clone()
+            if target_home_id == neighborhood.home_home_id {
+                neighborhood.home_name.clone()
             } else {
-                target_block_id.to_string()
+                target_home_id.to_string()
             }
         });
 
     // Create or update position
     let position = TraversalPosition {
-        current_block_id: target_block_id,
-        current_block_name: block_name,
+        current_home_id: target_home_id,
+        current_home_name: home_name,
         depth: depth_value,
-        path: vec![target_block_id],
+        path: vec![target_home_id],
     };
     neighborhood.position = Some(position);
 

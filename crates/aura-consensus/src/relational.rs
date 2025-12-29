@@ -55,6 +55,40 @@ pub async fn run_consensus<T: Serialize>(
     .await
 }
 
+/// Run consensus on an operation and return both the proof and commit fact.
+///
+/// Uses all authorities from the prestate as witnesses with a simple
+/// majority threshold. This is suitable for most relational operations.
+pub async fn run_consensus_with_commit<T: Serialize>(
+    prestate: &Prestate,
+    operation: &T,
+    key_packages: HashMap<AuthorityId, Share>,
+    group_public_key: PublicKeyPackage,
+    epoch: Epoch,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
+) -> Result<(ConsensusProof, CommitFact)> {
+    let witnesses: Vec<_> = prestate
+        .authority_commitments
+        .iter()
+        .map(|(id, _)| *id)
+        .collect();
+
+    let threshold = (witnesses.len() as u16).div_ceil(2).max(1);
+    let config = ConsensusConfig::new(threshold, witnesses, epoch)?;
+
+    run_consensus_with_config_and_commit(
+        prestate,
+        operation,
+        config,
+        key_packages,
+        group_public_key,
+        random,
+        time,
+    )
+    .await
+}
+
 /// Run consensus with explicit configuration for relational contexts
 ///
 /// Provides fine-grained control over witness selection and thresholds
@@ -93,6 +127,40 @@ pub async fn run_consensus_with_config<T: Serialize>(
     .await
 }
 
+/// Run consensus with explicit configuration and return proof + commit fact.
+pub async fn run_consensus_with_config_and_commit<T: Serialize>(
+    prestate: &Prestate,
+    operation: &T,
+    config: ConsensusConfig,
+    key_packages: HashMap<AuthorityId, Share>,
+    group_public_key: PublicKeyPackage,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
+) -> Result<(ConsensusProof, CommitFact)> {
+    if config.witness_set.is_empty() {
+        return Err(AuraError::invalid(
+            "Consensus requires at least one witness",
+        ));
+    }
+
+    if !config.has_quorum() {
+        return Err(AuraError::invalid(
+            "Consensus threshold exceeds witness set size",
+        ));
+    }
+
+    run_consensus_with_effects_and_commit(
+        prestate,
+        operation,
+        config,
+        key_packages,
+        group_public_key,
+        random,
+        time,
+    )
+    .await
+}
+
 /// Run consensus with custom effects (for testing)
 pub async fn run_consensus_with_effects<T: Serialize>(
     prestate: &Prestate,
@@ -115,6 +183,29 @@ pub async fn run_consensus_with_effects<T: Serialize>(
 
     // Convert CommitFact to ConsensusProof for relational contexts
     commit_fact_to_consensus_proof(commit_fact)
+}
+
+/// Run consensus with custom effects and return proof + commit fact.
+pub async fn run_consensus_with_effects_and_commit<T: Serialize>(
+    prestate: &Prestate,
+    operation: &T,
+    config: ConsensusConfig,
+    key_packages: HashMap<AuthorityId, Share>,
+    group_public_key: PublicKeyPackage,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
+) -> Result<(ConsensusProof, CommitFact)> {
+    let params = crate::protocol::ConsensusParams {
+        witnesses: config.witness_set.clone(),
+        threshold: config.threshold,
+        key_packages,
+        group_public_key,
+        epoch: config.epoch,
+    };
+    let commit_fact = run_protocol_consensus(prestate, operation, params, random, time).await?;
+    let proof = commit_fact_to_consensus_proof(commit_fact.clone())?;
+
+    Ok((proof, commit_fact))
 }
 
 /// Convert a CommitFact to a ConsensusProof

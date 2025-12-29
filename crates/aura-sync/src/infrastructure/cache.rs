@@ -25,7 +25,7 @@
 //! let is_fresh = cache.is_fresh("key1", 10);
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -80,13 +80,19 @@ impl CacheInvalidation {
 pub struct CacheEpochTracker {
     /// Per-key epoch floors
     floors: HashMap<String, TreeEpoch>,
+    /// Insertion order for eviction
+    #[serde(default)]
+    order: VecDeque<String>,
 }
 
 impl CacheEpochTracker {
+    const MAX_FLOOR_KEYS: usize = 1024;
+
     /// Create a new cache epoch tracker
     pub fn new() -> Self {
         Self {
             floors: HashMap::new(),
+            order: VecDeque::new(),
         }
     }
 
@@ -95,6 +101,7 @@ impl CacheEpochTracker {
     /// Updates epoch floors for the specified keys, ensuring monotonicity.
     pub fn apply_invalidation(&mut self, invalidation: &CacheInvalidation) {
         for key in &invalidation.keys {
+            let is_new = !self.floors.contains_key(key);
             let floor = self
                 .floors
                 .entry(key.clone())
@@ -104,7 +111,11 @@ impl CacheEpochTracker {
             if invalidation.epoch_floor > *floor {
                 *floor = invalidation.epoch_floor;
             }
+            if is_new {
+                self.order.push_back(key.clone());
+            }
         }
+        self.evict_if_needed();
     }
 
     /// Check if a cache key is fresh at the given epoch
@@ -128,10 +139,15 @@ impl CacheEpochTracker {
     /// Invalidate a single key at the specified epoch
     pub fn invalidate_key(&mut self, key: impl Into<String>, epoch_floor: TreeEpoch) {
         let key = key.into();
-        let floor = self.floors.entry(key).or_insert(epoch_floor);
+        let is_new = !self.floors.contains_key(&key);
+        let floor = self.floors.entry(key.clone()).or_insert(epoch_floor);
         if epoch_floor > *floor {
             *floor = epoch_floor;
         }
+        if is_new {
+            self.order.push_back(key);
+        }
+        self.evict_if_needed();
     }
 
     /// Invalidate multiple keys at the specified epoch
@@ -141,9 +157,20 @@ impl CacheEpochTracker {
         }
     }
 
+    fn evict_if_needed(&mut self) {
+        while self.floors.len() > Self::MAX_FLOOR_KEYS {
+            if let Some(oldest) = self.order.pop_front() {
+                self.floors.remove(&oldest);
+            } else {
+                break;
+            }
+        }
+    }
+
     /// Clear all epoch floor tracking
     pub fn clear(&mut self) {
         self.floors.clear();
+        self.order.clear();
     }
 
     /// Get the number of tracked keys

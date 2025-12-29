@@ -25,7 +25,7 @@
 //! | `aura-invitation` | `InvitationFact` | Invitation lifecycle |
 //! | `aura-relational` | `ContactFact` | Contact management |
 //! | `aura-recovery` | `RecoveryFact` | Guardian setup, membership, key recovery |
-//! | `aura-social/moderation` | `Block*Fact` | Block, mute, ban, kick |
+//! | `aura-social/moderation` | `Home*Fact` | Home, mute, ban, kick |
 //!
 //! Domain crates implement the `DomainFact` trait and provide a `FactReducer`.
 
@@ -98,8 +98,8 @@ mod tests {
         assert!(registry.is_registered(RECOVERY_GRANT_DETAILS_FACT_TYPE_ID));
         assert!(registry.is_registered(RENDEZVOUS_FACT_TYPE_ID));
         assert!(registry.is_registered(RECOVERY_FACT_TYPE_ID));
-        assert!(registry.is_registered("moderation:block-mute"));
-        assert!(registry.is_registered("moderation:block-unmute"));
+        assert!(registry.is_registered("moderation:home-mute"));
+        assert!(registry.is_registered("moderation:home-unmute"));
     }
 
     #[test]

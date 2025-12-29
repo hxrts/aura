@@ -12,8 +12,14 @@
 
 use aura_agent::handlers::{InvitationService, InvitationType, ShareableInvitation};
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
+use aura_amp::AmpJournalEffects;
+use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::threshold::ParticipantIdentity;
+use aura_journal::fact::{FactContent, RelationalFact};
+use aura_journal::ProtocolRelationalFact;
+use aura_rendezvous::{EffectCommand as RendezvousEffectCommand, GuardOutcome as RendezvousGuardOutcome, RendezvousFact};
 use std::sync::Arc;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -36,6 +42,17 @@ async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
         .with_authority(authority_id)
         .build_testing_async(&ctx)
         .await?;
+    let effects = agent.runtime().effects();
+    effects.bootstrap_authority(&authority_id).await?;
+    let secondary = AuthorityId::new_from_entropy([seed.wrapping_add(1); 32]);
+    let participants = vec![
+        ParticipantIdentity::guardian(authority_id),
+        ParticipantIdentity::guardian(secondary),
+    ];
+    let (epoch, _, _) = effects
+        .rotate_keys(&authority_id, 2, 2, &participants)
+        .await?;
+    effects.commit_key_rotation(&authority_id, epoch).await?;
     Ok(Arc::new(agent))
 }
 
@@ -145,6 +162,31 @@ async fn test_chat_group_flow() -> TestResult {
     assert!(group.members.iter().any(|m| m.authority_id == authority));
     assert!(group.members.iter().any(|m| m.authority_id == other_user));
 
+    let context_id = ContextId::from_uuid(group.id.0);
+    let journal = agent
+        .runtime()
+        .effects()
+        .fetch_context_journal(context_id)
+        .await?;
+    let mut saw_proposed_bump = false;
+    let mut saw_committed_bump = false;
+    for fact in journal.facts.iter() {
+        let FactContent::Relational(RelationalFact::Protocol(protocol_fact)) = &fact.content else {
+            continue;
+        };
+        match protocol_fact {
+            ProtocolRelationalFact::AmpProposedChannelEpochBump(_) => {
+                saw_proposed_bump = true;
+            }
+            ProtocolRelationalFact::AmpCommittedChannelEpochBump(_) => {
+                saw_committed_bump = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_proposed_bump, "Expected AMP proposed epoch bump fact");
+    assert!(saw_committed_bump, "Expected AMP committed epoch bump fact");
+
     // Send a message as the creator
     let message1 = chat
         .send_message(&group.id, authority, "Hello, world!".to_string())
@@ -173,6 +215,55 @@ async fn test_chat_group_flow() -> TestResult {
     let messages: Vec<&str> = history.iter().map(|m| m.content.as_str()).collect();
     assert!(messages.contains(&"Hello, world!"));
     assert!(messages.contains(&"Hi Alice!"));
+    Ok(())
+}
+
+/// Test: Rendezvous channel establishment emits consensus evidence.
+#[tokio::test]
+async fn test_rendezvous_channel_established_finalized() -> TestResult {
+    let agent = create_test_agent(40).await?;
+    let authority = agent.authority_id();
+    let authority_ctx = agent.context().clone();
+    let effects = agent.runtime().effects();
+
+    let fact = RendezvousFact::ChannelEstablished {
+        initiator: authority,
+        responder: AuthorityId::new_from_entropy([41u8; 32]),
+        channel_id: [7u8; 32],
+        epoch: 1,
+    };
+    let context_id = fact.context_id_for_fact();
+    let outcome = RendezvousGuardOutcome::allowed(vec![
+        RendezvousEffectCommand::JournalAppend { fact: fact.clone() },
+    ]);
+
+    aura_agent::handlers::rendezvous_bridge::execute_guard_outcome(
+        outcome,
+        &authority_ctx,
+        context_id,
+        effects.as_ref(),
+    )
+    .await?;
+
+    let journal = effects.fetch_context_journal(context_id).await?;
+    let mut saw_consensus = false;
+    for fact in journal.facts.iter() {
+        let FactContent::Relational(RelationalFact::Protocol(protocol_fact)) = &fact.content else {
+            continue;
+        };
+        if matches!(
+            protocol_fact,
+            ProtocolRelationalFact::Consensus { .. }
+        ) {
+            saw_consensus = true;
+            break;
+        }
+    }
+
+    assert!(
+        saw_consensus,
+        "Expected consensus evidence for rendezvous channel establishment"
+    );
     Ok(())
 }
 
@@ -316,8 +407,8 @@ async fn test_channel_invitation() -> TestResult {
     let shareable = InvitationService::import_code(&code)?;
 
     match shareable.invitation_type {
-        InvitationType::Channel { block_id } => {
-            assert_eq!(block_id, "channel-xyz-123");
+        InvitationType::Channel { home_id } => {
+            assert_eq!(home_id, "channel-xyz-123");
         }
         _ => panic!("Expected Channel invitation type"),
     }

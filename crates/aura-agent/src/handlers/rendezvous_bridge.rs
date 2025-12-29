@@ -6,9 +6,15 @@
 
 use super::shared::HandlerUtilities;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::AuraEffectSystem;
+use aura_consensus::protocol::run_consensus;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_journal::DomainFact;
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
+use aura_core::{Hash32, Prestate};
+use aura_journal::{DomainFact, FactJournal};
+use aura_protocol::amp::AmpJournalEffects;
+use aura_protocol::effects::TreeEffects;
 use aura_rendezvous::{EffectCommand, GuardOutcome, RendezvousFact, RENDEZVOUS_FACT_TYPE_ID};
 
 /// Execute a guard outcome's effect commands
@@ -84,6 +90,35 @@ async fn execute_journal_append(
     context_id: ContextId,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
+    let policy = policy_for(CeremonyFlow::RendezvousSecureChannel);
+
+    if matches!(fact, RendezvousFact::ChannelEstablished { .. })
+        && policy.allows_mode(AgreementMode::ConsensusFinalized)
+    {
+        let tree_state = effects.get_current_state().await.map_err(|e| {
+            AgentError::effects(format!("Failed to read tree state for rendezvous: {e}"))
+        })?;
+        let journal = effects.fetch_context_journal(context_id).await.map_err(|e| {
+            AgentError::effects(format!("Failed to load rendezvous context journal: {e}"))
+        })?;
+        let context_commitment = context_commitment_from_journal(context_id, &journal)?;
+        let prestate = Prestate::new(
+            vec![(authority.authority_id, tree_state.root_commitment)],
+            context_commitment,
+        );
+        let params = build_consensus_params(effects, authority.authority_id, effects).await.map_err(
+            |e| AgentError::effects(format!("Failed to build rendezvous consensus params: {e}")),
+        )?;
+        let commit = run_consensus(&prestate, &fact, params, effects, effects).await.map_err(
+            |e| AgentError::effects(format!("Rendezvous consensus finalization failed: {e}")),
+        )?;
+
+        effects
+            .insert_relational_fact(commit.to_relational_fact())
+            .await
+            .map_err(|e| AgentError::effects(format!("Commit rendezvous consensus fact: {e}")))?;
+    }
+
     // Append the fact to the journal
     HandlerUtilities::append_generic_fact(
         authority,
@@ -93,6 +128,21 @@ async fn execute_journal_append(
         &fact.to_bytes(),
     )
     .await
+}
+
+fn context_commitment_from_journal(
+    context: ContextId,
+    journal: &FactJournal,
+) -> AgentResult<Hash32> {
+    let mut hasher = aura_core::hash::hasher();
+    hasher.update(b"RELATIONAL_CONTEXT_FACTS");
+    hasher.update(context.as_bytes());
+    for fact in journal.facts.iter() {
+        let bytes = aura_core::util::serialization::to_vec(fact)
+            .map_err(|e| AgentError::effects(format!("Serialize context fact: {e}")))?;
+        hasher.update(&bytes);
+    }
+    Ok(Hash32(hasher.finalize()))
 }
 
 /// Execute a flow budget charge command

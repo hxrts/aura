@@ -8,11 +8,11 @@ use aura_journal::{
     DomainFact, FactReducer, FactRegistry,
 };
 
-struct BlockMuteFactReducer;
+struct HomeMuteFactReducer;
 
-impl FactReducer for BlockMuteFactReducer {
+impl FactReducer for HomeMuteFactReducer {
     fn handles_type(&self) -> &'static str {
-        BLOCK_MUTE_FACT_TYPE_ID
+        HOME_MUTE_FACT_TYPE_ID
     }
 
     fn reduce(
@@ -21,24 +21,24 @@ impl FactReducer for BlockMuteFactReducer {
         binding_type: &str,
         binding_data: &[u8],
     ) -> Option<RelationalBinding> {
-        if binding_type != BLOCK_MUTE_FACT_TYPE_ID {
+        if binding_type != HOME_MUTE_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = BlockMuteFact::from_bytes(binding_data)?;
+        let fact = HomeMuteFact::from_bytes(binding_data)?;
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(BLOCK_MUTE_FACT_TYPE_ID.to_string()),
+            binding_type: RelationalBindingType::Generic(HOME_MUTE_FACT_TYPE_ID.to_string()),
             context_id,
             data: fact.to_bytes(),
         })
     }
 }
 
-struct BlockUnmuteFactReducer;
+struct HomeUnmuteFactReducer;
 
-impl FactReducer for BlockUnmuteFactReducer {
+impl FactReducer for HomeUnmuteFactReducer {
     fn handles_type(&self) -> &'static str {
-        BLOCK_UNMUTE_FACT_TYPE_ID
+        HOME_UNMUTE_FACT_TYPE_ID
     }
 
     fn reduce(
@@ -47,24 +47,24 @@ impl FactReducer for BlockUnmuteFactReducer {
         binding_type: &str,
         binding_data: &[u8],
     ) -> Option<RelationalBinding> {
-        if binding_type != BLOCK_UNMUTE_FACT_TYPE_ID {
+        if binding_type != HOME_UNMUTE_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = BlockUnmuteFact::from_bytes(binding_data)?;
+        let fact = HomeUnmuteFact::from_bytes(binding_data)?;
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(BLOCK_UNMUTE_FACT_TYPE_ID.to_string()),
+            binding_type: RelationalBindingType::Generic(HOME_UNMUTE_FACT_TYPE_ID.to_string()),
             context_id,
             data: fact.to_bytes(),
         })
     }
 }
 
-struct BlockBanFactReducer;
+struct HomeBanFactReducer;
 
-impl FactReducer for BlockBanFactReducer {
+impl FactReducer for HomeBanFactReducer {
     fn handles_type(&self) -> &'static str {
-        BLOCK_BAN_FACT_TYPE_ID
+        HOME_BAN_FACT_TYPE_ID
     }
 
     fn reduce(
@@ -73,24 +73,24 @@ impl FactReducer for BlockBanFactReducer {
         binding_type: &str,
         binding_data: &[u8],
     ) -> Option<RelationalBinding> {
-        if binding_type != BLOCK_BAN_FACT_TYPE_ID {
+        if binding_type != HOME_BAN_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = BlockBanFact::from_bytes(binding_data)?;
+        let fact = HomeBanFact::from_bytes(binding_data)?;
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(BLOCK_BAN_FACT_TYPE_ID.to_string()),
+            binding_type: RelationalBindingType::Generic(HOME_BAN_FACT_TYPE_ID.to_string()),
             context_id,
             data: fact.to_bytes(),
         })
     }
 }
 
-struct BlockUnbanFactReducer;
+struct HomeUnbanFactReducer;
 
-impl FactReducer for BlockUnbanFactReducer {
+impl FactReducer for HomeUnbanFactReducer {
     fn handles_type(&self) -> &'static str {
-        BLOCK_UNBAN_FACT_TYPE_ID
+        HOME_UNBAN_FACT_TYPE_ID
     }
 
     fn reduce(
@@ -99,24 +99,24 @@ impl FactReducer for BlockUnbanFactReducer {
         binding_type: &str,
         binding_data: &[u8],
     ) -> Option<RelationalBinding> {
-        if binding_type != BLOCK_UNBAN_FACT_TYPE_ID {
+        if binding_type != HOME_UNBAN_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = BlockUnbanFact::from_bytes(binding_data)?;
+        let fact = HomeUnbanFact::from_bytes(binding_data)?;
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(BLOCK_UNBAN_FACT_TYPE_ID.to_string()),
+            binding_type: RelationalBindingType::Generic(HOME_UNBAN_FACT_TYPE_ID.to_string()),
             context_id,
             data: fact.to_bytes(),
         })
     }
 }
 
-struct BlockKickFactReducer;
+struct HomeKickFactReducer;
 
-impl FactReducer for BlockKickFactReducer {
+impl FactReducer for HomeKickFactReducer {
     fn handles_type(&self) -> &'static str {
-        BLOCK_KICK_FACT_TYPE_ID
+        HOME_KICK_FACT_TYPE_ID
     }
 
     fn reduce(
@@ -125,24 +125,24 @@ impl FactReducer for BlockKickFactReducer {
         binding_type: &str,
         binding_data: &[u8],
     ) -> Option<RelationalBinding> {
-        if binding_type != BLOCK_KICK_FACT_TYPE_ID {
+        if binding_type != HOME_KICK_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = BlockKickFact::from_bytes(binding_data)?;
+        let fact = HomeKickFact::from_bytes(binding_data)?;
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(BLOCK_KICK_FACT_TYPE_ID.to_string()),
+            binding_type: RelationalBindingType::Generic(HOME_KICK_FACT_TYPE_ID.to_string()),
             context_id,
             data: fact.to_bytes(),
         })
     }
 }
 
-struct BlockPinFactReducer;
+struct HomePinFactReducer;
 
-impl FactReducer for BlockPinFactReducer {
+impl FactReducer for HomePinFactReducer {
     fn handles_type(&self) -> &'static str {
-        BLOCK_PIN_FACT_TYPE_ID
+        HOME_PIN_FACT_TYPE_ID
     }
 
     fn reduce(
@@ -151,24 +151,24 @@ impl FactReducer for BlockPinFactReducer {
         binding_type: &str,
         binding_data: &[u8],
     ) -> Option<RelationalBinding> {
-        if binding_type != BLOCK_PIN_FACT_TYPE_ID {
+        if binding_type != HOME_PIN_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = BlockPinFact::from_bytes(binding_data)?;
+        let fact = HomePinFact::from_bytes(binding_data)?;
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(BLOCK_PIN_FACT_TYPE_ID.to_string()),
+            binding_type: RelationalBindingType::Generic(HOME_PIN_FACT_TYPE_ID.to_string()),
             context_id,
             data: fact.to_bytes(),
         })
     }
 }
 
-struct BlockUnpinFactReducer;
+struct HomeUnpinFactReducer;
 
-impl FactReducer for BlockUnpinFactReducer {
+impl FactReducer for HomeUnpinFactReducer {
     fn handles_type(&self) -> &'static str {
-        BLOCK_UNPIN_FACT_TYPE_ID
+        HOME_UNPIN_FACT_TYPE_ID
     }
 
     fn reduce(
@@ -177,13 +177,13 @@ impl FactReducer for BlockUnpinFactReducer {
         binding_type: &str,
         binding_data: &[u8],
     ) -> Option<RelationalBinding> {
-        if binding_type != BLOCK_UNPIN_FACT_TYPE_ID {
+        if binding_type != HOME_UNPIN_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = BlockUnpinFact::from_bytes(binding_data)?;
+        let fact = HomeUnpinFact::from_bytes(binding_data)?;
         Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(BLOCK_UNPIN_FACT_TYPE_ID.to_string()),
+            binding_type: RelationalBindingType::Generic(HOME_UNPIN_FACT_TYPE_ID.to_string()),
             context_id,
             data: fact.to_bytes(),
         })
@@ -192,12 +192,12 @@ impl FactReducer for BlockUnpinFactReducer {
 
 /// Register moderation domain facts with the journal registry.
 pub fn register_moderation_facts(registry: &mut FactRegistry) {
-    registry.register::<BlockMuteFact>(BLOCK_MUTE_FACT_TYPE_ID, Box::new(BlockMuteFactReducer));
+    registry.register::<HomeMuteFact>(HOME_MUTE_FACT_TYPE_ID, Box::new(HomeMuteFactReducer));
     registry
-        .register::<BlockUnmuteFact>(BLOCK_UNMUTE_FACT_TYPE_ID, Box::new(BlockUnmuteFactReducer));
-    registry.register::<BlockBanFact>(BLOCK_BAN_FACT_TYPE_ID, Box::new(BlockBanFactReducer));
-    registry.register::<BlockUnbanFact>(BLOCK_UNBAN_FACT_TYPE_ID, Box::new(BlockUnbanFactReducer));
-    registry.register::<BlockKickFact>(BLOCK_KICK_FACT_TYPE_ID, Box::new(BlockKickFactReducer));
-    registry.register::<BlockPinFact>(BLOCK_PIN_FACT_TYPE_ID, Box::new(BlockPinFactReducer));
-    registry.register::<BlockUnpinFact>(BLOCK_UNPIN_FACT_TYPE_ID, Box::new(BlockUnpinFactReducer));
+        .register::<HomeUnmuteFact>(HOME_UNMUTE_FACT_TYPE_ID, Box::new(HomeUnmuteFactReducer));
+    registry.register::<HomeBanFact>(HOME_BAN_FACT_TYPE_ID, Box::new(HomeBanFactReducer));
+    registry.register::<HomeUnbanFact>(HOME_UNBAN_FACT_TYPE_ID, Box::new(HomeUnbanFactReducer));
+    registry.register::<HomeKickFact>(HOME_KICK_FACT_TYPE_ID, Box::new(HomeKickFactReducer));
+    registry.register::<HomePinFact>(HOME_PIN_FACT_TYPE_ID, Box::new(HomePinFactReducer));
+    registry.register::<HomeUnpinFact>(HOME_UNPIN_FACT_TYPE_ID, Box::new(HomeUnpinFactReducer));
 }

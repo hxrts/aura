@@ -3,7 +3,7 @@
 //! This module contains the aggregate view state that holds all view states.
 
 use super::{
-    BlockState, BlocksState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
+    HomeState, HomesState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
     RecoveryState,
 };
 use crate::core::StateSnapshot;
@@ -32,10 +32,8 @@ cfg_if! {
             invitations: Mutable<InvitationsState>,
             /// Contacts state
             contacts: Mutable<ContactsState>,
-            /// Current block state (for backwards compatibility)
-            block: Mutable<BlockState>,
-            /// Multi-block state (all blocks the user has created/joined)
-            blocks: Mutable<BlocksState>,
+            /// Multi-home state (all homes the user has created/joined)
+            homes: Mutable<HomesState>,
             /// Neighborhood state
             neighborhood: Mutable<NeighborhoodState>,
         }
@@ -53,10 +51,8 @@ cfg_if! {
             invitations: InvitationsState,
             /// Contacts state
             contacts: ContactsState,
-            /// Current block state (for backwards compatibility)
-            block: BlockState,
-            /// Multi-block state (all blocks the user has created/joined)
-            blocks: BlocksState,
+            /// Multi-home state (all homes the user has created/joined)
+            homes: HomesState,
             /// Neighborhood state
             neighborhood: NeighborhoodState,
         }
@@ -73,8 +69,7 @@ impl ViewState {
                     recovery: self.recovery.get_cloned(),
                     invitations: self.invitations.get_cloned(),
                     contacts: self.contacts.get_cloned(),
-                    block: self.block.get_cloned(),
-                    blocks: self.blocks.get_cloned(),
+                    homes: self.homes.get_cloned(),
                     neighborhood: self.neighborhood.get_cloned(),
                 }
             } else {
@@ -83,8 +78,7 @@ impl ViewState {
                     recovery: self.recovery.clone(),
                     invitations: self.invitations.clone(),
                     contacts: self.contacts.clone(),
-                    block: self.block.clone(),
-                    blocks: self.blocks.clone(),
+                    homes: self.homes.clone(),
                     neighborhood: self.neighborhood.clone(),
                 }
             }
@@ -119,27 +113,22 @@ cfg_if! {
                 self.contacts.signal_cloned()
             }
 
-            /// Get a signal for block state
-            pub fn block_signal(&self) -> impl Signal<Item = BlockState> {
-                self.block.signal_cloned()
-            }
-
             /// Get a signal for neighborhood state
             pub fn neighborhood_signal(&self) -> impl Signal<Item = NeighborhoodState> {
                 self.neighborhood.signal_cloned()
             }
 
-            /// Get a signal for blocks state (multi-block management)
-            pub fn blocks_signal(&self) -> impl Signal<Item = BlocksState> {
-                self.blocks.signal_cloned()
+            /// Get a signal for homes state (multi-home management)
+            pub fn homes_signal(&self) -> impl Signal<Item = HomesState> {
+                self.homes.signal_cloned()
             }
 
-            /// Get a clone of the current blocks state
+            /// Get a clone of the current homes state
             ///
-            /// This returns a snapshot of the blocks state for read-only access.
-            /// For reactive updates, use `blocks_signal()` instead.
-            pub fn get_blocks(&self) -> BlocksState {
-                self.blocks.get_cloned()
+            /// This returns a snapshot of the homes state for read-only access.
+            /// For reactive updates, use `homes_signal()` instead.
+            pub fn get_homes(&self) -> HomesState {
+                self.homes.get_cloned()
             }
 
             /// Get a clone of the current recovery state
@@ -185,37 +174,32 @@ cfg_if! {
                 self.contacts.set(state);
             }
 
-            /// Update block state
-            pub fn set_block(&self, state: BlockState) {
-                self.block.set(state);
-            }
-
             /// Update neighborhood state
             pub fn set_neighborhood(&self, state: NeighborhoodState) {
                 self.neighborhood.set(state);
             }
 
-            /// Update blocks state
-            pub fn set_blocks(&self, state: BlocksState) {
-                self.blocks.set(state);
+            /// Update homes state
+            pub fn set_homes(&self, state: HomesState) {
+                self.homes.set(state);
             }
 
-            /// Select a block (UI-only, not journaled)
+            /// Select a home (UI-only, not journaled)
             ///
-            /// This updates the selected block in BlocksState and triggers
-            /// the blocks signal for UI updates.
-            pub fn select_block(&self, block_id: Option<ChannelId>) {
-                self.blocks.lock_mut().select_block(block_id);
+            /// This updates the selected home in HomesState and triggers
+            /// the homes signal for UI updates.
+            pub fn select_home(&self, home_id: Option<ChannelId>) {
+                self.homes.lock_mut().select_home(home_id);
             }
 
-            /// Add a block to the blocks state
-            pub fn add_block(&self, block: BlockState) {
-                self.blocks.lock_mut().add_block(block);
+            /// Add a home to the homes state
+            pub fn add_home(&self, home: HomeState) {
+                self.homes.lock_mut().add_home(home);
             }
 
-            /// Remove a block from the blocks state
-            pub fn remove_block(&self, block_id: &ChannelId) -> Option<BlockState> {
-                self.blocks.lock_mut().remove_block(block_id)
+            /// Remove a home from the homes state
+            pub fn remove_home(&self, home_id: &ChannelId) -> Option<HomeState> {
+                self.homes.lock_mut().remove_home(home_id)
             }
         }
     }
@@ -248,11 +232,6 @@ cfg_if! {
                 &self.contacts
             }
 
-            /// Get current block state
-            pub fn block(&self) -> &BlockState {
-                &self.block
-            }
-
             /// Get current neighborhood state
             pub fn neighborhood(&self) -> &NeighborhoodState {
                 &self.neighborhood
@@ -265,11 +244,11 @@ cfg_if! {
                 self.neighborhood.clone()
             }
 
-            /// Get a clone of the current blocks state
+            /// Get a clone of the current homes state
             ///
-            /// This returns a snapshot of the blocks state for read-only access.
-            pub fn get_blocks(&self) -> BlocksState {
-                self.blocks.clone()
+            /// This returns a snapshot of the homes state for read-only access.
+            pub fn get_homes(&self) -> HomesState {
+                self.homes.clone()
             }
 
             /// Update chat state
@@ -292,283 +271,24 @@ cfg_if! {
                 self.contacts = state;
             }
 
-            /// Update block state
-            pub fn set_block(&mut self, state: BlockState) {
-                self.block = state;
-            }
-
             /// Update neighborhood state
             pub fn set_neighborhood(&mut self, state: NeighborhoodState) {
                 self.neighborhood = state;
             }
 
-            /// Get current blocks state
-            pub fn blocks(&self) -> &BlocksState {
-                &self.blocks
+            /// Get current homes state
+            pub fn homes(&self) -> &HomesState {
+                &self.homes
             }
 
-            /// Get mutable blocks state
-            pub fn blocks_mut(&mut self) -> &mut BlocksState {
-                &mut self.blocks
+            /// Get mutable homes state
+            pub fn homes_mut(&mut self) -> &mut HomesState {
+                &mut self.homes
             }
 
-            /// Update blocks state
-            pub fn set_blocks(&mut self, state: BlocksState) {
-                self.blocks = state;
-            }
-        }
-    }
-}
-
-// =============================================================================
-// View Delta Application
-// =============================================================================
-
-#[cfg(any())]
-cfg_if! {
-    if #[cfg(feature = "signals")] {
-        impl ViewState {
-            /// Apply a view delta to update the appropriate state
-            ///
-            /// This is called after a journal fact is reduced to update the view.
-            pub fn apply_delta(&self, delta: ViewDelta) {
-                match delta {
-                    ViewDelta::MessageSent { channel_id, mut message } => {
-                        // Resolve sender_name from contacts if available
-                        let contacts = self.contacts.lock_ref();
-                        message.sender_name = contacts.get_display_name(&message.sender_id);
-                        drop(contacts);
-                        self.chat.lock_mut().apply_message(channel_id, message);
-                    }
-                    ViewDelta::ChannelCreated { channel } => {
-                        self.chat.lock_mut().add_channel(channel);
-                    }
-                    ViewDelta::ChannelJoined { channel_id } => {
-                        // Mark channel as joined (increment member count)
-                        self.chat.lock_mut().mark_channel_joined(&channel_id);
-                    }
-                    ViewDelta::ChannelLeft { channel_id } => {
-                        self.chat.lock_mut().remove_channel(&channel_id);
-                    }
-                    ViewDelta::ChannelClosed { channel_id } => {
-                        self.chat.lock_mut().remove_channel(&channel_id);
-                    }
-                    ViewDelta::TopicUpdated { channel_id, topic } => {
-                        self.chat.lock_mut().update_topic(&channel_id, topic);
-                    }
-                    ViewDelta::NicknameSet { target, nickname } => {
-                        self.contacts.lock_mut().set_nickname(target, nickname);
-                    }
-                    ViewDelta::BlockNameSet { block_id, name } => {
-                        let name_for_blocks = name.clone();
-                        if let Some(block) = self.blocks.lock_mut().block_mut(&block_id) {
-                            block.set_name(name_for_blocks);
-                        }
-                        let mut legacy = self.block.lock_mut();
-                        if legacy.id == block_id {
-                            legacy.set_name(name);
-                        }
-                    }
-                    ViewDelta::StewardGranted { context_id, target_id } => {
-                        let mut blocks = self.blocks.lock_mut();
-                        for (_id, block) in blocks.blocks.iter_mut() {
-                            if block.context_id.parse::<ContextId>().ok() == Some(context_id) {
-                                if let Some(resident) = block.resident_mut(&target_id) {
-                                    resident.role = ResidentRole::Admin;
-                                }
-                                break;
-                            }
-                        }
-                        drop(blocks);
-                        let mut legacy = self.block.lock_mut();
-                        if legacy.context_id.parse::<ContextId>().ok() == Some(context_id) {
-                            if let Some(resident) = legacy.resident_mut(&target_id) {
-                                resident.role = ResidentRole::Admin;
-                            }
-                        }
-                    }
-                    ViewDelta::StewardRevoked { context_id, target_id } => {
-                        let mut blocks = self.blocks.lock_mut();
-                        for (_id, block) in blocks.blocks.iter_mut() {
-                            if block.context_id.parse::<ContextId>().ok() == Some(context_id) {
-                                if let Some(resident) = block.resident_mut(&target_id) {
-                                    resident.role = ResidentRole::Resident;
-                                }
-                                break;
-                            }
-                        }
-                        drop(blocks);
-                        let mut legacy = self.block.lock_mut();
-                        if legacy.context_id.parse::<ContextId>().ok() == Some(context_id) {
-                            if let Some(resident) = legacy.resident_mut(&target_id) {
-                                resident.role = ResidentRole::Resident;
-                            }
-                        }
-                    }
-                    ViewDelta::RecoveryRequested { session_id } => {
-                        // Use default account_id and 0 as initiated_at since we don't have them in delta
-                        use aura_core::identifiers::AuthorityId;
-                        self.recovery.lock_mut().initiate_recovery(session_id, AuthorityId::default(), 0);
-                    }
-                    ViewDelta::GuardianApproved { guardian_id } => {
-                        self.recovery.lock_mut().add_guardian_approval(guardian_id);
-                    }
-                    ViewDelta::InvitationCreated { invitation_id } => {
-                        // Create a minimal invitation record - full details would come from reducer
-                        use super::invitations::{Invitation, InvitationDirection, InvitationStatus, InvitationType};
-                        use aura_core::identifiers::AuthorityId;
-                        let invitation = Invitation {
-                            id: invitation_id,
-                            invitation_type: InvitationType::Block,
-                            status: InvitationStatus::Pending,
-                            direction: InvitationDirection::Sent,
-                            from_id: AuthorityId::default(),
-                            from_name: String::new(),
-                            to_id: None,
-                            to_name: None,
-                            created_at: 0,
-                            expires_at: None,
-                            message: None,
-                            block_id: None,
-                            block_name: None,
-                        };
-                        self.invitations.lock_mut().add_invitation(invitation);
-                    }
-                    ViewDelta::InvitationAccepted { invitation_id } => {
-                        self.invitations.lock_mut().accept_invitation(&invitation_id);
-                    }
-                    ViewDelta::InvitationRejected { invitation_id } => {
-                        self.invitations.lock_mut().reject_invitation(&invitation_id);
-                    }
-                    ViewDelta::GuardianToggled {
-                        contact_id,
-                        is_guardian,
-                    } => {
-                        self.recovery.lock_mut().toggle_guardian(contact_id, is_guardian);
-                        // Also update the contact's is_guardian flag
-                        self.contacts.lock_mut().set_guardian_status(contact_id, is_guardian);
-                    }
-                    ViewDelta::GuardianThresholdSet { threshold } => {
-                        self.recovery.lock_mut().set_threshold(threshold);
-                    }
-                }
-            }
-        }
-    } else {
-        impl ViewState {
-            /// Apply a view delta to update the appropriate state
-            ///
-            /// This is called after a journal fact is reduced to update the view.
-            pub fn apply_delta(&mut self, delta: ViewDelta) {
-                match delta {
-                    ViewDelta::MessageSent { channel_id, mut message } => {
-                        // Resolve sender_name from contacts if available
-                        message.sender_name = self.contacts.get_display_name(&message.sender_id);
-                        self.chat.apply_message(channel_id, message);
-                    }
-                    ViewDelta::ChannelCreated { channel } => {
-                        self.chat.add_channel(channel);
-                    }
-                    ViewDelta::ChannelJoined { channel_id } => {
-                        self.chat.mark_channel_joined(&channel_id);
-                    }
-                    ViewDelta::ChannelLeft { channel_id } => {
-                        self.chat.remove_channel(&channel_id);
-                    }
-                    ViewDelta::ChannelClosed { channel_id } => {
-                        self.chat.remove_channel(&channel_id);
-                    }
-                    ViewDelta::TopicUpdated { channel_id, topic } => {
-                        self.chat.update_topic(&channel_id, topic);
-                    }
-                    ViewDelta::NicknameSet { target, nickname } => {
-                        self.contacts.set_nickname(target, nickname);
-                    }
-                    ViewDelta::BlockNameSet { block_id, name } => {
-                        if let Some(block) = self.blocks.block_mut(&block_id) {
-                            block.set_name(name.clone());
-                        }
-                        if self.block.id == block_id {
-                            self.block.set_name(name);
-                        }
-                    }
-                    ViewDelta::StewardGranted { context_id, target_id } => {
-                        for (_id, block) in self.blocks.blocks.iter_mut() {
-                            if block.context_id.parse::<ContextId>().ok() == Some(context_id) {
-                                if let Some(resident) = block.resident_mut(&target_id) {
-                                    resident.role = ResidentRole::Admin;
-                                }
-                                break;
-                            }
-                        }
-                        if self.block.context_id.parse::<ContextId>().ok() == Some(context_id) {
-                            if let Some(resident) = self.block.resident_mut(&target_id) {
-                                resident.role = ResidentRole::Admin;
-                            }
-                        }
-                    }
-                    ViewDelta::StewardRevoked { context_id, target_id } => {
-                        for (_id, block) in self.blocks.blocks.iter_mut() {
-                            if block.context_id.parse::<ContextId>().ok() == Some(context_id) {
-                                if let Some(resident) = block.resident_mut(&target_id) {
-                                    resident.role = ResidentRole::Resident;
-                                }
-                                break;
-                            }
-                        }
-                        if self.block.context_id.parse::<ContextId>().ok() == Some(context_id) {
-                            if let Some(resident) = self.block.resident_mut(&target_id) {
-                                resident.role = ResidentRole::Resident;
-                            }
-                        }
-                    }
-                    ViewDelta::RecoveryRequested { session_id } => {
-                        // Use default account_id and 0 as initiated_at since we don't have them in delta
-                        use aura_core::identifiers::AuthorityId;
-                        self.recovery.initiate_recovery(session_id, AuthorityId::default(), 0);
-                    }
-                    ViewDelta::GuardianApproved { guardian_id } => {
-                        self.recovery.add_guardian_approval(guardian_id);
-                    }
-                    ViewDelta::InvitationCreated { invitation_id } => {
-                        // Create a minimal invitation record - full details would come from reducer
-                        use super::invitations::{Invitation, InvitationDirection, InvitationStatus, InvitationType};
-                        use aura_core::identifiers::AuthorityId;
-                        let invitation = Invitation {
-                            id: invitation_id,
-                            invitation_type: InvitationType::Block,
-                            status: InvitationStatus::Pending,
-                            direction: InvitationDirection::Sent,
-                            from_id: AuthorityId::default(),
-                            from_name: String::new(),
-                            to_id: None,
-                            to_name: None,
-                            created_at: 0,
-                            expires_at: None,
-                            message: None,
-                            block_id: None,
-                            block_name: None,
-                        };
-                        self.invitations.add_invitation(invitation);
-                    }
-                    ViewDelta::InvitationAccepted { invitation_id } => {
-                        self.invitations.accept_invitation(&invitation_id);
-                    }
-                    ViewDelta::InvitationRejected { invitation_id } => {
-                        self.invitations.reject_invitation(&invitation_id);
-                    }
-                    ViewDelta::GuardianToggled {
-                        contact_id,
-                        is_guardian,
-                    } => {
-                        self.recovery.toggle_guardian(contact_id, is_guardian);
-                        // Also update the contact's is_guardian flag
-                        self.contacts.set_guardian_status(contact_id, is_guardian);
-                    }
-                    ViewDelta::GuardianThresholdSet { threshold } => {
-                        self.recovery.set_threshold(threshold);
-                    }
-                }
+            /// Update homes state
+            pub fn set_homes(&mut self, state: HomesState) {
+                self.homes = state;
             }
         }
     }

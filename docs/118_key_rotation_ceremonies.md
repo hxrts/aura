@@ -4,7 +4,7 @@ Aura treats *membership changes* and *key rotations* as **Category C ceremonies*
 
 ## Why ceremonies?
 
-Operations like “add a device”, “add/remove guardians”, “change group membership”, or “change block membership” all change who can produce valid signatures (or who is expected to participate in signing). These operations:
+Operations like “add a device”, “add/remove guardians”, “change group membership”, or “change home membership” all change who can produce valid signatures (or who is expected to participate in signing). These operations:
 
 - require multi-party participation and explicit consent,
 - must be bound to a **prestate** to avoid TOCTOU / replay,
@@ -42,6 +42,41 @@ All key rotation ceremonies follow this common shape:
      - emit an abort fact with a reason,
      - rollback the pending epoch and leave the prior epoch active.
 
+## Lifecycle taxonomy (K/A)
+
+Aura models ceremonies with **two orthogonal axes**:
+
+**Key generation (K)**
+- **K1**: Single‑signer (no DKG)
+- **K2**: Dealer‑based DKG (trusted coordinator)
+- **K3**: Consensus‑finalized DKG (BFT‑DKG + transcript commit)
+
+**Agreement (A)**
+- **A1: Provisional** — usable immediately, not final
+- **A2: Coordinator Soft‑Safe** — bounded divergence with convergence cert
+- **A3: Consensus‑Finalized** — unique, durable, non‑forkable
+
+Fast paths (A1/A2) are **provisional**. Durable shared state must be finalized by A3.
+
+## Per‑Ceremony Policy Matrix (Canonical)
+
+| Ceremony / Flow | Key Gen (K) | Agreement (A) | Fallback | Notes |
+|---|---|---|---|---|
+| **Authority bootstrap** | **K1** (Single‑signer) | **A3** (Finalized) | **None** | Local, immediate, no consensus needed. |
+| **Device enrollment (add device)** | **K2** (Dealer‑based DKG) | **A1 → A2 → A3** | **Yes: A1/A2** | Provisional acceptance → soft‑safe convergence → consensus finalize. |
+| **Device MFA rotation** | **K3** (Consensus‑finalized DKG) | **A2 → A3** | **Yes: A2** | Soft‑safe convergence, then consensus finalize; keys are consensus‑finalized. |
+| **Guardian setup / rotation** | **K3** (Consensus‑finalized DKG) | **A2 → A3** | **Yes: A2** | Consensus‑finalized keys and finalization for durability. |
+| **Recovery approval ceremony (guardian approvals)** | N/A | **A2 → A3** | **Yes: A2** | Soft‑safe approvals, then consensus commit. |
+| **Recovery execution ceremony** | N/A | **A2 → A3** | **Yes: A2** | Execute recovery with consensus‑finalized commit. |
+| **AMP channel epoch bump** | N/A | **A1 → A2 → A3** | **Yes: A1/A2** | Proposed bump → convergence cert → consensus bump commit. |
+| **Invitation ceremony (contact / channel / guardian)** | N/A | **A3 only** | **None** | Treat as consensus‑finalized only; no A1/A2 semantics. |
+| **Group / Block creation (new relational context)** | **K3** (Consensus‑finalized DKG) | **A1 → A2 → A3** | **Yes: A1/A2** | Provisional bootstrap channel → consensus‑finalized group key. |
+| **AMP channel bootstrap / provisional channel** | N/A | **A1 → A2 → A3** | **Yes: A1/A2** | Immediate provisional channel, then rotate into group key. |
+| **Rendezvous secure‑channel lifecycle** | N/A | **A1 → A2 → A3** | **Yes: A1/A2** | Provisional rendezvous link → consensus‑finalized secure channel. |
+| **OTA activation ceremony** | N/A | **A2 → A3** | **Yes: A2** | Threshold‑signed activation, then consensus finalize. |
+| **DKD ceremony (distributed key derivation)** | **DKD (non‑DKG)** | **A2 → A3** | **Yes: A2** | Multi‑party derivation with consensus‑finalized commit. |
+| **Device removal (rotation)** | **K3** (Consensus‑finalized DKG) | **A2 → A3** | **Yes: A2** | Remove device via rotation; consensus‑finalized keys. |
+
 ## Ceremony kinds
 
 ### Guardian key rotation
@@ -67,7 +102,7 @@ All key rotation ceremonies follow this common shape:
 
 **Multi-authority note**: Device enrollment adds signing capability for the account authority but does not replace any other authorities the device participates in. Devices may hold threshold shares for multiple authorities concurrently.
 
-### Group / block membership changes
+### Group / home membership changes
 
 These are conceptually identical ceremonies applied to different authorities/contexts:
 

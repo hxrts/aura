@@ -18,7 +18,7 @@ use crate::tui::types::PendingRequest;
 enum NotificationKind {
     ContactInvite,
     GuardianInvite,
-    BlockInvite,
+    HomeInvite,
     RecoveryApproval,
 }
 
@@ -27,7 +27,7 @@ impl NotificationKind {
         match self {
             Self::ContactInvite => "@",
             Self::GuardianInvite => "◆",
-            Self::BlockInvite => "■",
+            Self::HomeInvite => "■",
             Self::RecoveryApproval => "⊗",
         }
     }
@@ -36,7 +36,7 @@ impl NotificationKind {
         match self {
             Self::ContactInvite => "Contact request",
             Self::GuardianInvite => "Guardian request",
-            Self::BlockInvite => "Block invite",
+            Self::HomeInvite => "Home invite",
             Self::RecoveryApproval => "Recovery approval",
         }
     }
@@ -45,7 +45,7 @@ impl NotificationKind {
         match self {
             Self::ContactInvite => Theme::PRIMARY,
             Self::GuardianInvite => Theme::WARNING,
-            Self::BlockInvite => Theme::TEXT,
+            Self::HomeInvite => Theme::TEXT,
             Self::RecoveryApproval => Theme::SUCCESS,
         }
     }
@@ -100,9 +100,9 @@ pub fn NotificationsScreen(
                             NotificationKind::ContactInvite,
                             format!("Contact request from {}", inv.from_name),
                         ),
-                        InvitationType::Block => (
-                            NotificationKind::BlockInvite,
-                            format!("Block invite from {}", inv.from_name),
+                        InvitationType::Home => (
+                            NotificationKind::HomeInvite,
+                            format!("Home invite from {}", inv.from_name),
                         ),
                     };
 

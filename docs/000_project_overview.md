@@ -64,7 +64,7 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) covers the commitment tree structure for threshold identity management.
 
-[Key Rotation Ceremonies](118_key_rotation_ceremonies.md) describes the shared Category C contract for key rotations and membership changes (devices, guardians, groups, blocks).
+[Key Rotation Ceremonies](118_key_rotation_ceremonies.md) describes the shared Category C contract for key rotations and membership changes (devices, guardians, groups, home authorities, etc.).
 
 [Journal System](102_journal.md) documents the fact-based journal, validation rules, and deterministic reduction flows.
 
@@ -92,7 +92,7 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Database Architecture](113_database.md) specifies the distributed database layer using journals, Biscuit queries, and CRDTs.
 
-[Social Architecture](114_social_architecture.md) defines the social organization model using messages, blocks, and neighborhoods.
+[Social Architecture](114_social_architecture.md) defines the social organization model using messages, homes, and neighborhoods.
 
 [CLI and Terminal User Interface](115_cli_tui.md) specifies the CLI and iocraft-based TUI for Aura.
 

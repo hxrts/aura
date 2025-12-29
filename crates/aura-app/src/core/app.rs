@@ -424,13 +424,13 @@ impl AppCore {
                     return Err(IntentError::validation_failed("Nickname too long"));
                 }
             }
-            Intent::SetBlockName { name, .. } => {
+            Intent::SetHomeName { name, .. } => {
                 if name.is_empty() {
-                    return Err(IntentError::validation_failed("Block name is empty"));
+                    return Err(IntentError::validation_failed("Home name is empty"));
                 }
             }
             Intent::GrantSteward {
-                block_id,
+                home_id,
                 target_id,
             } => {
                 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -440,38 +440,25 @@ impl AppCore {
                     IntentError::validation_failed(format!("Invalid authority ID: {}", target_id))
                 })?;
 
-                let legacy_block = if snapshot
-                    .block
-                    .context_id
-                    .parse::<ContextId>()
-                    .ok()
-                    .is_some_and(|id| id == *block_id)
-                {
-                    Some(&snapshot.block)
-                } else {
-                    None
-                };
-
-                let block = snapshot
-                    .blocks
-                    .blocks
+                let home = snapshot
+                    .homes
+                    .homes
                     .values()
                     .find(|b| {
                         b.context_id
                             .parse::<ContextId>()
                             .ok()
-                            .is_some_and(|id| id == *block_id)
+                            .is_some_and(|id| id == *home_id)
                     })
-                    .or(legacy_block)
-                    .ok_or_else(|| IntentError::validation_failed("Block not found"))?;
+                    .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
 
-                if !block.is_admin() {
+                if !home.is_admin() {
                     return Err(IntentError::unauthorized(
                         "Only stewards can grant steward role",
                     ));
                 }
 
-                let Some(resident) = block.resident(&target) else {
+                let Some(resident) = home.resident(&target) else {
                     return Err(IntentError::validation_failed(format!(
                         "Resident not found: {}",
                         target_id
@@ -483,7 +470,7 @@ impl AppCore {
                 }
             }
             Intent::RevokeSteward {
-                block_id,
+                home_id,
                 target_id,
             } => {
                 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -493,38 +480,25 @@ impl AppCore {
                     IntentError::validation_failed(format!("Invalid authority ID: {}", target_id))
                 })?;
 
-                let legacy_block = if snapshot
-                    .block
-                    .context_id
-                    .parse::<ContextId>()
-                    .ok()
-                    .is_some_and(|id| id == *block_id)
-                {
-                    Some(&snapshot.block)
-                } else {
-                    None
-                };
-
-                let block = snapshot
-                    .blocks
-                    .blocks
+                let home = snapshot
+                    .homes
+                    .homes
                     .values()
                     .find(|b| {
                         b.context_id
                             .parse::<ContextId>()
                             .ok()
-                            .is_some_and(|id| id == *block_id)
+                            .is_some_and(|id| id == *home_id)
                     })
-                    .or(legacy_block)
-                    .ok_or_else(|| IntentError::validation_failed("Block not found"))?;
+                    .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
 
-                if !block.is_admin() {
+                if !home.is_admin() {
                     return Err(IntentError::unauthorized(
                         "Only stewards can revoke steward role",
                     ));
                 }
 
-                let Some(resident) = block.resident(&target) else {
+                let Some(resident) = home.resident(&target) else {
                     return Err(IntentError::validation_failed(format!(
                         "Resident not found: {}",
                         target_id
@@ -597,7 +571,7 @@ impl AppCore {
         self.observer_registry
             .notify_invitations(&snapshot.invitations);
         self.observer_registry.notify_contacts(&snapshot.contacts);
-        self.observer_registry.notify_block(&snapshot.block);
+        self.observer_registry.notify_homes(&snapshot.homes);
         self.observer_registry
             .notify_neighborhood(&snapshot.neighborhood);
     }
@@ -641,13 +615,6 @@ impl AppCore {
         &self,
     ) -> impl futures_signals::signal::Signal<Item = crate::views::ContactsState> {
         self.views.contacts_signal()
-    }
-
-    /// Get a signal for block state changes
-    pub fn block_signal(
-        &self,
-    ) -> impl futures_signals::signal::Signal<Item = crate::views::BlockState> {
-        self.views.block_signal()
     }
 
     /// Get a signal for neighborhood state changes
@@ -1170,7 +1137,7 @@ mod tests {
         // Step 1: Create a channel
         let result = app.dispatch(Intent::CreateChannel {
             name: "test-channel".to_string(),
-            channel_type: ChannelType::Block,
+            channel_type: ChannelType::Home,
         });
         assert!(
             result.is_ok(),
@@ -1235,7 +1202,7 @@ mod tests {
         // Dispatch multiple intents
         app.dispatch(Intent::CreateChannel {
             name: "channel-1".to_string(),
-            channel_type: ChannelType::Block,
+            channel_type: ChannelType::Home,
         })
         .unwrap();
 

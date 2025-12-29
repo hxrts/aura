@@ -1,7 +1,7 @@
 //! iocraft hook helpers for long-lived reactive subscriptions.
 //!
 //! Keep shell.rs focused on wiring and rendering by extracting the
-//! signal-subscription use_future blocks here.
+//! signal-subscription use_future homes here.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -344,33 +344,33 @@ pub fn use_invitations_subscription(
     shared_invitations
 }
 
-/// Shared neighborhood block IDs (in display order).
+/// Shared neighborhood home IDs (in display order).
 ///
-/// Used to map neighborhood grid index -> block ID for EnterBlock.
-pub type SharedNeighborhoodBlocks = Arc<RwLock<Vec<String>>>;
+/// Used to map neighborhood grid index -> home ID for EnterHome.
+pub type SharedNeighborhoodHomes = Arc<RwLock<Vec<String>>>;
 
-/// Create a shared neighborhood blocks holder and subscribe it to NEIGHBORHOOD_SIGNAL.
-pub fn use_neighborhood_blocks_subscription(
+/// Create a shared neighborhood homes holder and subscribe it to NEIGHBORHOOD_SIGNAL.
+pub fn use_neighborhood_homes_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
-) -> SharedNeighborhoodBlocks {
-    let shared_blocks_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
-    let shared_blocks: SharedNeighborhoodBlocks = shared_blocks_ref.read().clone();
+) -> SharedNeighborhoodHomes {
+    let shared_homes_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
+    let shared_homes: SharedNeighborhoodHomes = shared_homes_ref.read().clone();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let blocks = shared_blocks.clone();
+        let homes = shared_homes.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
                 let mut ids: Vec<String> = Vec::with_capacity(n.neighbors.len() + 1);
-                ids.push(n.home_block_id.to_string());
+                ids.push(n.home_home_id.to_string());
                 ids.extend(
                     n.neighbors
                         .iter()
-                        .filter(|b| b.id != n.home_block_id)
+                        .filter(|b| b.id != n.home_home_id)
                         .map(|b| b.id.to_string()),
                 );
-                if let Ok(mut guard) = blocks.write() {
+                if let Ok(mut guard) = homes.write() {
                     *guard = ids;
                 }
             })
@@ -378,7 +378,7 @@ pub fn use_neighborhood_blocks_subscription(
         }
     });
 
-    shared_blocks
+    shared_homes
 }
 
 /// Shared pending recovery requests.

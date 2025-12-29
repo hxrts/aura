@@ -9,7 +9,7 @@ pub enum NeighborhoodMode {
     /// Exploring the neighborhood map
     #[default]
     Map,
-    /// Inside a block (detail view)
+    /// Inside a home (detail view)
     Detail,
 }
 
@@ -39,7 +39,7 @@ pub struct NeighborhoodViewState {
     /// Grid navigation state (handles 2D wrap-around)
     pub grid: GridNav,
 
-    /// Desired traversal depth when entering a selected block.
+    /// Desired traversal depth when entering a selected home.
     pub enter_depth: TraversalDepth,
 
     /// Selected neighborhood tab index
@@ -47,13 +47,13 @@ pub struct NeighborhoodViewState {
     /// Total neighborhoods (V1: 4)
     pub neighborhood_count: usize,
 
-    /// Selected block index in map mode
-    pub selected_block: usize,
-    /// Total blocks in current neighborhood
-    pub block_count: usize,
+    /// Selected home index in map mode
+    pub selected_home: usize,
+    /// Total homes in current neighborhood
+    pub home_count: usize,
 
-    /// Entered block id (detail mode)
-    pub entered_block_id: Option<String>,
+    /// Entered home id (detail mode)
+    pub entered_home_id: Option<String>,
 
     /// Channel navigation
     pub selected_channel: usize,
@@ -70,18 +70,18 @@ pub struct NeighborhoodViewState {
     pub message_scroll: usize,
     pub message_count: usize,
 
-    /// Whether steward actions are enabled for current user in this block
+    /// Whether steward actions are enabled for current user in this home
     pub steward_actions_enabled: bool,
 }
 
-/// State for block creation modal
+/// State for home creation modal
 ///
 /// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
-pub struct BlockCreateModalState {
-    /// Block name input
+pub struct HomeCreateModalState {
+    /// Home name input
     pub name: String,
-    /// Block description (optional)
+    /// Home description (optional)
     pub description: String,
     /// Active field (0 = name, 1 = description)
     pub active_field: usize,
@@ -91,7 +91,7 @@ pub struct BlockCreateModalState {
     pub creating: bool,
 }
 
-impl BlockCreateModalState {
+impl HomeCreateModalState {
     /// Create new modal state
     pub fn new() -> Self {
         Self::default()

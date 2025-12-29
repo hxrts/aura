@@ -646,4 +646,82 @@ mod tests {
         tracker.mark_committed("ceremony-device-1").await.unwrap();
         assert!(tracker.is_complete("ceremony-device-1").await.unwrap());
     }
+
+    #[tokio::test]
+    async fn test_device_rotation_agreement_mode_transitions() {
+        let tracker = CeremonyTracker::new();
+        let device_a = DeviceId::new_from_entropy([10u8; 32]);
+        let device_b = DeviceId::new_from_entropy([11u8; 32]);
+
+        tracker
+            .register(
+                "ceremony-rotate-1".to_string(),
+                CeremonyKind::DeviceRotation,
+                2,
+                2,
+                vec![
+                    ParticipantIdentity::device(device_a),
+                    ParticipantIdentity::device(device_b),
+                ],
+                77,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let state = tracker.get("ceremony-rotate-1").await.unwrap();
+        assert_eq!(state.agreement_mode, AgreementMode::CoordinatorSoftSafe);
+
+        tracker
+            .mark_accepted("ceremony-rotate-1", ParticipantIdentity::device(device_a))
+            .await
+            .unwrap();
+        tracker
+            .mark_accepted("ceremony-rotate-1", ParticipantIdentity::device(device_b))
+            .await
+            .unwrap();
+
+        tracker.mark_committed("ceremony-rotate-1").await.unwrap();
+        let state = tracker.get("ceremony-rotate-1").await.unwrap();
+        assert_eq!(state.agreement_mode, AgreementMode::ConsensusFinalized);
+    }
+
+    #[tokio::test]
+    async fn test_device_removal_agreement_mode_transitions() {
+        let tracker = CeremonyTracker::new();
+        let device_a = DeviceId::new_from_entropy([12u8; 32]);
+        let device_b = DeviceId::new_from_entropy([13u8; 32]);
+
+        tracker
+            .register(
+                "ceremony-remove-1".to_string(),
+                CeremonyKind::DeviceRemoval,
+                2,
+                2,
+                vec![
+                    ParticipantIdentity::device(device_a),
+                    ParticipantIdentity::device(device_b),
+                ],
+                88,
+                Some(device_b),
+            )
+            .await
+            .unwrap();
+
+        let state = tracker.get("ceremony-remove-1").await.unwrap();
+        assert_eq!(state.agreement_mode, AgreementMode::CoordinatorSoftSafe);
+
+        tracker
+            .mark_accepted("ceremony-remove-1", ParticipantIdentity::device(device_a))
+            .await
+            .unwrap();
+        tracker
+            .mark_accepted("ceremony-remove-1", ParticipantIdentity::device(device_b))
+            .await
+            .unwrap();
+
+        tracker.mark_committed("ceremony-remove-1").await.unwrap();
+        let state = tracker.get("ceremony-remove-1").await.unwrap();
+        assert_eq!(state.agreement_mode, AgreementMode::ConsensusFinalized);
+    }
 }

@@ -5,8 +5,7 @@
 //! that prefer polling over reactive updates.
 
 use crate::views::{
-    BlockState, BlocksState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
-    RecoveryState,
+    HomesState, ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -28,13 +27,10 @@ pub struct StateSnapshot {
     /// Contacts state (contacts, nicknames)
     pub contacts: ContactsState,
 
-    /// Block state (residents, storage, settings)
-    pub block: BlockState,
+    /// Multi-home state (all homes the user has created/joined)
+    pub homes: HomesState,
 
-    /// Multi-block state (all blocks the user has created/joined)
-    pub blocks: BlocksState,
-
-    /// Neighborhood state (adjacent blocks, traversal)
+    /// Neighborhood state (adjacent homes, traversal)
     pub neighborhood: NeighborhoodState,
 }
 
@@ -50,6 +46,6 @@ impl StateSnapshot {
             && self.recovery.guardians.is_empty()
             && self.invitations.pending.is_empty()
             && self.contacts.contacts.is_empty()
-            && self.blocks.is_empty()
+            && self.homes.is_empty()
     }
 }

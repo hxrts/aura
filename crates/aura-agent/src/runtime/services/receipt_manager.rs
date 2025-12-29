@@ -2,11 +2,64 @@
 //!
 //! Manages receipt chains and audit trails for flow budget charges.
 //! Receipts provide cryptographic proof of budget consumption.
+//!
+//! ## Lifecycle Integration
+//!
+//! The receipt manager integrates with the runtime lifecycle via `start_cleanup_task()`.
+//! When enabled, it periodically prunes expired receipts based on the configured
+//! retention period.
 
 use crate::core::AgentConfig;
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
+
+use super::RuntimeTaskRegistry;
+
+/// Configuration for the receipt manager
+#[derive(Debug, Clone)]
+pub struct ReceiptManagerConfig {
+    /// Enable automatic cleanup of expired receipts
+    pub auto_cleanup_enabled: bool,
+
+    /// Interval between cleanup runs (default: 5 minutes)
+    pub cleanup_interval: Duration,
+
+    /// How long to retain receipts before pruning (default: 7 days)
+    pub retention_period: Duration,
+}
+
+impl Default for ReceiptManagerConfig {
+    fn default() -> Self {
+        Self {
+            auto_cleanup_enabled: true,
+            cleanup_interval: Duration::from_secs(300),    // 5 minutes
+            retention_period: Duration::from_secs(604800), // 7 days
+        }
+    }
+}
+
+impl ReceiptManagerConfig {
+    /// Create config for testing with shorter intervals
+    pub fn for_testing() -> Self {
+        Self {
+            auto_cleanup_enabled: true,
+            cleanup_interval: Duration::from_secs(10),
+            retention_period: Duration::from_secs(60), // 1 minute
+        }
+    }
+
+    /// Create config with cleanup disabled
+    pub fn no_cleanup() -> Self {
+        Self {
+            auto_cleanup_enabled: false,
+            ..Default::default()
+        }
+    }
+}
 
 /// Unique identifier for a receipt
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,23 +108,125 @@ pub enum ReceiptError {
 }
 
 /// Receipt manager service
+///
+/// Manages receipt chains for flow budget audit trails. Integrates with the
+/// runtime lifecycle for periodic cleanup of expired receipts.
 pub struct ReceiptManager {
     #[allow(dead_code)] // Will be used for receipt configuration
-    config: AgentConfig,
+    agent_config: AgentConfig,
+    /// Receipt manager configuration
+    config: ReceiptManagerConfig,
     /// Receipt storage by ID
-    receipts: RwLock<HashMap<ReceiptId, Receipt>>,
+    receipts: Arc<RwLock<HashMap<ReceiptId, Receipt>>>,
     /// Chain index: (ContextId, AuthorityId) -> list of ReceiptIds in order
-    chains: RwLock<HashMap<(ContextId, AuthorityId), Vec<ReceiptId>>>,
+    chains: Arc<RwLock<HashMap<(ContextId, AuthorityId), Vec<ReceiptId>>>>,
 }
 
 impl ReceiptManager {
-    /// Create a new receipt manager
-    pub fn new(config: &AgentConfig) -> Self {
+    /// Create a new receipt manager with default configuration
+    pub fn new(agent_config: &AgentConfig) -> Self {
+        Self::with_config(agent_config, ReceiptManagerConfig::default())
+    }
+
+    /// Create a new receipt manager with custom configuration
+    pub fn with_config(agent_config: &AgentConfig, config: ReceiptManagerConfig) -> Self {
         Self {
-            config: config.clone(),
-            receipts: RwLock::new(HashMap::new()),
-            chains: RwLock::new(HashMap::new()),
+            agent_config: agent_config.clone(),
+            config,
+            receipts: Arc::new(RwLock::new(HashMap::new())),
+            chains: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Start the background cleanup task
+    ///
+    /// This integrates the receipt manager with the runtime lifecycle. The cleanup
+    /// task will periodically prune expired receipts based on the retention period.
+    ///
+    /// The task is registered with the `RuntimeTaskRegistry` and will be automatically
+    /// stopped when the runtime shuts down.
+    pub fn start_cleanup_task(
+        &self,
+        tasks: Arc<RuntimeTaskRegistry>,
+        time: Arc<dyn PhysicalTimeEffects>,
+    ) {
+        if !self.config.auto_cleanup_enabled {
+            tracing::debug!("Receipt cleanup task disabled by configuration");
+            return;
+        }
+
+        let receipts = self.receipts.clone();
+        let chains = self.chains.clone();
+        let retention_ms = self.config.retention_period.as_millis() as u64;
+        let interval = self.config.cleanup_interval;
+
+        tasks.spawn_interval_until(interval, move || {
+            let receipts = receipts.clone();
+            let chains = chains.clone();
+            let time = time.clone();
+
+            async move {
+                // Get current time
+                let now_ms = match time.physical_time().await {
+                    Ok(t) => t.ts_ms,
+                    Err(e) => {
+                        tracing::warn!("Receipt cleanup: failed to get time: {}", e);
+                        return true; // Continue task
+                    }
+                };
+
+                // Calculate cutoff timestamp
+                let cutoff = now_ms.saturating_sub(retention_ms);
+
+                // Prune expired receipts
+                let mut receipts_guard = receipts.write().await;
+                let mut chains_guard = chains.write().await;
+
+                // Find expired receipt IDs
+                let expired_ids: Vec<ReceiptId> = receipts_guard
+                    .iter()
+                    .filter(|(_, r)| r.timestamp < cutoff)
+                    .map(|(id, _)| *id)
+                    .collect();
+
+                let count = expired_ids.len();
+
+                if count > 0 {
+                    // Remove from receipts
+                    for id in &expired_ids {
+                        receipts_guard.remove(id);
+                    }
+
+                    // Remove from chains
+                    for chain in chains_guard.values_mut() {
+                        chain.retain(|id| !expired_ids.contains(id));
+                    }
+
+                    // Clean up empty chains
+                    chains_guard.retain(|_, chain| !chain.is_empty());
+
+                    tracing::debug!(
+                        pruned = count,
+                        cutoff_ms = cutoff,
+                        remaining = receipts_guard.len(),
+                        "Pruned expired receipts"
+                    );
+                }
+
+                true // Continue running
+            }
+        });
+
+        tracing::info!(
+            interval_secs = self.config.cleanup_interval.as_secs(),
+            retention_days = self.config.retention_period.as_secs() / 86400,
+            "Receipt cleanup task started"
+        );
+    }
+
+    /// Get the configuration
+    pub fn config(&self) -> &ReceiptManagerConfig {
+        &self.config
     }
 
     /// Store a new receipt

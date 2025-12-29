@@ -33,7 +33,7 @@ pub const RENDEZVOUS_PACKET_SIZE: usize = 512;
 /// Default TTL for flood propagation.
 ///
 /// Packets travel at most this many hops from origin. A TTL of 3 reaches
-/// 2-hop neighborhood peers (block -> adjacent block -> their adjacent).
+/// 2-hop neighborhood peers (home -> adjacent home -> their adjacent).
 pub const DEFAULT_FLOOD_TTL: u8 = 3;
 
 /// Rendezvous packet for flooding through the network.
@@ -346,8 +346,8 @@ pub struct LayeredBudget {
     pub flood: FloodBudget,
     /// Budget for neighborhood operations.
     pub neighborhood: FlowBudget,
-    /// Budget for block operations.
-    pub block: FlowBudget,
+    /// Budget for home operations.
+    pub home: FlowBudget,
     /// Budget for direct channel traffic (innermost layer).
     pub direct: FlowBudget,
 }
@@ -358,7 +358,7 @@ impl LayeredBudget {
         Self {
             flood: FloodBudget::new(epoch),
             neighborhood: FlowBudget::new(1000, epoch),
-            block: FlowBudget::new(1000, epoch),
+            home: FlowBudget::new(1000, epoch),
             direct: FlowBudget::new(10000, epoch),
         }
     }
@@ -367,7 +367,7 @@ impl LayeredBudget {
     pub fn rotate_epoch(&mut self, next_epoch: Epoch) {
         self.flood.rotate_epoch(next_epoch);
         self.neighborhood.rotate_epoch(next_epoch);
-        self.block.rotate_epoch(next_epoch);
+        self.home.rotate_epoch(next_epoch);
         self.direct.rotate_epoch(next_epoch);
     }
 }
@@ -588,7 +588,7 @@ mod tests {
         assert!(budget.flood.can_originate());
         assert!(budget.flood.can_forward());
         assert!(budget.neighborhood.can_charge(100));
-        assert!(budget.block.can_charge(100));
+        assert!(budget.home.can_charge(100));
         assert!(budget.direct.can_charge(100));
     }
 

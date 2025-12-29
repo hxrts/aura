@@ -11,10 +11,10 @@ pub mod query;
 pub mod types;
 
 pub use facts::{
-    register_moderation_facts, BlockBanFact, BlockGrantStewardFact, BlockKickFact, BlockMuteFact,
-    BlockRevokeStewardFact, BlockUnbanFact, BlockUnmuteFact, BLOCK_BAN_FACT_TYPE_ID,
-    BLOCK_GRANT_STEWARD_FACT_TYPE_ID, BLOCK_KICK_FACT_TYPE_ID, BLOCK_MUTE_FACT_TYPE_ID,
-    BLOCK_REVOKE_STEWARD_FACT_TYPE_ID, BLOCK_UNBAN_FACT_TYPE_ID, BLOCK_UNMUTE_FACT_TYPE_ID,
+    register_moderation_facts, HomeBanFact, HomeGrantStewardFact, HomeKickFact, HomeMuteFact,
+    HomeRevokeStewardFact, HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID,
+    HOME_GRANT_STEWARD_FACT_TYPE_ID, HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID,
+    HOME_REVOKE_STEWARD_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
 };
 pub use query::{
     is_user_banned, is_user_muted, query_current_bans, query_current_mutes, query_kick_history,

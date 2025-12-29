@@ -218,7 +218,7 @@ impl CliHandler {
         let budget_status = budget::format_budget_status(&current_budget);
 
         println!();
-        println!("=== Block Storage Budget ===");
+        println!("=== Home Storage Budget ===");
         println!("{}", budget_status);
 
         Ok(())

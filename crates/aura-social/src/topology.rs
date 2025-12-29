@@ -3,12 +3,12 @@
 //! Provides a unified view of the social topology for use in relay selection
 //! and peer discovery.
 
-use crate::{Block, Neighborhood};
+use crate::{Home, Neighborhood};
 use aura_core::{
     effects::relay::{RelayCandidate, RelayRelationship},
     identifiers::AuthorityId,
 };
-use crate::facts::BlockId;
+use crate::facts::HomeId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -22,9 +22,9 @@ use std::collections::HashMap;
 pub struct SocialTopology {
     /// Our authority
     local_authority: AuthorityId,
-    /// Block we reside in (if any)
-    block: Option<Block>,
-    /// Neighborhoods our block belongs to
+    /// Home we reside in (if any)
+    home: Option<Home>,
+    /// Neighborhoods our home belongs to
     neighborhoods: Vec<Neighborhood>,
     /// Cached peer relationships for efficient lookup
     peer_relationships: HashMap<AuthorityId, RelayRelationship>,
@@ -35,16 +35,16 @@ impl SocialTopology {
     ///
     /// # Arguments
     /// * `local_authority` - Our authority ID
-    /// * `block` - The block we reside in (if any)
-    /// * `neighborhoods` - Neighborhoods our block belongs to
+    /// * `home` - The home we reside in (if any)
+    /// * `neighborhoods` - Neighborhoods our home belongs to
     pub fn new(
         local_authority: AuthorityId,
-        block: Option<Block>,
+        home: Option<Home>,
         neighborhoods: Vec<Neighborhood>,
     ) -> Self {
         let mut topology = Self {
             local_authority,
-            block,
+            home,
             neighborhoods,
             peer_relationships: HashMap::new(),
         };
@@ -56,7 +56,7 @@ impl SocialTopology {
     pub fn empty(local_authority: AuthorityId) -> Self {
         Self {
             local_authority,
-            block: None,
+            home: None,
             neighborhoods: Vec::new(),
             peer_relationships: HashMap::new(),
         }
@@ -66,30 +66,30 @@ impl SocialTopology {
     fn rebuild_peer_cache(&mut self) {
         self.peer_relationships.clear();
 
-        // Add block peers
-        if let Some(block) = &self.block {
-            let block_id_bytes = *block.block_id.as_bytes();
-            for resident in &block.residents {
+        // Add home peers
+        if let Some(home_ref) = &self.home {
+            let home_id_bytes = *home_ref.home_id.as_bytes();
+            for resident in &home_ref.residents {
                 if resident != &self.local_authority {
                     self.peer_relationships.insert(
                         *resident,
-                        RelayRelationship::BlockPeer {
-                            block_id: block_id_bytes,
+                        RelayRelationship::HomePeer {
+                            home_id: home_id_bytes,
                         },
                     );
                 }
             }
 
-            // Add neighborhood peers (excluding block peers already added)
+            // Add neighborhood peers (excluding home peers already added)
             for neighborhood in &self.neighborhoods {
-                if neighborhood.is_member(block.block_id) {
+                if neighborhood.is_member(home_ref.home_id) {
                     let _neighborhood_id_bytes = *neighborhood.neighborhood_id.as_bytes();
 
                     // We would need to know residents of other blocks
                     // For now, we track the neighborhoods we're in but can't enumerate
                     // all neighborhood peers without additional data
                     // This will be populated by higher-level code that has access
-                    // to all block residents in the neighborhood
+                    // to all home residents in the neighborhood
                 }
             }
         }
@@ -100,7 +100,7 @@ impl SocialTopology {
     /// This is used to populate neighborhood peer relationships which require
     /// knowledge of residents in other blocks.
     pub fn add_peer(&mut self, peer: AuthorityId, relationship: RelayRelationship) {
-        // Don't downgrade block peer to neighborhood peer
+        // Don't downgrade home peer to neighborhood peer
         if let Some(existing) = self.peer_relationships.get(&peer) {
             if existing.priority() < relationship.priority() {
                 return; // Keep higher priority relationship
@@ -119,16 +119,16 @@ impl SocialTopology {
         self.peer_relationships.contains_key(peer)
     }
 
-    /// Get all block peers (co-residents in our block).
-    pub fn block_peers(&self) -> Vec<AuthorityId> {
+    /// Get all home peers (co-residents in our home).
+    pub fn home_peers(&self) -> Vec<AuthorityId> {
         self.peer_relationships
             .iter()
-            .filter(|(_, rel)| rel.is_block_peer())
+            .filter(|(_, rel)| rel.is_home_peer())
             .map(|(auth, _)| *auth)
             .collect()
     }
 
-    /// Get all neighborhood peers (members of adjacent blocks in shared neighborhoods).
+    /// Get all neighborhood peers (members of adjacent homes in shared neighborhoods).
     pub fn neighborhood_peers(&self) -> Vec<AuthorityId> {
         self.peer_relationships
             .iter()
@@ -137,19 +137,19 @@ impl SocialTopology {
             .collect()
     }
 
-    /// Get all known peers (both block and neighborhood).
+    /// Get all known peers (both home and neighborhood).
     pub fn all_peers(&self) -> Vec<AuthorityId> {
         self.peer_relationships.keys().copied().collect()
     }
 
-    /// Get our block (if any).
-    pub fn our_block(&self) -> Option<&Block> {
-        self.block.as_ref()
+    /// Get our home (if any).
+    pub fn our_block(&self) -> Option<&Home> {
+        self.home.as_ref()
     }
 
-    /// Get our block ID (if any).
-    pub fn our_block_id(&self) -> Option<BlockId> {
-        self.block.as_ref().map(|b| b.block_id)
+    /// Get our home ID (if any).
+    pub fn our_home_id(&self) -> Option<HomeId> {
+        self.home.as_ref().map(|b| b.home_id)
     }
 
     /// Get neighborhoods we belong to.
@@ -162,14 +162,14 @@ impl SocialTopology {
         self.local_authority
     }
 
-    /// Check if we have social presence (are in a block).
+    /// Check if we have social presence (are in a home).
     pub fn has_social_presence(&self) -> bool {
-        self.block.is_some()
+        self.home.is_some()
     }
 
     /// Build relay candidates for a target destination.
     ///
-    /// Returns candidates in priority order (block peers first, then neighborhood peers).
+    /// Returns candidates in priority order (home peers first, then neighborhood peers).
     ///
     /// # Arguments
     /// * `destination` - The target authority we're trying to reach
@@ -206,7 +206,7 @@ impl SocialTopology {
         let mut counts = PeerCounts::default();
         for rel in self.peer_relationships.values() {
             match rel {
-                RelayRelationship::BlockPeer { .. } => counts.block_peers += 1,
+                RelayRelationship::HomePeer { .. } => counts.home_peers += 1,
                 RelayRelationship::NeighborhoodPeer { .. } => counts.neighborhood_peers += 1,
                 RelayRelationship::Guardian => counts.guardians += 1,
             }
@@ -216,14 +216,14 @@ impl SocialTopology {
 
     /// Check if a peer can relay for a target within this topology.
     ///
-    /// Both block peers and neighborhood peers can relay for anyone in the neighborhood.
+    /// Both home peers and neighborhood peers can relay for anyone in the neighborhood.
     pub fn can_relay_for(&self, relay: &AuthorityId, _target: &AuthorityId) -> bool {
         // If we don't know the relay, they can't relay for us
         if !self.knows_peer(relay) {
             return false;
         }
 
-        // All known peers (block or neighborhood) can relay for any target
+        // All known peers (home or neighborhood) can relay for any target
         // within the neighborhood scope
         // The actual validation happens at the relay node
         true
@@ -235,7 +235,7 @@ impl SocialTopology {
     /// relationship with the target:
     ///
     /// - `Direct`: Target is in our peer relationships (we know them)
-    /// - `Block`: Target unknown, but we have block presence to relay through
+    /// - `Home`: Target unknown, but we have home presence to relay through
     /// - `Neighborhood`: Target unknown, but we have neighborhood presence
     /// - `Rendezvous`: No social presence, must use external discovery
     ///
@@ -248,7 +248,7 @@ impl SocialTopology {
     /// let layer = topology.discovery_layer(&target);
     /// match layer {
     ///     DiscoveryLayer::Direct => connect_directly(&target),
-    ///     DiscoveryLayer::Block => relay_through_block_peers(&target),
+    ///     DiscoveryLayer::Home => relay_through_home_peers(&target),
     ///     DiscoveryLayer::Neighborhood => relay_through_neighborhood(&target),
     ///     DiscoveryLayer::Rendezvous => use_rendezvous_discovery(&target),
     /// }
@@ -263,7 +263,7 @@ impl SocialTopology {
         if let Some(relationship) = self.peer_relationships.get(target) {
             // Known peer - determine layer based on relationship type
             match relationship {
-                RelayRelationship::BlockPeer { .. } => return DiscoveryLayer::Direct,
+                RelayRelationship::HomePeer { .. } => return DiscoveryLayer::Direct,
                 RelayRelationship::NeighborhoodPeer { .. } => return DiscoveryLayer::Direct,
                 RelayRelationship::Guardian => return DiscoveryLayer::Direct,
             }
@@ -271,9 +271,9 @@ impl SocialTopology {
 
         // Target unknown - what resources do we have?
 
-        // Check if we have block presence (can relay through block peers)
-        if self.block.is_some() && !self.block_peers().is_empty() {
-            return DiscoveryLayer::Block;
+        // Check if we have home presence (can relay through home peers)
+        if self.home.is_some() && !self.home_peers().is_empty() {
+            return DiscoveryLayer::Home;
         }
 
         // Check if we have neighborhood presence (can relay through neighborhood)
@@ -283,8 +283,8 @@ impl SocialTopology {
 
         // Check if we have any social presence at all
         if self.has_social_presence() {
-            // We're in a block but have no peers yet
-            return DiscoveryLayer::Block;
+            // We're in a home but have no peers yet
+            return DiscoveryLayer::Home;
         }
 
         // No social presence - must use rendezvous/flooding
@@ -306,10 +306,10 @@ impl SocialTopology {
                     vec![]
                 }
             }
-            DiscoveryLayer::Block => self.block_peers(),
+            DiscoveryLayer::Home => self.home_peers(),
             DiscoveryLayer::Neighborhood => {
-                // Include both block and neighborhood peers for neighborhood-level relay
-                let mut peers = self.block_peers();
+                // Include both home and neighborhood peers for neighborhood-level relay
+                let mut peers = self.home_peers();
                 peers.extend(self.neighborhood_peers());
                 peers
             }
@@ -328,7 +328,7 @@ impl SocialTopology {
 /// Ordered from least to most specific relationship:
 /// - Rendezvous: No relationship, need external discovery
 /// - Neighborhood: Have traversal capability via neighborhood
-/// - Block: Target is in same block (can relay through co-residents)
+/// - Home: Target is in same home (can relay through co-residents)
 /// - Direct: Target is personally known (in peer relationships)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DiscoveryLayer {
@@ -337,9 +337,9 @@ pub enum DiscoveryLayer {
     /// We have neighborhood presence and can use traversal.
     /// Target may be reachable via multi-hop neighborhood relay.
     Neighborhood,
-    /// Target is reachable via block-level relay.
+    /// Target is reachable via home-level relay.
     /// We have co-residents who may be able to forward.
-    Block,
+    Home,
     /// Target is personally known - we have a direct relationship.
     /// Can attempt direct connection without relay.
     Direct,
@@ -350,7 +350,7 @@ impl DiscoveryLayer {
     pub fn priority(self) -> u8 {
         match self {
             DiscoveryLayer::Direct => 0,
-            DiscoveryLayer::Block => 1,
+            DiscoveryLayer::Home => 1,
             DiscoveryLayer::Neighborhood => 2,
             DiscoveryLayer::Rendezvous => 3,
         }
@@ -361,11 +361,11 @@ impl DiscoveryLayer {
         matches!(self, DiscoveryLayer::Direct)
     }
 
-    /// Check if this layer has social presence (block or neighborhood).
+    /// Check if this layer has social presence (home or neighborhood).
     pub fn has_social_presence(self) -> bool {
         matches!(
             self,
-            DiscoveryLayer::Direct | DiscoveryLayer::Block | DiscoveryLayer::Neighborhood
+            DiscoveryLayer::Direct | DiscoveryLayer::Home | DiscoveryLayer::Neighborhood
         )
     }
 }
@@ -373,8 +373,8 @@ impl DiscoveryLayer {
 /// Counts of peers by relationship type.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeerCounts {
-    /// Number of block peers
-    pub block_peers: usize,
+    /// Number of home peers
+    pub home_peers: usize,
     /// Number of neighborhood peers
     pub neighborhood_peers: usize,
     /// Number of guardians
@@ -384,7 +384,7 @@ pub struct PeerCounts {
 impl PeerCounts {
     /// Get total peer count.
     pub fn total(&self) -> usize {
-        self.block_peers + self.neighborhood_peers + self.guardians
+        self.home_peers + self.neighborhood_peers + self.guardians
     }
 }
 
@@ -403,7 +403,7 @@ mod tests {
         let topology = SocialTopology::empty(authority);
 
         assert!(!topology.has_social_presence());
-        assert!(topology.block_peers().is_empty());
+        assert!(topology.home_peers().is_empty());
         assert!(topology.neighborhood_peers().is_empty());
     }
 
@@ -413,18 +413,18 @@ mod tests {
         let peer1 = test_authority(2);
         let peer2 = test_authority(3);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
-        let mut block = Block::new_empty(block_id);
-        block.residents = vec![local, peer1, peer2];
+        let home_id = HomeId::from_bytes([1u8; 32]);
+        let mut home_state = Home::new_empty(home_id);
+        home_state.residents = vec![local, peer1, peer2];
 
-        let topology = SocialTopology::new(local, Some(block), vec![]);
+        let topology = SocialTopology::new(local, Some(home_state), vec![]);
 
         assert!(topology.has_social_presence());
-        let block_peers = topology.block_peers();
-        assert_eq!(block_peers.len(), 2);
-        assert!(block_peers.contains(&peer1));
-        assert!(block_peers.contains(&peer2));
-        assert!(!block_peers.contains(&local)); // Self excluded
+        let home_peers = topology.home_peers();
+        assert_eq!(home_peers.len(), 2);
+        assert!(home_peers.contains(&peer1));
+        assert!(home_peers.contains(&peer2));
+        assert!(!home_peers.contains(&local)); // Self excluded
     }
 
     #[test]
@@ -432,7 +432,7 @@ mod tests {
         let local = test_authority(1);
         let peer = test_authority(2);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
         let neighborhood_id = NeighborhoodId::from_bytes([1u8; 32]);
 
         let mut topology = SocialTopology::empty(local);
@@ -449,14 +449,14 @@ mod tests {
             .unwrap()
             .is_neighborhood_peer());
 
-        // Try to "upgrade" to block peer - should succeed
+        // Try to "upgrade" to home peer - should succeed
         topology.add_peer(
             peer,
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
-        assert!(topology.relationship_with(&peer).unwrap().is_block_peer());
+        assert!(topology.relationship_with(&peer).unwrap().is_home_peer());
 
         // Try to "downgrade" back to neighborhood peer - should be ignored
         topology.add_peer(
@@ -465,24 +465,24 @@ mod tests {
                 neighborhood_id: *neighborhood_id.as_bytes(),
             },
         );
-        assert!(topology.relationship_with(&peer).unwrap().is_block_peer());
+        assert!(topology.relationship_with(&peer).unwrap().is_home_peer());
     }
 
     #[test]
     fn test_build_relay_candidates() {
         let local = test_authority(1);
-        let block_peer = test_authority(2);
+        let home_peer = test_authority(2);
         let neighborhood_peer = test_authority(3);
         let target = test_authority(4);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
         let neighborhood_id = NeighborhoodId::from_bytes([1u8; 32]);
 
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
-            block_peer,
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            home_peer,
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
@@ -496,28 +496,28 @@ mod tests {
         let candidates = topology.build_relay_candidates(&target, |_| true);
 
         assert_eq!(candidates.len(), 2);
-        // Block peer should be first (higher priority)
-        assert!(candidates[0].relationship.is_block_peer());
+        // Home peer should be first (higher priority)
+        assert!(candidates[0].relationship.is_home_peer());
         assert!(candidates[1].relationship.is_neighborhood_peer());
     }
 
     #[test]
     fn test_peer_counts() {
         let local = test_authority(1);
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
         let neighborhood_id = NeighborhoodId::from_bytes([1u8; 32]);
 
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             test_authority(2),
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
             test_authority(3),
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
@@ -529,7 +529,7 @@ mod tests {
         topology.add_peer(test_authority(5), RelayRelationship::Guardian);
 
         let counts = topology.peer_counts();
-        assert_eq!(counts.block_peers, 2);
+        assert_eq!(counts.home_peers, 2);
         assert_eq!(counts.neighborhood_peers, 1);
         assert_eq!(counts.guardians, 1);
         assert_eq!(counts.total(), 4);
@@ -548,13 +548,13 @@ mod tests {
     fn test_discovery_layer_known_peer() {
         let local = test_authority(1);
         let peer = test_authority(2);
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
 
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer,
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
 
@@ -568,14 +568,14 @@ mod tests {
         let peer1 = test_authority(2);
         let unknown = test_authority(99);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
-        let mut block = Block::new_empty(block_id);
-        block.residents = vec![local, peer1];
+        let home_id = HomeId::from_bytes([1u8; 32]);
+        let mut home_state = Home::new_empty(home_id);
+        home_state.residents = vec![local, peer1];
 
-        let topology = SocialTopology::new(local, Some(block), vec![]);
+        let topology = SocialTopology::new(local, Some(home_state), vec![]);
 
-        // Unknown target with block presence should be Block layer
-        assert_eq!(topology.discovery_layer(&unknown), DiscoveryLayer::Block);
+        // Unknown target with home presence should be Home layer
+        assert_eq!(topology.discovery_layer(&unknown), DiscoveryLayer::Home);
     }
 
     #[test]
@@ -595,20 +595,20 @@ mod tests {
     #[test]
     fn test_discovery_layer_priority() {
         // Test that DiscoveryLayer priorities are correct
-        assert!(DiscoveryLayer::Direct.priority() < DiscoveryLayer::Block.priority());
-        assert!(DiscoveryLayer::Block.priority() < DiscoveryLayer::Neighborhood.priority());
+        assert!(DiscoveryLayer::Direct.priority() < DiscoveryLayer::Home.priority());
+        assert!(DiscoveryLayer::Home.priority() < DiscoveryLayer::Neighborhood.priority());
         assert!(DiscoveryLayer::Neighborhood.priority() < DiscoveryLayer::Rendezvous.priority());
     }
 
     #[test]
     fn test_discovery_layer_predicates() {
         assert!(DiscoveryLayer::Direct.is_known());
-        assert!(!DiscoveryLayer::Block.is_known());
+        assert!(!DiscoveryLayer::Home.is_known());
         assert!(!DiscoveryLayer::Neighborhood.is_known());
         assert!(!DiscoveryLayer::Rendezvous.is_known());
 
         assert!(DiscoveryLayer::Direct.has_social_presence());
-        assert!(DiscoveryLayer::Block.has_social_presence());
+        assert!(DiscoveryLayer::Home.has_social_presence());
         assert!(DiscoveryLayer::Neighborhood.has_social_presence());
         assert!(!DiscoveryLayer::Rendezvous.has_social_presence());
     }
@@ -620,20 +620,20 @@ mod tests {
         let peer2 = test_authority(3);
         let unknown = test_authority(99);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
-        let mut block = Block::new_empty(block_id);
-        block.residents = vec![local, peer1, peer2];
+        let home_id = HomeId::from_bytes([1u8; 32]);
+        let mut home_state = Home::new_empty(home_id);
+        home_state.residents = vec![local, peer1, peer2];
 
-        let topology = SocialTopology::new(local, Some(block), vec![]);
+        let topology = SocialTopology::new(local, Some(home_state), vec![]);
 
         // Known peer should return Direct with the peer
         let (layer, peers) = topology.discovery_context(&peer1);
         assert_eq!(layer, DiscoveryLayer::Direct);
         assert_eq!(peers, vec![peer1]);
 
-        // Unknown target should return Block with block peers
+        // Unknown target should return Home with home peers
         let (layer, peers) = topology.discovery_context(&unknown);
-        assert_eq!(layer, DiscoveryLayer::Block);
+        assert_eq!(layer, DiscoveryLayer::Home);
         assert_eq!(peers.len(), 2);
         assert!(peers.contains(&peer1));
         assert!(peers.contains(&peer2));

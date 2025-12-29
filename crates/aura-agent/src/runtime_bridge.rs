@@ -15,6 +15,7 @@ use aura_app::signal_defs::INVITATIONS_SIGNAL;
 use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
 use aura_app::ReactiveHandler;
+use aura_consensus::protocol::ConsensusParams;
 use aura_core::effects::{
     amp::{
         AmpChannelEffects, AmpChannelError, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
@@ -24,7 +25,8 @@ use aura_core::effects::{
     reactive::ReactiveEffects,
     task::TaskSpawner,
     time::PhysicalTimeEffects,
-    StorageCoreEffects, ThresholdSigningEffects, TransportEffects,
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
+    ThresholdSigningEffects, TransportEffects,
 };
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -35,16 +37,23 @@ use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
 use aura_core::EffectContext;
+use aura_core::AuraError;
 use aura_core::Hash32;
-use aura_journal::fact::{CommittedChannelEpochBump, RelationalFact};
-use aura_journal::DomainFact;
-use aura_protocol::amp::AmpJournalEffects;
+use aura_core::Prestate;
+use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump, RelationalFact};
+use aura_journal::{DomainFact, FactJournal};
+use aura_protocol::amp::{commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects};
 use aura_protocol::effects::TreeEffects;
-use aura_social::moderation::facts::{BlockPinFact, BlockUnpinFact};
+use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
-    BlockBanFact, BlockKickFact, BlockMuteFact, BlockUnbanFact, BlockUnmuteFact,
+    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
 use serde::{Deserialize, Serialize};
+use crate::runtime::consensus::{
+    build_consensus_params, membership_hash_from_participants,
+    participant_identity_to_authority_id,
+};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Wrapper to implement RuntimeBridge for AuraAgent
@@ -63,50 +72,48 @@ impl AgentRuntimeBridge {
     }
 }
 
-fn participant_identity_to_authority_id(
-    identity: &ParticipantIdentity,
-) -> Result<AuthorityId, IntentError> {
-    match identity {
-        ParticipantIdentity::Guardian(id) => Ok(*id),
-        ParticipantIdentity::GroupMember { member, .. } => Ok(*member),
-        ParticipantIdentity::Device(device_id) => {
-            let bytes = device_id.to_bytes().map_err(|_| {
-                IntentError::internal_error("Failed to convert device id to bytes".to_string())
-            })?;
-            Ok(AuthorityId::new_from_entropy(hash(&bytes)))
-        }
-    }
+fn map_consensus_error(err: AuraError) -> IntentError {
+    IntentError::internal_error(format!("{err}"))
 }
 
-fn membership_hash_from_participants(participants: &[AuthorityId]) -> Hash32 {
-    let mut sorted = participants.to_vec();
-    sorted.sort_by(|a, b| a.to_bytes().cmp(&b.to_bytes()));
-    let mut bytes = Vec::with_capacity(sorted.len() * 16);
-    for id in sorted {
-        bytes.extend_from_slice(&id.to_bytes());
+fn context_commitment_from_journal(
+    context: ContextId,
+    journal: &FactJournal,
+) -> Result<Hash32, IntentError> {
+    let mut hasher = aura_core::hash::hasher();
+    hasher.update(b"RELATIONAL_CONTEXT_FACTS");
+    hasher.update(context.as_bytes());
+    for fact in journal.facts.iter() {
+        let bytes = aura_core::util::serialization::to_vec(fact)
+            .map_err(|e| IntentError::internal_error(format!("Serialize context fact: {e}")))?;
+        hasher.update(&bytes);
     }
-    Hash32(hash(&bytes))
+    Ok(Hash32(hasher.finalize()))
 }
 
-async fn persist_stub_dkg_transcript(
+async fn persist_consensus_dkg_transcript(
     effects: Arc<crate::runtime::AuraEffectSystem>,
+    prestate: Prestate,
+    params: ConsensusParams,
     authority_id: AuthorityId,
     epoch: u64,
     threshold: u16,
     max_signers: u16,
     participants: &[ParticipantIdentity],
-    prestate_hash: Hash32,
     operation_hash: Hash32,
 ) -> Result<Option<Hash32>, IntentError> {
     let mut participant_ids = Vec::with_capacity(participants.len());
     for participant in participants {
-        participant_ids.push(participant_identity_to_authority_id(participant)?);
+        participant_ids.push(
+            participant_identity_to_authority_id(participant).map_err(map_consensus_error)?,
+        );
     }
 
     let membership_hash = membership_hash_from_participants(&participant_ids);
     let context = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+    let prestate_hash = prestate.compute_hash();
 
-    let config = aura_consensus::dkg::types::DkgConfig {
+    let config = aura_consensus::dkg::DkgConfig {
         epoch,
         threshold,
         max_signers,
@@ -126,28 +133,34 @@ async fn persist_stub_dkg_transcript(
         packages.push(package);
     }
 
-    let transcript =
-        aura_consensus::dkg::ceremony::run_dkg_ceremony(&config, packages).map_err(|e| {
-            IntentError::internal_error(format!("Finalize DKG transcript failed: {e}"))
-        })?;
-
     let store = aura_consensus::dkg::StorageTranscriptStore::new_default(effects.clone());
-    let commit =
-        aura_consensus::dkg::ceremony::persist_transcript(&store, context, &transcript)
-            .await
-            .map_err(|e| IntentError::internal_error(format!("Persist transcript failed: {e}")))?;
+    let (commit, consensus_commit) = aura_consensus::dkg::run_consensus_dkg(
+        &prestate,
+        context,
+        &config,
+        packages,
+        &store,
+        params,
+        effects.as_ref(),
+        effects.as_ref(),
+    )
+    .await
+    .map_err(|e| IntentError::internal_error(format!("Finalize DKG transcript failed: {e}")))?;
 
     effects
-        .commit_relational_facts(vec![RelationalFact::Protocol(
-            aura_journal::ProtocolRelationalFact::DkgTranscriptCommit(commit.clone()),
-        )])
+        .commit_relational_facts(vec![
+            RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::DkgTranscriptCommit(
+                commit.clone(),
+            )),
+            consensus_commit.to_relational_fact(),
+        ])
         .await
         .map_err(|e| IntentError::internal_error(format!("Commit DKG fact failed: {e}")))?;
 
-    tracing::warn!(
+    tracing::info!(
         authority_id = %authority_id,
         epoch,
-        "Persisted stub DKG transcript (placeholder for consensus DKG)"
+        "Persisted consensus-backed DKG transcript"
     );
 
     Ok(commit.blob_ref.or(Some(commit.transcript_hash)))
@@ -290,26 +303,71 @@ impl RuntimeBridge for AgentRuntimeBridge {
         reason: String,
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
+        let authority_id = self.agent.authority_id();
         let state = aura_protocol::amp::get_channel_state(&effects, context, channel)
             .await
             .map_err(|e| IntentError::internal_error(format!("AMP state lookup failed: {e}")))?;
-
-        let committed = CommittedChannelEpochBump {
+        let bump_nonce = effects
+            .random_bytes(32)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("AMP bump nonce failed: {e}")))?;
+        let bump_id = Hash32(hash(&bump_nonce));
+        let proposal = ProposedChannelEpochBump {
             context,
             channel,
             parent_epoch: state.chan_epoch,
             new_epoch: state.chan_epoch + 1,
-            chosen_bump_id: Default::default(),
-            consensus_id: Default::default(),
-            transcript_ref: None,
+            bump_id,
+            reason: ChannelBumpReason::Routine,
         };
 
-        effects
-            .insert_relational_fact(RelationalFact::Protocol(
-                aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(committed),
-            ))
+        emit_proposed_bump(effects.as_ref(), proposal.clone())
             .await
-            .map_err(|e| IntentError::internal_error(format!("AMP epoch bump failed: {e}")))?;
+            .map_err(|e| IntentError::internal_error(format!("AMP proposal failed: {e}")))?;
+
+        let policy = aura_core::threshold::policy_for(
+            aura_core::threshold::CeremonyFlow::AmpEpochBump,
+        );
+        if policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            let tree_state = effects
+                .get_current_state()
+                .await
+                .map_err(|e| IntentError::internal_error(format!("Tree state lookup failed: {e}")))?;
+            let journal = effects
+                .fetch_context_journal(context)
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!("Context journal lookup failed: {e}"))
+                })?;
+            let context_commitment = context_commitment_from_journal(context, &journal)?;
+            let prestate = Prestate::new(
+                vec![(authority_id, tree_state.root_commitment)],
+                context_commitment,
+            );
+
+            let params = build_consensus_params(effects.as_ref(), authority_id, effects.as_ref())
+                .await
+                .map_err(map_consensus_error)?;
+
+            let transcript_ref = effects
+                .latest_dkg_transcript_commit(authority_id, context)
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!("AMP transcript lookup failed: {e}"))
+                })?
+                .and_then(|commit| commit.blob_ref.or(Some(commit.transcript_hash)));
+
+            commit_bump_with_consensus(
+                effects.as_ref(),
+                &prestate,
+                &proposal,
+                params.key_packages,
+                params.group_public_key,
+                transcript_ref,
+            )
+            .await
+            .map_err(|e| IntentError::internal_error(format!("AMP finalize failed: {e}")))?;
+        }
 
         tracing::info!(
             context = %context,
@@ -422,7 +480,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
 
-        let fact = BlockKickFact::new_ms(
+        let fact = HomeKickFact::new_ms(
             context_id,
             channel_id,
             target,
@@ -448,7 +506,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
 
-        let fact = BlockBanFact::new_ms(
+        let fact = HomeBanFact::new_ms(
             context_id,
             None,
             target,
@@ -474,7 +532,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
 
-        let fact = BlockUnbanFact::new_ms(
+        let fact = HomeUnbanFact::new_ms(
             context_id,
             None,
             target,
@@ -500,7 +558,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
         let expires_at = duration_secs.map(|s| now.ts_ms.saturating_add(s.saturating_mul(1000)));
 
-        let fact = BlockMuteFact::new_ms(
+        let fact = HomeMuteFact::new_ms(
             context_id,
             None,
             target,
@@ -526,7 +584,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
 
-        let fact = BlockUnmuteFact::new_ms(
+        let fact = HomeUnmuteFact::new_ms(
             context_id,
             None,
             target,
@@ -550,7 +608,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
 
-        let fact = BlockPinFact::new_ms(
+        let fact = HomePinFact::new_ms(
             context_id,
             channel_id,
             message_id,
@@ -574,7 +632,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
 
-        let fact = BlockUnpinFact::new_ms(
+        let fact = HomeUnpinFact::new_ms(
             context_id,
             channel_id,
             message_id,
@@ -881,6 +939,27 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn commit_guardian_key_rotation(&self, new_epoch: Epoch) -> Result<(), IntentError> {
         let authority = self.agent.authority_id();
         let signing_service = self.agent.threshold_signing();
+        let policy = aura_core::threshold::policy_for(
+            aura_core::threshold::CeremonyFlow::GuardianSetupRotation,
+        );
+
+        if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
+            let effects = self.agent.runtime().effects();
+            let context_id = ContextId::new_from_entropy(hash(&authority.to_bytes()));
+            let has_commit = effects
+                .has_dkg_transcript_commit(authority, context_id, new_epoch.value())
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to verify DKG transcript commit: {e}"
+                    ))
+                })?;
+            if !has_commit {
+                return Err(IntentError::validation_failed(
+                    "Missing consensus DKG transcript".to_string(),
+                ));
+            }
+        }
 
         signing_service
             .commit_key_rotation(&authority, new_epoch.value())
@@ -908,7 +987,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         total_n: u16,
         guardian_ids: &[String],
     ) -> Result<String, IntentError> {
-        use aura_core::effects::ThresholdSigningEffects;
+        use aura_core::effects::{
+            SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+            ThresholdSigningEffects,
+        };
         use aura_core::hash::hash;
         use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
         use aura_recovery::guardian_ceremony::GuardianState;
@@ -942,6 +1024,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         // Step 2: Compute prestate + operation hashes and derive a ceremony id.
         let authority_id = self.agent.authority_id();
         let signing_service = self.agent.threshold_signing();
+        let effects = self.agent.runtime().effects();
 
         let current_state = match signing_service.threshold_state(&authority_id).await {
             Some(state) => {
@@ -970,7 +1053,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
             None => GuardianState::empty(),
         };
 
-        let prestate_hash = current_state.compute_prestate_hash(&authority_id);
+        let tree_state = effects
+            .get_current_state()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read tree state: {e}")))?;
+        let context_commitment = current_state.compute_prestate_hash(&authority_id);
+        let prestate = Prestate::new(
+            vec![(authority_id, tree_state.root_commitment)],
+            context_commitment,
+        );
+        let prestate_hash = prestate.compute_hash();
         let threshold_k_value = threshold_k.value();
         let operation = GuardianRotationOp {
             threshold_k: threshold_k_value,
@@ -981,14 +1073,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let operation_hash = operation.compute_hash();
 
         if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
-            let _ = persist_stub_dkg_transcript(
-                self.agent.runtime().effects(),
+            let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
+                .await
+                .map_err(map_consensus_error)?;
+            let _ = persist_consensus_dkg_transcript(
+                effects.clone(),
+                prestate,
+                params,
                 authority_id,
                 new_epoch.value(),
                 threshold_k_value,
                 total_n,
                 &participants,
-                prestate_hash,
                 operation_hash,
             )
             .await?;
@@ -1084,6 +1180,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
+        let signing_service = self.agent.threshold_signing();
+        let signing_service = self.agent.threshold_signing();
         let current_device_id = self.agent.context().device_id();
 
         let mut parsed_devices: Vec<aura_core::DeviceId> = Vec::with_capacity(device_ids.len());
@@ -1198,7 +1296,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             total_n,
         ))
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
-        let prestate_hash = aura_core::Hash32(hash(&prestate_input));
+        let context_commitment = aura_core::Hash32(hash(&prestate_input));
+        let prestate = Prestate::new(
+            vec![(authority_id, tree_state.root_commitment)],
+            context_commitment,
+        );
+        let prestate_hash = prestate.compute_hash();
 
         let op_input = serde_json::to_vec(&(
             pending_epoch.value(),
@@ -1210,14 +1313,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
-            let _ = persist_stub_dkg_transcript(
+            let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
+                .await
+                .map_err(map_consensus_error)?;
+            let _ = persist_consensus_dkg_transcript(
                 effects.clone(),
+                prestate,
+                params,
                 authority_id,
                 pending_epoch.value(),
                 threshold_value,
                 total_n,
                 &participants,
-                prestate_hash,
                 op_hash,
             )
             .await?;
@@ -1502,7 +1609,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             participant_device_ids.clone(),
         ))
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
-        let prestate_hash = aura_core::Hash32(hash(&prestate_input));
+        let context_commitment = aura_core::Hash32(hash(&prestate_input));
+        let prestate = Prestate::new(
+            vec![(authority_id, tree_state.root_commitment)],
+            context_commitment,
+        );
+        let prestate_hash = prestate.compute_hash();
 
         let op_input = serde_json::to_vec(&(
             new_device_id,
@@ -1724,24 +1836,37 @@ impl RuntimeBridge for AgentRuntimeBridge {
             aura_core::threshold::CeremonyFlow::DeviceRemoval,
         );
 
-        // For now, only support removing a device when the result is a single-device account.
-        // Supporting multi-device removals requires distributing fresh shares to all remaining devices.
-        if remaining_devices.len() != 1 {
-            return Err(IntentError::validation_failed(
-                "Device removal for multi-device accounts is not yet supported".to_string(),
-            ));
-        }
+        let mut other_device_ids: Vec<aura_core::DeviceId> = remaining_devices
+            .iter()
+            .copied()
+            .filter(|id| *id != current_device_id)
+            .collect();
+        other_device_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
 
-        let participants: Vec<ParticipantIdentity> = remaining_devices
+        let mut participant_device_ids: Vec<aura_core::DeviceId> =
+            Vec::with_capacity(other_device_ids.len() + 1);
+        participant_device_ids.push(current_device_id);
+        participant_device_ids.extend(other_device_ids.iter().copied());
+
+        let participants: Vec<ParticipantIdentity> = participant_device_ids
             .iter()
             .copied()
             .map(ParticipantIdentity::device)
             .collect();
 
         let total_n: u16 = participants.len().try_into().unwrap_or(u16::MAX);
-        let threshold_k = total_n;
+        let mut threshold_k = if let Some(config) = self.get_threshold_config().await {
+            config.threshold
+        } else if total_n <= 2 {
+            total_n
+        } else {
+            2
+        };
+        if threshold_k == 0 || threshold_k > total_n {
+            threshold_k = total_n;
+        }
 
-        let (pending_epoch, _key_packages, _public_key) = effects
+        let (pending_epoch, key_packages, _public_key) = effects
             .rotate_keys(&authority_id, threshold_k, total_n, &participants)
             .await
             .map_err(|e| {
@@ -1751,6 +1876,61 @@ impl RuntimeBridge for AgentRuntimeBridge {
             })?;
         let pending_epoch = Epoch::new(pending_epoch);
 
+        let pubkey_location = SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority_id),
+            format!("{}", pending_epoch.value()),
+        );
+        let config_location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            format!("{}", authority_id),
+            format!("{}", pending_epoch.value()),
+        );
+
+        let public_key_package = match effects
+            .secure_retrieve(
+                &pubkey_location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+        {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!(error = %e, "Missing device removal public key package");
+                Vec::new()
+            }
+        };
+
+        let threshold_config = match effects
+            .secure_retrieve(
+                &config_location,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+        {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!(error = %e, "Missing device removal threshold config");
+                Vec::new()
+            }
+        };
+
+        let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
+            std::collections::HashMap::new();
+        for (device_id, key_package) in participant_device_ids
+            .iter()
+            .copied()
+            .zip(key_packages.iter())
+        {
+            key_package_by_device.insert(device_id, key_package.clone());
+        }
+
         // Compute a best-effort prestate-bound ceremony id.
         let prestate_input = serde_json::to_vec(&(
             tree_state.epoch,
@@ -1758,7 +1938,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             target_device_id,
         ))
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
-        let prestate_hash = aura_core::Hash32(hash(&prestate_input));
+        let context_commitment = aura_core::Hash32(hash(&prestate_input));
+        let prestate = Prestate::new(
+            vec![(authority_id, tree_state.root_commitment)],
+            context_commitment,
+        );
+        let prestate_hash = prestate.compute_hash();
 
         let op_input = serde_json::to_vec(&(
             target_device_id,
@@ -1770,14 +1955,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
-            let _ = persist_stub_dkg_transcript(
+            let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
+                .await
+                .map_err(map_consensus_error)?;
+            let _ = persist_consensus_dkg_transcript(
                 effects.clone(),
+                prestate,
+                params,
                 authority_id,
                 pending_epoch.value(),
                 threshold_k,
                 total_n,
                 &participants,
-                prestate_hash,
                 op_hash,
             )
             .await?;
@@ -1797,56 +1986,161 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .register(
                 ceremony_id.clone(),
                 aura_app::runtime_bridge::CeremonyKind::DeviceRemoval,
-                0,
-                0,
-                Vec::new(),
+                threshold_k,
+                total_n,
+                participants.clone(),
                 pending_epoch.value(),
-                None,
+                Some(target_device_id),
             )
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to register ceremony: {e}"))
             })?;
 
-        // Apply the membership change and commit the key rotation.
-        let op = aura_core::tree::TreeOp {
-            parent_epoch: tree_state.epoch,
-            parent_commitment: tree_state.root_commitment,
-            op: aura_core::tree::TreeOpKind::RemoveLeaf {
-                leaf: leaf_to_remove,
-                reason: 0,
-            },
-            version: 1,
+        let _ = tracker
+            .mark_accepted(&ceremony_id, ParticipantIdentity::device(current_device_id))
+            .await;
+
+        use base64::Engine;
+        let config_b64 = if threshold_config.is_empty() {
+            None
+        } else {
+            Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config))
+        };
+        let pubkey_b64 = if public_key_package.is_empty() {
+            None
+        } else {
+            Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package))
         };
 
-        let attested = aura_core::tree::AttestedOp {
-            op,
-            agg_sig: Vec::new(),
-            signer_count: 1,
+        let context_entropy = {
+            let mut h = aura_core::hash::hasher();
+            h.update(b"DEVICE_THRESHOLD_CONTEXT");
+            h.update(&authority_id.to_bytes());
+            h.update(ceremony_id.as_bytes());
+            h.finalize()
         };
+        let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
 
-        if let Err(e) = effects.apply_attested_op(attested).await {
-            let _ = tracker
-                .mark_failed(&ceremony_id, Some(format!("Failed to apply tree op: {e}")))
-                .await;
-            return Err(IntentError::internal_error(format!(
-                "Failed to apply tree op for device removal: {e}"
-            )));
+        for device_id in participant_device_ids.iter().copied() {
+            if device_id == current_device_id {
+                continue;
+            }
+
+            let Some(key_package) = key_package_by_device.get(&device_id).cloned() else {
+                return Err(IntentError::internal_error(format!(
+                    "Missing key package for device {}",
+                    device_id
+                )));
+            };
+
+            let mut metadata = std::collections::HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                "application/aura-device-threshold-key-package".to_string(),
+            );
+            metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+            metadata.insert(
+                "pending-epoch".to_string(),
+                pending_epoch.value().to_string(),
+            );
+            metadata.insert(
+                "initiator-device-id".to_string(),
+                current_device_id.to_string(),
+            );
+            metadata.insert("participant-device-id".to_string(), device_id.to_string());
+            metadata.insert(
+                "aura-destination-device-id".to_string(),
+                device_id.to_string(),
+            );
+            if let Some(config_b64) = config_b64.as_ref() {
+                metadata.insert("threshold-config".to_string(), config_b64.clone());
+            }
+            if let Some(pubkey_b64) = pubkey_b64.as_ref() {
+                metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
+            }
+
+            let envelope = aura_core::effects::TransportEnvelope {
+                destination: authority_id,
+                source: authority_id,
+                context: ceremony_context,
+                payload: key_package,
+                metadata,
+                receipt: None,
+            };
+
+            effects.send_envelope(envelope).await.map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to send device removal key package to {}: {e}",
+                    device_id
+                ))
+            })?;
         }
 
-        if let Err(e) = effects
-            .commit_key_rotation(&authority_id, pending_epoch.value())
-            .await
-        {
-            let _ = tracker
-                .mark_failed(&ceremony_id, Some(format!("Commit failed: {e}")))
-                .await;
-            return Err(IntentError::internal_error(format!(
-                "Failed to commit key rotation: {e}"
-            )));
+        if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
+            let context_id =
+                ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+            let has_commit = effects
+                .has_dkg_transcript_commit(authority_id, context_id, pending_epoch.value())
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to verify DKG transcript commit: {e}"
+                    ))
+                })?;
+            if !has_commit {
+                let _ = tracker
+                    .mark_failed(
+                        &ceremony_id,
+                        Some("Missing consensus DKG transcript".to_string()),
+                    )
+                    .await;
+                return Err(IntentError::validation_failed(
+                    "Missing consensus DKG transcript".to_string(),
+                ));
+            }
         }
 
-        let _ = tracker.mark_committed(&ceremony_id).await;
+        if total_n == 1 && threshold_k == 1 {
+            let op = aura_core::tree::TreeOp {
+                parent_epoch: tree_state.epoch,
+                parent_commitment: tree_state.root_commitment,
+                op: aura_core::tree::TreeOpKind::RemoveLeaf {
+                    leaf: leaf_to_remove,
+                    reason: 0,
+                },
+                version: 1,
+            };
+
+            let attested = aura_core::tree::AttestedOp {
+                op,
+                agg_sig: Vec::new(),
+                signer_count: 1,
+            };
+
+            if let Err(e) = effects.apply_attested_op(attested).await {
+                let _ = tracker
+                    .mark_failed(&ceremony_id, Some(format!("Failed to apply tree op: {e}")))
+                    .await;
+                return Err(IntentError::internal_error(format!(
+                    "Failed to apply tree op for device removal: {e}"
+                )));
+            }
+
+            if let Err(e) = effects
+                .commit_key_rotation(&authority_id, pending_epoch.value())
+                .await
+            {
+                let _ = tracker
+                    .mark_failed(&ceremony_id, Some(format!("Commit failed: {e}")))
+                    .await;
+                return Err(IntentError::internal_error(format!(
+                    "Failed to commit key rotation: {e}"
+                )));
+            }
+
+            let _ = tracker.mark_committed(&ceremony_id).await;
+        }
 
         Ok(ceremony_id)
     }
@@ -2008,7 +2302,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn create_channel_invitation(
         &self,
         receiver: AuthorityId,
-        block_id: String,
+        home_id: String,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
@@ -2017,7 +2311,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })?;
 
         let invitation = invitation_service
-            .invite_to_channel(receiver, block_id, message, ttl_ms)
+            .invite_to_channel(receiver, home_id, message, ttl_ms)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to create channel invitation: {}", e))
@@ -2391,9 +2685,9 @@ fn convert_invitation_type_to_bridge(
                 subject_authority: *subject_authority,
             }
         }
-        crate::handlers::invitation::InvitationType::Channel { block_id } => {
+        crate::handlers::invitation::InvitationType::Channel { home_id } => {
             InvitationBridgeType::Channel {
-                block_id: block_id.clone(),
+                home_id: home_id.clone(),
             }
         }
         crate::handlers::invitation::InvitationType::DeviceEnrollment {

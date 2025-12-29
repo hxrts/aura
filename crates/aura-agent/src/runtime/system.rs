@@ -17,6 +17,7 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Main runtime system for the agent
 pub struct RuntimeSystem {
@@ -215,6 +216,30 @@ impl RuntimeSystem {
     /// Get the runtime task registry.
     pub fn tasks(&self) -> Arc<RuntimeTaskRegistry> {
         self.runtime_tasks.clone()
+    }
+
+    /// Start background maintenance tasks (cleanup, pruning).
+    pub fn start_maintenance_tasks(&self) {
+        let tasks = self.runtime_tasks.clone();
+        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+            Arc::new(self.effect_system.time_effects().clone());
+        let ceremony_tracker = self.ceremony_tracker.clone();
+        let sync_manager = self.sync_manager.clone();
+
+        // Sync service maintains its own cleanup schedule.
+        if let Some(sync_manager) = sync_manager.as_ref() {
+            sync_manager.start_maintenance_task(tasks.clone(), time_effects.clone());
+        }
+
+        // General runtime maintenance loop (ceremony timeouts, etc.).
+        let interval = Duration::from_secs(60);
+        tasks.spawn_interval_until(interval, move || {
+            let ceremony_tracker = ceremony_tracker.clone();
+            async move {
+                let _ = ceremony_tracker.cleanup_timed_out().await;
+                true
+            }
+        });
     }
 
     /// Get the runtime task spawner as a trait object.

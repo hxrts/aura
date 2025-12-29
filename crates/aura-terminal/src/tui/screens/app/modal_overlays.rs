@@ -14,7 +14,7 @@ use crate::tui::props::{
     ChatViewProps, ContactsViewProps, NeighborhoodViewProps, SettingsViewProps,
 };
 use crate::tui::screens::{
-    BlockCreateModal, ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal,
+    HomeCreateModal, ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal,
     GuardianCandidateProps, GuardianSetupKind, GuardianSetupModal, InvitationCodeModal,
     InvitationCreateModal, InvitationImportModal,
 };
@@ -567,20 +567,20 @@ pub fn render_remove_device_modal(settings: &SettingsViewProps) -> Option<AnyEle
 // Neighborhood Screen Modal Render Functions
 // =============================================================================
 
-pub fn render_block_create_modal(
+pub fn render_home_create_modal(
     neighborhood: &NeighborhoodViewProps,
 ) -> Option<AnyElement<'static>> {
-    if neighborhood.block_create_modal_visible {
+    if neighborhood.home_create_modal_visible {
         Some(
             element! {
                 ModalFrame {
-                    BlockCreateModal(
-                        state: crate::tui::state::views::BlockCreateModalState {
-                            name: neighborhood.block_create_modal_name.clone(),
-                            description: neighborhood.block_create_modal_description.clone(),
-                            active_field: neighborhood.block_create_modal_active_field,
-                            error: neighborhood.block_create_modal_error.clone(),
-                            creating: neighborhood.block_create_modal_creating,
+                    HomeCreateModal(
+                        state: crate::tui::state::views::HomeCreateModalState {
+                            name: neighborhood.home_create_modal_name.clone(),
+                            description: neighborhood.home_create_modal_description.clone(),
+                            active_field: neighborhood.home_create_modal_active_field,
+                            error: neighborhood.home_create_modal_error.clone(),
+                            creating: neighborhood.home_create_modal_creating,
                         },
                     )
                 }

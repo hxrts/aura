@@ -430,7 +430,7 @@ mod tests {
         // Start in Neighborhood screen
         tui.assert_normal_mode();
 
-        // Enter block detail mode, then insert mode
+        // Enter home detail mode, then insert mode
         tui.send_event(events::enter());
         tui.send_event(events::char('i'));
         tui.assert_insert_mode();

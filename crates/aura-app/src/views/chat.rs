@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum ChannelType {
-    /// Block-level messaging (group)
+    /// Home-level messaging (group)
     #[default]
-    Block,
+    Home,
     /// Direct message
     DirectMessage,
     /// Guardian chat
@@ -19,8 +19,8 @@ pub enum ChannelType {
 }
 
 impl ChannelType {
-    /// Alias for Block (group channels)
-    pub const GROUP: ChannelType = ChannelType::Block;
+    /// Alias for Home (group channels)
+    pub const GROUP: ChannelType = ChannelType::Home;
 }
 
 /// A chat channel

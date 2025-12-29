@@ -54,7 +54,7 @@ fn test_parse_inline_trace() {
       "states": [
         {
           "#meta": {"index": 0},
-          "currentScreen": {"tag": "Block", "value": {"#tup": []}},
+          "currentScreen": {"tag": "Home", "value": {"#tup": []}},
           "currentModal": {"tag": "NoModal", "value": {"#tup": []}},
           "blockInsertMode": false,
           "chatInsertMode": false,

@@ -47,6 +47,9 @@ pub struct Receipt {
     /// Receipt timestamp
     pub timestamp: u64,
 
+    /// Optional consensus instance id for finalized operations
+    pub consensus_id: Option<Hash32>,
+
     /// Optional previous receipt in chain
     pub previous_receipt: Option<Box<Receipt>>,
 }
@@ -85,6 +88,9 @@ pub struct ReceiptVerificationConfig {
 
     /// Enable signature verification
     pub verify_signatures: bool,
+
+    /// Require consensus finalization evidence when verifying receipts
+    pub require_consensus_finalization: bool,
 }
 
 impl Default for ReceiptVerificationConfig {
@@ -93,6 +99,7 @@ impl Default for ReceiptVerificationConfig {
             max_chain_depth: 100,
             require_chronological: true,
             verify_signatures: true,
+            require_consensus_finalization: false,
         }
     }
 }
@@ -124,6 +131,12 @@ impl ReceiptVerificationProtocol {
 
         if receipt.public_key.is_empty() {
             return Err(sync_session_error("Receipt has empty public key"));
+        }
+
+        if self.config.require_consensus_finalization && receipt.consensus_id.is_none() {
+            return Err(sync_session_error(
+                "Receipt missing consensus finalization evidence",
+            ));
         }
 
         // Skip cryptographic verification if disabled in config
@@ -314,6 +327,7 @@ impl ReceiptVerificationProtocol {
             public_key,
             signature,
             timestamp,
+            consensus_id: None,
             previous_receipt,
         })
     }
@@ -341,6 +355,7 @@ mod tests {
             public_key: vec![signer; 32], // Mock public key
             signature: vec![1, 2, 3, 4],
             timestamp,
+            consensus_id: None,
             previous_receipt: None,
         }
     }

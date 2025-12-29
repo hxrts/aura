@@ -150,4 +150,39 @@ impl FlowBudgetManager {
             budget.epoch = new_epoch;
         }
     }
+
+    /// Remove budget entry for a context-peer pair.
+    ///
+    /// Call this when a context or peer relationship is no longer active.
+    pub async fn remove_budget(&self, context: ContextId, peer: AuthorityId) -> bool {
+        let mut budgets = self.budgets.write().await;
+        budgets.remove(&(context, peer)).is_some()
+    }
+
+    /// Remove all budgets for a context.
+    ///
+    /// Call this when a context is deleted or no longer used.
+    /// Returns the number of budgets removed.
+    pub async fn remove_context(&self, context: ContextId) -> usize {
+        let mut budgets = self.budgets.write().await;
+        let before = budgets.len();
+        budgets.retain(|(ctx, _), _| *ctx != context);
+        before - budgets.len()
+    }
+
+    /// Cleanup stale budgets that haven't been used for several epochs.
+    ///
+    /// Removes budgets that are older than `stale_epochs` epochs behind current.
+    /// Returns the number of budgets removed.
+    pub async fn cleanup_stale(&self, current_epoch: u64, stale_epochs: u64) -> usize {
+        let min_epoch = current_epoch.saturating_sub(stale_epochs);
+        let mut budgets = self.budgets.write().await;
+        let before = budgets.len();
+        budgets.retain(|_, budget| budget.epoch >= min_epoch);
+        let removed = before - budgets.len();
+        if removed > 0 {
+            tracing::debug!(removed, current_epoch, min_epoch, "Cleaned up stale flow budgets");
+        }
+        removed
+    }
 }

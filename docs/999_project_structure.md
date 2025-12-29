@@ -1,6 +1,9 @@
 # Aura Crate Structure and Dependency Graph
 
 This document provides an overview of the Aura project's crate organization and dependencies.
+The **primary specifications** live in `docs/` (e.g., consensus in `docs/104_consensus.md`,
+ceremony lifecycles in `docs/118_key_rotation_ceremonies.md`). The `work/` directory is
+non-authoritative scratch and may be removed.
 
 ## 8-Layer Architecture
 

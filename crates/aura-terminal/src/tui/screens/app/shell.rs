@@ -11,7 +11,7 @@
 #![allow(clippy::manual_map)]
 
 use super::modal_overlays::{
-    render_account_setup_modal, render_add_device_modal, render_block_create_modal,
+    render_account_setup_modal, render_add_device_modal, render_home_create_modal,
     render_channel_info_modal, render_chat_create_modal, render_confirm_modal,
     render_contact_modal, render_contacts_code_modal, render_contacts_create_modal,
     render_contacts_import_modal, render_device_enrollment_modal, render_device_import_modal,
@@ -42,7 +42,7 @@ use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
 use crate::tui::screens::app::subscriptions::{
     use_channels_subscription, use_contacts_subscription, use_devices_subscription,
-    use_messages_subscription, use_nav_status_signals, use_neighborhood_blocks_subscription,
+    use_messages_subscription, use_nav_status_signals, use_neighborhood_homes_subscription,
     use_notifications_subscription, use_pending_requests_subscription, use_threshold_subscription,
 };
 use crate::tui::screens::router::Screen;
@@ -50,7 +50,7 @@ use crate::tui::screens::{
     ChatScreen, ContactsScreen, NeighborhoodScreenV2, NotificationsScreen, SettingsScreen,
 };
 use crate::tui::types::{
-    BlockSummary, Channel, Contact, Device, Guardian, Invitation, KeyHint, Message, MfaPolicy,
+    HomeSummary, Channel, Contact, Device, Guardian, Invitation, KeyHint, Message, MfaPolicy,
     TraversalDepth,
 };
 
@@ -86,7 +86,7 @@ pub struct IoAppProps {
     pub discovered_peers: Vec<DiscoveredPeerInfo>,
     // Neighborhood screen data
     pub neighborhood_name: String,
-    pub blocks: Vec<BlockSummary>,
+    pub homes: Vec<HomeSummary>,
     pub traversal_depth: TraversalDepth,
     // Account setup
     /// Whether to show account setup modal on start
@@ -332,9 +332,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let shared_channels = use_channels_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
-    // Neighborhood blocks subscription: SharedNeighborhoodBlocks for dispatch handlers to read
+    // Neighborhood homes subscription: SharedNeighborhoodHomes for dispatch handlers to read
     // =========================================================================
-    let shared_neighborhood_blocks = use_neighborhood_blocks_subscription(&mut hooks, &app_ctx);
+    let shared_neighborhood_homes = use_neighborhood_homes_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
     // Pending requests subscription: SharedPendingRequests for dispatch handlers to read
@@ -923,8 +923,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         // Navigation
                         // =========================================================================
-                        UiUpdate::BlockEntered { block_id: _ } => {
-                            // Navigation/state machine owns the current block selection.
+                        UiUpdate::HomeEntered { home_id: _ } => {
+                            // Navigation/state machine owns the current home selection.
                         }
                         UiUpdate::NavigatedHome => {
                             // Navigation/state machine handles this.
@@ -1096,18 +1096,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
 
                         // =========================================================================
-                        // Block operations
+                        // Home operations
                         // =========================================================================
-                        UiUpdate::BlockMessageSent {
-                            block_id: _,
+                        UiUpdate::HomeMessageSent {
+                            home_id: _,
                             content: _,
                         } => {
                             enqueue_toast!(
-                                "Block message sent".to_string(),
+                                "Home message sent".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
                             );
                         }
-                        UiUpdate::BlockInviteSent { contact_id: _ } => {
+                        UiUpdate::HomeInviteSent { contact_id: _ } => {
                             enqueue_toast!(
                                 "Invite sent".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
@@ -1384,7 +1384,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let callbacks = callbacks.clone();
         // Clone shared contacts Arc for guardian setup dispatch
         let shared_channels_for_dispatch = shared_channels.clone();
-        let shared_neighborhood_blocks_for_dispatch = shared_neighborhood_blocks.clone();
+        let shared_neighborhood_homes_for_dispatch = shared_neighborhood_homes.clone();
         let shared_pending_requests_for_dispatch = shared_pending_requests.clone();
         // This Arc is updated by a reactive subscription, so reading from it
         // always gets current contacts (not stale props)
@@ -1426,9 +1426,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.recovery.on_select_guardian)(contact_id);
                                     }
 
-                                    // === Block Messaging Commands ===
-                                    DispatchCommand::SendBlockMessage { content } => {
-                                        (cb.block.on_send)(content);
+                                    // === Home Messaging Commands ===
+                                    DispatchCommand::SendHomeMessage { content } => {
+                                        (cb.home.on_send)(content);
                                     }
 
                                     // === Chat Screen Commands ===
@@ -2192,20 +2192,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     // which is handled above with the guardian ceremony commands.
 
                                     // === Neighborhood Screen Commands ===
-                                    DispatchCommand::EnterBlock => {
+                                    DispatchCommand::EnterHome => {
                                         let idx = new_state.neighborhood.grid.current();
-                                        if let Ok(guard) = shared_neighborhood_blocks_for_dispatch.read() {
-                                            if let Some(block_id) = guard.get(idx) {
+                                        if let Ok(guard) = shared_neighborhood_homes_for_dispatch.read() {
+                                            if let Some(home_id) = guard.get(idx) {
                                                 // Default to Street-level traversal depth
-                                                (cb.neighborhood.on_enter_block)(
-                                                    block_id.clone(),
+                                                (cb.neighborhood.on_enter_home)(
+                                                    home_id.clone(),
                                                     new_state.neighborhood.enter_depth,
                                                 );
                                             } else {
-                                                new_state.toast_error("No block selected");
+                                                new_state.toast_error("No home selected");
                                             }
                                         } else {
-                                            new_state.toast_error("Failed to read neighborhood blocks");
+                                            new_state.toast_error("Failed to read neighborhood homes");
                                         }
                                     }
                                     DispatchCommand::GoHome => {
@@ -2214,17 +2214,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::BackToStreet => {
                                         (cb.neighborhood.on_back_to_street)();
                                     }
-                                    DispatchCommand::OpenBlockCreate => {
-                                        // Open block creation modal
+                                    DispatchCommand::OpenHomeCreate => {
+                                        // Open home creation modal
                                         new_state.modal_queue.enqueue(
-                                            crate::tui::state_machine::QueuedModal::NeighborhoodBlockCreate(
-                                                crate::tui::state_machine::BlockCreateModalState::new(),
+                                            crate::tui::state_machine::QueuedModal::NeighborhoodHomeCreate(
+                                                crate::tui::state_machine::HomeCreateModalState::new(),
                                             ),
                                         );
                                     }
-                                    DispatchCommand::CreateBlock { name, description } => {
-                                        // UI-only for now; block creation is not wired to runtime yet.
-                                        new_state.toast_success(format!("Block '{}' created", name));
+                                    DispatchCommand::CreateHome { name, description } => {
+                                        // UI-only for now; home creation is not wired to runtime yet.
+                                        new_state.toast_success(format!("Home '{}' created", name));
                                         new_state.modal_queue.dismiss();
                                         let _ = description; // Suppress unused warning until wired
                                     }
@@ -2398,7 +2398,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // === NEIGHBORHOOD SCREEN MODALS ===
             // Rendered via modal_overlays module for maintainability
-            #(render_block_create_modal(&neighborhood_props))
+            #(render_home_create_modal(&neighborhood_props))
 
             // === TOAST OVERLAY ===
             // Toast notifications overlay the footer when active
@@ -2451,7 +2451,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // - ChatScreen subscribes to CHAT_SIGNAL
     // - NotificationsScreen subscribes to INVITATIONS_SIGNAL + RECOVERY_SIGNAL
     // - ContactsScreen subscribes to CONTACTS_SIGNAL + DISCOVERED_PEERS_SIGNAL
-    // - NeighborhoodScreenV2 subscribes to NEIGHBORHOOD_SIGNAL + BLOCK_SIGNAL + CHAT_SIGNAL + CONTACTS_SIGNAL
+    // - NeighborhoodScreenV2 subscribes to NEIGHBORHOOD_SIGNAL + HOMES_SIGNAL + CHAT_SIGNAL + CONTACTS_SIGNAL
     // - SettingsScreen subscribes to SETTINGS_SIGNAL (+ RECOVERY_SIGNAL for recovery data)
     //
     // Props passed below are ONLY used as empty/default initial values.
@@ -2466,7 +2466,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
 
     // Neighborhood data - reactively updated via signals
     let neighborhood_name = String::from("Neighborhood");
-    let blocks: Vec<BlockSummary> = Vec::new();
+    let homes: Vec<HomeSummary> = Vec::new();
 
     // Settings data - reactively updated via SETTINGS_SIGNAL
     let devices = Vec::new();
@@ -2519,7 +2519,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         discovered_peers: discovered_peers,
                         // Neighborhood screen data
                         neighborhood_name: neighborhood_name,
-                        blocks: blocks,
+                        homes: homes,
                         traversal_depth: TraversalDepth::Street,
                         // Account setup
                         show_account_setup: show_account_setup,
@@ -2564,7 +2564,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         discovered_peers: discovered_peers,
                         // Neighborhood screen data
                         neighborhood_name: neighborhood_name,
-                        blocks: blocks,
+                        homes: homes,
                         traversal_depth: TraversalDepth::Street,
                         // Account setup
                         show_account_setup: show_account_setup,

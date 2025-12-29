@@ -320,6 +320,21 @@ impl ChannelManager {
     pub fn active_channel_count(&self) -> usize {
         self.channels.values().filter(|c| c.is_active()).count()
     }
+
+    /// Remove closed or error channels to prevent unbounded growth.
+    pub fn prune_closed_channels(&mut self) -> usize {
+        let before = self.channels.len();
+        let mut to_remove = Vec::new();
+        for (id, channel) in &self.channels {
+            if matches!(channel.state, ChannelState::Closed | ChannelState::Error(_)) {
+                to_remove.push(*id);
+            }
+        }
+        for id in to_remove {
+            self.remove(&id);
+        }
+        before.saturating_sub(self.channels.len())
+    }
 }
 
 impl Default for ChannelManager {

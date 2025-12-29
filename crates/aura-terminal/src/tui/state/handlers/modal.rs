@@ -132,7 +132,7 @@ pub fn handle_queued_modal_key(
             handle_chat_member_select_key_queue(state, commands, key, modal_state);
         }
         // Neighborhood screen modals
-        QueuedModal::NeighborhoodBlockCreate(modal_state) => {
+        QueuedModal::NeighborhoodHomeCreate(modal_state) => {
             if modal_state.creating {
                 return;
             }
@@ -143,7 +143,7 @@ pub fn handle_queued_modal_key(
                 }
                 KeyCode::Tab => {
                     state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::NeighborhoodBlockCreate(ref mut s) = modal {
+                        if let QueuedModal::NeighborhoodHomeCreate(ref mut s) = modal {
                             s.next_field();
                         }
                     });
@@ -154,12 +154,12 @@ pub fn handle_queued_modal_key(
                         let description = modal_state.get_description().map(|s| s.to_string());
 
                         state.modal_queue.update_active(|modal| {
-                            if let QueuedModal::NeighborhoodBlockCreate(ref mut s) = modal {
+                            if let QueuedModal::NeighborhoodHomeCreate(ref mut s) = modal {
                                 s.start_creating();
                             }
                         });
 
-                        commands.push(TuiCommand::Dispatch(DispatchCommand::CreateBlock {
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::CreateHome {
                             name,
                             description,
                         }));
@@ -167,14 +167,14 @@ pub fn handle_queued_modal_key(
                 }
                 KeyCode::Char(c) => {
                     state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::NeighborhoodBlockCreate(ref mut s) = modal {
+                        if let QueuedModal::NeighborhoodHomeCreate(ref mut s) = modal {
                             s.push_char(c);
                         }
                     });
                 }
                 KeyCode::Backspace => {
                     state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::NeighborhoodBlockCreate(ref mut s) = modal {
+                        if let QueuedModal::NeighborhoodHomeCreate(ref mut s) = modal {
                             s.pop_char();
                         }
                     });

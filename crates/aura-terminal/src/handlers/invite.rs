@@ -170,8 +170,8 @@ fn format_invitation_type(shareable: &ShareableInvitation) -> String {
         aura_agent::handlers::InvitationType::Guardian { subject_authority } => {
             format!("Guardian (for: {})", subject_authority)
         }
-        aura_agent::handlers::InvitationType::Channel { block_id } => {
-            format!("Channel (block: {})", block_id)
+        aura_agent::handlers::InvitationType::Channel { home_id } => {
+            format!("Channel (home: {})", home_id)
         }
         aura_agent::handlers::InvitationType::DeviceEnrollment {
             subject_authority,
@@ -274,9 +274,9 @@ mod tests {
     #[test]
     fn test_format_invitation_type_channel() {
         let shareable = test_shareable(InvitationType::Channel {
-            block_id: "block-123".to_string(),
+            home_id: "home-123".to_string(),
         });
         let result = format_invitation_type(&shareable);
-        assert_eq!(result, "Channel (block: block-123)");
+        assert_eq!(result, "Channel (home: home-123)");
     }
 }

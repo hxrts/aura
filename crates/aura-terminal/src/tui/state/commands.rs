@@ -38,8 +38,8 @@ pub enum DispatchCommand {
     // Navigation
     NavigateTo(Screen),
 
-    // Block messaging
-    SendBlockMessage {
+    // Home messaging
+    SendHomeMessage {
         content: String,
     },
 
@@ -165,13 +165,13 @@ pub enum DispatchCommand {
     },
 
     // Neighborhood screen
-    EnterBlock,
+    EnterHome,
     GoHome,
     BackToStreet,
-    /// Open block creation flow
-    OpenBlockCreate,
-    /// Create a new block
-    CreateBlock {
+    /// Open home creation flow
+    OpenHomeCreate,
+    /// Create a new home
+    CreateHome {
         name: String,
         description: Option<String>,
     },

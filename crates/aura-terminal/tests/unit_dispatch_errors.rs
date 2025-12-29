@@ -56,7 +56,7 @@ async fn capability_denied_emits_error_signal() {
 
     let _ = ctx
         .dispatch(EffectCommand::KickUser {
-            channel: "block:home".to_string(),
+            channel: "home:main".to_string(),
             target: "someone".to_string(),
             reason: None,
         })

@@ -2,7 +2,7 @@
 
 use iocraft::prelude::*;
 
-use aura_app::signal_defs::{BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL};
+use aura_app::signal_defs::{HOMES_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL};
 
 use crate::tui::components::{MessageInput, MessagePanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -11,7 +11,7 @@ use crate::tui::props::NeighborhoodViewProps;
 use crate::tui::state_machine::{DetailFocus, NeighborhoodMode};
 use crate::tui::theme::Theme;
 use crate::tui::types::TraversalDepth;
-use crate::tui::types::{format_timestamp, BlockBudget, BlockSummary, Contact, Message, Resident};
+use crate::tui::types::{format_timestamp, HomeBudget, HomeSummary, Contact, Message, Resident};
 
 pub async fn run_neighborhood_screen_v2() -> std::io::Result<()> {
     element! {
@@ -35,21 +35,21 @@ struct ChannelSummary {
 }
 
 #[derive(Default, Props)]
-struct BlockMapProps {
-    blocks: Vec<BlockSummary>,
+struct HomeMapProps {
+    homes: Vec<HomeSummary>,
     selected_index: usize,
     enter_depth: TraversalDepth,
 }
 
 #[component]
-fn BlockMap(props: &BlockMapProps) -> impl Into<AnyElement<'static>> {
-    let blocks = props.blocks.clone();
+fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
+    let homes = props.homes.clone();
     let selected = props.selected_index;
     let enter_depth = props.enter_depth;
 
     let (depth_icon, depth_label) = (enter_depth.icon().to_string(), enter_depth.label());
 
-    let can_enter_interior = blocks.get(selected).map(|b| b.can_enter).unwrap_or(false);
+    let can_enter_interior = homes.get(selected).map(|b| b.can_enter).unwrap_or(false);
 
     let can_enter_line = format!(
         "Can enter: Street ✔ Frontage ✔ Interior {}",
@@ -78,37 +78,37 @@ fn BlockMap(props: &BlockMapProps) -> impl Into<AnyElement<'static>> {
                 gap: 1,
                 overflow: Overflow::Scroll,
             ) {
-                #(if blocks.is_empty() {
+                #(if homes.is_empty() {
                     vec![
                         element! {
                             View(flex_direction: FlexDirection::Column, gap: 1) {
-                                Text(content: "No blocks yet", color: Theme::TEXT_MUTED)
+                                Text(content: "No homes yet", color: Theme::TEXT_MUTED)
                                 View(height: 1)
                                 Text(content: "To get started:", color: Theme::TEXT)
                                 View(flex_direction: FlexDirection::Column, padding_left: 1) {
-                                    Text(content: "• Create a new block", color: Theme::TEXT_MUTED)
+                                    Text(content: "• Create a new home", color: Theme::TEXT_MUTED)
                                     Text(content: "• Accept an invitation to join", color: Theme::TEXT_MUTED)
-                                    Text(content: "  an existing block", color: Theme::TEXT_MUTED)
+                                    Text(content: "  an existing home", color: Theme::TEXT_MUTED)
                                 }
                                 View(height: 1)
-                                Text(content: "[n] Create block", color: Theme::SECONDARY)
+                                Text(content: "[n] Create home", color: Theme::SECONDARY)
                                 Text(content: "[i] Import invitation", color: Theme::SECONDARY)
                             }
                         }
                     ]
                 } else {
-                    blocks.iter().enumerate().map(|(idx, block)| {
+                    homes.iter().enumerate().map(|(idx, home_entry)| {
                         let is_selected = idx == selected;
                         let border_color = if is_selected { Theme::PRIMARY } else { Theme::BORDER };
-                        let name = block
+                        let name = home_entry
                             .name
                             .clone()
-                            .unwrap_or_else(|| "Unnamed Block".to_string());
-                        let home_badge = if block.is_home { " ⌂" } else { "" };
-                        let residents = format!("{}/{}", block.resident_count, block.max_residents);
+                            .unwrap_or_else(|| "Unnamed Home".to_string());
+                        let home_badge = if home_entry.is_home { " ⌂" } else { "" };
+                        let residents = format!("{}/{}", home_entry.resident_count, home_entry.max_residents);
                         element! {
                             View(
-                                key: block.id.clone(),
+                                key: home_entry.id.clone(),
                                 flex_direction: FlexDirection::Column,
                                 border_style: BorderStyle::Round,
                                 border_color: border_color,
@@ -132,20 +132,20 @@ fn BlockMap(props: &BlockMapProps) -> impl Into<AnyElement<'static>> {
 }
 
 #[derive(Default, Props)]
-struct BlockHeaderProps {
-    block_name: String,
+struct HomeHeaderProps {
+    home_name: String,
     resident_count: usize,
     storage_text: String,
     steward_label: String,
 }
 
 #[component]
-fn BlockHeader(props: &BlockHeaderProps) -> impl Into<AnyElement<'static>> {
+fn HomeHeader(props: &HomeHeaderProps) -> impl Into<AnyElement<'static>> {
     let status_line = format!(
         "Residents: {} • {} • {}",
         props.resident_count, props.storage_text, props.steward_label
     );
-    let name_line = format!("Name: {}", props.block_name);
+    let name_line = format!("Name: {}", props.home_name);
 
     element! {
         View(
@@ -157,7 +157,7 @@ fn BlockHeader(props: &BlockHeaderProps) -> impl Into<AnyElement<'static>> {
             padding_right: 1,
         ) {
             View(flex_direction: FlexDirection::Column, gap: 0) {
-                Text(content: "Block", weight: Weight::Bold, color: Theme::PRIMARY)
+                Text(content: "Home", weight: Weight::Bold, color: Theme::PRIMARY)
                 Text(content: name_line, color: Theme::TEXT_MUTED)
                 Text(content: status_line, color: Theme::TEXT_MUTED)
             }
@@ -276,14 +276,14 @@ fn short_id(id: &str, len: usize) -> String {
     }
 }
 
-fn is_steward_role(role: aura_app::views::block::ResidentRole) -> bool {
+fn is_steward_role(role: aura_app::views::home::ResidentRole) -> bool {
     matches!(
         role,
-        aura_app::views::block::ResidentRole::Admin | aura_app::views::block::ResidentRole::Owner
+        aura_app::views::home::ResidentRole::Admin | aura_app::views::home::ResidentRole::Owner
     )
 }
 
-fn convert_resident(r: &aura_app::views::block::Resident) -> Resident {
+fn convert_resident(r: &aura_app::views::home::Resident) -> Resident {
     Resident {
         id: r.id.to_string(),
         name: r.name.clone(),
@@ -292,8 +292,8 @@ fn convert_resident(r: &aura_app::views::block::Resident) -> Resident {
     }
 }
 
-fn convert_budget(storage: &aura_app::BlockFlowBudget, resident_count: u32) -> BlockBudget {
-    BlockBudget {
+fn convert_budget(storage: &aura_app::HomeFlowBudget, resident_count: u32) -> HomeBudget {
+    HomeBudget {
         total: storage.total_allocation(),
         used: storage.total_used(),
         resident_count: resident_count as u8,
@@ -315,16 +315,16 @@ fn format_contact_name(authority_id: &str, contacts: &[Contact]) -> String {
     short_id(authority_id, 8)
 }
 
-fn convert_neighbor_block(
-    n: &aura_app::views::NeighborBlock,
-    home_block_id: &aura_core::identifiers::ChannelId,
-) -> BlockSummary {
-    BlockSummary {
+fn convert_neighbor_home(
+    n: &aura_app::views::NeighborHome,
+    home_home_id: &aura_core::identifiers::ChannelId,
+) -> HomeSummary {
+    HomeSummary {
         id: n.id.to_string(),
         name: Some(n.name.clone()),
         resident_count: n.resident_count.unwrap_or(0) as u8,
         max_residents: 8,
-        is_home: n.id == *home_block_id,
+        is_home: n.id == *home_home_id,
         can_enter: n.can_traverse,
     }
 }
@@ -345,11 +345,11 @@ pub fn NeighborhoodScreenV2(
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
     let reactive_neighborhood_name = hooks.use_state(String::new);
-    let reactive_blocks = hooks.use_state(Vec::new);
+    let reactive_homes = hooks.use_state(Vec::new);
     let reactive_depth = hooks.use_state(TraversalDepth::default);
 
     let reactive_residents = hooks.use_state(Vec::new);
-    let reactive_budget = hooks.use_state(BlockBudget::default);
+    let reactive_budget = hooks.use_state(HomeBudget::default);
     let reactive_messages = hooks.use_state(Vec::new);
     let reactive_channel_name = hooks.use_state(|| "general".to_string());
     let reactive_channels = hooks.use_state(Vec::new);
@@ -358,33 +358,33 @@ pub fn NeighborhoodScreenV2(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut reactive_neighborhood_name = reactive_neighborhood_name.clone();
-        let mut reactive_blocks = reactive_blocks.clone();
+        let mut reactive_homes = reactive_homes.clone();
         let mut reactive_depth = reactive_depth.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
-                let home_id = &n.home_block_id;
-                let mut blocks: Vec<BlockSummary> = Vec::with_capacity(n.neighbors.len() + 1);
-                blocks.push(BlockSummary {
-                    id: n.home_block_id.to_string(),
-                    name: Some(n.home_block_name.clone()),
+                let home_id = &n.home_home_id;
+                let mut homes: Vec<HomeSummary> = Vec::with_capacity(n.neighbors.len() + 1);
+                homes.push(HomeSummary {
+                    id: n.home_home_id.to_string(),
+                    name: Some(n.home_name.clone()),
                     resident_count: 0,
                     max_residents: 8,
                     is_home: true,
                     can_enter: true,
                 });
-                blocks.extend(
+                homes.extend(
                     n.neighbors
                         .iter()
-                        .filter(|b| b.id != n.home_block_id)
-                        .map(|b| convert_neighbor_block(b, home_id)),
+                        .filter(|b| b.id != n.home_home_id)
+                        .map(|b| convert_neighbor_home(b, home_id)),
                 );
                 let depth = n
                     .position
                     .as_ref()
                     .map(|p| convert_traversal_depth(p.depth))
                     .unwrap_or(TraversalDepth::Interior);
-                reactive_neighborhood_name.set(n.home_block_name.clone());
-                reactive_blocks.set(blocks);
+                reactive_neighborhood_name.set(n.home_name.clone());
+                reactive_homes.set(homes);
                 reactive_depth.set(depth);
             })
             .await;
@@ -409,10 +409,10 @@ pub fn NeighborhoodScreenV2(
         let mut reactive_residents = reactive_residents.clone();
         let mut reactive_budget = reactive_budget.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*BLOCK_SIGNAL, move |block_state| {
+            subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |home_state| {
                 let residents: Vec<Resident> =
-                    block_state.residents.iter().map(convert_resident).collect();
-                let budget = convert_budget(&block_state.storage, block_state.resident_count);
+                    home_state.residents.iter().map(convert_resident).collect();
+                let budget = convert_budget(&home_state.storage, home_state.resident_count);
                 reactive_residents.set(residents);
                 reactive_budget.set(budget);
             })
@@ -465,7 +465,7 @@ pub fn NeighborhoodScreenV2(
     });
 
     let neighborhood_name = reactive_neighborhood_name.read().clone();
-    let blocks = reactive_blocks.read().clone();
+    let homes = reactive_homes.read().clone();
     let residents = reactive_residents.read().clone();
     let budget = reactive_budget.read().clone();
     let messages = reactive_messages.read().clone();
@@ -474,11 +474,11 @@ pub fn NeighborhoodScreenV2(
 
     let is_detail = props.view.mode == NeighborhoodMode::Detail;
     let input_focused = props.view.insert_mode || props.view.detail_focus == DetailFocus::Input;
-    let is_entered = props.view.entered_block_id.is_some();
+    let is_entered = props.view.entered_home_id.is_some();
     let read_only = !is_entered || props.view.enter_depth != TraversalDepth::Interior;
 
-    let current_block_name = blocks
-        .get(props.view.selected_block)
+    let current_home_name = homes
+        .get(props.view.selected_home)
         .and_then(|b| b.name.clone())
         .unwrap_or_else(|| neighborhood_name.clone());
 
@@ -503,9 +503,9 @@ pub fn NeighborhoodScreenV2(
             parts.push(neighborhood_name.clone());
         }
 
-        // Add block name if different from neighborhood
-        if !current_block_name.is_empty() && current_block_name != neighborhood_name {
-            parts.push(current_block_name.clone());
+        // Add home name if different from neighborhood
+        if !current_home_name.is_empty() && current_home_name != neighborhood_name {
+            parts.push(current_home_name.clone());
         }
 
         // Always show traversal depth
@@ -518,7 +518,7 @@ pub fn NeighborhoodScreenV2(
     };
 
     let input_placeholder = if read_only {
-        "Enter block to chat (Frontage/Interior)".to_string()
+        "Enter home to chat (Frontage/Interior)".to_string()
     } else {
         "Type a message...".to_string()
     };
@@ -540,8 +540,8 @@ pub fn NeighborhoodScreenV2(
                     #(if is_detail {
                         vec![element! {
                             View(flex_direction: FlexDirection::Column, gap: 0) {
-                                BlockHeader(
-                                    block_name: current_block_name,
+                                HomeHeader(
+                                    home_name: current_home_name,
                                     resident_count: residents.len(),
                                     storage_text: storage_text,
                                     steward_label: steward_label,
@@ -557,7 +557,7 @@ pub fn NeighborhoodScreenV2(
                     } else {
                         vec![element! {
                             View {
-                                BlockMap(blocks: blocks, selected_index: props.view.selected_block, enter_depth: props.view.enter_depth)
+                                HomeMap(homes: homes, selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
                             }
                         }]
                     })

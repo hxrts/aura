@@ -53,28 +53,11 @@ struct ThresholdConfigMetadata {
     /// Participants who will hold shares (in protocol participant order)
     #[serde(default)]
     participants: Vec<ParticipantIdentity>,
-    /// Legacy guardian IDs (for backward-compatible deserialization)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    guardian_ids: Vec<String>,
     /// Signing mode (SingleSigner for 1-of-1, Threshold for k>=2)
     mode: SigningMode,
     /// Agreement mode for this epoch (A1/A2/A3)
     #[serde(default)]
     agreement_mode: AgreementMode,
-}
-
-impl ThresholdConfigMetadata {
-    fn resolved_participants(&self) -> Vec<ParticipantIdentity> {
-        if !self.participants.is_empty() {
-            return self.participants.clone();
-        }
-
-        self.guardian_ids
-            .iter()
-            .filter_map(|s| s.parse::<AuthorityId>().ok())
-            .map(ParticipantIdentity::guardian)
-            .collect()
-    }
 }
 
 /// State for a signing context (per authority)
@@ -287,101 +270,20 @@ impl ThresholdSigningService {
         ))
     }
 
-    /// Sign operation for single-device using legacy FROST (threshold=1)
-    ///
-    /// This path is kept for backward compatibility with existing keys.
-    /// New 1-of-1 configurations use `sign_solo_ed25519` instead.
-    async fn sign_solo_frost(
-        &self,
-        authority: &AuthorityId,
-        message: &[u8],
-        state: &SigningContextState,
-    ) -> Result<ThresholdSignature, AuraError> {
-        tracing::debug!(?authority, "Signing with FROST single-device path (legacy)");
-
-        // Load key package from secure storage
-        // Location: frost_keys/<authority>/<epoch>/<signer_index>
-        let location = SecureStorageLocation::with_sub_key(
-            "frost_keys",
-            format!("{}/{}", authority, state.epoch),
-            format!("{}", state.my_signer_index.unwrap_or(1)),
-        );
-
-        let key_package = self
-            .effects
-            .secure_retrieve(
-                &location,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to load key package: {}", e)))?;
-
-        // Generate nonces
-        let nonces = self
-            .effects
-            .frost_generate_nonces(&key_package)
-            .await
-            .map_err(|e| AuraError::internal(format!("Nonce generation failed: {}", e)))?;
-
-        // Create signing package (single participant)
-        let participants = vec![state.my_signer_index.unwrap_or(1)];
-        let signing_package = self
-            .effects
-            .frost_create_signing_package(
-                message,
-                std::slice::from_ref(&nonces),
-                &participants,
-                &state.public_key_package,
-            )
-            .await
-            .map_err(|e| AuraError::internal(format!("Signing package creation failed: {}", e)))?;
-
-        // Sign
-        let share = self
-            .effects
-            .frost_sign_share(&signing_package, &key_package, &nonces)
-            .await
-            .map_err(|e| AuraError::internal(format!("Signature share creation failed: {}", e)))?;
-
-        // Aggregate (trivial for single signer)
-        let signature = self
-            .effects
-            .frost_aggregate_signatures(&signing_package, &[share])
-            .await
-            .map_err(|e| AuraError::internal(format!("Signature aggregation failed: {}", e)))?;
-
-        tracing::info!(?authority, "FROST single-device signing complete");
-
-        Ok(ThresholdSignature::single_signer(
-            signature,
-            state.public_key_package.clone(),
-            state.epoch,
-        ))
-    }
-
     /// Serialize operation for signing
     fn serialize_operation(operation: &SignableOperation) -> Result<Vec<u8>, AuraError> {
         serde_json::to_vec(operation)
             .map_err(|e| AuraError::internal(format!("Failed to serialize operation: {}", e)))
     }
 
-    /// Route single-device signing based on mode
-    ///
-    /// - SingleSigner mode: Use Ed25519 (fast path for new 1-of-1 accounts)
-    /// - Threshold mode with threshold=1: Use FROST (legacy 1-of-1 accounts)
+    /// Route single-device signing.
     async fn sign_solo(
         &self,
         authority: &AuthorityId,
         message: &[u8],
         state: &SigningContextState,
     ) -> Result<ThresholdSignature, AuraError> {
-        match state.mode {
-            SigningMode::SingleSigner => self.sign_solo_ed25519(authority, message, state).await,
-            SigningMode::Threshold => self.sign_solo_frost(authority, message, state).await,
-        }
+        self.sign_solo_ed25519(authority, message, state).await
     }
 }
 
@@ -707,7 +609,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             threshold_k: new_threshold,
             total_n: new_total_participants,
             participants: participants.to_vec(),
-            guardian_ids: Vec::new(),
             mode: if new_threshold >= 2 {
                 SigningMode::Threshold
             } else {
@@ -981,9 +882,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
         // Delete guardian key packages for this failed epoch
         if let Some(metadata) = config_metadata {
-            let participants = metadata.resolved_participants();
-
-            for participant in &participants {
+            for participant in &metadata.participants {
                 let share_location = SecureStorageLocation::with_sub_key(
                     "participant_shares",
                     format!("{}/{}", authority, failed_epoch),
@@ -1001,33 +900,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                         participant = %participant.display_name(),
                         error = %e,
                         "Failed to delete participant share (may not exist)"
-                    );
-                }
-            }
-
-            // Best-effort cleanup of legacy guardian share locations
-            for participant in participants {
-                let ParticipantIdentity::Guardian(guardian_id) = participant else {
-                    continue;
-                };
-
-                let share_location = SecureStorageLocation::with_sub_key(
-                    "guardian_shares",
-                    format!("{}/{}", authority, failed_epoch),
-                    guardian_id.to_string(),
-                );
-
-                if let Err(e) = self
-                    .effects
-                    .secure_delete(&share_location, delete_caps)
-                    .await
-                {
-                    tracing::debug!(
-                        ?authority,
-                        failed_epoch,
-                        guardian_id = %guardian_id,
-                        error = %e,
-                        "Failed to delete guardian share (may not exist)"
                     );
                 }
             }

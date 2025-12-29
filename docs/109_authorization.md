@@ -36,6 +36,11 @@ Guard evaluation is pure and synchronous over a prepared `GuardSnapshot`. CapGua
 
 Only after all guards pass does transport emit a packet. Any failure returns locally and leaves no observable side effect.
 
+**DKG payloads and budgets**: Dealer packages and transcript exchanges are large.
+Flow and leakage budgets must be charged **proportionally to payload size** before
+any transport send. This ensures DKG traffic cannot bypass the guard chain and
+prevents unaccounted leakage during fast‑path coordination.
+
 ## Failure Handling and Caching
 
 Runtimes cache evaluated capability frontiers per `(ContextId, CapabilityPredicate)` with an epoch tag. Cache entries invalidate when journal policy facts change or when the epoch rotates.

@@ -26,6 +26,18 @@ pub struct SyncManagerConfig {
 
     /// Initial peers to sync with (can be empty if using discovery)
     pub initial_peers: Vec<DeviceId>,
+
+    /// Enable periodic maintenance cleanup
+    pub maintenance_enabled: bool,
+
+    /// Interval between maintenance runs
+    pub maintenance_interval: Duration,
+
+    /// TTL for stale peer states
+    pub peer_state_ttl: Duration,
+
+    /// Maximum tracked peer states before pruning
+    pub max_peer_states: usize,
 }
 
 impl Default for SyncManagerConfig {
@@ -35,6 +47,10 @@ impl Default for SyncManagerConfig {
             auto_sync_interval: Duration::from_secs(60),
             max_concurrent_syncs: 5,
             initial_peers: Vec::new(),
+            maintenance_enabled: true,
+            maintenance_interval: Duration::from_secs(60),
+            peer_state_ttl: Duration::from_secs(6 * 60 * 60),
+            max_peer_states: 1024,
         }
     }
 }
@@ -47,6 +63,10 @@ impl SyncManagerConfig {
             auto_sync_interval: Duration::from_secs(5),
             max_concurrent_syncs: 3,
             initial_peers: Vec::new(),
+            maintenance_enabled: true,
+            maintenance_interval: Duration::from_secs(5),
+            peer_state_ttl: Duration::from_secs(60),
+            max_peer_states: 128,
         }
     }
 
@@ -57,6 +77,10 @@ impl SyncManagerConfig {
             auto_sync_interval: Duration::from_secs(60),
             max_concurrent_syncs: 5,
             initial_peers: Vec::new(),
+            maintenance_enabled: true,
+            maintenance_interval: Duration::from_secs(60),
+            peer_state_ttl: Duration::from_secs(6 * 60 * 60),
+            max_peer_states: 1024,
         }
     }
 }
@@ -78,6 +102,7 @@ pub enum SyncManagerState {
 ///
 /// Integrates `aura_sync::SyncService` into the agent runtime lifecycle.
 /// Handles startup, shutdown, and coordination with other agent services.
+#[derive(Clone)]
 pub struct SyncServiceManager {
     /// Inner sync service from aura-sync
     service: Arc<RwLock<Option<SyncService>>>,
@@ -215,6 +240,57 @@ impl SyncServiceManager {
 
         tracing::info!("Sync service manager stopped");
         Ok(())
+    }
+
+    /// Start background maintenance task for pruning long-lived state.
+    pub fn start_maintenance_task(
+        &self,
+        tasks: Arc<crate::runtime::services::RuntimeTaskRegistry>,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+    ) {
+        if !self.config.maintenance_enabled {
+            tracing::debug!("Sync maintenance task disabled by configuration");
+            return;
+        }
+
+        let interval = self.config.maintenance_interval;
+        let peer_state_ttl = self.config.peer_state_ttl;
+        let max_peer_states = self.config.max_peer_states;
+        let manager = self.clone();
+
+        tasks.spawn_interval_until(interval, move || {
+            let manager = manager.clone();
+            let time_effects = time_effects.clone();
+            async move {
+                let state = manager.state.read().await;
+                if matches!(*state, SyncManagerState::Stopped | SyncManagerState::Stopping) {
+                    return true;
+                }
+
+                let now_ms = match time_effects.physical_time().await {
+                    Ok(t) => t.ts_ms,
+                    Err(e) => {
+                        tracing::warn!("Sync maintenance: failed to get time: {}", e);
+                        return true;
+                    }
+                };
+
+                if let Some(service) = manager.service.read().await.as_ref() {
+                    if let Err(e) = service
+                        .maintenance_cleanup(
+                            now_ms,
+                            peer_state_ttl.as_millis() as u64,
+                            max_peer_states,
+                        )
+                        .await
+                    {
+                        tracing::warn!("Sync maintenance failed: {}", e);
+                    }
+                }
+
+                true
+            }
+        });
     }
 
     /// Perform a manual sync with specific peers

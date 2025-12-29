@@ -3,8 +3,8 @@
 //! This crate provides the service/logic layer for Aura's urban social topology.
 //! It builds on fact types defined in `aura-social::facts` to provide:
 //!
-//! - Materialized views: `Block`, `Neighborhood` aggregates from journal facts
-//! - Services: `BlockService`, `NeighborhoodService`, `TraversalService`, `StorageService`
+//! - Materialized views: `Home`, `Neighborhood` aggregates from journal facts
+//! - Services: `HomeService`, `NeighborhoodService`, `TraversalService`, `StorageService`
 //! - Social topology: `SocialTopology` aggregated view for relay and discovery
 //!
 //! # Architecture
@@ -16,9 +16,9 @@
 //! # Fact vs Service Separation
 //!
 //! Facts (data structures) live in `aura-social::facts`:
-//! - `BlockId`, `NeighborhoodId` - Identifiers
-//! - `BlockFact`, `ResidentFact`, `StewardFact` - Block facts
-//! - `NeighborhoodFact`, `BlockMemberFact`, `AdjacencyFact` - Neighborhood facts
+//! - `HomeId`, `NeighborhoodId` - Identifiers
+//! - `HomeFact`, `ResidentFact`, `StewardFact` - Home facts
+//! - `NeighborhoodFact`, `HomeMemberFact`, `AdjacencyFact` - Neighborhood facts
 //!
 //! Services (business logic) live in this crate:
 //! - Membership validation
@@ -29,24 +29,24 @@
 //! # Example
 //!
 //! ```ignore
-//! use aura_social::{Block, Neighborhood, SocialTopology};
-//! use aura_social::facts::{BlockFact, ResidentFact};
+//! use aura_social::{Home, Neighborhood, SocialTopology};
+//! use aura_social::facts::{HomeFact, ResidentFact};
 //!
-//! // Build a Block view from journal facts
-//! let block = Block::from_facts(&block_fact, &residents, &stewards);
+//! // Build a Home view from journal facts
+//! let home = Home::from_facts(&home_fact, &residents, &stewards);
 //!
 //! // Check membership
-//! if block.is_resident(&authority_id) {
+//! if home.is_resident(&authority_id) {
 //!     println!("Authority is a resident");
 //! }
 //!
 //! // Build social topology for relay selection
 //! let topology = SocialTopology::from_journal(&journal, local_authority);
-//! let block_peers = topology.block_peers();
+//! let home_peers = topology.home_peers();
 //! ```
 
 pub mod availability;
-pub mod block;
+pub mod home;
 pub mod error;
 pub mod facts;
 pub mod membership;
@@ -59,8 +59,8 @@ pub mod traversal;
 
 /// Operation category map (A/B/C) for protocol gating and review.
 pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
-    ("social:block-create", "B"),
-    ("social:block-delete", "B"),
+    ("social:home-create", "B"),
+    ("social:home-delete", "B"),
     ("social:resident-join", "B"),
     ("social:resident-leave", "B"),
     ("social:steward-grant", "B"),
@@ -78,14 +78,14 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 }
 
 // Re-export primary types
-pub use availability::{BlockAvailability, NeighborhoodAvailability};
-pub use block::Block;
+pub use availability::{HomeAvailability, NeighborhoodAvailability};
+pub use home::Home;
 pub use error::SocialError;
 pub use facts::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
 pub use moderation::{
     is_user_banned, is_user_muted, query_current_bans, query_current_mutes, query_kick_history,
-    register_moderation_facts, BanStatus, BlockBanFact, BlockGrantStewardFact, BlockKickFact,
-    BlockMuteFact, BlockRevokeStewardFact, BlockUnbanFact, BlockUnmuteFact, KickRecord, MuteStatus,
+    register_moderation_facts, BanStatus, HomeBanFact, HomeGrantStewardFact, HomeKickFact,
+    HomeMuteFact, HomeRevokeStewardFact, HomeUnbanFact, HomeUnmuteFact, KickRecord, MuteStatus,
 };
 pub use neighborhood::Neighborhood;
 pub use relay::{ReachabilityChecker, RelayCandidateBuilder};
@@ -95,8 +95,8 @@ pub use traversal::TraversalService;
 
 // Re-export fact types for convenience
 pub use crate::facts::{
-    AdjacencyFact, BlockConfigFact, BlockFact, BlockId, BlockMemberFact, BlockMessageMemberFact,
-    BlockStorageBudget, NeighborhoodFact, NeighborhoodId, PinnedContentFact, ResidentFact,
+    AdjacencyFact, HomeConfigFact, HomeFact, HomeId, HomeMemberFact, HomeMessageMemberFact,
+    HomeStorageBudget, NeighborhoodFact, NeighborhoodId, PinnedContentFact, ResidentFact,
     SocialFactError, StewardCapabilities, StewardFact, TraversalAllowedFact, TraversalDepth,
     TraversalPosition,
 };

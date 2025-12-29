@@ -23,7 +23,7 @@
 //! ## Core Flows Tested
 //!
 //! - Guardian Recovery: Bob → request → Alice/Carol approve → restore
-//! - Block Lifecycle: create → invite → join → promote steward
+//! - Home Lifecycle: create → invite → join → promote steward
 //! - Neighborhood Formation: create blocks → link → traverse
 //! - Chat & Messaging: contact → DM/channel → message exchange
 //! - Invitation Lifecycle: create → export → import → accept → contact
@@ -39,7 +39,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use aura_app::signal_defs::{
-    BLOCK_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
+    HOMES_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
     RECOVERY_SIGNAL,
 };
 use aura_app::{AppConfig, AppCore};
@@ -192,9 +192,9 @@ impl TestAgent {
 
     async fn read_block(&self) -> aura_app::views::BlockState {
         let core = self.app_core.read().await;
-        core.read(&*BLOCK_SIGNAL)
+        core.read(&*HOMES_SIGNAL)
             .await
-            .expect("Failed to read BLOCK_SIGNAL")
+            .expect("Failed to read HOMES_SIGNAL")
     }
 
     async fn read_neighborhood(&self) -> aura_app::views::NeighborhoodState {
@@ -572,13 +572,13 @@ async fn test_guardian_recovery_flow() {
 }
 
 // ============================================================================
-// Flow Test: Block Lifecycle
+// Flow Test: Home Lifecycle
 // ============================================================================
 
-/// Test block creation and management
+/// Test home creation and management
 #[tokio::test]
 async fn test_block_lifecycle_flow() {
-    println!("\n=== Block Lifecycle Flow Test ===\n");
+    println!("\n=== Home Lifecycle Flow Test ===\n");
 
     let mut env = FlowTestEnv::new().await;
     env.add_agent("bob").await;
@@ -588,24 +588,24 @@ async fn test_block_lifecycle_flow() {
         .await
         .expect("Bob account creation");
 
-    // Read initial block state
-    println!("Initial block state:");
-    let bob_block = env.get_agent("bob").read_block().await;
-    println!("  Block ID: {}", bob_block.id);
-    println!("  Block name: {}", bob_block.name);
-    println!("  Residents: {}", bob_block.residents.len());
+    // Read initial home state
+    println!("Initial home state:");
+    let bob_home = env.get_agent("bob").read_block().await;
+    println!("  Home ID: {}", bob_block.id);
+    println!("  Home name: {}", bob_home_state.name);
+    println!("  Residents: {}", bob_home_state.residents.len());
 
-    // Note: Block creation commands would be added here when implemented
+    // Note: Home creation commands would be added here when implemented
     // For now, we verify the signal infrastructure is in place
 
-    println!("\n=== Block Lifecycle Flow Test Complete ===\n");
+    println!("\n=== Home Lifecycle Flow Test Complete ===\n");
 }
 
 // ============================================================================
 // Flow Test: Neighborhood Formation
 // ============================================================================
 
-/// Test neighborhood creation and block linking
+/// Test neighborhood creation and home linking
 #[tokio::test]
 async fn test_neighborhood_formation_flow() {
     println!("\n=== Neighborhood Formation Flow Test ===\n");
@@ -621,8 +621,8 @@ async fn test_neighborhood_formation_flow() {
     // Read initial neighborhood state
     println!("Initial neighborhood state:");
     let bob_neighborhood = env.get_agent("bob").read_neighborhood().await;
-    println!("  Home block ID: {}", bob_neighborhood.home_block_id);
-    println!("  Home block name: {}", bob_neighborhood.home_block_name);
+    println!("  Home home ID: {}", bob_neighborhood.home_home_id);
+    println!("  Home home name: {}", bob_neighborhood.home_name);
     println!("  Neighbors: {}", bob_neighborhood.neighbors.len());
 
     // Note: Neighborhood commands would be added here when implemented
@@ -634,7 +634,7 @@ async fn test_neighborhood_formation_flow() {
 // Flow Test: Social Graph (Contacts + Blocks)
 // ============================================================================
 
-/// Test complete Social Graph flow: contacts → blocks → nicknames → contact-block relationships
+/// Test complete Social Graph flow: contacts → blocks → nicknames → contact-home relationships
 /// This covers Flow 6: Social Graph (Contacts + Blocks) from the verification plan
 #[tokio::test]
 async fn test_social_graph_flow() {
@@ -733,33 +733,33 @@ async fn test_social_graph_flow() {
         println!("    - {} (id: {})", name, c.id);
     }
 
-    // Phase 4: Create a block for social organization
-    println!("\nPhase 4: Creating block...");
-    let block_result = env
+    // Phase 4: Create a home for social organization
+    println!("\nPhase 4: Creating home...");
+    let home_result = env
         .get_agent("bob")
-        .dispatch(EffectCommand::CreateBlock {
-            name: Some("Friends Block".to_string()),
+        .dispatch(EffectCommand::CreateHome {
+            name: Some("Friends Home".to_string()),
         })
         .await;
 
-    match &block_result {
+    match &home_result {
         Ok(()) => {
-            println!("  ✓ Block created successfully");
-            env.track_signal("BLOCK_SIGNAL", "block_creation");
+            println!("  ✓ Home created successfully");
+            env.track_signal("HOMES_SIGNAL", "home_creation");
         }
         Err(e) => {
-            println!("  Block creation: {}", e);
+            println!("  Home creation: {}", e);
         }
     }
 
-    let bob_block = env.get_agent("bob").read_block().await;
+    let bob_home = env.get_agent("bob").read_block().await;
     println!(
-        "  Block state: id={}, name={}",
-        bob_block.id, bob_block.name
+        "  Home state: id={}, name={}",
+        bob_block.id, bob_home_state.name
     );
 
-    // Phase 5: Invite contact to block (SendBlockInvitation)
-    println!("\nPhase 5: Inviting contact to block...");
+    // Phase 5: Invite contact to home (SendHomeInvitation)
+    println!("\nPhase 5: Inviting contact to home...");
     if let Some(alice_contact) = bob_contacts.contacts.iter().find(|c| {
         (!c.nickname.is_empty() && c.nickname.to_lowercase() == "alice")
             || c.suggested_name
@@ -768,28 +768,28 @@ async fn test_social_graph_flow() {
     }) {
         let invite_result = env
             .get_agent("bob")
-            .dispatch(EffectCommand::SendBlockInvitation {
+            .dispatch(EffectCommand::SendHomeInvitation {
                 contact_id: alice_contact.id.to_string(),
             })
             .await;
 
         match &invite_result {
             Ok(()) => {
-                println!("  ✓ Block invitation sent successfully");
-                env.track_signal("BLOCK_SIGNAL", "block_invitation");
-                env.track_signal("CONTACTS_SIGNAL", "block_invitation");
+                println!("  ✓ Home invitation sent successfully");
+                env.track_signal("HOMES_SIGNAL", "home_invitation");
+                env.track_signal("CONTACTS_SIGNAL", "home_invitation");
             }
             Err(e) => {
-                println!("  Block invitation: {}", e);
+                println!("  Home invitation: {}", e);
             }
         }
     }
 
-    // Phase 6: Verify final block state
+    // Phase 6: Verify final home state
     println!("\nPhase 6: Verifying final state...");
     let bob_block_final = env.get_agent("bob").read_block().await;
-    println!("  Block ID: {}", bob_block_final.id);
-    println!("  Block name: {}", bob_block_final.name);
+    println!("  Home ID: {}", bob_block_final.id);
+    println!("  Home name: {}", bob_block_final.name);
     println!("  Residents: {}", bob_block_final.residents.len());
     println!("  My role: {:?}", bob_block_final.my_role);
 
@@ -803,8 +803,8 @@ async fn test_social_graph_flow() {
         env.signal_tracker.emission_count("CONTACTS_SIGNAL")
     );
     println!(
-        "  BLOCK_SIGNAL: {} emissions",
-        env.signal_tracker.emission_count("BLOCK_SIGNAL")
+        "  HOMES_SIGNAL: {} emissions",
+        env.signal_tracker.emission_count("HOMES_SIGNAL")
     );
 
     // Verify minimum expected emissions
@@ -816,10 +816,10 @@ async fn test_social_graph_flow() {
     println!("\n=== Social Graph Flow Test Complete ===\n");
 }
 
-/// Test contact filtering by block membership
+/// Test contact filtering by home membership
 #[tokio::test]
 async fn test_social_graph_contact_block_view() {
-    println!("\n=== Social Graph Contact-Block View Test ===\n");
+    println!("\n=== Social Graph Contact-Home View Test ===\n");
 
     let mut env = FlowTestEnv::new().await;
     env.add_agent("bob").await;
@@ -857,13 +857,13 @@ async fn test_social_graph_contact_block_view() {
         println!("  - {} (id: {})", c.nickname, c.id);
     }
 
-    // Read block state
-    let bob_block = env.get_agent("bob").read_block().await;
-    println!("\nBob's block:");
+    // Read home state
+    let bob_home = env.get_agent("bob").read_block().await;
+    println!("\nBob's home:");
     println!("  ID: {}", bob_block.id);
-    println!("  Name: {}", bob_block.name);
+    println!("  Name: {}", bob_home_state.name);
 
-    // The contact-block view in UI would filter contacts based on block membership
+    // The contact-home view in UI would filter contacts based on home membership
     // This test verifies the signals are available for such a view
 
     // Verify we can read both signals needed for the view
@@ -871,9 +871,9 @@ async fn test_social_graph_contact_block_view() {
         !bob_contacts.contacts.is_empty() || true,
         "Contacts signal readable"
     );
-    println!("\n✓ Both CONTACTS_SIGNAL and BLOCK_SIGNAL are readable");
+    println!("\n✓ Both CONTACTS_SIGNAL and HOMES_SIGNAL are readable");
 
-    println!("\n=== Social Graph Contact-Block View Test Complete ===\n");
+    println!("\n=== Social Graph Contact-Home View Test Complete ===\n");
 }
 
 // ============================================================================
@@ -907,10 +907,10 @@ async fn test_signal_emission_coverage() {
             vec!["CONTACTS_SIGNAL", "RECOVERY_SIGNAL"],
         ),
         // Social Graph commands
-        ("CreateBlock", vec!["BLOCK_SIGNAL"]),
+        ("CreateHome", vec!["HOMES_SIGNAL"]),
         (
-            "SendBlockInvitation",
-            vec!["BLOCK_SIGNAL", "CONTACTS_SIGNAL"],
+            "SendHomeInvitation",
+            vec!["HOMES_SIGNAL", "CONTACTS_SIGNAL"],
         ),
     ];
 

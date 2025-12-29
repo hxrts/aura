@@ -20,11 +20,18 @@ use aura_core::effects::amp::{
 use aura_core::effects::{PhysicalTimeEffects, RandomExtendedEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::{Hash32, Prestate};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_guards::GuardContextProvider;
-use aura_journal::fact::{CommittedChannelEpochBump, RelationalFact};
+use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump, RelationalFact};
+use aura_journal::FactJournal;
 use aura_journal::DomainFact;
-use aura_protocol::amp::{get_channel_state, AmpChannelCoordinator, AmpJournalEffects};
+use aura_protocol::amp::{
+    commit_bump_with_consensus, emit_proposed_bump, get_channel_state, AmpChannelCoordinator,
+    AmpJournalEffects,
+};
+use crate::runtime::consensus::build_consensus_params;
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use uuid::Uuid;
 
 /// Chat service for the agent layer.
@@ -64,6 +71,105 @@ impl ChatService {
     /// The coordinator handles AMP channel lifecycle and encryption.
     fn amp_coordinator(&self) -> AmpChannelCoordinator<std::sync::Arc<AuraEffectSystem>> {
         AmpChannelCoordinator::new(self.effects.clone())
+    }
+
+    fn context_commitment_from_journal(
+        &self,
+        context_id: ContextId,
+        journal: &FactJournal,
+    ) -> AgentResult<Hash32> {
+        let mut hasher = aura_core::hash::hasher();
+        hasher.update(b"RELATIONAL_CONTEXT_FACTS");
+        hasher.update(context_id.as_bytes());
+        for fact in journal.facts.iter() {
+            let bytes = aura_core::util::serialization::to_vec(fact)
+                .map_err(|e| AgentError::effects(format!("Serialize context fact: {e}")))?;
+            hasher.update(&bytes);
+        }
+        Ok(Hash32(hasher.finalize()))
+    }
+
+    async fn build_amp_prestate(
+        &self,
+        authority_id: AuthorityId,
+        context_id: ContextId,
+    ) -> AgentResult<Prestate> {
+        let tree_state = self
+            .effects
+            .get_current_state()
+            .await
+            .map_err(|e| AgentError::effects(format!("Tree state lookup failed: {e}")))?;
+        let journal = self
+            .effects
+            .fetch_context_journal(context_id)
+            .await
+            .map_err(|e| AgentError::effects(format!("Context journal lookup failed: {e}")))?;
+        let context_commitment = self.context_commitment_from_journal(context_id, &journal)?;
+        Ok(Prestate::new(
+            vec![(authority_id, tree_state.root_commitment)],
+            context_commitment,
+        ))
+    }
+
+    async fn propose_and_finalize_amp_bump(
+        &self,
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        reason: ChannelBumpReason,
+    ) -> AgentResult<()> {
+        let state = get_channel_state(self.effects.as_ref(), context_id, channel_id)
+            .await
+            .map_err(|e| AgentError::effects(format!("AMP state lookup failed: {e}")))?;
+        let bump_nonce = self
+            .effects
+            .random_uuid()
+            .await
+            .as_bytes()
+            .to_vec();
+        let bump_id = Hash32(hash(&bump_nonce));
+        let proposal = ProposedChannelEpochBump {
+            context: context_id,
+            channel: channel_id,
+            parent_epoch: state.chan_epoch,
+            new_epoch: state.chan_epoch + 1,
+            bump_id,
+            reason,
+        };
+
+        emit_proposed_bump(self.effects.as_ref(), proposal.clone())
+            .await
+            .map_err(|e| AgentError::effects(format!("AMP proposal failed: {e}")))?;
+
+        let policy = policy_for(CeremonyFlow::AmpEpochBump);
+        if policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            let prestate = self.build_amp_prestate(authority_id, context_id).await?;
+            let params =
+                build_consensus_params(self.effects.as_ref(), authority_id, self.effects.as_ref())
+            .await
+            .map_err(|e| AgentError::effects(format!("Consensus params failed: {e}")))?;
+
+            let transcript_ref = self
+                .effects
+                .latest_dkg_transcript_commit(authority_id, context_id)
+                .await
+                .map_err(|e| AgentError::effects(format!("AMP transcript lookup failed: {e}")))?;
+            let transcript_ref =
+                transcript_ref.and_then(|commit| commit.blob_ref.or(Some(commit.transcript_hash)));
+
+            commit_bump_with_consensus(
+                self.effects.as_ref(),
+                &prestate,
+                &proposal,
+                params.key_packages,
+                params.group_public_key,
+                transcript_ref,
+            )
+            .await
+            .map_err(|e| AgentError::effects(format!("AMP finalize failed: {e}")))?;
+        }
+
+        Ok(())
     }
 
     async fn build_snapshot(
@@ -236,6 +342,16 @@ impl ChatService {
             self.facts
                 .prepare_create_channel(&snapshot, channel_id, name.to_string(), None, false);
         self.execute_outcome(outcome).await?;
+
+        if policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            self.propose_and_finalize_amp_bump(
+                creator_id,
+                context_id,
+                channel_id,
+                ChannelBumpReason::Routine,
+            )
+            .await?;
+        }
 
         let created_at = TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: snapshot.now_ms,
@@ -596,36 +712,20 @@ impl ChatService {
         .await
         .map_err(|e| AgentError::effects(format!("Failed to remove member: {e}")))?;
 
-        // Key rotation ceremony: Bump the channel epoch so the removed member
-        // cannot decrypt messages sent after this point. The keystream derivation
-        // uses chan_epoch as input, so advancing the epoch effectively rotates
-        // the encryption key.
-        let state = get_channel_state(self.effects.as_ref(), context_id, channel_id)
-            .await
-            .map_err(|e| AgentError::effects(format!("Failed to get channel state: {e}")))?;
-
-        let committed = CommittedChannelEpochBump {
-            context: context_id,
-            channel: channel_id,
-            parent_epoch: state.chan_epoch,
-            new_epoch: state.chan_epoch + 1,
-            // For membership-driven bumps, use zeroed identifiers (no consensus proposal)
-            chosen_bump_id: Default::default(),
-            consensus_id: Default::default(),
-            transcript_ref: None,
-        };
-
-        self.effects
-            .insert_relational_fact(RelationalFact::Protocol(
-                aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(committed),
-            ))
-            .await
-            .map_err(|e| AgentError::effects(format!("Failed to commit epoch bump: {e}")))?;
+        // Key rotation ceremony: bump the channel epoch so the removed member
+        // cannot decrypt messages sent after this point.
+        self.propose_and_finalize_amp_bump(
+            _requester,
+            context_id,
+            channel_id,
+            ChannelBumpReason::Routine,
+        )
+        .await?;
 
         tracing::info!(
             group_id = %group_id,
             removed_member = %member_to_remove,
-            new_epoch = state.chan_epoch + 1,
+            new_epoch = "rotated",
             "Member removed from chat group with key rotation"
         );
 

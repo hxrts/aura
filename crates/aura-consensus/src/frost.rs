@@ -77,6 +77,21 @@ impl FrostConsensusOrchestrator {
         })
     }
 
+    /// Evict stale consensus instances that exceed the configured timeout.
+    pub async fn cleanup_stale_instances(&self, now_ms: u64) -> usize {
+        let timeout_ms = self.config.timeout_ms;
+        let mut removed = 0usize;
+        let mut instances = self.instances.write().await;
+        instances.retain(|_, instance| {
+            let stale = now_ms.saturating_sub(instance.start_time_ms) > timeout_ms;
+            if stale {
+                removed += 1;
+            }
+            !stale
+        });
+        removed
+    }
+
     /// Run consensus on a request
     pub async fn run_consensus(
         &self,
@@ -84,6 +99,10 @@ impl FrostConsensusOrchestrator {
         random: &(impl RandomEffects + ?Sized),
         time: &(impl PhysicalTimeEffects + ?Sized),
     ) -> Result<ConsensusResponse> {
+        // Best-effort cleanup of stale instances before starting a new run.
+        if let Ok(now) = time.physical_time().await {
+            let _ = self.cleanup_stale_instances(now.ts_ms).await;
+        }
         let start_time = time
             .physical_time()
             .await

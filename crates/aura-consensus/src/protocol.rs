@@ -148,6 +148,24 @@ enum ProtocolRole {
 }
 
 impl ConsensusProtocol {
+    /// Evict stale protocol instances that have exceeded the configured timeout.
+    pub async fn cleanup_stale_instances(
+        &self,
+        now_ms: u64,
+    ) -> usize {
+        let timeout_ms = self.config.timeout_ms;
+        let mut removed = 0usize;
+        let mut instances = self.instances.write().await;
+        instances.retain(|_, instance| {
+            let stale = now_ms.saturating_sub(instance.start_time_ms) > timeout_ms;
+            if stale {
+                removed += 1;
+            }
+            !stale
+        });
+        removed
+    }
+
     /// Create a new consensus protocol instance
     pub fn new(
         authority_id: AuthorityId,
@@ -178,6 +196,10 @@ impl ConsensusProtocol {
         random: &(impl RandomEffects + ?Sized),
         time: &(impl PhysicalTimeEffects + ?Sized),
     ) -> Result<ConsensusResponse> {
+        // Best-effort cleanup of stale instances before starting a new run.
+        if let Ok(now) = time.physical_time().await {
+            let _ = self.cleanup_stale_instances(now.ts_ms).await;
+        }
         // Serialize operation
         let operation_bytes =
             serde_json::to_vec(operation).map_err(|e| AuraError::serialization(e.to_string()))?;
@@ -220,6 +242,10 @@ impl ConsensusProtocol {
         random: &(impl RandomEffects + ?Sized),
         time: &(impl PhysicalTimeEffects + ?Sized),
     ) -> Result<Option<ConsensusMessage>> {
+        // Best-effort cleanup of stale instances before handling messages.
+        if let Ok(now) = time.physical_time().await {
+            let _ = self.cleanup_stale_instances(now.ts_ms).await;
+        }
         match message {
             ConsensusMessage::Execute {
                 consensus_id,

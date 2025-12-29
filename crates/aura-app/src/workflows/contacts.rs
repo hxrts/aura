@@ -40,7 +40,7 @@ pub async fn update_contact_nickname(
     let owner_id = runtime.authority_id();
 
     // Contacts are currently modeled as generic relational facts; use a stable
-    // default context so they don't depend on "current block/chat" context.
+    // default context so they don't depend on "current home/chat" context.
     let fact = ContactFact::renamed_with_timestamp_ms(
         ContextId::default(),
         owner_id,
@@ -78,7 +78,7 @@ pub async fn remove_contact(
     let owner_id = runtime.authority_id();
 
     // Contacts are currently modeled as generic relational facts; use a stable
-    // default context so they don't depend on "current block/chat" context.
+    // default context so they don't depend on "current home/chat" context.
     let fact = ContactFact::removed_with_timestamp_ms(
         ContextId::default(),
         owner_id,

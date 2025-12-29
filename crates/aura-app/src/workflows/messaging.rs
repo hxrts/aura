@@ -32,7 +32,7 @@ fn dm_channel_id(target: &str) -> ChannelId {
 }
 
 fn normalize_channel_str(channel: &str) -> &str {
-    channel.strip_prefix("block:").unwrap_or(channel)
+    channel.strip_prefix("home:").unwrap_or(channel)
 }
 
 /// Parse a channel string into a ChannelId.
@@ -50,7 +50,7 @@ fn parse_channel_id(channel: &str) -> ChannelId {
 fn parse_context_id(context_id: &str) -> Result<ContextId, AuraError> {
     let trimmed = context_id.trim();
     if trimmed.is_empty() {
-        return Err(AuraError::not_found("Block context not available"));
+        return Err(AuraError::not_found("Home context not available"));
     }
 
     trimmed
@@ -58,20 +58,20 @@ fn parse_context_id(context_id: &str) -> Result<ContextId, AuraError> {
         .map_err(|_| AuraError::invalid(format!("Invalid context ID: {}", trimmed)))
 }
 
-async fn current_block_context_id(app_core: &Arc<RwLock<AppCore>>) -> Result<ContextId, AuraError> {
+async fn current_home_context_id(app_core: &Arc<RwLock<AppCore>>) -> Result<ContextId, AuraError> {
     let core = app_core.read().await;
-    let blocks = core.views().get_blocks();
-    if let Some(block) = blocks.current_block() {
-        return parse_context_id(&block.context_id);
+    let homes = core.views().get_homes();
+    if let Some(home_state) = homes.current_home() {
+        return parse_context_id(&home_state.context_id);
     }
 
-    // Fallback: when no block is selected yet (common in demos/tests), use a
+    // Fallback: when no home is selected yet (common in demos/tests), use a
     // deterministic per-authority context id so messaging can still function.
     if let Some(runtime) = core.runtime() {
         return Ok(EffectContext::with_authority(runtime.authority_id()).context_id());
     }
 
-    Err(AuraError::not_found("No current block selected"))
+    Err(AuraError::not_found("No current home selected"))
 }
 
 async fn context_id_for_channel(
@@ -80,16 +80,16 @@ async fn context_id_for_channel(
 ) -> Result<ContextId, AuraError> {
     {
         let core = app_core.read().await;
-        let blocks = core.views().get_blocks();
-        if let Some(block) = blocks.block(&channel_id) {
-            return parse_context_id(&block.context_id);
+        let homes = core.views().get_homes();
+        if let Some(home_state) = homes.home_state(&channel_id) {
+            return parse_context_id(&home_state.context_id);
         }
     }
 
-    // Not all channels correspond to a "block" entry in the blocks view yet
+    // Not all channels correspond to a "home" entry in the homes view yet
     // (e.g. AMP-created channels in demos/tests). Fall back to the currently
-    // selected block context (or per-authority demo context).
-    current_block_context_id(app_core).await
+    // selected home context (or per-authority demo context).
+    current_home_context_id(app_core).await
 }
 
 /// Send a direct message to a contact
@@ -171,7 +171,7 @@ pub async fn send_direct_message(
     Ok(channel_id.to_string())
 }
 
-/// Create a group channel (block channel) in chat state.
+/// Create a group channel (home channel) in chat state.
 ///
 /// **What it does**: Creates a chat channel and selects it
 /// **Returns**: Channel ID
@@ -194,7 +194,7 @@ pub async fn create_channel(
             .clone()
     };
 
-    let context_id = current_block_context_id(app_core).await?;
+    let context_id = current_home_context_id(app_core).await?;
     let channel_hint = (!name.trim().is_empty()).then(|| parse_channel_id(name));
     let params = ChannelCreateParams {
         context: context_id,
@@ -233,6 +233,18 @@ pub async fn create_channel(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to persist channel: {}", e)))?;
 
+    // Rotate into a finalized AMP epoch when policy allows.
+    if let Err(e) = runtime
+        .bump_channel_epoch(
+            context_id,
+            channel_id,
+            "amp-bootstrap-finalize".to_string(),
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "AMP bootstrap finalize bump failed");
+    }
+
     // Update UI state for responsiveness; reactive reductions may also update this later.
     let core = app_core.read().await;
     let mut chat_state = core
@@ -244,7 +256,7 @@ pub async fn create_channel(
         id: channel_id,
         name: name.to_string(),
         topic,
-        channel_type: ChannelType::Block,
+        channel_type: ChannelType::Home,
         unread_count: 0,
         is_dm: false,
         member_count: (members.len() + 1) as u32,
@@ -311,7 +323,7 @@ pub async fn join_channel(app_core: &Arc<RwLock<AppCore>>, channel: &str) -> Res
     };
 
     let channel_id = parse_channel_id(channel);
-    let context_id = current_block_context_id(app_core).await?;
+    let context_id = current_home_context_id(app_core).await?;
 
     runtime
         .amp_join_channel(ChannelJoinParams {
@@ -338,7 +350,7 @@ pub async fn leave_channel(
     };
 
     let channel_id = parse_channel_id(channel);
-    let context_id = current_block_context_id(app_core).await?;
+    let context_id = current_home_context_id(app_core).await?;
 
     runtime
         .amp_leave_channel(ChannelLeaveParams {
@@ -484,7 +496,7 @@ pub async fn send_message(
             id: channel_id,
             name: channel.to_string(),
             topic: None,
-            channel_type: ChannelType::Block,
+            channel_type: ChannelType::Home,
             unread_count: 0,
             is_dm: false,
             member_count: 1,

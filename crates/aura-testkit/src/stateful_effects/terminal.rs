@@ -570,7 +570,7 @@ mod tests {
     async fn test_frame_text_search() {
         let handler = MockTerminalHandler::new();
 
-        let frame = frame_from_string("Block Screen\nPress 1 for home", 80, 24);
+        let frame = frame_from_string("Home Screen\nPress 1 for home", 80, 24);
         handler.render(frame).await.unwrap();
 
         assert!(handler.frame_contains("Block"));

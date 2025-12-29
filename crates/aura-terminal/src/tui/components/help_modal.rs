@@ -17,7 +17,7 @@ use super::{modal_footer, modal_header, ModalFooterProps, ModalHeaderProps};
 pub struct HelpModalProps {
     /// Whether the modal is visible
     pub visible: bool,
-    /// Current screen name for context-sensitive help (e.g., "Chat", "Block")
+    /// Current screen name for context-sensitive help (e.g., "Chat", "Home")
     pub current_screen: Option<String>,
 }
 

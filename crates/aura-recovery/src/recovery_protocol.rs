@@ -16,6 +16,7 @@ use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_journal::DomainFact;
 use aura_macros::choreography;
+use aura_relational::consensus_adapter::{run_consensus_with_commit, CommitFact};
 use aura_relational::RelationalContext;
 use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
@@ -137,7 +138,10 @@ impl RecoveryProtocol {
     }
 
     /// Run consensus protocol
-    async fn run_consensus(&self, operation: &RecoveryOperation) -> Result<ConsensusProof> {
+    async fn run_consensus(
+        &self,
+        operation: &RecoveryOperation,
+    ) -> Result<(ConsensusProof, CommitFact)> {
         // Create prestate
         let prestate = Prestate {
             authority_commitments: vec![(self.account_authority, self.current_commitment()?)],
@@ -156,8 +160,7 @@ impl RecoveryProtocol {
         );
         let epoch = Epoch::from(1); // Recovery uses a default epoch
 
-        aura_relational::run_consensus(&prestate, operation, key_packages, group_public_key, epoch)
-            .await
+        run_consensus_with_commit(&prestate, operation, key_packages, group_public_key, epoch).await
     }
 
     /// Initiate recovery ceremony
@@ -186,7 +189,7 @@ impl RecoveryProtocol {
         };
 
         // Run consensus to get proof
-        let consensus_proof = self.run_consensus(&request.operation).await?;
+        let (consensus_proof, commit_fact) = self.run_consensus(&request.operation).await?;
 
         // Create recovery grant
         let grant = RecoveryGrant {
@@ -201,6 +204,11 @@ impl RecoveryProtocol {
         let _ = self
             .recovery_context
             .add_recovery_grant(self.account_authority, grant.clone())?;
+
+        // Persist consensus evidence alongside the recovery grant.
+        let _ = self
+            .recovery_context
+            .add_fact(commit_fact.to_relational_fact())?;
 
         let result = RecoveryOutcome {
             success: true,
@@ -419,6 +427,9 @@ impl RecoveryProtocolHandler {
                 journal,
             )
             .await?;
+
+            // Remove cached approvals for this recovery once finalized.
+            approvals.remove(&approval.recovery_id);
         }
 
         Ok(threshold_met)
@@ -435,6 +446,29 @@ impl RecoveryProtocolHandler {
         }
 
         Hash32(hash::hash(&bytes))
+    }
+
+    /// Cleanup stale approval caches by TTL (best-effort).
+    ///
+    /// Entries are removed if all approvals are older than `ttl_ms`
+    /// relative to `now_ms`. Approvals with non-physical timestamps are retained.
+    pub async fn cleanup_stale_approvals(&self, now_ms: u64, ttl_ms: u64) -> usize {
+        let mut approvals = self.approvals.lock().await;
+        let before = approvals.len();
+        approvals.retain(|_, approvals_for_recovery| {
+            let newest = approvals_for_recovery
+                .iter()
+                .filter_map(|a| match &a.timestamp {
+                    aura_core::time::TimeStamp::PhysicalClock(t) => Some(t.ts_ms),
+                    _ => None,
+                })
+                .max();
+            match newest {
+                Some(ts) => now_ms.saturating_sub(ts) <= ttl_ms,
+                None => true,
+            }
+        });
+        before.saturating_sub(approvals.len())
     }
 
     /// Notify guardians about recovery request via NetworkEffects

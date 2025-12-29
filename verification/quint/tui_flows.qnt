@@ -26,7 +26,7 @@ module tui_flows {
   // Unique identifiers
   type InvitationId = str
   type ChannelId = str
-  type BlockId = str
+  type HomeId = str
   type NeighborhoodId = str
   type RecoverySessionId = str
   type MessageId = str
@@ -59,7 +59,7 @@ module tui_flows {
   // Flow 2: Block lifecycle phases
   type BlockFlowPhase =
     | BlockNone                      // No block
-    | BlockCreated                   // Block created by owner
+    | HomeCreated                   // Home created by owner
     | BlockInvitationSent            // Resident invitation sent
     | BlockResidentJoined            // Resident accepted invitation
     | BlockStewardPromoted           // Resident promoted to steward
@@ -107,7 +107,7 @@ module tui_flows {
   type InvitationType =
     | GuardianInvitation             // Become a guardian
     | ContactInvitation              // Simple contact
-    | BlockResidentInvitation(BlockId) // Join a block as resident
+    | BlockResidentInvitation(HomeId) // Join a block as resident
 
   // ============ AGENT STATE ============
 
@@ -132,9 +132,9 @@ module tui_flows {
     directMessages: Set[AgentId],    // DM channels (keyed by other party)
 
     // Blocks & Neighborhoods
-    ownedBlocks: Set[BlockId],
-    residentOf: Set[BlockId],
-    stewardOf: Set[BlockId],
+    ownedBlocks: Set[HomeId],
+    residentOf: Set[HomeId],
+    stewardOf: Set[HomeId],
     neighborhoods: Set[NeighborhoodId],
 
     // Recovery
@@ -185,7 +185,7 @@ module tui_flows {
   // ============ BLOCK STATE ============
 
   type BlockRecord = {
-    id: BlockId,
+    id: HomeId,
     owner: AgentId,
     stewards: Set[AgentId],
     residents: Set[AgentId],
@@ -193,7 +193,7 @@ module tui_flows {
     linkedNeighborhood: Option[NeighborhoodId]
   }
 
-  var blocks: BlockId -> BlockRecord
+  var blocks: HomeId -> BlockRecord
 
   // ============ CHANNEL STATE ============
 
@@ -212,7 +212,7 @@ module tui_flows {
   type NeighborhoodRecord = {
     id: NeighborhoodId,
     name: str,
-    linkedBlocks: Set[BlockId]
+    linkedBlocks: Set[HomeId]
   }
 
   var neighborhoods: NeighborhoodId -> NeighborhoodRecord
@@ -221,7 +221,7 @@ module tui_flows {
 
   // Track current phase of each flow type for verification
   var recoveryFlowPhase: AgentId -> RecoveryFlowPhase
-  var blockFlowPhase: AgentId -> BlockFlowPhase
+  var homeFlowPhase: AgentId -> BlockFlowPhase
   var neighborhoodFlowPhase: AgentId -> NeighborhoodFlowPhase
   var chatFlowPhase: AgentId -> ChatFlowPhase
   var invitationFlowPhase: AgentId -> InvitationFlowPhase
@@ -281,7 +281,7 @@ module tui_flows {
       "alice" -> RecoveryIdle,
       "carol" -> RecoveryIdle
     ),
-    blockFlowPhase' = Map(
+    homeFlowPhase' = Map(
       "bob" -> BlockNone,
       "alice" -> BlockNone,
       "carol" -> BlockNone
@@ -345,7 +345,7 @@ module tui_flows {
       blocks' = blocks,
       channels' = channels,
       neighborhoods' = neighborhoods,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -391,7 +391,7 @@ module tui_flows {
       blocks' = blocks,
       channels' = channels,
       neighborhoods' = neighborhoods,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -436,7 +436,7 @@ module tui_flows {
       blocks' = blocks,
       channels' = channels,
       neighborhoods' = neighborhoods,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -471,7 +471,7 @@ module tui_flows {
       blocks' = blocks,
       channels' = channels,
       neighborhoods' = neighborhoods,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -508,7 +508,7 @@ module tui_flows {
       blocks' = blocks,
       channels' = channels,
       neighborhoods' = neighborhoods,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -553,7 +553,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -580,7 +580,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -621,7 +621,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -672,7 +672,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -713,7 +713,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -754,7 +754,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -798,7 +798,7 @@ module tui_flows {
       blocks' = blocks,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -832,7 +832,7 @@ module tui_flows {
       blocks' = blocks,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -842,7 +842,7 @@ module tui_flows {
   // ============ FLOW 2: BLOCK LIFECYCLE ============
 
   // Create block
-  action createBlock(owner: AgentId, blockId: BlockId): bool = {
+  action createBlock(owner: AgentId, blockId: HomeId): bool = {
     val ownerState = getAgent(agents, owner)
     all {
       ownerState.hasAccount,
@@ -864,7 +864,7 @@ module tui_flows {
         stewardOf: ownerState.stewardOf.union(Set(blockId)),
         lastEmittedSignals: Set(BlockSignal)
       }),
-      blockFlowPhase' = blockFlowPhase.set(owner, BlockCreated),
+      homeFlowPhase' = homeFlowPhase.set(owner, HomeCreated),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -880,7 +880,7 @@ module tui_flows {
   }
 
   // Join block as resident
-  action joinBlock(resident: AgentId, blockId: BlockId): bool = {
+  action joinBlock(resident: AgentId, blockId: HomeId): bool = {
     val residentState = getAgent(agents, resident)
     val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
       id: blockId, owner: "", stewards: Set(), residents: Set(),
@@ -908,7 +908,7 @@ module tui_flows {
           ...ownerState,
           lastEmittedSignals: Set(BlockSignal)
         }),
-      blockFlowPhase' = blockFlowPhase.set(resident, BlockResidentJoined),
+      homeFlowPhase' = homeFlowPhase.set(resident, BlockResidentJoined),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -924,7 +924,7 @@ module tui_flows {
   }
 
   // Promote resident to steward
-  action promoteSteward(owner: AgentId, blockId: BlockId, resident: AgentId): bool = {
+  action promoteSteward(owner: AgentId, blockId: HomeId, resident: AgentId): bool = {
     val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
       id: blockId, owner: "", stewards: Set(), residents: Set(),
       capacity: 8, linkedNeighborhood: None
@@ -952,7 +952,7 @@ module tui_flows {
           ...ownerState,
           lastEmittedSignals: Set(BlockSignal)
         }),
-      blockFlowPhase' = blockFlowPhase.set(resident, BlockStewardPromoted),
+      homeFlowPhase' = homeFlowPhase.set(resident, BlockStewardPromoted),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -995,7 +995,7 @@ module tui_flows {
       blocks' = blocks,
       channels' = channels,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -1005,7 +1005,7 @@ module tui_flows {
   // Link block to neighborhood
   action linkBlockToNeighborhood(
     owner: AgentId,
-    blockId: BlockId,
+    blockId: HomeId,
     neighborhoodId: NeighborhoodId
   ): bool = {
     val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
@@ -1044,7 +1044,7 @@ module tui_flows {
       recoverySessions' = recoverySessions,
       channels' = channels,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
@@ -1074,7 +1074,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase
@@ -1083,7 +1083,7 @@ module tui_flows {
 
   // Invite a contact to join a block
   // Creates a block resident invitation and adds contact to block residents when they accept
-  action inviteContactToBlock(owner: AgentId, blockId: BlockId, contactId: AgentId): bool = {
+  action inviteContactToBlock(owner: AgentId, blockId: HomeId, contactId: AgentId): bool = {
     val ownerState = getAgent(agents, owner)
     val contactState = getAgent(agents, contactId)
     val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
@@ -1124,7 +1124,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase
@@ -1132,7 +1132,7 @@ module tui_flows {
   }
 
   // Remove a contact from a block (kick)
-  action removeContactFromBlock(owner: AgentId, blockId: BlockId, contactId: AgentId): bool = {
+  action removeContactFromBlock(owner: AgentId, blockId: HomeId, contactId: AgentId): bool = {
     val ownerState = getAgent(agents, owner)
     val contactState = getAgent(agents, contactId)
     val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
@@ -1170,7 +1170,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase
@@ -1179,7 +1179,7 @@ module tui_flows {
 
   // Get contacts who are residents of a specific block (filter contacts by block)
   // This is a "view" action - no state mutation, just emits signal for UI refresh
-  action filterContactsByBlock(agent: AgentId, blockId: BlockId): bool = {
+  action filterContactsByBlock(agent: AgentId, blockId: HomeId): bool = {
     val agentState = getAgent(agents, agent)
     val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
       id: blockId, owner: "", stewards: Set(), residents: Set(),
@@ -1204,7 +1204,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase
@@ -1417,7 +1417,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -1449,7 +1449,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -1482,7 +1482,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -1514,7 +1514,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -1540,7 +1540,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -1575,7 +1575,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -1600,7 +1600,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -1628,7 +1628,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -1660,7 +1660,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,
@@ -1683,7 +1683,7 @@ module tui_flows {
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
-      blockFlowPhase' = blockFlowPhase,
+      homeFlowPhase' = homeFlowPhase,
       neighborhoodFlowPhase' = neighborhoodFlowPhase,
       chatFlowPhase' = chatFlowPhase,
       invitationFlowPhase' = invitationFlowPhase,

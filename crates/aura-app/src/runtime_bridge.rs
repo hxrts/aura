@@ -203,8 +203,8 @@ pub enum InvitationBridgeType {
     Contact { nickname: Option<String> },
     /// Guardian invitation for a subject authority
     Guardian { subject_authority: AuthorityId },
-    /// Channel/block invitation
-    Channel { block_id: String },
+    /// Channel/home invitation
+    Channel { home_id: String },
     /// Device enrollment invitation (out-of-band transfer).
     DeviceEnrollment {
         subject_authority: AuthorityId,
@@ -711,17 +711,17 @@ pub trait RuntimeBridge: Send + Sync {
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError>;
 
-    /// Create a channel/block invitation
+    /// Create a channel/home invitation
     ///
     /// # Arguments
     /// * `receiver` - Authority to invite to channel
-    /// * `block_id` - Block/channel identifier
+    /// * `home_id` - Home/channel identifier
     /// * `message` - Optional message to include
     /// * `ttl_ms` - Optional time-to-live in milliseconds
     async fn create_channel_invitation(
         &self,
         receiver: AuthorityId,
-        block_id: String,
+        home_id: String,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError>;
@@ -1212,7 +1212,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn create_channel_invitation(
         &self,
         _receiver: AuthorityId,
-        _block_id: String,
+        _home_id: String,
         _message: Option<String>,
         _ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {

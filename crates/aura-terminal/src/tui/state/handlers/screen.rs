@@ -188,11 +188,11 @@ pub fn handle_neighborhood_key(
                 ));
             }
             KeyCode::Enter => {
-                if state.neighborhood.block_count > 0 {
+                if state.neighborhood.home_count > 0 {
                     state.neighborhood.mode = NeighborhoodMode::Detail;
-                    state.neighborhood.entered_block_id =
-                        Some(state.neighborhood.selected_block.to_string());
-                    commands.push(TuiCommand::Dispatch(DispatchCommand::EnterBlock));
+                    state.neighborhood.entered_home_id =
+                        Some(state.neighborhood.selected_home.to_string());
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::EnterHome));
                 }
             }
             KeyCode::Char('a') => {
@@ -202,18 +202,18 @@ pub fn handle_neighborhood_key(
                 ));
             }
             KeyCode::Char('i') => {
-                // Enter block in insert mode (like chat screen)
+                // Enter home in insert mode (like chat screen)
                 state.neighborhood.mode = NeighborhoodMode::Detail;
-                state.neighborhood.entered_block_id =
-                    Some(state.neighborhood.selected_block.to_string());
+                state.neighborhood.entered_home_id =
+                    Some(state.neighborhood.selected_home.to_string());
                 state.neighborhood.insert_mode = true;
                 state.neighborhood.insert_mode_entry_char = Some('i');
                 state.neighborhood.detail_focus = DetailFocus::Input;
-                commands.push(TuiCommand::Dispatch(DispatchCommand::EnterBlock));
+                commands.push(TuiCommand::Dispatch(DispatchCommand::EnterHome));
             }
             KeyCode::Char('n') => {
-                // Create a new block
-                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenBlockCreate));
+                // Create a new home
+                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenHomeCreate));
             }
             KeyCode::Char('g') | KeyCode::Char('H') => {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::GoHome));
@@ -228,7 +228,7 @@ pub fn handle_neighborhood_key(
                 state.neighborhood.mode = NeighborhoodMode::Map;
                 state.neighborhood.insert_mode = false;
                 state.neighborhood.insert_mode_entry_char = None;
-                state.neighborhood.entered_block_id = None;
+                state.neighborhood.entered_home_id = None;
                 state.neighborhood.detail_focus = DetailFocus::Channels;
             }
             KeyCode::Left | KeyCode::Char('h') => {
@@ -296,7 +296,7 @@ pub fn handle_neighborhood_key(
         },
     }
 
-    state.neighborhood.selected_block = state.neighborhood.grid.current();
+    state.neighborhood.selected_home = state.neighborhood.grid.current();
 }
 
 /// Handle settings screen key events

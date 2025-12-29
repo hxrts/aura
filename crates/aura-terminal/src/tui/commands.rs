@@ -657,7 +657,7 @@ pub enum CommandCategory {
     User,
     /// Moderator commands for stewards
     Moderator,
-    /// Admin commands for block stewards
+    /// Admin commands for home stewards
     Admin,
 }
 
@@ -736,14 +736,14 @@ pub fn all_command_help() -> Vec<CommandHelp> {
         CommandHelp {
             name: "kick",
             syntax: "/kick <user> [reason]",
-            description: "Remove a user from the block/channel",
+            description: "Remove a user from the home/channel",
             capability: CommandCapability::ModerateKick,
             category: CommandCategory::Moderator,
         },
         CommandHelp {
             name: "ban",
             syntax: "/ban <user> [reason]",
-            description: "Ban a user from the block",
+            description: "Ban a user from the home",
             capability: CommandCapability::ModerateBan,
             category: CommandCategory::Moderator,
         },
@@ -771,7 +771,7 @@ pub fn all_command_help() -> Vec<CommandHelp> {
         CommandHelp {
             name: "invite",
             syntax: "/invite <user>",
-            description: "Invite a user to the block/channel",
+            description: "Invite a user to the home/channel",
             capability: CommandCapability::Invite,
             category: CommandCategory::Moderator,
         },

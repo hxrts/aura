@@ -250,7 +250,7 @@ fn test_insert_mode_text_entry_deterministic() {
 fn test_escape_exits_insert_mode_deterministic() {
     let mut tui = TestTui::new();
 
-    // Enter block detail mode then insert mode on Neighborhood screen
+    // Enter home detail mode then insert mode on Neighborhood screen
     tui.send_enter();
     tui.send_char('i');
     assert!(tui.is_insert_mode());

@@ -38,7 +38,7 @@ async fn setup_ctx(name: &str) -> (IoContext, TempDir) {
 #[tokio::test]
 async fn moderation_commands_are_handled() {
     let (ctx, _dir) = setup_ctx("moderation").await;
-    let channel = "block:home".to_string();
+    let channel = "home:main".to_string();
 
     let commands = vec![
         EffectCommand::KickUser {

@@ -1,4 +1,4 @@
-//! Moderation domain facts for block-level moderation actions
+//! Moderation domain facts for home-level moderation actions
 
 mod constants;
 mod fact_types;
@@ -6,15 +6,15 @@ mod reducers;
 
 // Re-export constants
 pub use constants::{
-    BLOCK_BAN_FACT_TYPE_ID, BLOCK_GRANT_STEWARD_FACT_TYPE_ID, BLOCK_KICK_FACT_TYPE_ID,
-    BLOCK_MUTE_FACT_TYPE_ID, BLOCK_PIN_FACT_TYPE_ID, BLOCK_REVOKE_STEWARD_FACT_TYPE_ID,
-    BLOCK_UNBAN_FACT_TYPE_ID, BLOCK_UNMUTE_FACT_TYPE_ID, BLOCK_UNPIN_FACT_TYPE_ID,
+    HOME_BAN_FACT_TYPE_ID, HOME_GRANT_STEWARD_FACT_TYPE_ID, HOME_KICK_FACT_TYPE_ID,
+    HOME_MUTE_FACT_TYPE_ID, HOME_PIN_FACT_TYPE_ID, HOME_REVOKE_STEWARD_FACT_TYPE_ID,
+    HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
 
 // Re-export fact types
 pub use fact_types::{
-    BlockBanFact, BlockGrantStewardFact, BlockKickFact, BlockMuteFact, BlockPinFact,
-    BlockRevokeStewardFact, BlockUnbanFact, BlockUnmuteFact, BlockUnpinFact,
+    HomeBanFact, HomeGrantStewardFact, HomeKickFact, HomeMuteFact, HomePinFact,
+    HomeRevokeStewardFact, HomeUnbanFact, HomeUnmuteFact, HomeUnpinFact,
 };
 
 // Re-export registration function
@@ -48,13 +48,13 @@ mod tests {
         let mut registry = FactRegistry::new();
         register_moderation_facts(&mut registry);
 
-        assert!(registry.is_registered(BLOCK_MUTE_FACT_TYPE_ID));
-        assert!(registry.is_registered(BLOCK_UNMUTE_FACT_TYPE_ID));
-        assert!(registry.is_registered(BLOCK_PIN_FACT_TYPE_ID));
-        assert!(registry.is_registered(BLOCK_UNPIN_FACT_TYPE_ID));
+        assert!(registry.is_registered(HOME_MUTE_FACT_TYPE_ID));
+        assert!(registry.is_registered(HOME_UNMUTE_FACT_TYPE_ID));
+        assert!(registry.is_registered(HOME_PIN_FACT_TYPE_ID));
+        assert!(registry.is_registered(HOME_UNPIN_FACT_TYPE_ID));
 
         let context_id = test_context_id();
-        let block_mute = BlockMuteFact {
+        let home_mute = HomeMuteFact {
             context_id,
             channel_id: None,
             muted_authority: test_authority_id(1),
@@ -65,35 +65,35 @@ mod tests {
         };
 
         let binding = registry.reduce_generic(
-            block_mute.context_id,
-            BLOCK_MUTE_FACT_TYPE_ID,
-            &block_mute.to_bytes(),
+            home_mute.context_id,
+            HOME_MUTE_FACT_TYPE_ID,
+            &home_mute.to_bytes(),
         );
 
         assert_eq!(
             binding.binding_type,
-            RelationalBindingType::Generic(BLOCK_MUTE_FACT_TYPE_ID.to_string())
+            RelationalBindingType::Generic(HOME_MUTE_FACT_TYPE_ID.to_string())
         );
-        assert_eq!(binding.data, block_mute.to_bytes());
+        assert_eq!(binding.data, home_mute.to_bytes());
 
-        let block_unmute = BlockUnmuteFact {
+        let home_unmute = HomeUnmuteFact {
             context_id,
             channel_id: None,
-            unmuted_authority: block_mute.muted_authority,
-            actor_authority: block_mute.actor_authority,
+            unmuted_authority: home_mute.muted_authority,
+            actor_authority: home_mute.actor_authority,
             unmuted_at: pt(2000),
         };
 
         let binding = registry.reduce_generic(
-            block_unmute.context_id,
-            BLOCK_UNMUTE_FACT_TYPE_ID,
-            &block_unmute.to_bytes(),
+            home_unmute.context_id,
+            HOME_UNMUTE_FACT_TYPE_ID,
+            &home_unmute.to_bytes(),
         );
 
         assert_eq!(
             binding.binding_type,
-            RelationalBindingType::Generic(BLOCK_UNMUTE_FACT_TYPE_ID.to_string())
+            RelationalBindingType::Generic(HOME_UNMUTE_FACT_TYPE_ID.to_string())
         );
-        assert_eq!(binding.data, block_unmute.to_bytes());
+        assert_eq!(binding.data, home_unmute.to_bytes());
     }
 }

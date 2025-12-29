@@ -5,7 +5,7 @@
 
 use aura_core::effects::relay::{RelayCandidate, RelayContext, RelaySelector};
 use aura_core::identifiers::AuthorityId;
-use aura_social::{Block, DiscoveryLayer, Neighborhood, SocialTopology};
+use aura_social::{Home, DiscoveryLayer, Neighborhood, SocialTopology};
 use aura_transport::relay::DeterministicRandomSelector;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 /// Configuration for the social topology manager
 #[derive(Debug, Clone)]
 pub struct SocialManagerConfig {
-    /// Prefer proximity in relay selection (block peers before neighborhood)
+    /// Prefer proximity in relay selection (home peers before neighborhood)
     pub prefer_proximity: bool,
 
     /// Enable automatic topology refresh from journal
@@ -102,13 +102,13 @@ impl SocialManager {
         );
     }
 
-    /// Initialize with block and neighborhoods
+    /// Initialize with home and neighborhoods
     pub async fn initialize_with_social(
         &self,
-        block: Option<Block>,
+        home: Option<Home>,
         neighborhoods: Vec<Neighborhood>,
     ) {
-        let topology = SocialTopology::new(self.authority_id, block, neighborhoods);
+        let topology = SocialTopology::new(self.authority_id, home, neighborhoods);
         self.initialize(topology).await;
     }
 
@@ -205,9 +205,9 @@ impl SocialManager {
     // Peer Queries
     // ========================================================================
 
-    /// Get all block peers
-    pub async fn block_peers(&self) -> Vec<AuthorityId> {
-        self.topology.read().await.block_peers()
+    /// Get all home peers
+    pub async fn home_peers(&self) -> Vec<AuthorityId> {
+        self.topology.read().await.home_peers()
     }
 
     /// Get all neighborhood peers
@@ -244,7 +244,7 @@ impl SocialManager {
 mod tests {
     use super::*;
     use aura_core::effects::relay::RelayRelationship;
-    use aura_social::facts::BlockId;
+    use aura_social::facts::HomeId;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
@@ -277,16 +277,16 @@ mod tests {
 
         let manager = SocialManager::with_defaults(local);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
-        let mut block = Block::new_empty(block_id);
-        block.residents = vec![local, peer];
+        let home_id = HomeId::from_bytes([1u8; 32]);
+        let mut home_state = Home::new_empty(home_id);
+        home_state.residents = vec![local, peer];
 
-        manager.initialize_with_social(Some(block), vec![]).await;
+        manager.initialize_with_social(Some(home_state), vec![]).await;
 
         assert!(manager.is_ready().await);
         assert!(manager.has_social_presence().await);
 
-        let peers = manager.block_peers().await;
+        let peers = manager.home_peers().await;
         assert_eq!(peers.len(), 1);
         assert!(peers.contains(&peer));
     }
@@ -299,12 +299,12 @@ mod tests {
 
         let manager = SocialManager::with_defaults(local);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer,
-            RelayRelationship::BlockPeer {
-                block_id: *block_id.as_bytes(),
+            RelayRelationship::HomePeer {
+                home_id: *home_id.as_bytes(),
             },
         );
 
@@ -330,12 +330,12 @@ mod tests {
 
         assert!(!manager.knows_peer(&peer).await);
 
-        let block_id = BlockId::from_bytes([1u8; 32]);
+        let home_id = HomeId::from_bytes([1u8; 32]);
         manager
             .add_peer(
                 peer,
-                RelayRelationship::BlockPeer {
-                    block_id: *block_id.as_bytes(),
+                RelayRelationship::HomePeer {
+                    home_id: *home_id.as_bytes(),
                 },
             )
             .await;

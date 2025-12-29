@@ -1,6 +1,6 @@
 //! Context command handlers
 //!
-//! Handlers for SetContext, MovePosition, AcceptPendingBlockInvitation.
+//! Handlers for SetContext, MovePosition, AcceptPendingHomeInvitation.
 //!
 //! This module delegates to portable workflows in aura_app::workflows::context
 //! and adds terminal-specific response formatting.
@@ -15,7 +15,7 @@ use super::EffectCommand;
 
 // Re-export workflows for convenience
 pub use aura_app::workflows::context::{move_position, set_context};
-pub use aura_app::workflows::invitation::accept_pending_block_invitation;
+pub use aura_app::workflows::invitation::accept_pending_home_invitation;
 
 /// Handle context commands
 pub async fn handle_context(
@@ -41,25 +41,25 @@ pub async fn handle_context(
 
         EffectCommand::MovePosition {
             neighborhood_id: _,
-            block_id,
+            home_id,
             depth,
         } => {
             // Delegate to workflow
-            match move_position(app_core, block_id, depth).await {
+            match move_position(app_core, home_id, depth).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
         }
 
-        EffectCommand::AcceptPendingBlockInvitation => {
-            // Accept a pending block invitation via workflow
-            match accept_pending_block_invitation(app_core).await {
+        EffectCommand::AcceptPendingHomeInvitation => {
+            // Accept a pending home invitation via workflow
+            match accept_pending_home_invitation(app_core).await {
                 Ok(invitation_id) => Some(Ok(OpResponse::Data(format!(
-                    "Accepted block invitation: {}",
+                    "Accepted home invitation: {}",
                     invitation_id
                 )))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to accept block invitation: {}",
+                    "Failed to accept home invitation: {}",
                     e
                 )))),
             }

@@ -662,10 +662,10 @@ impl RuntimeBridge for MockRuntimeBridge {
                             }
                         })
                     },
-                    InvitationBridgeType::Channel { block_id } => {
+                    InvitationBridgeType::Channel { home_id } => {
                         serde_json::json!({
                             "Channel": {
-                                "block_id": block_id
+                                "home_id": home_id
                             }
                         })
                     },
@@ -771,7 +771,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn create_channel_invitation(
         &self,
         receiver: AuthorityId,
-        block_id: String,
+        home_id: String,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
@@ -783,7 +783,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             invitation_id: invitation_id.clone(),
             sender_id: self.authority_id.clone(),
             receiver_id: receiver,
-            invitation_type: InvitationBridgeType::Channel { block_id },
+            invitation_type: InvitationBridgeType::Channel { home_id },
             status: InvitationBridgeStatus::Pending,
             created_at_ms: now,
             expires_at_ms,
@@ -954,13 +954,13 @@ impl RuntimeBridge for MockRuntimeBridge {
                     subject_authority: AuthorityId::from_uuid(subject_uuid),
                 }
             } else if inv_type.get("Channel").is_some() {
-                let block_id = inv_type
+                let home_id = inv_type
                     .get("Channel")
-                    .and_then(|c| c.get("block_id"))
+                    .and_then(|c| c.get("home_id"))
                     .and_then(|b| b.as_str())
                     .unwrap_or("home")
                     .to_string();
-                InvitationBridgeType::Channel { block_id }
+                InvitationBridgeType::Channel { home_id }
             } else {
                 InvitationBridgeType::Contact { nickname: None }
             }

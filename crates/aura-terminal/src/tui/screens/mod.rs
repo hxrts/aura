@@ -34,7 +34,7 @@ pub use settings::MfaCallback;
 pub use app::{run_app_with_context, IoApp};
 pub use chat::{run_chat_screen, ChatFocus, ChatScreen};
 pub use contacts::{run_contacts_screen, ContactsScreen};
-pub use neighborhood_v2::block_create_modal::BlockCreateModal;
+pub use neighborhood_v2::home_create_modal::HomeCreateModal;
 pub use neighborhood_v2::{
     run_neighborhood_screen_v2, NeighborhoodScreenV2, NeighborhoodScreenV2Props,
 };

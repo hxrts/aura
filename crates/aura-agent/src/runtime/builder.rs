@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
+use super::services::{ContextManager, FlowBudgetManager, ReceiptManager, ReceiptManagerConfig};
 use super::shared_transport::SharedTransport;
 use super::system::RuntimeSystem;
 use super::{ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager};
@@ -32,6 +32,7 @@ pub struct EffectSystemBuilder {
     sync_config: Option<super::services::SyncManagerConfig>,
     rendezvous_config: Option<super::services::RendezvousManagerConfig>,
     social_config: Option<super::services::SocialManagerConfig>,
+    receipt_config: Option<ReceiptManagerConfig>,
     shared_transport: Option<SharedTransport>,
 }
 
@@ -45,6 +46,7 @@ impl EffectSystemBuilder {
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
+            receipt_config: None,
             shared_transport: None,
         }
     }
@@ -58,6 +60,7 @@ impl EffectSystemBuilder {
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
+            receipt_config: Some(ReceiptManagerConfig::for_testing()),
             shared_transport: None,
         }
     }
@@ -71,6 +74,7 @@ impl EffectSystemBuilder {
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
+            receipt_config: Some(ReceiptManagerConfig::for_testing()),
             shared_transport: None,
         }
     }
@@ -132,6 +136,12 @@ impl EffectSystemBuilder {
         self
     }
 
+    /// Configure receipt manager with custom settings
+    pub fn with_receipt_config(mut self, config: ReceiptManagerConfig) -> Self {
+        self.receipt_config = Some(config);
+        self
+    }
+
     /// Build the runtime system (async)
     pub async fn build(self, _ctx: &EffectContext) -> Result<RuntimeSystem, String> {
         let config = self.config.unwrap_or_default();
@@ -180,7 +190,10 @@ impl EffectSystemBuilder {
         // Create service managers
         let context_manager = ContextManager::new(&config);
         let flow_budget_manager = FlowBudgetManager::new(&config);
-        let receipt_manager = ReceiptManager::new(&config);
+        let receipt_manager = match self.receipt_config {
+            Some(receipt_config) => ReceiptManager::with_config(&config, receipt_config),
+            None => ReceiptManager::new(&config),
+        };
 
         // Create choreography adapter
         let choreography_adapter = ChoreographyAdapter::new(authority_id);
@@ -209,10 +222,13 @@ impl EffectSystemBuilder {
             .social_config
             .map(|social_config| super::services::SocialManager::new(authority_id, social_config));
 
+        // Wrap effect system in Arc for shared ownership
+        let effect_system = Arc::new(effect_system);
+
         // Build runtime system with configured services
         let mut system = RuntimeSystem::new_with_services(
             effect_executor,
-            Arc::new(effect_system),
+            effect_system.clone(),
             context_manager,
             flow_budget_manager,
             receipt_manager,
@@ -233,6 +249,15 @@ impl EffectSystemBuilder {
 
         // Start reactive pipeline (facts → scheduler).
         system.start_reactive_pipeline().await?;
+
+        // Start receipt cleanup background task
+        system.receipts().start_cleanup_task(
+            system.tasks(),
+            Arc::new(effect_system.time_effects().clone()),
+        );
+
+        // Start runtime maintenance tasks (cleanup/pruning).
+        system.start_maintenance_tasks();
 
         Ok(system)
     }

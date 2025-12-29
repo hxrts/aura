@@ -152,6 +152,10 @@ pub struct DkdResult {
     pub epoch: u64,
     /// Verification proof
     pub verification_proof: Vec<u8>,
+    /// Agreement mode for this result (A1/A2/A3)
+    pub agreement_mode: AgreementMode,
+    /// Whether reversion is still possible
+    pub reversion_risk: bool,
 }
 
 /// DKD protocol errors
@@ -331,9 +335,11 @@ impl DkdProtocol {
             .await?;
 
         let policy = policy_for(CeremonyFlow::DkdCeremony);
-        if policy.allows_mode(AgreementMode::ConsensusFinalized) {
-            self.agreement_mode = AgreementMode::ConsensusFinalized;
-        }
+        let agreement_mode = if policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            AgreementMode::CoordinatorSoftSafe
+        } else {
+            self.agreement_mode
+        };
 
         // Create result
         let context =
@@ -350,22 +356,32 @@ impl DkdProtocol {
             participant_count: revealed_contributions.len() as u16,
             epoch: context.epoch,
             verification_proof,
+            agreement_mode,
+            reversion_risk: agreement_mode != AgreementMode::ConsensusFinalized,
         };
 
         // Clean up session
         self.active_sessions.remove(session_id);
 
-        // Log successful completion
-        self.log_session_event(
-            effects,
-            session_id,
-            "session_completed",
-            &format!(
+        // Log completion; treat as provisional when consensus finalization is required.
+        let event_type = if policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            "session_completed_provisional"
+        } else {
+            "session_completed"
+        };
+        let message = if policy.allows_mode(AgreementMode::ConsensusFinalized) {
+            format!(
+                "DKD completed with {} participants (consensus finalization required)",
+                result.participant_count
+            )
+        } else {
+            format!(
                 "DKD protocol completed successfully with {} participants",
                 result.participant_count
-            ),
-        )
-        .await?;
+            )
+        };
+        self.log_session_event(effects, session_id, event_type, &message)
+            .await?;
 
         tracing::info!(
             session_id = ?session_id,
@@ -1065,5 +1081,23 @@ mod tests {
         // Should be deterministic
         let combined2 = protocol.compute_combined_commitment(&contributions);
         assert_eq!(combined, combined2);
+    }
+
+    #[tokio::test]
+    async fn test_dkd_agreement_mode_requires_consensus() {
+        let participants = vec![device(1), device(2)];
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
+
+        let result = execute_simple_dkd(&effects, participants, "test_app", "test_ctx")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.agreement_mode,
+            AgreementMode::CoordinatorSoftSafe
+        );
+        assert!(result.reversion_risk);
     }
 }

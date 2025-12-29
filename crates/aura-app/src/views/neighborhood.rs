@@ -3,7 +3,7 @@
 use aura_core::identifiers::ChannelId;
 use serde::{Deserialize, Serialize};
 
-/// Adjacency type between blocks
+/// Adjacency type between homes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum AdjacencyType {
@@ -16,13 +16,13 @@ pub enum AdjacencyType {
     Distant,
 }
 
-/// A neighboring block
+/// A neighboring home
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct NeighborBlock {
-    /// Block identifier
+pub struct NeighborHome {
+    /// Home identifier
     pub id: ChannelId,
-    /// Block name
+    /// Home name
     pub name: String,
     /// Type of adjacency
     pub adjacency: AdjacencyType,
@@ -30,7 +30,7 @@ pub struct NeighborBlock {
     pub shared_contacts: u32,
     /// Resident count (if known)
     pub resident_count: Option<u32>,
-    /// Whether we can traverse to this block
+    /// Whether we can traverse to this home
     pub can_traverse: bool,
 }
 
@@ -38,13 +38,13 @@ pub struct NeighborBlock {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct TraversalPosition {
-    /// Current block ID
-    pub current_block_id: ChannelId,
-    /// Current block name
-    pub current_block_name: String,
-    /// Depth from home block
+    /// Current home ID
+    pub current_home_id: ChannelId,
+    /// Current home name
+    pub current_home_name: String,
+    /// Depth from local home
     pub depth: u32,
-    /// Path from home (block IDs)
+    /// Path from home (home IDs)
     pub path: Vec<ChannelId>,
 }
 
@@ -52,14 +52,14 @@ pub struct TraversalPosition {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct NeighborhoodState {
-    /// Home block ID
-    pub home_block_id: ChannelId,
-    /// Home block name
-    pub home_block_name: String,
+    /// Home home ID
+    pub home_home_id: ChannelId,
+    /// Home name
+    pub home_name: String,
     /// Current traversal position (if traversing)
     pub position: Option<TraversalPosition>,
     /// Visible neighbors from current position
-    pub neighbors: Vec<NeighborBlock>,
+    pub neighbors: Vec<NeighborHome>,
     /// Maximum traversal depth allowed
     pub max_depth: u32,
     /// Whether currently loading neighbors
@@ -67,21 +67,21 @@ pub struct NeighborhoodState {
 }
 
 impl NeighborhoodState {
-    /// Check if we're at the home block
+    /// Check if we're at the local home
     pub fn is_at_home(&self) -> bool {
         self.position
             .as_ref()
-            .map(|p| p.current_block_id == self.home_block_id)
+            .map(|p| p.current_home_id == self.home_home_id)
             .unwrap_or(true)
     }
 
     /// Get neighbor by ID
-    pub fn neighbor(&self, id: &ChannelId) -> Option<&NeighborBlock> {
+    pub fn neighbor(&self, id: &ChannelId) -> Option<&NeighborHome> {
         self.neighbors.iter().find(|n| n.id == *id)
     }
 
     /// Get direct neighbors
-    pub fn direct_neighbors(&self) -> Vec<&NeighborBlock> {
+    pub fn direct_neighbors(&self) -> Vec<&NeighborHome> {
         self.neighbors
             .iter()
             .filter(|n| n.adjacency == AdjacencyType::Direct)
