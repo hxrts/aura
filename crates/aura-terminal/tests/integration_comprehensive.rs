@@ -753,7 +753,7 @@ mod neighborhood_screen {
     }
 
     #[test]
-    fn test_neighborhood_enter_block() {
+    fn test_neighborhood_enter_home() {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Neighborhood);
         tui.state.neighborhood.home_count = 1;
@@ -869,7 +869,7 @@ mod modals {
     }
 
     #[test]
-    fn test_modal_blocks_screen_navigation() {
+    fn test_modal_homes_screen_navigation() {
         let mut tui = TestTui::new();
 
         // Open help modal
@@ -1010,7 +1010,7 @@ mod global_behavior {
     }
 
     #[test]
-    fn test_quit_blocked_in_insert_mode() {
+    fn test_quit_homeed_in_insert_mode() {
         let mut tui = TestTui::new();
 
         // Enter detail mode then insert mode on Neighborhood screen
@@ -1025,7 +1025,7 @@ mod global_behavior {
     }
 
     #[test]
-    fn test_quit_blocked_in_modal() {
+    fn test_quit_homeed_in_modal() {
         let mut tui = TestTui::new();
 
         // Open help modal
@@ -1255,9 +1255,9 @@ proptest! {
         prop_assert_eq!(tui.screen(), expected);
     }
 
-    /// Modal always blocks screen navigation
+    /// Modal always homes screen navigation
     #[test]
-    fn prop_modal_blocks_nav(nav_keys in prop::collection::vec(screen_key_strategy(), 1..10)) {
+    fn prop_modal_homes_nav(nav_keys in prop::collection::vec(screen_key_strategy(), 1..10)) {
         let mut tui = TestTui::new();
         let screen_before = tui.screen();
 

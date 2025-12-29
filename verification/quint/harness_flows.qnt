@@ -5,11 +5,11 @@
 //
 // Provides simplified scenarios for:
 // - Guardian recovery flow
-// - Block lifecycle flow
+// - Home lifecycle flow
 // - Neighborhood formation flow
 // - Chat/messaging flow
 // - Invitation lifecycle flow
-// - Social graph flow (contacts + blocks)
+// - Social graph flow (contacts + homes)
 
 module harness_flows {
   // ============ IMPORTS ============
@@ -156,22 +156,22 @@ module harness_flows {
 
   // ============ SCENARIO: BLOCK FLOW ============
 
-  // Bob creates block
-  action bobCreatesBlock(blockId: HomeId): bool = all {
-    tui_flows::createBlock("bob", blockId),
+  // Bob creates home
+  action bobCreatesHome(homeId: HomeId): bool = all {
+    tui_flows::createHome("bob", homeId),
     harnessUnchanged
   }
 
-  // Alice joins block
-  action aliceJoinsBlock(blockId: HomeId): bool = all {
-    tui_flows::joinBlock("alice", blockId),
+  // Alice joins home
+  action aliceJoinsHome(homeId: HomeId): bool = all {
+    tui_flows::joinHome("alice", homeId),
     harnessUnchanged
   }
 
   // Bob promotes alice to steward
-  action bobPromotesAlice(blockId: HomeId): bool = all {
-    tui_flows::promoteSteward("bob", blockId, "alice"),
-    markScenario("block_steward_promotion", true)
+  action bobPromotesAlice(homeId: HomeId): bool = all {
+    tui_flows::promoteSteward("bob", homeId, "alice"),
+    markScenario("home_steward_promotion", true)
   }
 
   // ============ SCENARIO: NEIGHBORHOOD FLOW ============
@@ -182,9 +182,9 @@ module harness_flows {
     harnessUnchanged
   }
 
-  // Bob links block to neighborhood
-  action bobLinksBlock(blockId: HomeId, neighborhoodId: NeighborhoodId): bool = all {
-    tui_flows::linkBlockToNeighborhood("bob", blockId, neighborhoodId),
+  // Bob links home to neighborhood
+  action bobLinksHome(homeId: HomeId, neighborhoodId: NeighborhoodId): bool = all {
+    tui_flows::linkHomeToNeighborhood("bob", homeId, neighborhoodId),
     markScenario("neighborhood_link", true)
   }
 
@@ -196,21 +196,21 @@ module harness_flows {
     harnessUnchanged
   }
 
-  // Bob invites alice to block
-  action bobInvitesAliceToBlock(blockId: HomeId): bool = all {
-    tui_flows::inviteContactToBlock("bob", blockId, "alice"),
+  // Bob invites alice to home
+  action bobInvitesAliceToHome(homeId: HomeId): bool = all {
+    tui_flows::inviteContactToHome("bob", homeId, "alice"),
     harnessUnchanged
   }
 
-  // Bob removes alice from block
-  action bobRemovesAliceFromBlock(blockId: HomeId): bool = all {
-    tui_flows::removeContactFromBlock("bob", blockId, "alice"),
+  // Bob removes alice from home
+  action bobRemovesAliceFromHome(homeId: HomeId): bool = all {
+    tui_flows::removeContactFromHome("bob", homeId, "alice"),
     harnessUnchanged
   }
 
-  // Bob filters contacts by block
-  action bobFiltersContactsByBlock(blockId: HomeId): bool = all {
-    tui_flows::filterContactsByBlock("bob", blockId),
+  // Bob filters contacts by home
+  action bobFiltersContactsByHome(homeId: HomeId): bool = all {
+    tui_flows::filterContactsByHome("bob", homeId),
     markScenario("social_graph_filter", true)
   }
 
@@ -220,11 +220,11 @@ module harness_flows {
     tui_flows::agents' = tui_flows::agents,
     tui_flows::invitations' = tui_flows::invitations,
     tui_flows::recoverySessions' = tui_flows::recoverySessions,
-    tui_flows::blocks' = tui_flows::blocks,
+    tui_flows::homes' = tui_flows::homes,
     tui_flows::channels' = tui_flows::channels,
     tui_flows::neighborhoods' = tui_flows::neighborhoods,
     tui_flows::recoveryFlowPhase' = tui_flows::recoveryFlowPhase,
-    tui_flows::blockFlowPhase' = tui_flows::blockFlowPhase,
+    tui_flows::homeFlowPhase' = tui_flows::homeFlowPhase,
     tui_flows::neighborhoodFlowPhase' = tui_flows::neighborhoodFlowPhase,
     tui_flows::chatFlowPhase' = tui_flows::chatFlowPhase,
     tui_flows::invitationFlowPhase' = tui_flows::invitationFlowPhase,
@@ -252,11 +252,11 @@ module harness_flows {
       tui_flows::agents' = tui_flows::agents,
       tui_flows::invitations' = tui_flows::invitations,
       tui_flows::recoverySessions' = tui_flows::recoverySessions,
-      tui_flows::blocks' = tui_flows::blocks,
+      tui_flows::homes' = tui_flows::homes,
       tui_flows::channels' = tui_flows::channels,
       tui_flows::neighborhoods' = tui_flows::neighborhoods,
       tui_flows::recoveryFlowPhase' = tui_flows::recoveryFlowPhase,
-      tui_flows::blockFlowPhase' = tui_flows::blockFlowPhase,
+      tui_flows::homeFlowPhase' = tui_flows::homeFlowPhase,
       tui_flows::neighborhoodFlowPhase' = tui_flows::neighborhoodFlowPhase,
       tui_flows::chatFlowPhase' = tui_flows::chatFlowPhase,
       tui_flows::invitationFlowPhase' = tui_flows::invitationFlowPhase,
@@ -285,11 +285,11 @@ module harness_flows {
       tui_flows::agents' = tui_flows::agents,
       tui_flows::invitations' = tui_flows::invitations,
       tui_flows::recoverySessions' = tui_flows::recoverySessions,
-      tui_flows::blocks' = tui_flows::blocks,
+      tui_flows::homes' = tui_flows::homes,
       tui_flows::channels' = tui_flows::channels,
       tui_flows::neighborhoods' = tui_flows::neighborhoods,
       tui_flows::recoveryFlowPhase' = tui_flows::recoveryFlowPhase,
-      tui_flows::blockFlowPhase' = tui_flows::blockFlowPhase,
+      tui_flows::homeFlowPhase' = tui_flows::homeFlowPhase,
       tui_flows::neighborhoodFlowPhase' = tui_flows::neighborhoodFlowPhase,
       tui_flows::chatFlowPhase' = tui_flows::chatFlowPhase,
       tui_flows::invitationFlowPhase' = tui_flows::invitationFlowPhase,
@@ -299,28 +299,28 @@ module harness_flows {
     })
   }
 
-  // Full block → neighborhood scenario
-  run fullBlockNeighborhoodScenario = {
+  // Full home → neighborhood scenario
+  run fullHomeNeighborhoodScenario = {
     init
     .then(setupGuardianRecovery)
     .then(setupGuardians)
-    .then(bobCreatesBlock("block-harness"))
-    .then(aliceJoinsBlock("block-harness"))
-    .then(bobPromotesAlice("block-harness"))
+    .then(bobCreatesHome("home-harness"))
+    .then(aliceJoinsHome("home-harness"))
+    .then(bobPromotesAlice("home-harness"))
     .then(bobCreatesNeighborhood("neighborhood-harness", "Downtown"))
-    .then(bobLinksBlock("block-harness", "neighborhood-harness"))
+    .then(bobLinksHome("home-harness", "neighborhood-harness"))
     .then(all {
-      assert(executedScenarios.contains("block_steward_promotion")),
+      assert(executedScenarios.contains("home_steward_promotion")),
       assert(executedScenarios.contains("neighborhood_link")),
       tui_flows::allAgents' = tui_flows::allAgents,
       tui_flows::agents' = tui_flows::agents,
       tui_flows::invitations' = tui_flows::invitations,
       tui_flows::recoverySessions' = tui_flows::recoverySessions,
-      tui_flows::blocks' = tui_flows::blocks,
+      tui_flows::homes' = tui_flows::homes,
       tui_flows::channels' = tui_flows::channels,
       tui_flows::neighborhoods' = tui_flows::neighborhoods,
       tui_flows::recoveryFlowPhase' = tui_flows::recoveryFlowPhase,
-      tui_flows::blockFlowPhase' = tui_flows::blockFlowPhase,
+      tui_flows::homeFlowPhase' = tui_flows::homeFlowPhase,
       tui_flows::neighborhoodFlowPhase' = tui_flows::neighborhoodFlowPhase,
       tui_flows::chatFlowPhase' = tui_flows::chatFlowPhase,
       tui_flows::invitationFlowPhase' = tui_flows::invitationFlowPhase,
@@ -330,8 +330,8 @@ module harness_flows {
     })
   }
 
-  // Full social graph scenario: contact_import → block_creation → contact_block_assignment → filter
-  // This covers Flow 6: Social Graph (Contacts + Blocks)
+  // Full social graph scenario: contact_import → home_creation → contact_home_assignment → filter
+  // This covers Flow 6: Social Graph (Contacts + Homes)
   // Note: Uses invitation flow to establish contact relationship before Social Graph operations
   run fullSocialGraphScenario = {
     init
@@ -343,33 +343,33 @@ module harness_flows {
     .then(exportInv("social-invite"))
     .then(bobImportsInvitation("social-invite"))
     .then(bobAcceptsInvitation("social-invite"))  // Now alice is bob's contact
-    // Bob creates a block
-    .then(bobCreatesBlock("social-block"))
+    // Bob creates a home
+    .then(bobCreatesHome("social-home"))
     // Bob sets nickname for alice (alice is now a contact!)
     .then(bobSetsNicknameForAlice("My Friend Alice"))
-    // Bob invites alice to his block (alice becomes a resident)
-    .then(bobInvitesAliceToBlock("social-block"))
-    // Bob filters contacts by block to view only block members
-    .then(bobFiltersContactsByBlock("social-block"))
+    // Bob invites alice to his home (alice becomes a resident)
+    .then(bobInvitesAliceToHome("social-home"))
+    // Bob filters contacts by home to view only home members
+    .then(bobFiltersContactsByHome("social-home"))
     // Complete the scenario
     .then(markSocialGraphComplete)
     .then(all {
       assert(executedScenarios.contains("social_graph_filter")),
       assert(executedScenarios.contains("social_graph_complete")),
       assert(scenarioOutcomes.get("social_graph_complete") == true),
-      // Verify state: alice should be a resident of the block
-      assert(tui_flows::blocks.get("social-block").residents.contains("alice")),
+      // Verify state: alice should be a resident of the home
+      assert(tui_flows::homes.get("social-home").residents.contains("alice")),
       // Verify nickname was set
       assert(tui_flows::agents.get("bob").contactNicknames.get("alice") == "My Friend Alice"),
       tui_flows::allAgents' = tui_flows::allAgents,
       tui_flows::agents' = tui_flows::agents,
       tui_flows::invitations' = tui_flows::invitations,
       tui_flows::recoverySessions' = tui_flows::recoverySessions,
-      tui_flows::blocks' = tui_flows::blocks,
+      tui_flows::homes' = tui_flows::homes,
       tui_flows::channels' = tui_flows::channels,
       tui_flows::neighborhoods' = tui_flows::neighborhoods,
       tui_flows::recoveryFlowPhase' = tui_flows::recoveryFlowPhase,
-      tui_flows::blockFlowPhase' = tui_flows::blockFlowPhase,
+      tui_flows::homeFlowPhase' = tui_flows::homeFlowPhase,
       tui_flows::neighborhoodFlowPhase' = tui_flows::neighborhoodFlowPhase,
       tui_flows::chatFlowPhase' = tui_flows::chatFlowPhase,
       tui_flows::invitationFlowPhase' = tui_flows::invitationFlowPhase,

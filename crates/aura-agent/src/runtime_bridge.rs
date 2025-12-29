@@ -53,7 +53,6 @@ use crate::runtime::consensus::{
     build_consensus_params, membership_hash_from_participants,
     participant_identity_to_authority_id,
 };
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Wrapper to implement RuntimeBridge for AuraAgent
@@ -307,10 +306,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let state = aura_protocol::amp::get_channel_state(&effects, context, channel)
             .await
             .map_err(|e| IntentError::internal_error(format!("AMP state lookup failed: {e}")))?;
-        let bump_nonce = effects
-            .random_bytes(32)
-            .await
-            .map_err(|e| IntentError::internal_error(format!("AMP bump nonce failed: {e}")))?;
+        let bump_nonce = effects.random_bytes(32).await;
         let bump_id = Hash32(hash(&bump_nonce));
         let proposal = ProposedChannelEpochBump {
             context,
@@ -341,7 +337,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 })?;
             let context_commitment = context_commitment_from_journal(context, &journal)?;
             let prestate = Prestate::new(
-                vec![(authority_id, tree_state.root_commitment)],
+                vec![(authority_id, Hash32(tree_state.root_commitment))],
                 context_commitment,
             );
 
@@ -987,10 +983,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
         total_n: u16,
         guardian_ids: &[String],
     ) -> Result<String, IntentError> {
-        use aura_core::effects::{
-            SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-            ThresholdSigningEffects,
-        };
         use aura_core::hash::hash;
         use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
         use aura_recovery::guardian_ceremony::GuardianState;
@@ -1059,7 +1051,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| IntentError::internal_error(format!("Failed to read tree state: {e}")))?;
         let context_commitment = current_state.compute_prestate_hash(&authority_id);
         let prestate = Prestate::new(
-            vec![(authority_id, tree_state.root_commitment)],
+            vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
         );
         let prestate_hash = prestate.compute_hash();
@@ -1181,7 +1173,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
         let signing_service = self.agent.threshold_signing();
-        let signing_service = self.agent.threshold_signing();
         let current_device_id = self.agent.context().device_id();
 
         let mut parsed_devices: Vec<aura_core::DeviceId> = Vec::with_capacity(device_ids.len());
@@ -1298,7 +1289,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
         let context_commitment = aura_core::Hash32(hash(&prestate_input));
         let prestate = Prestate::new(
-            vec![(authority_id, tree_state.root_commitment)],
+            vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
         );
         let prestate_hash = prestate.compute_hash();
@@ -1453,6 +1444,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
+        let signing_service = self.agent.threshold_signing();
         let current_device_id = self.agent.context().device_id();
 
         // Best-effort: derive current device participant set from the commitment tree.
@@ -1611,7 +1603,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
         let context_commitment = aura_core::Hash32(hash(&prestate_input));
         let prestate = Prestate::new(
-            vec![(authority_id, tree_state.root_commitment)],
+            vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
         );
         let prestate_hash = prestate.compute_hash();
@@ -1783,6 +1775,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
+        let signing_service = self.agent.threshold_signing();
         let current_device_id = self.agent.context().device_id();
 
         let target_device_id: aura_core::DeviceId = device_id.parse().map_err(|e| {
@@ -1940,7 +1933,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
         let context_commitment = aura_core::Hash32(hash(&prestate_input));
         let prestate = Prestate::new(
-            vec![(authority_id, tree_state.root_commitment)],
+            vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
         );
         let prestate_hash = prestate.compute_hash();

@@ -50,18 +50,18 @@ fn test_parse_inline_trace() {
         "description": "Test trace",
         "timestamp": 0
       },
-      "vars": ["currentScreen", "currentModal", "blockInsertMode", "chatInsertMode", "shouldExit", "terminalWidth", "terminalHeight"],
+      "vars": ["currentScreen", "currentModal", "homeInsertMode", "chatInsertMode", "shouldExit", "terminalWidth", "terminalHeight"],
       "states": [
         {
           "#meta": {"index": 0},
           "currentScreen": {"tag": "Home", "value": {"#tup": []}},
           "currentModal": {"tag": "NoModal", "value": {"#tup": []}},
-          "blockInsertMode": false,
+          "homeInsertMode": false,
           "chatInsertMode": false,
           "shouldExit": false,
           "terminalWidth": {"#bigint": "80"},
           "terminalHeight": {"#bigint": "24"},
-          "blockInputBuffer": "",
+          "homeInputBuffer": "",
           "chatInputBuffer": "",
           "modalInputBuffer": "",
           "commandQueue": []
@@ -70,12 +70,12 @@ fn test_parse_inline_trace() {
           "#meta": {"index": 1},
           "currentScreen": {"tag": "Chat", "value": {"#tup": []}},
           "currentModal": {"tag": "NoModal", "value": {"#tup": []}},
-          "blockInsertMode": false,
+          "homeInsertMode": false,
           "chatInsertMode": false,
           "shouldExit": false,
           "terminalWidth": {"#bigint": "80"},
           "terminalHeight": {"#bigint": "24"},
-          "blockInputBuffer": "",
+          "homeInputBuffer": "",
           "chatInputBuffer": "",
           "modalInputBuffer": "",
           "commandQueue": []
@@ -111,18 +111,18 @@ fn test_invariant_validation() {
         "description": "Test trace with invalid state",
         "timestamp": 0
       },
-      "vars": ["currentScreen", "currentModal", "blockInsertMode", "chatInsertMode", "shouldExit", "terminalWidth", "terminalHeight"],
+      "vars": ["currentScreen", "currentModal", "homeInsertMode", "chatInsertMode", "shouldExit", "terminalWidth", "terminalHeight"],
       "states": [
         {
           "#meta": {"index": 0},
           "currentScreen": {"tag": "Contacts", "value": {"#tup": []}},
           "currentModal": {"tag": "NoModal", "value": {"#tup": []}},
-          "blockInsertMode": true,
+          "homeInsertMode": true,
           "chatInsertMode": false,
           "shouldExit": false,
           "terminalWidth": {"#bigint": "80"},
           "terminalHeight": {"#bigint": "24"},
-          "blockInputBuffer": "",
+          "homeInputBuffer": "",
           "chatInputBuffer": "",
           "modalInputBuffer": "",
           "commandQueue": []

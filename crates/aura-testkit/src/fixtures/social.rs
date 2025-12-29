@@ -68,7 +68,7 @@ pub fn create_test_home(
 
     let home = Home::from_facts(&home_fact, None, &resident_facts, &steward_facts);
 
-    (home_instance, steward, residents)
+    (home, steward, residents)
 }
 
 /// Create a test home with custom configuration.
@@ -107,7 +107,7 @@ pub fn create_test_home_with_config(
         &steward_facts,
     );
 
-    (home_instance, steward, residents)
+    (home, steward, residents)
 }
 
 /// Create a test neighborhood with a given number of member homes.
@@ -217,8 +217,8 @@ pub fn create_single_home_topology(
     resident_count: usize,
 ) -> (SocialTopology, Home, AuthorityId, Vec<AuthorityId>) {
     let (home, steward, residents) = create_test_home(home_seed, resident_count);
-    let topology = SocialTopology::new(steward, Some(home_instance.clone()), vec![]);
-    (topology, home_instance, steward, residents)
+    let topology = SocialTopology::new(steward, Some(home.clone()), vec![]);
+    (topology, home, steward, residents)
 }
 
 /// Create a social topology with a home in a neighborhood.
@@ -234,13 +234,14 @@ pub fn create_neighborhood_topology(
 
     // Add our home to the neighborhood
     let timestamp = test_timestamp();
-    neighborhood.member_homes.push(home_instance.home_id);
-    let member_fact = HomeMemberFact::new(home_instance.home_id, neighborhood.neighborhood_id, timestamp);
+    neighborhood.member_homes.push(home.home_id);
+    let member_fact =
+        HomeMemberFact::new(home.home_id, neighborhood.neighborhood_id, timestamp);
     let _ = member_fact; // Use fact in production code
 
-    let topology = SocialTopology::new(steward, Some(home_instance.clone()), vec![neighborhood.clone()]);
+    let topology = SocialTopology::new(steward, Some(home.clone()), vec![neighborhood.clone()]);
 
-    (topology, home_instance, neighborhood, steward)
+    (topology, home, neighborhood, steward)
 }
 
 /// Builder for complex social topology test scenarios.

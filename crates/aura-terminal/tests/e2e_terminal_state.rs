@@ -1360,7 +1360,7 @@ async fn test_threshold_configuration_flow() {
 /// 2. MovePosition updates neighborhood state
 /// 3. Home channel naming convention (home:<home_id>)
 #[tokio::test]
-async fn test_block_messaging_flow() {
+async fn test_home_messaging_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::TuiMode;
@@ -1395,7 +1395,7 @@ async fn test_block_messaging_flow() {
     );
 
     // Create account
-    ctx.create_account("BlockTester")
+    ctx.create_account("HomeTester")
         .await
         .expect("Failed to create account");
     println!("  ✓ Account created");
@@ -1465,7 +1465,7 @@ async fn test_block_messaging_flow() {
     let uuid_home_channel = format!("home:{}", "550e8400-e29b-41d4-a716-446655440000");
     let result = ctx
         .dispatch(EffectCommand::SendMessage {
-            channel: uuid_block_channel.clone(),
+            channel: uuid_home_channel.clone(),
             content: "Message to UUID home".to_string(),
         })
         .await;
@@ -1689,7 +1689,7 @@ async fn test_steward_role_flow() {
         let core = app_core.write().await;
 
         // Create a home with the current user as owner
-        let mut home = BlockState::new(
+        let mut home = HomeState::new(
             home_id.clone(),
             Some("Test Home".to_string()),
             owner_id.clone(),
@@ -1726,7 +1726,7 @@ async fn test_steward_role_flow() {
 
         // Add home and select it
         core.views().add_home(home_state);
-        core.views().select_block(Some(home_id.clone()));
+        core.views().select_home(Some(home_id.clone()));
     }
 
     println!("  ✓ Home created with 3 residents (1 owner, 2 residents)");
@@ -1746,8 +1746,8 @@ async fn test_steward_role_flow() {
     // Verify role changed
     {
         let core = app_core.read().await;
-        let blocks = core.views().get_blocks();
-        let home = blocks.current_block().expect("Home should exist");
+        let homes = core.views().get_homes();
+        let home = homes.current_home().expect("Home should exist");
         let resident = home_state
             .resident(&resident1_id)
             .expect("Resident should exist");
@@ -1773,8 +1773,8 @@ async fn test_steward_role_flow() {
     // Verify role changed back
     {
         let core = app_core.read().await;
-        let blocks = core.views().get_blocks();
-        let home = blocks.current_block().expect("Home should exist");
+        let homes = core.views().get_homes();
+        let home = homes.current_home().expect("Home should exist");
         let resident = home_state
             .resident(&resident1_id)
             .expect("Resident should exist");
@@ -1858,7 +1858,7 @@ async fn test_steward_role_flow() {
 async fn test_neighborhood_navigation_flow() {
     use async_lock::RwLock;
     use aura_app::views::neighborhood::{
-        AdjacencyType, NeighborBlock, NeighborhoodState, TraversalPosition,
+        AdjacencyType, NeighborHome, NeighborhoodState, TraversalPosition,
     };
     use aura_app::AppCore;
     use aura_core::identifiers::ChannelId;
@@ -1897,8 +1897,8 @@ async fn test_neighborhood_navigation_flow() {
         .expect("Failed to create account");
     println!("  ✓ Account created");
 
-    // Phase 2: Set up neighborhood with blocks
-    println!("\nPhase 2: Setting up neighborhood with blocks");
+    // Phase 2: Set up neighborhood with homes
+    println!("\nPhase 2: Setting up neighborhood with homes");
 
     let home_home_id = "home-main".parse::<ChannelId>().unwrap_or_default();
     let alice_home_id = "alice-home".parse::<ChannelId>().unwrap_or_default();
@@ -2357,7 +2357,7 @@ async fn test_channel_mode_operations() {
     // Set up a home with the user as owner (required for SetChannelMode)
     {
         let core = app_core.write().await;
-        let mut home = BlockState::new(
+        let mut home = HomeState::new(
             home_id.clone(),
             Some("Test Home".to_string()),
             owner_id.clone(),
@@ -2366,7 +2366,7 @@ async fn test_channel_mode_operations() {
         );
         home_state.my_role = ResidentRole::Owner;
         core.views().add_home(home_state);
-        core.views().select_block(Some(home_id.clone()));
+        core.views().select_home(Some(home_id.clone()));
     }
 
     // Initially no mode set
@@ -3264,7 +3264,7 @@ async fn test_device_management() {
 /// Snapshot Data Accuracy E2E Test
 ///
 /// This test verifies:
-/// 1. BlockInfo.created_at is populated from BlockState
+/// 1. HomeInfo.created_at is populated from HomeState
 /// 2. Resident.is_self correctly identifies current user
 /// 3. Contact.has_pending_suggestion is derived correctly
 #[tokio::test]
@@ -3315,13 +3315,13 @@ async fn test_snapshot_data_accuracy() {
         TuiMode::Production,
     );
 
-    println!("Phase 1: Testing BlockInfo.created_at");
+    println!("Phase 1: Testing HomeInfo.created_at");
 
     // Create a home with a specific created_at timestamp
     let test_created_at = 1702000000000u64; // A specific timestamp
     let home_id = "test-home-1".parse::<ChannelId>().unwrap_or_default();
-    let _block_context_id = ContextId::new_from_entropy([9u8; 32]);
-    let home_state = BlockState::new(
+    let _home_context_id = ContextId::new_from_entropy([9u8; 32]);
+    let home_state = HomeState::new(
         home_id,
         Some("Test Home".to_string()),
         authority_id.clone(),
@@ -3342,10 +3342,10 @@ async fn test_snapshot_data_accuracy() {
     if let Some(home_info) = &home_snapshot.home {
         assert_eq!(
             home_info.created_at, test_created_at,
-            "BlockInfo.created_at should match the BlockState value"
+            "HomeInfo.created_at should match the HomeState value"
         );
         println!(
-            "  ✓ BlockInfo.created_at is correct: {}",
+            "  ✓ HomeInfo.created_at is correct: {}",
             home_info.created_at
         );
     } else {

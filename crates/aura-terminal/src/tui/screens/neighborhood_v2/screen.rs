@@ -410,11 +410,25 @@ pub fn NeighborhoodScreenV2(
         let mut reactive_budget = reactive_budget.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |home_state| {
-                let residents: Vec<Resident> =
-                    home_state.residents.iter().map(convert_resident).collect();
-                let budget = convert_budget(&home_state.storage, home_state.resident_count);
-                reactive_residents.set(residents);
-                reactive_budget.set(budget);
+                if let Some(current_home) = home_state.current_home() {
+                    let residents: Vec<Resident> = current_home
+                        .residents
+                        .iter()
+                        .map(convert_resident)
+                        .collect();
+                    let budget =
+                        convert_budget(&current_home.storage, current_home.resident_count);
+                    reactive_residents.set(residents);
+                    reactive_budget.set(budget);
+                } else {
+                    reactive_residents.set(Vec::new());
+                    reactive_budget.set(HomeBudget {
+                        total: 0,
+                        used: 0,
+                        resident_count: 0,
+                        max_residents: aura_app::MAX_RESIDENTS,
+                    });
+                }
             })
             .await;
         }

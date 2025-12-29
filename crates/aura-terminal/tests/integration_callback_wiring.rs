@@ -891,7 +891,7 @@ async fn test_context_switching_works() {
 /// Test dispatch_and_wait waits for completion
 ///
 /// Validates:
-/// 1. dispatch_and_wait blocks until complete
+/// 1. dispatch_and_wait homes until complete
 /// 2. Result is available immediately
 /// 3. State changes are visible after return
 #[tokio::test]
@@ -1058,8 +1058,8 @@ async fn test_snapshot_methods_return_current_state() {
 
     let neighborhood = ctx.snapshot_neighborhood();
     println!(
-        "  Neighborhood snapshot: blocks={}",
-        neighborhood.blocks.len()
+        "  Neighborhood snapshot: homes={}",
+        neighborhood.homes.len()
     );
 
     let home = ctx.snapshot_home();

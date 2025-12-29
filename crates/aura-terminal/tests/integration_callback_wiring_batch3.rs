@@ -79,7 +79,7 @@ fn cleanup_test_dir(name: &str) {
 
 /// Test that HOMES_SIGNAL and HOMES_SIGNAL are properly initialized
 #[tokio::test]
-async fn test_block_signals_initialization() {
+async fn test_home_signals_initialization() {
     println!("\n=== Home Signals Initialization Test ===\n");
 
     let (ctx, app_core) = setup_test_env("home-init").await;
@@ -111,17 +111,17 @@ async fn test_block_signals_initialization() {
 
     // Phase 2: Read initial HOMES_SIGNAL state
     println!("\nPhase 2: Check HOMES_SIGNAL initial state");
-    let blocks_state = core.read(&*HOMES_SIGNAL).await;
+    let homes_state = core.read(&*HOMES_SIGNAL).await;
 
-    match blocks_state {
+    match homes_state {
         Ok(state) => {
             println!("  HOMES_SIGNAL initialized");
-            println!("  Total blocks: {}", state.homes.len());
+            println!("  Total homes: {}", state.homes.len());
             println!("  Current home ID: {:?}", state.current_home_id);
-            // Should start with no blocks
+            // Should start with no homes
             assert!(
                 state.homes.is_empty(),
-                "Initial blocks state should be empty"
+                "Initial homes state should be empty"
             );
         }
         Err(e) => {
@@ -145,15 +145,15 @@ async fn test_create_home_updates_signals() {
 
     let (ctx, app_core) = setup_test_env("create-home").await;
 
-    // Phase 1: Get initial blocks count
+    // Phase 1: Get initial homes count
     println!("Phase 1: Get initial state");
     let core = app_core.read().await;
-    let initial_blocks = core
+    let initial_homes = core
         .read(&*HOMES_SIGNAL)
         .await
-        .map(|s| s.blocks.len())
+        .map(|s| s.homes.len())
         .unwrap_or(0);
-    println!("  Initial blocks count: {}", initial_blocks);
+    println!("  Initial homes count: {}", initial_homes);
     drop(core);
 
     // Phase 2: Create a home
@@ -183,11 +183,11 @@ async fn test_create_home_updates_signals() {
     // Phase 3: Verify home was created (if succeeded) or authorization enforced
     println!("\nPhase 3: Verify state");
     let core = app_core.read().await;
-    let blocks_state = core.read(&*HOMES_SIGNAL).await;
+    let homes_state = core.read(&*HOMES_SIGNAL).await;
 
-    if let Ok(state) = blocks_state {
-        println!("  Blocks count after create: {}", state.homes.len());
-        if state.homes.len() > initial_blocks {
+    if let Ok(state) = homes_state {
+        println!("  Homes count after create: {}", state.homes.len());
+        if state.homes.len() > initial_homes {
             println!("  New home was created successfully");
             // Find the new home
             for (id, home_state) in &state.homes {
@@ -204,7 +204,7 @@ async fn test_create_home_updates_signals() {
 
 /// Test home resident management
 #[tokio::test]
-async fn test_block_resident_operations() {
+async fn test_home_resident_operations() {
     println!("\n=== Home Resident Operations Test ===\n");
 
     let (ctx, app_core) = setup_test_env("home-residents").await;

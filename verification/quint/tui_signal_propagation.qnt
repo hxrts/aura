@@ -19,7 +19,7 @@ module tui_signal_propagation {
     | InvitationsSignal
     | RecoverySignal
     | NeighborhoodSignal
-    | BlockSignal
+    | HomeSignal
     | ConnectionStatusSignal
     | SyncStatusSignal
 

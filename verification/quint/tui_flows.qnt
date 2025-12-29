@@ -7,11 +7,11 @@
 //
 // Core Flows Modeled:
 // 1. Guardian Recovery: Bob → request → Alice/Carol approve → restore
-// 2. Block Lifecycle: create → invite → join → promote steward
-// 3. Neighborhood: create blocks → link → traverse
+// 2. Home Lifecycle: create → invite → join → promote steward
+// 3. Neighborhood: create homes → link → traverse
 // 4. Chat & Messaging: contact → DM/channel → message exchange
 // 5. Invitation Lifecycle: create → export → import → accept → contact
-// 6. Social Graph: contacts → blocks → assignment → views
+// 6. Social Graph: contacts → homes → assignment → views
 //
 // See: work/tui_flows.md for design documentation
 
@@ -40,7 +40,7 @@ module tui_flows {
     | InvitationsSignal
     | RecoverySignal
     | NeighborhoodSignal
-    | BlockSignal
+    | HomeSignal
     | ConnectionStatusSignal
     | SyncStatusSignal
 
@@ -56,22 +56,22 @@ module tui_flows {
     | RecoveryCompleted              // Authority restored
     | RecoveryCancelled              // Aborted
 
-  // Flow 2: Block lifecycle phases
-  type BlockFlowPhase =
-    | BlockNone                      // No block
+  // Flow 2: Home lifecycle phases
+  type HomeFlowPhase =
+    | HomeNone                      // No home
     | HomeCreated                   // Home created by owner
-    | BlockInvitationSent            // Resident invitation sent
-    | BlockResidentJoined            // Resident accepted invitation
-    | BlockStewardPromoted           // Resident promoted to steward
-    | BlockFull                      // Block at capacity (8 residents)
+    | HomeInvitationSent            // Resident invitation sent
+    | HomeResidentJoined            // Resident accepted invitation
+    | HomeStewardPromoted           // Resident promoted to steward
+    | HomeFull                      // Home at capacity (8 residents)
 
   // Flow 3: Neighborhood formation phases
   type NeighborhoodFlowPhase =
     | NeighborhoodNone               // No neighborhood
-    | NeighborhoodBlocksCreated      // Multiple blocks exist
+    | NeighborhoodHomesCreated      // Multiple homes exist
     | NeighborhoodCreated            // Neighborhood entity created
-    | NeighborhoodBlocksLinked       // Blocks connected to neighborhood
-    | NeighborhoodTraversable        // Can traverse between blocks
+    | NeighborhoodHomesLinked       // Homes connected to neighborhood
+    | NeighborhoodTraversable        // Can traverse between homes
 
   // Flow 4: Chat & messaging phases
   type ChatFlowPhase =
@@ -92,22 +92,22 @@ module tui_flows {
     | InvitationDeclined             // Recipient declined
     | InvitationContactCreated       // Contact relationship created
 
-  // Flow 6: Social Graph (Contacts + Blocks) phases
+  // Flow 6: Social Graph (Contacts + Homes) phases
   type SocialGraphFlowPhase =
     | SocialNone                     // No social graph activity
     | SocialContactsExist            // User has contacts
-    | SocialBlockExists              // User has created/owns a block
-    | SocialContactInvitedToBlock    // Contact invited to join block
-    | SocialContactJoinedBlock       // Contact joined as resident (is_resident = true)
+    | SocialHomeExists              // User has created/owns a home
+    | SocialContactInvitedToHome    // Contact invited to join home
+    | SocialContactJoinedHome       // Contact joined as resident (is_resident = true)
     | SocialNicknameUpdated           // Contact nickname changed
-    | SocialBlockContactsFiltered    // Contacts filtered by block membership
+    | SocialHomeContactsFiltered    // Contacts filtered by home membership
 
   // ============ INVITATION TYPE ============
 
   type InvitationType =
     | GuardianInvitation             // Become a guardian
     | ContactInvitation              // Simple contact
-    | BlockResidentInvitation(HomeId) // Join a block as resident
+    | HomeResidentInvitation(HomeId) // Join a home as resident
 
   // ============ AGENT STATE ============
 
@@ -131,8 +131,8 @@ module tui_flows {
     channels: Set[ChannelId],
     directMessages: Set[AgentId],    // DM channels (keyed by other party)
 
-    // Blocks & Neighborhoods
-    ownedBlocks: Set[HomeId],
+    // Homes & Neighborhoods
+    ownedHomes: Set[HomeId],
     residentOf: Set[HomeId],
     stewardOf: Set[HomeId],
     neighborhoods: Set[NeighborhoodId],
@@ -184,7 +184,7 @@ module tui_flows {
 
   // ============ BLOCK STATE ============
 
-  type BlockRecord = {
+  type HomeRecord = {
     id: HomeId,
     owner: AgentId,
     stewards: Set[AgentId],
@@ -193,7 +193,7 @@ module tui_flows {
     linkedNeighborhood: Option[NeighborhoodId]
   }
 
-  var blocks: HomeId -> BlockRecord
+  var homes: HomeId -> HomeRecord
 
   // ============ CHANNEL STATE ============
 
@@ -212,7 +212,7 @@ module tui_flows {
   type NeighborhoodRecord = {
     id: NeighborhoodId,
     name: str,
-    linkedBlocks: Set[HomeId]
+    linkedHomes: Set[HomeId]
   }
 
   var neighborhoods: NeighborhoodId -> NeighborhoodRecord
@@ -221,7 +221,7 @@ module tui_flows {
 
   // Track current phase of each flow type for verification
   var recoveryFlowPhase: AgentId -> RecoveryFlowPhase
-  var homeFlowPhase: AgentId -> BlockFlowPhase
+  var homeFlowPhase: AgentId -> HomeFlowPhase
   var neighborhoodFlowPhase: AgentId -> NeighborhoodFlowPhase
   var chatFlowPhase: AgentId -> ChatFlowPhase
   var invitationFlowPhase: AgentId -> InvitationFlowPhase
@@ -241,7 +241,7 @@ module tui_flows {
     sentInvitations: Set(),
     channels: Set(),
     directMessages: Set(),
-    ownedBlocks: Set(),
+    ownedHomes: Set(),
     residentOf: Set(),
     stewardOf: Set(),
     neighborhoods: Set(),
@@ -273,7 +273,7 @@ module tui_flows {
     ),
     invitations' = Map(),
     recoverySessions' = Map(),
-    blocks' = Map(),
+    homes' = Map(),
     channels' = Map(),
     neighborhoods' = Map(),
     recoveryFlowPhase' = Map(
@@ -282,9 +282,9 @@ module tui_flows {
       "carol" -> RecoveryIdle
     ),
     homeFlowPhase' = Map(
-      "bob" -> BlockNone,
-      "alice" -> BlockNone,
-      "carol" -> BlockNone
+      "bob" -> HomeNone,
+      "alice" -> HomeNone,
+      "carol" -> HomeNone
     ),
     neighborhoodFlowPhase' = Map(
       "bob" -> NeighborhoodNone,
@@ -342,7 +342,7 @@ module tui_flows {
       allAgents' = allAgents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       homeFlowPhase' = homeFlowPhase,
@@ -388,7 +388,7 @@ module tui_flows {
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       homeFlowPhase' = homeFlowPhase,
@@ -433,7 +433,7 @@ module tui_flows {
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       homeFlowPhase' = homeFlowPhase,
@@ -468,7 +468,7 @@ module tui_flows {
       allAgents' = allAgents,
       agents' = agents,
       invitations' = invitations,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       homeFlowPhase' = homeFlowPhase,
@@ -505,7 +505,7 @@ module tui_flows {
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       homeFlowPhase' = homeFlowPhase,
@@ -549,7 +549,7 @@ module tui_flows {
       // Unchanged
       allAgents' = allAgents,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -576,7 +576,7 @@ module tui_flows {
       allAgents' = allAgents,
       agents' = agents,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -617,7 +617,7 @@ module tui_flows {
       // Unchanged
       allAgents' = allAgents,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -668,7 +668,7 @@ module tui_flows {
       // Unchanged
       allAgents' = allAgents,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -709,7 +709,7 @@ module tui_flows {
       // Unchanged
       allAgents' = allAgents,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -750,7 +750,7 @@ module tui_flows {
       allAgents' = allAgents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -795,7 +795,7 @@ module tui_flows {
       allAgents' = allAgents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
       homeFlowPhase' = homeFlowPhase,
@@ -829,7 +829,7 @@ module tui_flows {
       allAgents' = allAgents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
       homeFlowPhase' = homeFlowPhase,
@@ -841,15 +841,15 @@ module tui_flows {
 
   // ============ FLOW 2: BLOCK LIFECYCLE ============
 
-  // Create block
-  action createBlock(owner: AgentId, blockId: HomeId): bool = {
+  // Create home
+  action createHome(owner: AgentId, homeId: HomeId): bool = {
     val ownerState = getAgent(agents, owner)
     all {
       ownerState.hasAccount,
-      not(blockId.in(blocks.keys())),
-      // Create block
-      blocks' = blocks.put(blockId, {
-        id: blockId,
+      not(homeId.in(homes.keys())),
+      // Create home
+      homes' = homes.put(homeId, {
+        id: homeId,
         owner: owner,
         stewards: Set(owner),
         residents: Set(owner),
@@ -859,10 +859,10 @@ module tui_flows {
       // Update owner state
       agents' = agents.set(owner, {
         ...ownerState,
-        ownedBlocks: ownerState.ownedBlocks.union(Set(blockId)),
-        residentOf: ownerState.residentOf.union(Set(blockId)),
-        stewardOf: ownerState.stewardOf.union(Set(blockId)),
-        lastEmittedSignals: Set(BlockSignal)
+        ownedHomes: ownerState.ownedHomes.union(Set(homeId)),
+        residentOf: ownerState.residentOf.union(Set(homeId)),
+        stewardOf: ownerState.stewardOf.union(Set(homeId)),
+        lastEmittedSignals: Set(HomeSignal)
       }),
       homeFlowPhase' = homeFlowPhase.set(owner, HomeCreated),
       // Unchanged
@@ -879,36 +879,36 @@ module tui_flows {
     }
   }
 
-  // Join block as resident
-  action joinBlock(resident: AgentId, blockId: HomeId): bool = {
+  // Join home as resident
+  action joinHome(resident: AgentId, homeId: HomeId): bool = {
     val residentState = getAgent(agents, resident)
-    val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
-      id: blockId, owner: "", stewards: Set(), residents: Set(),
+    val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
+      id: homeId, owner: "", stewards: Set(), residents: Set(),
       capacity: 8, linkedNeighborhood: None
     }
-    val ownerState = getAgent(agents, block.owner)
+    val ownerState = getAgent(agents, home.owner)
     all {
-      blockId.in(blocks.keys()),
+      homeId.in(homes.keys()),
       residentState.hasAccount,
-      not(block.residents.contains(resident)),
-      block.residents.size() < block.capacity,
-      // Update block
-      blocks' = blocks.put(blockId, {
-        ...block,
-        residents: block.residents.union(Set(resident))
+      not(home.residents.contains(resident)),
+      home.residents.size() < home.capacity,
+      // Update home
+      homes' = homes.put(homeId, {
+        ...home,
+        residents: home.residents.union(Set(resident))
       }),
       // Update resident and owner states
       agents' = agents
         .set(resident, {
           ...residentState,
-          residentOf: residentState.residentOf.union(Set(blockId)),
-          lastEmittedSignals: Set(BlockSignal, ContactsSignal)
+          residentOf: residentState.residentOf.union(Set(homeId)),
+          lastEmittedSignals: Set(HomeSignal, ContactsSignal)
         })
-        .set(block.owner, {
+        .set(home.owner, {
           ...ownerState,
-          lastEmittedSignals: Set(BlockSignal)
+          lastEmittedSignals: Set(HomeSignal)
         }),
-      homeFlowPhase' = homeFlowPhase.set(resident, BlockResidentJoined),
+      homeFlowPhase' = homeFlowPhase.set(resident, HomeResidentJoined),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -924,35 +924,35 @@ module tui_flows {
   }
 
   // Promote resident to steward
-  action promoteSteward(owner: AgentId, blockId: HomeId, resident: AgentId): bool = {
-    val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
-      id: blockId, owner: "", stewards: Set(), residents: Set(),
+  action promoteSteward(owner: AgentId, homeId: HomeId, resident: AgentId): bool = {
+    val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
+      id: homeId, owner: "", stewards: Set(), residents: Set(),
       capacity: 8, linkedNeighborhood: None
     }
     val residentState = getAgent(agents, resident)
     val ownerState = getAgent(agents, owner)
     all {
-      blockId.in(blocks.keys()),
-      block.owner == owner,
-      block.residents.contains(resident),
-      not(block.stewards.contains(resident)),
-      // Update block
-      blocks' = blocks.put(blockId, {
-        ...block,
-        stewards: block.stewards.union(Set(resident))
+      homeId.in(homes.keys()),
+      home.owner == owner,
+      home.residents.contains(resident),
+      not(home.stewards.contains(resident)),
+      // Update home
+      homes' = homes.put(homeId, {
+        ...home,
+        stewards: home.stewards.union(Set(resident))
       }),
       // Update states
       agents' = agents
         .set(resident, {
           ...residentState,
-          stewardOf: residentState.stewardOf.union(Set(blockId)),
-          lastEmittedSignals: Set(BlockSignal)
+          stewardOf: residentState.stewardOf.union(Set(homeId)),
+          lastEmittedSignals: Set(HomeSignal)
         })
         .set(owner, {
           ...ownerState,
-          lastEmittedSignals: Set(BlockSignal)
+          lastEmittedSignals: Set(HomeSignal)
         }),
-      homeFlowPhase' = homeFlowPhase.set(resident, BlockStewardPromoted),
+      homeFlowPhase' = homeFlowPhase.set(resident, HomeStewardPromoted),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -979,7 +979,7 @@ module tui_flows {
       neighborhoods' = neighborhoods.put(neighborhoodId, {
         id: neighborhoodId,
         name: name,
-        linkedBlocks: Set()
+        linkedHomes: Set()
       }),
       // Update creator
       agents' = agents.set(creator, {
@@ -992,7 +992,7 @@ module tui_flows {
       allAgents' = allAgents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       recoveryFlowPhase' = recoveryFlowPhase,
       homeFlowPhase' = homeFlowPhase,
@@ -1002,42 +1002,42 @@ module tui_flows {
     }
   }
 
-  // Link block to neighborhood
-  action linkBlockToNeighborhood(
+  // Link home to neighborhood
+  action linkHomeToNeighborhood(
     owner: AgentId,
-    blockId: HomeId,
+    homeId: HomeId,
     neighborhoodId: NeighborhoodId
   ): bool = {
-    val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
-      id: blockId, owner: "", stewards: Set(), residents: Set(),
+    val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
+      id: homeId, owner: "", stewards: Set(), residents: Set(),
       capacity: 8, linkedNeighborhood: None
     }
     val neighborhood = if (neighborhoodId.in(neighborhoods.keys())) neighborhoods.get(neighborhoodId) else {
-      id: neighborhoodId, name: "", linkedBlocks: Set()
+      id: neighborhoodId, name: "", linkedHomes: Set()
     }
     val ownerState = getAgent(agents, owner)
-    val hasNoLink = match block.linkedNeighborhood { | None => true | Some(_) => false }
+    val hasNoLink = match home.linkedNeighborhood { | None => true | Some(_) => false }
     all {
-      blockId.in(blocks.keys()),
+      homeId.in(homes.keys()),
       neighborhoodId.in(neighborhoods.keys()),
-      block.owner == owner,
+      home.owner == owner,
       hasNoLink,
-      // Update block
-      blocks' = blocks.put(blockId, {
-        ...block,
+      // Update home
+      homes' = homes.put(homeId, {
+        ...home,
         linkedNeighborhood: Some(neighborhoodId)
       }),
       // Update neighborhood
       neighborhoods' = neighborhoods.put(neighborhoodId, {
         ...neighborhood,
-        linkedBlocks: neighborhood.linkedBlocks.union(Set(blockId))
+        linkedHomes: neighborhood.linkedHomes.union(Set(homeId))
       }),
       // Update owner
       agents' = agents.set(owner, {
         ...ownerState,
-        lastEmittedSignals: Set(NeighborhoodSignal, BlockSignal)
+        lastEmittedSignals: Set(NeighborhoodSignal, HomeSignal)
       }),
-      neighborhoodFlowPhase' = neighborhoodFlowPhase.set(owner, NeighborhoodBlocksLinked),
+      neighborhoodFlowPhase' = neighborhoodFlowPhase.set(owner, NeighborhoodHomesLinked),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -1051,7 +1051,7 @@ module tui_flows {
     }
   }
 
-  // ============ FLOW 6: SOCIAL GRAPH (Contacts + Blocks) ============
+  // ============ FLOW 6: SOCIAL GRAPH (Contacts + Homes) ============
 
   // Set nickname for a contact
   action setNickname(agent: AgentId, contactId: AgentId, nickname: str): bool = {
@@ -1070,7 +1070,7 @@ module tui_flows {
       allAgents' = allAgents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1081,42 +1081,42 @@ module tui_flows {
     }
   }
 
-  // Invite a contact to join a block
-  // Creates a block resident invitation and adds contact to block residents when they accept
-  action inviteContactToBlock(owner: AgentId, blockId: HomeId, contactId: AgentId): bool = {
+  // Invite a contact to join a home
+  // Creates a home resident invitation and adds contact to home residents when they accept
+  action inviteContactToHome(owner: AgentId, homeId: HomeId, contactId: AgentId): bool = {
     val ownerState = getAgent(agents, owner)
     val contactState = getAgent(agents, contactId)
-    val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
-      id: blockId, owner: "", stewards: Set(), residents: Set(),
+    val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
+      id: homeId, owner: "", stewards: Set(), residents: Set(),
       capacity: 8, linkedNeighborhood: None
     }
     all {
-      blockId.in(blocks.keys()),
+      homeId.in(homes.keys()),
       ownerState.hasAccount,
       contactState.hasAccount,
-      block.owner == owner or block.stewards.contains(owner),  // Owner or steward can invite
+      home.owner == owner or home.stewards.contains(owner),  // Owner or steward can invite
       ownerState.contacts.contains(contactId),  // Must be a contact
-      not(block.residents.contains(contactId)), // Not already a resident
-      block.residents.size() < block.capacity,  // Block has capacity
-      // Update block with new resident
-      blocks' = blocks.put(blockId, {
-        ...block,
-        residents: block.residents.union(Set(contactId))
+      not(home.residents.contains(contactId)), // Not already a resident
+      home.residents.size() < home.capacity,  // Home has capacity
+      // Update home with new resident
+      homes' = homes.put(homeId, {
+        ...home,
+        residents: home.residents.union(Set(contactId))
       }),
       // Update both agent states
       agents' = agents
         .set(contactId, {
           ...contactState,
-          residentOf: contactState.residentOf.union(Set(blockId)),
-          lastEmittedSignals: Set(BlockSignal, ContactsSignal)
+          residentOf: contactState.residentOf.union(Set(homeId)),
+          lastEmittedSignals: Set(HomeSignal, ContactsSignal)
         })
         .set(owner, {
           ...ownerState,
-          lastEmittedSignals: Set(BlockSignal, ContactsSignal)
+          lastEmittedSignals: Set(HomeSignal, ContactsSignal)
         }),
       socialGraphFlowPhase' = socialGraphFlowPhase
-        .set(owner, SocialContactInvitedToBlock)
-        .set(contactId, SocialContactJoinedBlock),
+        .set(owner, SocialContactInvitedToHome)
+        .set(contactId, SocialContactJoinedHome),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -1131,36 +1131,36 @@ module tui_flows {
     }
   }
 
-  // Remove a contact from a block (kick)
-  action removeContactFromBlock(owner: AgentId, blockId: HomeId, contactId: AgentId): bool = {
+  // Remove a contact from a home (kick)
+  action removeContactFromHome(owner: AgentId, homeId: HomeId, contactId: AgentId): bool = {
     val ownerState = getAgent(agents, owner)
     val contactState = getAgent(agents, contactId)
-    val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
-      id: blockId, owner: "", stewards: Set(), residents: Set(),
+    val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
+      id: homeId, owner: "", stewards: Set(), residents: Set(),
       capacity: 8, linkedNeighborhood: None
     }
     all {
-      blockId.in(blocks.keys()),
-      block.owner == owner or block.stewards.contains(owner),  // Owner or steward can remove
-      block.residents.contains(contactId),  // Must be a resident
-      contactId != block.owner,  // Can't remove owner
-      // Update block - remove resident and steward status
-      blocks' = blocks.put(blockId, {
-        ...block,
-        residents: block.residents.exclude(Set(contactId)),
-        stewards: block.stewards.exclude(Set(contactId))
+      homeId.in(homes.keys()),
+      home.owner == owner or home.stewards.contains(owner),  // Owner or steward can remove
+      home.residents.contains(contactId),  // Must be a resident
+      contactId != home.owner,  // Can't remove owner
+      // Update home - remove resident and steward status
+      homes' = homes.put(homeId, {
+        ...home,
+        residents: home.residents.exclude(Set(contactId)),
+        stewards: home.stewards.exclude(Set(contactId))
       }),
       // Update contact state
       agents' = agents
         .set(contactId, {
           ...contactState,
-          residentOf: contactState.residentOf.exclude(Set(blockId)),
-          stewardOf: contactState.stewardOf.exclude(Set(blockId)),
-          lastEmittedSignals: Set(BlockSignal, ContactsSignal)
+          residentOf: contactState.residentOf.exclude(Set(homeId)),
+          stewardOf: contactState.stewardOf.exclude(Set(homeId)),
+          lastEmittedSignals: Set(HomeSignal, ContactsSignal)
         })
         .set(owner, {
           ...ownerState,
-          lastEmittedSignals: Set(BlockSignal)
+          lastEmittedSignals: Set(HomeSignal)
         }),
       socialGraphFlowPhase' = socialGraphFlowPhase.set(contactId, SocialNone),
       // Unchanged
@@ -1177,30 +1177,30 @@ module tui_flows {
     }
   }
 
-  // Get contacts who are residents of a specific block (filter contacts by block)
+  // Get contacts who are residents of a specific home (filter contacts by home)
   // This is a "view" action - no state mutation, just emits signal for UI refresh
-  action filterContactsByBlock(agent: AgentId, blockId: HomeId): bool = {
+  action filterContactsByHome(agent: AgentId, homeId: HomeId): bool = {
     val agentState = getAgent(agents, agent)
-    val block = if (blockId.in(blocks.keys())) blocks.get(blockId) else {
-      id: blockId, owner: "", stewards: Set(), residents: Set(),
+    val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
+      id: homeId, owner: "", stewards: Set(), residents: Set(),
       capacity: 8, linkedNeighborhood: None
     }
-    // Compute contacts that are residents of this block
-    val blockContacts = agentState.contacts.filter(c => block.residents.contains(c))
+    // Compute contacts that are residents of this home
+    val homeContacts = agentState.contacts.filter(c => home.residents.contains(c))
     all {
       agentState.hasAccount,
-      blockId.in(blocks.keys()),
+      homeId.in(homes.keys()),
       // Update agent's last emitted signals (view operation)
       agents' = agents.set(agent, {
         ...agentState,
-        lastEmittedSignals: Set(ContactsSignal, BlockSignal)
+        lastEmittedSignals: Set(ContactsSignal, HomeSignal)
       }),
-      socialGraphFlowPhase' = socialGraphFlowPhase.set(agent, SocialBlockContactsFiltered),
+      socialGraphFlowPhase' = socialGraphFlowPhase.set(agent, SocialHomeContactsFiltered),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1213,13 +1213,13 @@ module tui_flows {
 
   // ============ SOCIAL GRAPH HELPER DEFINITIONS ============
 
-  // Pure function: Get contacts who are residents of a given block
-  pure def getBlockContacts(agentState: AgentState, block: BlockRecord): Set[AgentId] =
-    agentState.contacts.filter(c => block.residents.contains(c))
+  // Pure function: Get contacts who are residents of a given home
+  pure def getHomeContacts(agentState: AgentState, home: HomeRecord): Set[AgentId] =
+    agentState.contacts.filter(c => home.residents.contains(c))
 
-  // Pure function: Check if a contact is a resident of a given block
-  pure def isContactResident(agentState: AgentState, contactId: AgentId, block: BlockRecord): bool =
-    agentState.contacts.contains(contactId) and block.residents.contains(contactId)
+  // Pure function: Check if a contact is a resident of a given home
+  pure def isContactResident(agentState: AgentState, contactId: AgentId, home: HomeRecord): bool =
+    agentState.contacts.contains(contactId) and home.residents.contains(contactId)
 
   // ============ NON-DETERMINISTIC STEP ============
 
@@ -1268,39 +1268,39 @@ module tui_flows {
     nondet messageSender = allAgents.oneOf()
     sendMessage(messageSender, "channel-1"),
 
-    // Block flow
-    nondet blockOwner = allAgents.oneOf()
-    createBlock(blockOwner, "block-1"),
+    // Home flow
+    nondet homeOwner = allAgents.oneOf()
+    createHome(homeOwner, "home-1"),
 
     nondet joiner = allAgents.oneOf()
-    joinBlock(joiner, "block-1"),
+    joinHome(joiner, "home-1"),
 
     nondet promoter = allAgents.oneOf()
     nondet promotee = allAgents.oneOf()
-    promoteSteward(promoter, "block-1", promotee),
+    promoteSteward(promoter, "home-1", promotee),
 
     // Neighborhood flow
     nondet neighborhoodCreator = allAgents.oneOf()
     createNeighborhood(neighborhoodCreator, "neighborhood-1", "Downtown"),
 
     nondet linker = allAgents.oneOf()
-    linkBlockToNeighborhood(linker, "block-1", "neighborhood-1"),
+    linkHomeToNeighborhood(linker, "home-1", "neighborhood-1"),
 
     // Social Graph flow
     nondet nicknameAgent = allAgents.oneOf()
     nondet nicknameContact = allAgents.oneOf()
     setNickname(nicknameAgent, nicknameContact, "Friend"),
 
-    nondet blockInviter = allAgents.oneOf()
+    nondet homeInviter = allAgents.oneOf()
     nondet contactToInvite = allAgents.oneOf()
-    inviteContactToBlock(blockInviter, "block-1", contactToInvite),
+    inviteContactToHome(homeInviter, "home-1", contactToInvite),
 
     nondet kickOwner = allAgents.oneOf()
     nondet contactToKick = allAgents.oneOf()
-    removeContactFromBlock(kickOwner, "block-1", contactToKick),
+    removeContactFromHome(kickOwner, "home-1", contactToKick),
 
     nondet filterAgent = allAgents.oneOf()
-    filterContactsByBlock(filterAgent, "block-1")
+    filterContactsByHome(filterAgent, "home-1")
   }
 
   // ============ INVARIANTS (SAFETY PROPERTIES) ============
@@ -1325,18 +1325,18 @@ module tui_flows {
       }
     })
 
-  // Block capacity invariant
-  val blockCapacityInvariant: bool =
-    blocks.keys().forall(bid => {
-      val block = blocks.get(bid)
-      block.residents.size() <= block.capacity
+  // Home capacity invariant
+  val homeCapacityInvariant: bool =
+    homes.keys().forall(bid => {
+      val home = homes.get(bid)
+      home.residents.size() <= home.capacity
     })
 
   // Stewards must be residents
   val stewardsAreResidents: bool =
-    blocks.keys().forall(bid => {
-      val block = blocks.get(bid)
-      block.stewards.subseteq(block.residents)
+    homes.keys().forall(bid => {
+      val home = homes.get(bid)
+      home.stewards.subseteq(home.residents)
     })
 
   // Invitation consistency
@@ -1351,23 +1351,23 @@ module tui_flows {
     })
 
   // Social Graph: Contact-resident mapping consistency
-  // If an agent is residentOf a block, they must appear in that block's residents
-  val contactBlockMappingConsistency: bool =
+  // If an agent is residentOf a home, they must appear in that home's residents
+  val contactHomeMappingConsistency: bool =
     allAgents.forall(agent => {
       val state = getAgent(agents, agent)
       state.residentOf.forall(bid => {
-        if (bid.in(blocks.keys())) {
-          val block = blocks.get(bid)
-          block.residents.contains(agent)
+        if (bid.in(homes.keys())) {
+          val home = homes.get(bid)
+          home.residents.contains(agent)
         } else true
       })
     })
 
-  // Social Graph: Block residents must have accounts
+  // Social Graph: Home residents must have accounts
   val blockResidentsHaveAccounts: bool =
-    blocks.keys().forall(bid => {
-      val block = blocks.get(bid)
-      block.residents.forall(resident => {
+    homes.keys().forall(bid => {
+      val home = homes.get(bid)
+      home.residents.forall(resident => {
         val residentState = getAgent(agents, resident)
         residentState.hasAccount
       })
@@ -1387,10 +1387,10 @@ module tui_flows {
   val allInvariants: bool =
     signalEmissionInvariant and
     recoveryPhaseConsistency and
-    blockCapacityInvariant and
+    homeCapacityInvariant and
     stewardsAreResidents and
     invitationConsistency and
-    contactBlockMappingConsistency and
+    contactHomeMappingConsistency and
     blockResidentsHaveAccounts and
     nicknamesOnlyForContacts
 
@@ -1413,7 +1413,7 @@ module tui_flows {
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1445,7 +1445,7 @@ module tui_flows {
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1478,7 +1478,7 @@ module tui_flows {
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1490,27 +1490,27 @@ module tui_flows {
     })
   }
 
-  // Test: Block and neighborhood flow
-  run blockNeighborhoodFlowTest = {
+  // Test: Home and neighborhood flow
+  run homeNeighborhoodFlowTest = {
     init
     .then(createAccountWithGuardians("bob", Set("alice", "carol"), 2))
     .then(createAccountWithGuardians("alice", Set("bob", "carol"), 2))
-    .then(createBlock("bob", "bob-block"))
-    .then(joinBlock("alice", "bob-block"))
-    .then(promoteSteward("bob", "bob-block", "alice"))
+    .then(createHome("bob", "bob-home"))
+    .then(joinHome("alice", "bob-home"))
+    .then(promoteSteward("bob", "bob-home", "alice"))
     .then(createNeighborhood("bob", "downtown", "Downtown"))
-    .then(linkBlockToNeighborhood("bob", "bob-block", "downtown"))
+    .then(linkHomeToNeighborhood("bob", "bob-home", "downtown"))
     .then(all {
-      assert(blocks.get("bob-block").residents.contains("bob")),
-      assert(blocks.get("bob-block").residents.contains("alice")),
-      assert(blocks.get("bob-block").stewards.contains("alice")),
-      assert(neighborhoods.get("downtown").linkedBlocks.contains("bob-block")),
+      assert(homes.get("bob-home").residents.contains("bob")),
+      assert(homes.get("bob-home").residents.contains("alice")),
+      assert(homes.get("bob-home").stewards.contains("alice")),
+      assert(neighborhoods.get("downtown").linkedHomes.contains("bob-home")),
       // Keep state unchanged
       allAgents' = allAgents,
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1536,7 +1536,7 @@ module tui_flows {
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1548,7 +1548,7 @@ module tui_flows {
     })
   }
 
-  // Test: Social Graph flow - contacts, blocks, nicknames, assignment
+  // Test: Social Graph flow - contacts, homes, nicknames, assignment
   run socialGraphFlowTest = {
     init
     // Create accounts for bob, alice, carol
@@ -1566,12 +1566,12 @@ module tui_flows {
     .then(all {
       assert(getAgent(agents, "bob").contactNicknames.get("alice") == "My Guardian Alice"),
       assert(getAgent(agents, "bob").lastEmittedSignals.contains(ContactsSignal)),
-      // Continue to block creation
+      // Continue to home creation
       allAgents' = allAgents,
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1581,22 +1581,22 @@ module tui_flows {
       invitationFlowPhase' = invitationFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
     })
-    // Bob creates a block
-    .then(createBlock("bob", "social-block"))
-    // Bob invites alice (contact) to join block
-    .then(inviteContactToBlock("bob", "social-block", "alice"))
+    // Bob creates a home
+    .then(createHome("bob", "social-home"))
+    // Bob invites alice (contact) to join home
+    .then(inviteContactToHome("bob", "social-home", "alice"))
     // Verify alice is now a resident
     .then(all {
-      assert(blocks.get("social-block").residents.contains("alice")),
-      assert(getAgent(agents, "alice").residentOf.contains("social-block")),
-      assert(getAgent(agents, "bob").lastEmittedSignals.contains(BlockSignal)),
+      assert(homes.get("social-home").residents.contains("alice")),
+      assert(getAgent(agents, "alice").residentOf.contains("social-home")),
+      assert(getAgent(agents, "bob").lastEmittedSignals.contains(HomeSignal)),
       assert(getAgent(agents, "bob").lastEmittedSignals.contains(ContactsSignal)),
       // Continue
       allAgents' = allAgents,
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1606,17 +1606,17 @@ module tui_flows {
       invitationFlowPhase' = invitationFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
     })
-    // Bob filters contacts by block
-    .then(filterContactsByBlock("bob", "social-block"))
+    // Bob filters contacts by home
+    .then(filterContactsByHome("bob", "social-home"))
     // Verify final state
     .then(all {
       // Alice is contact and resident
       assert(getAgent(agents, "bob").contacts.contains("alice")),
-      assert(isContactResident(getAgent(agents, "bob"), "alice", blocks.get("social-block"))),
+      assert(isContactResident(getAgent(agents, "bob"), "alice", homes.get("social-home"))),
       // Nickname persists
       assert(getAgent(agents, "bob").contactNicknames.get("alice") == "My Guardian Alice"),
       // Social graph flow phase updated
-      assert(match socialGraphFlowPhase.get("bob") { | SocialBlockContactsFiltered => true | _ => false }),
+      assert(match socialGraphFlowPhase.get("bob") { | SocialHomeContactsFiltered => true | _ => false }),
       // All invariants hold
       assert(allInvariants),
       // Keep state unchanged
@@ -1624,7 +1624,7 @@ module tui_flows {
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1636,7 +1636,7 @@ module tui_flows {
     })
   }
 
-  // Test: Social Graph - remove contact from block (kick)
+  // Test: Social Graph - remove contact from home (kick)
   run socialGraphKickTest = {
     init
     .then(createAccountWithGuardians("bob", Set("alice", "carol"), 2))
@@ -1646,17 +1646,17 @@ module tui_flows {
     .then(exportInvitation("kick-inv"))
     .then(importInvitation("bob", "kick-inv"))
     .then(acceptInvitation("bob", "kick-inv"))
-    // Bob creates block and invites alice
-    .then(createBlock("bob", "kick-block"))
-    .then(inviteContactToBlock("bob", "kick-block", "alice"))
+    // Bob creates home and invites alice
+    .then(createHome("bob", "kick-home"))
+    .then(inviteContactToHome("bob", "kick-home", "alice"))
     // Verify alice is resident
     .then(all {
-      assert(blocks.get("kick-block").residents.contains("alice")),
+      assert(homes.get("kick-home").residents.contains("alice")),
       allAgents' = allAgents,
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,
@@ -1666,12 +1666,12 @@ module tui_flows {
       invitationFlowPhase' = invitationFlowPhase,
       socialGraphFlowPhase' = socialGraphFlowPhase
     })
-    // Bob removes alice from block
-    .then(removeContactFromBlock("bob", "kick-block", "alice"))
+    // Bob removes alice from home
+    .then(removeContactFromHome("bob", "kick-home", "alice"))
     // Verify alice is no longer resident
     .then(all {
-      assert(not(blocks.get("kick-block").residents.contains("alice"))),
-      assert(not(getAgent(agents, "alice").residentOf.contains("kick-block"))),
+      assert(not(homes.get("kick-home").residents.contains("alice"))),
+      assert(not(getAgent(agents, "alice").residentOf.contains("kick-home"))),
       // Alice is still a contact, just not a resident
       assert(getAgent(agents, "bob").contacts.contains("alice")),
       assert(allInvariants),
@@ -1679,7 +1679,7 @@ module tui_flows {
       agents' = agents,
       invitations' = invitations,
       recoverySessions' = recoverySessions,
-      blocks' = blocks,
+      homes' = homes,
       channels' = channels,
       neighborhoods' = neighborhoods,
       recoveryFlowPhase' = recoveryFlowPhase,

@@ -64,7 +64,7 @@ fn create_home(home_seed: u8, resident_count: usize) -> (Home, AuthorityId, Vec<
     (home_instance, steward, residents)
 }
 
-/// Create a neighborhood with the specified blocks
+/// Create a neighborhood with the specified homes
 fn create_neighborhood(neighborhood_seed: u8, home_ids: Vec<HomeId>) -> Neighborhood {
     let neighborhood_id = test_neighborhood_id(neighborhood_seed);
     let timestamp = test_timestamp();
@@ -167,7 +167,7 @@ impl ReachabilityChecker for PartialReachability {
 // ============================================================================
 
 #[test]
-fn test_large_block_simulation() {
+fn test_large_home_simulation() {
     // Simulate a home at maximum capacity (8 residents)
     let (home, steward, residents) = create_home(1, 8);
     let topology = SocialTopology::new(steward, Some(home_instance), vec![]);
@@ -195,15 +195,15 @@ fn test_multi_neighborhood_simulation() {
     let (home3, _, _) = create_home(3, 4);
     let (home4, _, _) = create_home(4, 4);
 
-    // Neighborhood 1: blocks 1, 2
+    // Neighborhood 1: homes 1, 2
     let neighborhood1 = create_neighborhood(1, vec![home1.home_id, home2.home_id]);
 
-    // Neighborhood 2: blocks 1, 3, 4
+    // Neighborhood 2: homes 1, 3, 4
     let neighborhood2 =
         create_neighborhood(2, vec![home1.home_id, home3.home_id, home4.home_id]);
 
-    // Store block1_id before moving home1
-    let block1_id = home1.home_id;
+    // Store home1_id before moving home1
+    let home1_id = home1.home_id;
 
     // Create topology with both neighborhoods
     let topology = SocialTopology::new(
@@ -219,22 +219,22 @@ fn test_multi_neighborhood_simulation() {
     assert_eq!(topology.home_peers().len(), 3);
 
     // Both neighborhoods should track home1
-    assert!(neighborhood1.is_member(block1_id));
-    assert!(neighborhood2.is_member(block1_id));
+    assert!(neighborhood1.is_member(home1_id));
+    assert!(neighborhood2.is_member(home1_id));
 }
 
 #[test]
 fn test_mesh_neighborhood_topology() {
-    // Create a fully-connected mesh of blocks
-    let blocks: Vec<(Home, AuthorityId, Vec<AuthorityId>)> =
+    // Create a fully-connected mesh of homes
+    let homes: Vec<(Home, AuthorityId, Vec<AuthorityId>)> =
         (1..=5).map(|i| create_home(i, 3)).collect();
 
-    let home_ids: Vec<HomeId> = blocks.iter().map(|(b, _, _)| b.home_id).collect();
+    let home_ids: Vec<HomeId> = homes.iter().map(|(b, _, _)| b.home_id).collect();
     let neighborhood = create_fully_connected_neighborhood(1, home_ids.clone());
 
-    // All blocks should be adjacent to each other
-    for i in 0..blocks.len() {
-        for j in 0..blocks.len() {
+    // All homes should be adjacent to each other
+    for i in 0..homes.len() {
+        for j in 0..homes.len() {
             if i != j {
                 assert!(neighborhood.are_adjacent(home_ids[i], home_ids[j]));
             }
@@ -242,8 +242,8 @@ fn test_mesh_neighborhood_topology() {
     }
 
     // Create topology for first home
-    let (block0, steward0, _) = &blocks[0];
-    let topology = SocialTopology::new(*steward0, Some(block0.clone()), vec![neighborhood]);
+    let (home0, steward0, _) = &homes[0];
+    let topology = SocialTopology::new(*steward0, Some(home0.clone()), vec![neighborhood]);
 
     // Should have social presence
     assert!(topology.has_social_presence());
@@ -254,7 +254,7 @@ fn test_mesh_neighborhood_topology() {
 // ============================================================================
 
 #[test]
-fn test_partial_block_partition() {
+fn test_partial_home_partition() {
     // Simulate a scenario where some home peers are unreachable
     let (home, steward, residents) = create_home(1, 5);
     let topology = SocialTopology::new(steward, Some(home_instance), vec![]);
@@ -286,7 +286,7 @@ fn test_partial_block_partition() {
 }
 
 #[test]
-fn test_complete_block_partition() {
+fn test_complete_home_partition() {
     // Simulate a scenario where ALL home peers are unreachable
     let (home, steward, _) = create_home(1, 5);
     let topology = SocialTopology::new(steward, Some(home_instance), vec![]);
@@ -613,11 +613,11 @@ fn test_many_peers_performance() {
 fn test_large_neighborhood_mesh() {
     // Create a large mesh topology
     let home_count = 8;
-    let blocks: Vec<(Home, AuthorityId, Vec<AuthorityId>)> = (1..=home_count)
+    let homes: Vec<(Home, AuthorityId, Vec<AuthorityId>)> = (1..=home_count)
         .map(|i| create_home(i as u8, 4))
         .collect();
 
-    let home_ids: Vec<HomeId> = blocks.iter().map(|(b, _, _)| b.home_id).collect();
+    let home_ids: Vec<HomeId> = homes.iter().map(|(b, _, _)| b.home_id).collect();
     let neighborhood = create_fully_connected_neighborhood(1, home_ids.clone());
 
     // Total adjacencies should be n*(n-1)/2 = 8*7/2 = 28

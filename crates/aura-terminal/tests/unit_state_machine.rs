@@ -291,7 +291,7 @@ fn test_help_modal_deterministic() {
     assert!(!tui.has_modal());
 }
 
-/// Test modal blocks screen navigation
+/// Test modal homes screen navigation
 #[test]
 fn test_modal_blocks_navigation_deterministic() {
     let mut tui = TestTui::new();
@@ -636,7 +636,7 @@ proptest! {
         prop_assert_eq!(tui.screen(), expected_screen);
     }
 
-    /// Property: Modal blocks all screen navigation
+    /// Property: Modal homes all screen navigation
     #[test]
     fn prop_modal_blocks_all_navigation(
         initial_screen in 1u8..=5,

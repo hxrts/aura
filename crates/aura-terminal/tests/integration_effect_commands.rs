@@ -891,7 +891,7 @@ async fn test_send_message_propagates_to_chat_signal() {
 
 /// Property: CreateHome creates a new home and updates HOMES_SIGNAL
 #[tokio::test]
-async fn test_create_home_propagates_to_block_signal() {
+async fn test_create_home_propagates_to_home_signal() {
     use aura_app::signal_defs::HOMES_SIGNAL;
 
     println!("\n=== CreateHome → HOMES_SIGNAL Propagation Test ===\n");
@@ -903,7 +903,7 @@ async fn test_create_home_propagates_to_block_signal() {
         let core = app_core.read().await;
         core.read(&*HOMES_SIGNAL).await.unwrap()
     };
-    println!("  Initial home id: {:?}", initial_block.id);
+    println!("  Initial home id: {:?}", initial_home.id);
 
     // Create a new home
     let result = ctx
@@ -920,7 +920,7 @@ async fn test_create_home_propagates_to_block_signal() {
         core.read(&*HOMES_SIGNAL).await.unwrap()
     };
 
-    println!("  Final home id: {:?}", final_block.id);
+    println!("  Final home id: {:?}", final_home.id);
     println!("  Final home name: {:?}", final_home_state.name);
 
     // If command succeeded, verify home was created
@@ -940,7 +940,7 @@ async fn test_create_home_propagates_to_block_signal() {
 
 /// Property: SendHomeInvitation sends invitation to contact for home membership
 #[tokio::test]
-async fn test_send_block_invitation_propagates_to_signals() {
+async fn test_send_home_invitation_propagates_to_signals() {
     use aura_app::signal_defs::HOMES_SIGNAL;
 
     println!("\n=== SendHomeInvitation → HOMES_SIGNAL + CONTACTS_SIGNAL Test ===\n");

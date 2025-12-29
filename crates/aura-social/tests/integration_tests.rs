@@ -74,7 +74,7 @@ fn create_home(home_seed: u8, resident_count: usize) -> (Home, AuthorityId, Vec<
     (home_instance, steward, residents)
 }
 
-/// Create a neighborhood with the specified blocks
+/// Create a neighborhood with the specified homes
 fn create_neighborhood(neighborhood_seed: u8, home_ids: Vec<HomeId>) -> Neighborhood {
     let neighborhood_id = test_neighborhood_id(neighborhood_seed);
     let timestamp = test_timestamp();
@@ -146,7 +146,7 @@ fn test_discovery_layer_direct_for_home_peers() {
 }
 
 #[test]
-fn test_discovery_layer_block_for_unknown_with_social_presence() {
+fn test_discovery_layer_home_for_unknown_with_social_presence() {
     let (home, steward, _residents) = create_home(1, 3);
     let topology = SocialTopology::new(steward, Some(home_instance), vec![]);
 
@@ -351,7 +351,7 @@ fn test_neighborhood_membership() {
     let home_ids: Vec<HomeId> = (1..=3).map(test_home_id).collect();
     let neighborhood = create_neighborhood(1, home_ids.clone());
 
-    // All blocks should be members
+    // All homes should be members
     for home_id in &home_ids {
         assert!(neighborhood.is_member(*home_id));
     }
@@ -362,18 +362,18 @@ fn test_neighborhood_membership() {
 }
 
 #[test]
-fn test_neighborhood_adjacent_blocks() {
+fn test_neighborhood_adjacent_homes() {
     let home_ids: Vec<HomeId> = (1..=4).map(test_home_id).collect();
     let neighborhood = create_neighborhood(1, home_ids.clone());
 
-    // Home 2 (index 1) should have blocks 1 and 3 as adjacent
-    let adjacent_to_2 = neighborhood.adjacent_blocks(home_ids[1]);
+    // Home 2 (index 1) should have homes 1 and 3 as adjacent
+    let adjacent_to_2 = neighborhood.adjacent_homes(home_ids[1]);
     assert_eq!(adjacent_to_2.len(), 2);
     assert!(adjacent_to_2.contains(&home_ids[0]));
     assert!(adjacent_to_2.contains(&home_ids[2]));
 
     // Home 1 (index 0) should only have home 2 as adjacent
-    let adjacent_to_1 = neighborhood.adjacent_blocks(home_ids[0]);
+    let adjacent_to_1 = neighborhood.adjacent_homes(home_ids[0]);
     assert_eq!(adjacent_to_1.len(), 1);
     assert!(adjacent_to_1.contains(&home_ids[1]));
 }
@@ -388,7 +388,7 @@ fn test_topology_has_social_presence() {
 
     // With home
     let topology_with_home = SocialTopology::new(steward, Some(home_instance), vec![]);
-    assert!(topology_with_block.has_social_presence());
+    assert!(topology_with_home.has_social_presence());
 
     // Without home
     let topology_empty = SocialTopology::empty(steward);
@@ -490,13 +490,13 @@ fn test_discovery_layer_implies_budget() {
 // ============================================================================
 
 #[test]
-fn test_multi_block_neighborhood_topology() {
-    // Create multiple blocks
+fn test_multi_home_neighborhood_topology() {
+    // Create multiple homes
     let (home1, steward1, _) = create_home(1, 3);
     let (home2, _, _) = create_home(2, 3);
     let (home3, _, _) = create_home(3, 3);
 
-    // Create neighborhood with all blocks
+    // Create neighborhood with all homes
     let neighborhood =
         create_neighborhood(1, vec![home1.home_id, home2.home_id, home3.home_id]);
 
@@ -523,7 +523,7 @@ fn test_multi_block_neighborhood_topology() {
 // ============================================================================
 
 #[test]
-fn test_single_resident_block() {
+fn test_single_resident_home() {
     let (home, steward, _residents) = create_home(1, 1);
     let topology = SocialTopology::new(steward, Some(home_instance), vec![]);
 

@@ -291,7 +291,7 @@ fn test_g_key_produces_open_guardian_setup_command() {
     );
 }
 
-/// Test: Ceremony in progress blocks new guardian setup.
+/// Test: Ceremony in progress homes new guardian setup.
 #[test]
 fn test_guardian_ceremony_in_progress_escape_cancels() {
     let mut state = TuiState::new();

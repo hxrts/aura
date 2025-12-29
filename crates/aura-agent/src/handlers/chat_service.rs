@@ -23,13 +23,14 @@ use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::{Hash32, Prestate};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_guards::GuardContextProvider;
-use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump, RelationalFact};
+use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_journal::FactJournal;
 use aura_journal::DomainFact;
 use aura_protocol::amp::{
     commit_bump_with_consensus, emit_proposed_bump, get_channel_state, AmpChannelCoordinator,
     AmpJournalEffects,
 };
+use aura_protocol::effects::TreeEffects;
 use crate::runtime::consensus::build_consensus_params;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use uuid::Uuid;
@@ -106,7 +107,7 @@ impl ChatService {
             .map_err(|e| AgentError::effects(format!("Context journal lookup failed: {e}")))?;
         let context_commitment = self.context_commitment_from_journal(context_id, &journal)?;
         Ok(Prestate::new(
-            vec![(authority_id, tree_state.root_commitment)],
+            vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
         ))
     }
@@ -312,7 +313,7 @@ impl ChatService {
         initial_members: Vec<AuthorityId>,
     ) -> AgentResult<ChatGroup> {
         let policy = aura_core::threshold::policy_for(
-            aura_core::threshold::CeremonyFlow::GroupBlockCreation,
+            aura_core::threshold::CeremonyFlow::GroupHomeCreation,
         );
         if !policy.allows_mode(aura_core::threshold::AgreementMode::Provisional) {
             return Err(AgentError::invalid(

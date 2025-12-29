@@ -24,7 +24,7 @@
 //!
 //! - Guardian Recovery: Bob → request → Alice/Carol approve → restore
 //! - Home Lifecycle: create → invite → join → promote steward
-//! - Neighborhood Formation: create blocks → link → traverse
+//! - Neighborhood Formation: create homes → link → traverse
 //! - Chat & Messaging: contact → DM/channel → message exchange
 //! - Invitation Lifecycle: create → export → import → accept → contact
 //!
@@ -190,7 +190,7 @@ impl TestAgent {
             .expect("Failed to read RECOVERY_SIGNAL")
     }
 
-    async fn read_block(&self) -> aura_app::views::BlockState {
+    async fn read_home(&self) -> aura_app::views::HomeState {
         let core = self.app_core.read().await;
         core.read(&*HOMES_SIGNAL)
             .await
@@ -577,7 +577,7 @@ async fn test_guardian_recovery_flow() {
 
 /// Test home creation and management
 #[tokio::test]
-async fn test_block_lifecycle_flow() {
+async fn test_home_lifecycle_flow() {
     println!("\n=== Home Lifecycle Flow Test ===\n");
 
     let mut env = FlowTestEnv::new().await;
@@ -590,8 +590,8 @@ async fn test_block_lifecycle_flow() {
 
     // Read initial home state
     println!("Initial home state:");
-    let bob_home = env.get_agent("bob").read_block().await;
-    println!("  Home ID: {}", bob_block.id);
+    let bob_home = env.get_agent("bob").read_home().await;
+    println!("  Home ID: {}", bob_home.id);
     println!("  Home name: {}", bob_home_state.name);
     println!("  Residents: {}", bob_home_state.residents.len());
 
@@ -631,11 +631,11 @@ async fn test_neighborhood_formation_flow() {
 }
 
 // ============================================================================
-// Flow Test: Social Graph (Contacts + Blocks)
+// Flow Test: Social Graph (Contacts + Homes)
 // ============================================================================
 
-/// Test complete Social Graph flow: contacts → blocks → nicknames → contact-home relationships
-/// This covers Flow 6: Social Graph (Contacts + Blocks) from the verification plan
+/// Test complete Social Graph flow: contacts → homes → nicknames → contact-home relationships
+/// This covers Flow 6: Social Graph (Contacts + Homes) from the verification plan
 #[tokio::test]
 async fn test_social_graph_flow() {
     println!("\n=== Social Graph Flow Test ===\n");
@@ -752,10 +752,10 @@ async fn test_social_graph_flow() {
         }
     }
 
-    let bob_home = env.get_agent("bob").read_block().await;
+    let bob_home = env.get_agent("bob").read_home().await;
     println!(
         "  Home state: id={}, name={}",
-        bob_block.id, bob_home_state.name
+        bob_home.id, bob_home_state.name
     );
 
     // Phase 5: Invite contact to home (SendHomeInvitation)
@@ -787,11 +787,11 @@ async fn test_social_graph_flow() {
 
     // Phase 6: Verify final home state
     println!("\nPhase 6: Verifying final state...");
-    let bob_block_final = env.get_agent("bob").read_block().await;
-    println!("  Home ID: {}", bob_block_final.id);
-    println!("  Home name: {}", bob_block_final.name);
-    println!("  Residents: {}", bob_block_final.residents.len());
-    println!("  My role: {:?}", bob_block_final.my_role);
+    let bob_home_final = env.get_agent("bob").read_home().await;
+    println!("  Home ID: {}", bob_home_final.id);
+    println!("  Home name: {}", bob_home_final.name);
+    println!("  Residents: {}", bob_home_final.residents.len());
+    println!("  My role: {:?}", bob_home_final.my_role);
 
     let bob_contacts_final = env.get_agent("bob").read_contacts().await;
     println!("  Final contacts: {}", bob_contacts_final.contacts.len());
@@ -818,7 +818,7 @@ async fn test_social_graph_flow() {
 
 /// Test contact filtering by home membership
 #[tokio::test]
-async fn test_social_graph_contact_block_view() {
+async fn test_social_graph_contact_home_view() {
     println!("\n=== Social Graph Contact-Home View Test ===\n");
 
     let mut env = FlowTestEnv::new().await;
@@ -858,9 +858,9 @@ async fn test_social_graph_contact_block_view() {
     }
 
     // Read home state
-    let bob_home = env.get_agent("bob").read_block().await;
+    let bob_home = env.get_agent("bob").read_home().await;
     println!("\nBob's home:");
-    println!("  ID: {}", bob_block.id);
+    println!("  ID: {}", bob_home.id);
     println!("  Name: {}", bob_home_state.name);
 
     // The contact-home view in UI would filter contacts based on home membership

@@ -2,7 +2,9 @@
 
 use aura_consensus::protocol::ConsensusParams;
 use aura_core::crypto::tree_signing::{public_key_package_from_bytes, share_from_key_package_bytes};
-use aura_core::effects::{SecureStorageCapability, SecureStorageLocation, ThresholdSigningEffects};
+use aura_core::effects::{
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
+};
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash::hash;
 use aura_core::threshold::ParticipantIdentity;

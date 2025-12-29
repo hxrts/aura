@@ -43,7 +43,7 @@ use aura_protocol::amp::{AmpJournalEffects, ChannelMembershipFact, ChannelPartic
 use aura_protocol::effects::{
     AuraEffects, AuthorizationEffects, BloomDigest, ChoreographicEffects, ChoreographicRole,
     ChoreographyError, ChoreographyEvent, ChoreographyMetrics, EffectApiEffects, EffectApiError,
-    EffectApiEventStream, LeakageEffects, SyncEffects, SyncError,
+    EffectApiEventStream, LeakageEffects, SyncEffects, SyncError, TreeEffects,
 };
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use biscuit_auth::{Biscuit, KeyPair, PublicKey};
@@ -2598,13 +2598,16 @@ impl AmpChannelEffects for AuraEffectSystem {
             hasher.update(b"RELATIONAL_CONTEXT_FACTS");
             hasher.update(params.context.as_bytes());
             for fact in journal.facts.iter() {
-                let bytes = aura_core::util::serialization::to_vec(fact)
-                    .map_err(map_amp_err)?;
+                let bytes = aura_core::util::serialization::to_vec(fact).map_err(|e| {
+                    map_amp_err(AuraError::internal(format!(
+                        "Failed to serialize context fact: {e}"
+                    )))
+                })?;
                 hasher.update(&bytes);
             }
             let context_commitment = Hash32(hasher.finalize());
             let prestate = aura_core::Prestate::new(
-                vec![(self.authority_id, tree_state.root_commitment)],
+                vec![(self.authority_id, Hash32(tree_state.root_commitment))],
                 context_commitment,
             );
             let consensus_params =

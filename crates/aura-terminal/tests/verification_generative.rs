@@ -86,7 +86,7 @@ pub struct AgentState {
     pub channels: Vec<String>,
     pub emitted_signals: Vec<String>,
     pub contact_nicknames: HashMap<String, String>,
-    pub blocks: Vec<String>,
+    pub homes: Vec<String>,
 }
 
 /// Extracted flow state from ITF
@@ -94,7 +94,7 @@ pub struct AgentState {
 pub struct FlowState {
     pub agents: HashMap<String, AgentState>,
     pub recovery_sessions: HashMap<String, RecoverySessionState>,
-    pub blocks: HashMap<String, HomeState>,
+    pub homes: HashMap<String, HomeState>,
     pub neighborhoods: HashMap<String, NeighborhoodState>,
     pub invitations: HashMap<String, InvitationState>,
     pub channels: HashMap<String, ChannelState>,
@@ -125,7 +125,7 @@ pub struct HomeState {
 pub struct NeighborhoodState {
     pub creator: String,
     pub name: String,
-    pub linked_blocks: Vec<String>,
+    pub linked_homes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -235,9 +235,9 @@ impl FlowTraceReplayer {
             state.recovery_sessions = Self::extract_recovery_sessions(recovery_val)?;
         }
 
-        // Extract blocks
-        if let Some(blocks_val) = vars.get("blocks") {
-            state.homes = Self::extract_blocks(blocks_val)?;
+        // Extract homes
+        if let Some(homes_val) = vars.get("homes") {
+            state.homes = Self::extract_homes(homes_val)?;
         }
 
         // Extract neighborhoods
@@ -252,7 +252,7 @@ impl FlowTraceReplayer {
             Self::extract_string(vars.get("invitationFlowPhase")).unwrap_or_default();
         state.chat_flow_phase = Self::extract_string(vars.get("chatFlowPhase")).unwrap_or_default();
         state.home_flow_phase =
-            Self::extract_string(vars.get("blockFlowPhase")).unwrap_or_default();
+            Self::extract_string(vars.get("homeFlowPhase")).unwrap_or_default();
         state.neighborhood_flow_phase =
             Self::extract_string(vars.get("neighborhoodFlowPhase")).unwrap_or_default();
         state.social_graph_flow_phase =
@@ -299,7 +299,7 @@ impl FlowTraceReplayer {
             agent.channels = Self::extract_string_set(obj.get("channels"));
             agent.emitted_signals = Self::extract_string_set(obj.get("emittedSignals"));
             agent.contact_nicknames = Self::extract_string_map(obj.get("contactNicknames"));
-            agent.blocks = Self::extract_string_set(obj.get("blocks"));
+            agent.homes = Self::extract_string_set(obj.get("homes"));
         }
 
         Ok(agent)
@@ -381,9 +381,9 @@ impl FlowTraceReplayer {
         Ok(session)
     }
 
-    /// Extract blocks map
-    fn extract_blocks(value: &serde_json::Value) -> Result<HashMap<String, HomeState>, String> {
-        let mut blocks = HashMap::new();
+    /// Extract homes map
+    fn extract_homes(value: &serde_json::Value) -> Result<HashMap<String, HomeState>, String> {
+        let mut homes = HashMap::new();
 
         if let Some(map) = value.as_object() {
             if let Some(map_arr) = map.get("#map").and_then(|v| v.as_array()) {
@@ -391,7 +391,7 @@ impl FlowTraceReplayer {
                     if let Some(pair) = entry.as_array() {
                         if pair.len() == 2 {
                             let key = pair[0].as_str().unwrap_or_default().to_string();
-                            let home = Self::extract_block_state(&pair[1])?;
+                            let home = Self::extract_home_state(&pair[1])?;
                             homes.insert(key, home_state);
                         }
                     }
@@ -399,11 +399,11 @@ impl FlowTraceReplayer {
             }
         }
 
-        Ok(blocks)
+        Ok(homes)
     }
 
     /// Extract home state
-    fn extract_block_state(value: &serde_json::Value) -> Result<HomeState, String> {
+    fn extract_home_state(value: &serde_json::Value) -> Result<HomeState, String> {
         let mut home = HomeState::default();
 
         if let Some(obj) = value.as_object() {
@@ -460,7 +460,7 @@ impl FlowTraceReplayer {
                 .unwrap_or_default()
                 .to_string();
 
-            neighborhood.linked_blocks = Self::extract_string_set(obj.get("linkedBlocks"));
+            neighborhood.linked_homes = Self::extract_string_set(obj.get("linkedHomes"));
         }
 
         Ok(neighborhood)
@@ -653,14 +653,14 @@ fn test_parse_inline_flow_trace() {
         "status": "ok",
         "description": "Test flow trace"
       },
-      "vars": ["agents", "blocks", "recoveryFlowPhase"],
+      "vars": ["agents", "homes", "recoveryFlowPhase"],
       "states": [
         {
           "#meta": {"index": 0},
           "agents": {"#map": [
             ["bob", {"hasAccount": true, "contacts": {"#set": []}, "guardians": {"#set": []}, "pendingInvitations": {"#set": []}, "channels": {"#set": []}, "emittedSignals": {"#set": []}}]
           ]},
-          "blocks": {"#map": []},
+          "homes": {"#map": []},
           "recoveryFlowPhase": {"tag": "AccountCreation", "value": {"#tup": []}}
         }
       ]
@@ -719,7 +719,7 @@ fn test_flow_invariant_validation() {
 
 /// Test home capacity invariant
 #[test]
-fn test_block_capacity_invariant() {
+fn test_home_capacity_invariant() {
     let mut state = FlowState::default();
 
     // Add agents for residents
@@ -735,7 +735,7 @@ fn test_block_capacity_invariant() {
 
     // Valid: 8 residents
     state.homes.insert(
-        "block1".to_string(),
+        "home1".to_string(),
         HomeState {
             owner: "bob".to_string(),
             residents: (0..8).map(|i| format!("user{}", i)).collect(),
@@ -752,8 +752,8 @@ fn test_block_capacity_invariant() {
 
     // Invalid: 9 residents
     state
-        .blocks
-        .get_mut("block1")
+        .homes
+        .get_mut("home1")
         .unwrap()
         .residents
         .push("user8".to_string());
@@ -779,7 +779,7 @@ fn test_stewards_are_residents_invariant() {
 
     // Invalid: steward not a resident
     state.homes.insert(
-        "block1".to_string(),
+        "home1".to_string(),
         HomeState {
             owner: "bob".to_string(),
             residents: vec!["alice".to_string()],
@@ -837,7 +837,7 @@ fn test_nicknames_for_contacts_invariant() {
 
 /// Test home-residents-are-agents invariant (Social Graph)
 #[test]
-fn test_block_residents_are_agents_invariant() {
+fn test_home_residents_are_agents_invariant() {
     let mut state = FlowState::default();
 
     // Setup agents
@@ -858,7 +858,7 @@ fn test_block_residents_are_agents_invariant() {
 
     // Valid: home with valid agent residents
     state.homes.insert(
-        "block1".to_string(),
+        "home1".to_string(),
         HomeState {
             owner: "bob".to_string(),
             residents: vec!["bob".to_string(), "alice".to_string()],
@@ -875,8 +875,8 @@ fn test_block_residents_are_agents_invariant() {
 
     // Invalid: home with non-existent agent as resident
     state
-        .blocks
-        .get_mut("block1")
+        .homes
+        .get_mut("home1")
         .unwrap()
         .residents
         .push("ghost".to_string());
@@ -901,7 +901,7 @@ fn test_social_graph_flow_state_extraction() {
         "status": "ok",
         "description": "Social Graph flow trace"
       },
-      "vars": ["agents", "blocks", "socialGraphFlowPhase"],
+      "vars": ["agents", "homes", "socialGraphFlowPhase"],
       "states": [
         {
           "#meta": {"index": 0},
@@ -914,7 +914,7 @@ fn test_social_graph_flow_state_extraction() {
               "channels": {"#set": []},
               "emittedSignals": {"#set": ["CONTACTS_SIGNAL", "HOMES_SIGNAL"]},
               "contactNicknames": {"#map": [["alice", "My Friend"]]},
-              "blocks": {"#set": ["block1"]}
+              "homes": {"#set": ["home1"]}
             }],
             ["alice", {
               "hasAccount": true,
@@ -924,17 +924,17 @@ fn test_social_graph_flow_state_extraction() {
               "channels": {"#set": []},
               "emittedSignals": {"#set": []},
               "contactNicknames": {"#map": []},
-              "blocks": {"#set": []}
+              "homes": {"#set": []}
             }]
           ]},
-          "blocks": {"#map": [
-            ["block1", {
+          "homes": {"#map": [
+            ["home1", {
               "owner": "bob",
               "residents": {"#set": ["bob", "alice"]},
               "stewards": {"#set": ["bob"]}
             }]
           ]},
-          "socialGraphFlowPhase": {"tag": "ContactBlockFiltering", "value": {"#tup": []}}
+          "socialGraphFlowPhase": {"tag": "ContactHomeFiltering", "value": {"#tup": []}}
         }
       ]
     }

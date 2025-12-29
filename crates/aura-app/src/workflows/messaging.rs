@@ -242,7 +242,10 @@ pub async fn create_channel(
         )
         .await
     {
+        #[cfg(feature = "instrumented")]
         tracing::warn!(error = %e, "AMP bootstrap finalize bump failed");
+        #[cfg(not(feature = "instrumented"))]
+        let _ = e;
     }
 
     // Update UI state for responsiveness; reactive reductions may also update this later.

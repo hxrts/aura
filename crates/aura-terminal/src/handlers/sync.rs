@@ -86,6 +86,7 @@ async fn handle_daemon_mode(
         auto_sync_interval: Duration::from_secs(interval_secs),
         max_concurrent_syncs: max_concurrent,
         initial_peers,
+        ..SyncManagerConfig::default()
     };
 
     let manager = SyncServiceManager::new(config);

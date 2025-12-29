@@ -60,6 +60,12 @@ struct ThresholdConfigMetadata {
     agreement_mode: AgreementMode,
 }
 
+impl ThresholdConfigMetadata {
+    fn resolved_participants(&self) -> Vec<ParticipantIdentity> {
+        self.participants.clone()
+    }
+}
+
 /// State for a signing context (per authority)
 #[derive(Debug, Clone)]
 pub struct SigningContextState {
@@ -785,7 +791,10 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             let device_id = self.effects.device_id();
             let my_signer_index = participants
                 .iter()
-                .position(|p| matches!(p, ParticipantIdentity::Device(id) if *id == device_id))
+                .position(|p| match p {
+                    ParticipantIdentity::Device(id) => *id == device_id,
+                    _ => false,
+                })
                 .map(|idx| (idx + 1) as u16);
 
             let state = SigningContextState {

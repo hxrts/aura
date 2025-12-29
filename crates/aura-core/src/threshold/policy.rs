@@ -28,7 +28,7 @@ pub enum CeremonyFlow {
     RecoveryExecution,
     AmpEpochBump,
     Invitation,
-    GroupBlockCreation,
+    GroupHomeCreation,
     AmpBootstrap,
     RendezvousSecureChannel,
     OtaActivation,
@@ -100,7 +100,7 @@ pub fn policy_for(flow: CeremonyFlow) -> CeremonyLifecyclePolicy {
             agreement_sequence: &A3_ONLY,
             fallback: &FALLBACK_NONE,
         },
-        CeremonyFlow::GroupBlockCreation => CeremonyLifecyclePolicy {
+        CeremonyFlow::GroupHomeCreation => CeremonyLifecyclePolicy {
             keygen: KeyGenerationPolicy::K3ConsensusDkg,
             agreement_sequence: &A1_A2_A3,
             fallback: &FALLBACK_A1_A2,

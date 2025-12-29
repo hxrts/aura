@@ -382,7 +382,7 @@ impl IoContext {
             .enable_all()
             .build()
             .expect("Failed to build tokio runtime for IoContext::with_defaults")
-            .home_on(InitializedAppCore::new(app_core))
+            .block_on(InitializedAppCore::new(app_core))
             .expect("Failed to init signals for IoContext::with_defaults");
 
         let mode = TuiMode::Production;
@@ -979,9 +979,8 @@ impl IoContext {
     // =========================================================================
 
     pub fn get_current_role(&self) -> Option<aura_app::views::home::ResidentRole> {
-        // Prefer multi-home state if available; fall back to legacy singular.
         let snapshot = self.snapshots.try_state_snapshot()?;
-        let home_state = snapshot.homes.current_home().unwrap_or(&snapshot.home_state);
+        let home_state = snapshot.homes.current_home()?;
         Some(home_state.my_role)
     }
 

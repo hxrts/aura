@@ -6,12 +6,12 @@
 // Key properties:
 // - Navigation: Screen switching via number keys (1-7) and Tab
 // - Modals: Block all navigation when active, Escape closes
-// - Insert mode: Text input on Block/Chat screens, Escape exits
+// - Insert mode: Text input on Home/Chat screens, Escape exits
 // - Determinism: Same inputs produce same outputs
 //
 // Safety invariants:
 // - Modal blocks all navigation
-// - Insert mode only on Block or Chat screens
+// - Insert mode only on Home or Chat screens
 // - Escape always provides exit path
 //
 // See: crates/aura-terminal/src/tui/state_machine.rs
@@ -26,7 +26,7 @@ module tui_state_machine {
   // This must stay in sync with:
   // - `crates/aura-terminal/src/tui/screens/router.rs` (`Screen`)
   // - the nav bar tab ordering in the TUI shell
-  type Screen = Block | Neighborhood | Chat | Contacts | Recovery | Settings
+  type Screen = Home | Neighborhood | Chat | Contacts | Recovery | Settings
 
   // Modal types that can be displayed
   type ModalType =
@@ -96,11 +96,11 @@ module tui_state_machine {
   var modalInputBuffer: str
 
   // Insert mode state per screen
-  var blockInsertMode: bool
+  var homeInsertMode: bool
   var chatInsertMode: bool
 
   // Input buffers per screen
-  var blockInputBuffer: str
+  var homeInputBuffer: str
   var chatInputBuffer: str
 
   // Whether exit has been requested
@@ -120,7 +120,7 @@ module tui_state_machine {
 
   // Check if in insert mode
   val isInsertMode: bool =
-    (currentScreen == Block and blockInsertMode) or
+    (currentScreen == Home and homeInsertMode) or
     (currentScreen == Chat and chatInsertMode)
 
   // Check if navigation is allowed
@@ -128,7 +128,7 @@ module tui_state_machine {
 
   // Get screen from number key (1-6)
   pure def screenFromKey(key: int): Option[Screen] =
-    if (key == 1) Some(Block)
+    if (key == 1) Some(Home)
     else if (key == 2) Some(Neighborhood)
     else if (key == 3) Some(Chat)
     else if (key == 4) Some(Contacts)
@@ -139,19 +139,19 @@ module tui_state_machine {
   // Get next screen (for Tab navigation)
   pure def nextScreen(screen: Screen): Screen =
     match screen {
-      | Block => Neighborhood
+      | Home => Neighborhood
       | Neighborhood => Chat
       | Chat => Contacts
       | Contacts => Recovery
       | Recovery => Settings
-      | Settings => Block
+      | Settings => Home
     }
 
   // Get previous screen (for Shift+Tab navigation)
   pure def prevScreen(screen: Screen): Screen =
     match screen {
-      | Block => Settings
-      | Neighborhood => Block
+      | Home => Settings
+      | Neighborhood => Home
       | Chat => Neighborhood
       | Contacts => Chat
       | Recovery => Contacts
@@ -170,12 +170,12 @@ module tui_state_machine {
   // ============ INITIALIZATION ============
 
   action init = all {
-    currentScreen' = Block,
+    currentScreen' = Home,
     currentModal' = NoModal,
     modalInputBuffer' = "",
-    blockInsertMode' = false,
+    homeInsertMode' = false,
     chatInsertMode' = false,
-    blockInputBuffer' = "",
+    homeInputBuffer' = "",
     chatInputBuffer' = "",
     shouldExit' = false,
     terminalWidth' = 80,
@@ -192,9 +192,9 @@ module tui_state_machine {
       modalInputBuffer' = "",
       // Other state unchanged
       currentScreen' = currentScreen,
-      blockInsertMode' = blockInsertMode,
+      homeInsertMode' = homeInsertMode,
       chatInsertMode' = chatInsertMode,
-      blockInputBuffer' = blockInputBuffer,
+      homeInputBuffer' = homeInputBuffer,
       chatInputBuffer' = chatInputBuffer,
       shouldExit' = shouldExit,
       terminalWidth' = terminalWidth,
@@ -202,13 +202,13 @@ module tui_state_machine {
       commandQueue' = []
     }
     else if (isInsertMode) all {
-      blockInsertMode' = false,
+      homeInsertMode' = false,
       chatInsertMode' = false,
       // Other state unchanged
       currentScreen' = currentScreen,
       currentModal' = currentModal,
       modalInputBuffer' = modalInputBuffer,
-      blockInputBuffer' = blockInputBuffer,
+      homeInputBuffer' = homeInputBuffer,
       chatInputBuffer' = chatInputBuffer,
       shouldExit' = shouldExit,
       terminalWidth' = terminalWidth,
@@ -220,9 +220,9 @@ module tui_state_machine {
       currentScreen' = currentScreen,
       currentModal' = currentModal,
       modalInputBuffer' = modalInputBuffer,
-      blockInsertMode' = blockInsertMode,
+      homeInsertMode' = homeInsertMode,
       chatInsertMode' = chatInsertMode,
-      blockInputBuffer' = blockInputBuffer,
+      homeInputBuffer' = homeInputBuffer,
       chatInputBuffer' = chatInputBuffer,
       shouldExit' = shouldExit,
       terminalWidth' = terminalWidth,
@@ -240,9 +240,9 @@ module tui_state_machine {
       currentScreen' = currentScreen,
       currentModal' = currentModal,
       modalInputBuffer' = modalInputBuffer,
-      blockInsertMode' = blockInsertMode,
+      homeInsertMode' = homeInsertMode,
       chatInsertMode' = chatInsertMode,
-      blockInputBuffer' = blockInputBuffer,
+      homeInputBuffer' = homeInputBuffer,
       chatInputBuffer' = chatInputBuffer,
       terminalWidth' = terminalWidth,
       terminalHeight' = terminalHeight
@@ -252,9 +252,9 @@ module tui_state_machine {
       currentScreen' = currentScreen,
       currentModal' = currentModal,
       modalInputBuffer' = modalInputBuffer,
-      blockInsertMode' = blockInsertMode,
+      homeInsertMode' = homeInsertMode,
       chatInsertMode' = chatInsertMode,
-      blockInputBuffer' = blockInputBuffer,
+      homeInputBuffer' = homeInputBuffer,
       chatInputBuffer' = chatInputBuffer,
       shouldExit' = shouldExit,
       terminalWidth' = terminalWidth,
@@ -270,9 +270,9 @@ module tui_state_machine {
       // Other state unchanged
       currentScreen' = currentScreen,
       modalInputBuffer' = modalInputBuffer,
-      blockInsertMode' = blockInsertMode,
+      homeInsertMode' = homeInsertMode,
       chatInsertMode' = chatInsertMode,
-      blockInputBuffer' = blockInputBuffer,
+      homeInputBuffer' = homeInputBuffer,
       chatInputBuffer' = chatInputBuffer,
       shouldExit' = shouldExit,
       terminalWidth' = terminalWidth,
@@ -284,9 +284,9 @@ module tui_state_machine {
       currentScreen' = currentScreen,
       currentModal' = currentModal,
       modalInputBuffer' = modalInputBuffer,
-      blockInsertMode' = blockInsertMode,
+      homeInsertMode' = homeInsertMode,
       chatInsertMode' = chatInsertMode,
-      blockInputBuffer' = blockInputBuffer,
+      homeInputBuffer' = homeInputBuffer,
       chatInputBuffer' = chatInputBuffer,
       shouldExit' = shouldExit,
       terminalWidth' = terminalWidth,
@@ -300,9 +300,9 @@ module tui_state_machine {
     currentScreen' = currentScreen,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
+    homeInsertMode' = homeInsertMode,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -312,12 +312,12 @@ module tui_state_machine {
 
   // Helper: navigate preserving other state
   action navigateTo1 = all {
-    currentScreen' = Block,
+    currentScreen' = Home,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
+    homeInsertMode' = homeInsertMode,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -329,9 +329,9 @@ module tui_state_machine {
     currentScreen' = Neighborhood,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
+    homeInsertMode' = homeInsertMode,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -343,9 +343,9 @@ module tui_state_machine {
     currentScreen' = Chat,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
+    homeInsertMode' = homeInsertMode,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -357,9 +357,9 @@ module tui_state_machine {
     currentScreen' = Contacts,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
+    homeInsertMode' = homeInsertMode,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -371,9 +371,9 @@ module tui_state_machine {
     currentScreen' = Recovery,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
+    homeInsertMode' = homeInsertMode,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -385,9 +385,9 @@ module tui_state_machine {
     currentScreen' = Settings,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
+    homeInsertMode' = homeInsertMode,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -400,9 +400,9 @@ module tui_state_machine {
     currentScreen' = nextScreen(currentScreen),
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
+    homeInsertMode' = homeInsertMode,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -415,9 +415,9 @@ module tui_state_machine {
     currentScreen' = prevScreen(currentScreen),
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
+    homeInsertMode' = homeInsertMode,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -425,7 +425,7 @@ module tui_state_machine {
     commandQueue' = []
   }
 
-  // Handle number key 1 - go to Block
+  // Handle number key 1 - go to Home
   action handleKey1 =
     if (not(hasModal) and not(isInsertMode)) navigateTo1
     else unchanged
@@ -465,14 +465,14 @@ module tui_state_machine {
     if (not(hasModal) and not(isInsertMode)) navigatePrev
     else unchanged
 
-  // Enter insert mode on Block screen
+  // Enter insert mode on Home screen
   action enterBlockInsertMode = all {
-    blockInsertMode' = true,
+    homeInsertMode' = true,
     currentScreen' = currentScreen,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
     chatInsertMode' = chatInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -486,8 +486,8 @@ module tui_state_machine {
     currentScreen' = currentScreen,
     currentModal' = currentModal,
     modalInputBuffer' = modalInputBuffer,
-    blockInsertMode' = blockInsertMode,
-    blockInputBuffer' = blockInputBuffer,
+    homeInsertMode' = homeInsertMode,
+    homeInputBuffer' = homeInputBuffer,
     chatInputBuffer' = chatInputBuffer,
     shouldExit' = shouldExit,
     terminalWidth' = terminalWidth,
@@ -498,7 +498,7 @@ module tui_state_machine {
   // Handle insert mode key (i)
   action handleInsertKey =
     if (hasModal or isInsertMode) unchanged
-    else if (currentScreen == Block) enterBlockInsertMode
+    else if (currentScreen == Home) enterBlockInsertMode
     else if (currentScreen == Chat) enterChatInsertMode
     else unchanged
 
@@ -512,9 +512,9 @@ module tui_state_machine {
       currentScreen' = currentScreen,
       currentModal' = currentModal,
       modalInputBuffer' = modalInputBuffer,
-      blockInsertMode' = blockInsertMode,
+      homeInsertMode' = homeInsertMode,
       chatInsertMode' = chatInsertMode,
-      blockInputBuffer' = blockInputBuffer,
+      homeInputBuffer' = homeInputBuffer,
       chatInputBuffer' = chatInputBuffer,
       shouldExit' = shouldExit,
       commandQueue' = []
@@ -550,9 +550,9 @@ module tui_state_machine {
       true
     )
 
-  // Insert mode only available on Block or Chat screens
+  // Insert mode only available on Home or Chat screens
   val insertModeOnlyValidScreens: bool =
-    isInsertMode implies (currentScreen == Block or currentScreen == Chat)
+    isInsertMode implies (currentScreen == Home or currentScreen == Chat)
 
   // Escape always provides an exit path
   val escapeAlwaysExits: bool =
@@ -562,7 +562,7 @@ module tui_state_machine {
 
   // Screen is always one of the 6 valid screens
   val validScreen: bool =
-    currentScreen == Block or
+    currentScreen == Home or
     currentScreen == Neighborhood or
     currentScreen == Chat or
     currentScreen == Contacts or
@@ -607,9 +607,9 @@ module tui_state_machine {
     .then(handleKey4)              // Go to Contacts
     .then(handleTab)               // Tab to Recovery
     .then(handleShiftTab)          // Shift+Tab back to Contacts
-    .then(handleKey1)              // Go to Block
+    .then(handleKey1)              // Go to Home
     .then(all {
-      assert(currentScreen == Block),
+      assert(currentScreen == Home),
       unchanged
     })
   }
@@ -624,7 +624,7 @@ module tui_state_machine {
     })
     .then(handleKey3)              // Try to navigate (blocked)
     .then(all {
-      assert(currentScreen == Block),  // Still on Block
+      assert(currentScreen == Home),  // Still on Home
       assert(hasModal),              // Modal still open
       unchanged
     })
@@ -638,10 +638,10 @@ module tui_state_machine {
   // Test: Insert mode
   run insertModeTest = {
     init
-    .then(handleInsertKey)         // Enter insert mode on Block
+    .then(handleInsertKey)         // Enter insert mode on Home
     .then(all {
       assert(isInsertMode),
-      assert(blockInsertMode),
+      assert(homeInsertMode),
       unchanged
     })
     .then(handleQuit)              // Try to quit (blocked)
