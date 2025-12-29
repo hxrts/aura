@@ -189,7 +189,7 @@ impl SyncServiceManager {
         let sync_config = SyncServiceConfig {
             auto_sync_enabled: self.config.auto_sync_enabled,
             auto_sync_interval: self.config.auto_sync_interval,
-            max_concurrent_syncs: self.config.max_concurrent_syncs,
+            max_concurrent_syncs: self.config.max_concurrent_syncs as u32,
             ..Default::default()
         };
 

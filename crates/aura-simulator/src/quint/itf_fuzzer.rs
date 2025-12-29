@@ -81,7 +81,7 @@ pub struct ITFState {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ITFStateMeta {
     /// State index in the trace
-    pub index: usize,
+    pub index: u64,
 }
 
 /// Result of bounded model checking
@@ -94,7 +94,7 @@ pub struct ModelCheckingResult {
     /// Properties that were checked
     pub checked_properties: Vec<String>,
     /// Bound used for checking
-    pub checking_bound: usize,
+    pub checking_bound: u32,
     /// Time taken for model checking
     pub checking_time_ms: u64,
 }
@@ -107,7 +107,7 @@ pub struct PropertyViolation {
     /// ITF trace leading to the violation
     pub violation_trace: ITFTrace,
     /// Step number where violation occurred
-    pub violation_step: usize,
+    pub violation_step: u64,
     /// Description of the violation
     pub violation_description: String,
     /// State that caused the violation
@@ -128,7 +128,7 @@ pub struct GenerativeSimulationResult {
     /// Whether simulation completed successfully
     pub success: bool,
     /// Total number of steps executed
-    pub step_count: usize,
+    pub step_count: u64,
     /// Properties that were violated (if any)
     pub property_violations: Vec<GenerativePropertyViolation>,
 }
@@ -139,7 +139,7 @@ pub struct GenerativePropertyViolation {
     /// Property name
     pub property: String,
     /// Step at which violation occurred
-    pub step_index: usize,
+    pub step_index: u64,
     /// Description of violation
     pub description: String,
 }
@@ -167,13 +167,13 @@ pub struct MBTExecutionResult {
     /// Source specification file
     pub spec_file: PathBuf,
     /// Total number of traces generated
-    pub total_traces: usize,
+    pub total_traces: u64,
     /// Number of traces that executed successfully
-    pub successful_traces: usize,
+    pub successful_traces: u64,
     /// Number of traces that failed
-    pub failed_traces: usize,
+    pub failed_traces: u64,
     /// Total steps executed across all traces
-    pub total_steps_executed: usize,
+    pub total_steps_executed: u64,
     /// All property violations found
     pub violations: Vec<GenerativePropertyViolation>,
     /// All validated test cases
@@ -186,11 +186,11 @@ pub struct MBTExecutionResult {
 #[derive(Debug, Clone)]
 pub struct IterativeDeepening {
     /// Starting bound
-    pub initial_bound: usize,
+    pub initial_bound: u32,
     /// Maximum bound to reach
-    pub max_bound: usize,
+    pub max_bound: u32,
     /// Increment per iteration
-    pub bound_increment: usize,
+    pub bound_increment: u32,
     /// Timeout per bound iteration (milliseconds)
     pub timeout_per_bound: u64,
 }
@@ -203,9 +203,9 @@ pub struct ITFFuzzConfig {
     /// Working directory for Quint operations
     pub working_dir: PathBuf,
     /// Maximum bound for model checking iterations
-    pub max_bound: usize,
+    pub max_bound: u32,
     /// Number of simulation runs per property
-    pub simulation_runs: usize,
+    pub simulation_runs: u32,
     /// Enable counterexample mutation
     pub enable_mutation: bool,
     /// Timeout per Quint command (seconds)
@@ -360,7 +360,7 @@ impl ITFBasedFuzzer {
 
         // Check states have sequential indices
         for (i, state) in trace.states.iter().enumerate() {
-            if state.meta.index != i {
+            if state.meta.index != i as u64 {
                 return Err(ITFFuzzError::ValidationError(format!(
                     "State index mismatch: expected {}, got {}",
                     i, state.meta.index
@@ -485,7 +485,7 @@ impl ITFBasedFuzzer {
         execution_trace: ExecutionTrace,
     ) -> Result<QuintTrace, ITFFuzzError> {
         let config = TraceConversionConfig {
-            max_trace_length: self.config.max_bound,
+            max_trace_length: self.config.max_bound as u64,
             include_detailed_state: true,
             include_protocol_events: true,
             include_network_events: false,
@@ -586,7 +586,7 @@ impl ITFBasedFuzzer {
             steps: result.steps,
             final_state: result.final_state,
             success: result.success,
-            step_count: result.step_count,
+            step_count: result.step_count as u64,
             property_violations: result
                 .property_violations
                 .into_iter()
@@ -607,7 +607,7 @@ impl ITFBasedFuzzer {
         &self,
         registry: ActionRegistry,
         initial_state: QuintSimulationState,
-        max_steps: usize,
+        max_steps: u32,
         seed: Option<u64>,
     ) -> Result<GenerativeSimulationResult, ITFFuzzError> {
         let config = GenerativeSimulatorConfig {
@@ -627,7 +627,7 @@ impl ITFBasedFuzzer {
             steps: result.steps,
             final_state: result.final_state,
             success: result.success,
-            step_count: result.step_count,
+            step_count: result.step_count as u64,
             property_violations: result
                 .property_violations
                 .into_iter()
@@ -711,7 +711,10 @@ impl ITFBasedFuzzer {
             .iter()
             .filter(|c| c.validation_passed)
             .count();
-        let total_steps: usize = validated_cases.iter().map(|c| c.executed_steps.len()).sum();
+        let total_steps: u64 = validated_cases
+            .iter()
+            .map(|c| c.executed_steps.len() as u64)
+            .sum();
         let violations: Vec<_> = validated_cases
             .iter()
             .flat_map(|c| c.violations.clone())
@@ -721,9 +724,9 @@ impl ITFBasedFuzzer {
 
         Ok(MBTExecutionResult {
             spec_file: spec_file.to_path_buf(),
-            total_traces,
-            successful_traces,
-            failed_traces: total_traces - successful_traces,
+            total_traces: total_traces as u64,
+            successful_traces: successful_traces as u64,
+            failed_traces: (total_traces - successful_traces) as u64,
             total_steps_executed: total_steps,
             violations,
             validated_cases,
@@ -758,7 +761,7 @@ impl ITFBasedFuzzer {
 
         // Iterative deepening: gradually increase bounds until max or violations found
         for bound in
-            (deepening.initial_bound..=deepening.max_bound).step_by(deepening.bound_increment)
+            (deepening.initial_bound..=deepening.max_bound).step_by(deepening.bound_increment as usize)
         {
             final_bound = bound;
 
@@ -802,7 +805,7 @@ impl ITFBasedFuzzer {
         &self,
         spec_file: &Path,
         property: &str,
-        bound: usize,
+        bound: u32,
     ) -> Result<PropertyCheckResult, ITFFuzzError> {
         // Create ephemeral output file for counterexample
         let temp_dir = std::env::temp_dir();
@@ -869,7 +872,7 @@ impl ITFBasedFuzzer {
 
         for (i, counterexample) in result.counterexamples.iter().enumerate() {
             // Find the step where the violation occurred
-            let violation_step = counterexample.states.len().saturating_sub(1);
+            let violation_step = counterexample.states.len().saturating_sub(1) as u64;
             let violation_state =
                 counterexample
                     .states
@@ -891,7 +894,7 @@ impl ITFBasedFuzzer {
             violations.push(PropertyViolation {
                 property_name: property_name.clone(),
                 violation_trace: counterexample.clone(),
-                violation_step,
+                violation_step: violation_step as u64,
                 violation_description: format!(
                     "Property '{}' violated at step {} with bound {}",
                     property_name, violation_step, result.checking_bound
@@ -976,7 +979,7 @@ impl ITFBasedFuzzer {
                 recommendations.push("Some violations occur very early in execution. Check initial state conditions and preconditions.".to_string());
             }
 
-            if max_step > self.config.max_bound / 2 {
+            if max_step > self.config.max_bound as u64 / 2 {
                 recommendations.push("Some violations occur at high step counts. Consider protocol timeouts and liveness properties.".to_string());
             }
         }
@@ -1025,7 +1028,7 @@ impl ITFBasedFuzzer {
     async fn run_single_simulation(
         &self,
         spec_file: &Path,
-        run_id: usize,
+        run_id: u32,
         config: &SimulationConfig,
     ) -> Result<ITFTrace, ITFFuzzError> {
         let temp_dir = std::env::temp_dir();
@@ -1100,7 +1103,7 @@ impl ITFBasedFuzzer {
         let mut test_cases = Vec::new();
 
         for (i, trace) in traces.iter().enumerate() {
-            let test_case = self.convert_single_trace_to_test_case(trace, spec_file, i)?;
+            let test_case = self.convert_single_trace_to_test_case(trace, spec_file, i as u32)?;
             test_cases.push(test_case);
         }
 
@@ -1112,7 +1115,7 @@ impl ITFBasedFuzzer {
         &self,
         trace: &ITFTrace,
         spec_file: &Path,
-        index: usize,
+        index: u32,
     ) -> Result<GeneratedTestCase, ITFFuzzError> {
         // Extract action sequence from trace
         let action_sequence = self.extract_action_sequence_from_trace(trace)?;
@@ -1174,7 +1177,7 @@ impl ITFBasedFuzzer {
             };
 
             actions.push(TestAction {
-                step: i,
+                step: i as u64,
                 action_name,
                 state_variables: state.variables.clone(),
                 nondet_picks,
@@ -1314,11 +1317,11 @@ impl ITFBasedFuzzer {
         }
 
         TestCoverageAnalysis {
-            total_test_cases: test_cases.len(),
+            total_test_cases: test_cases.len() as u64,
             total_steps,
-            covered_actions: covered_actions.len(),
-            covered_variables: covered_variables.len(),
-            covered_properties: covered_properties.len(),
+            covered_actions: covered_actions.len() as u32,
+            covered_variables: covered_variables.len() as u32,
+            covered_properties: covered_properties.len() as u32,
             action_names: covered_actions.into_iter().collect(),
             variable_names: covered_variables.into_iter().collect(),
             property_names: covered_properties.into_iter().collect(),
@@ -1417,7 +1420,7 @@ impl ITFBasedFuzzer {
         );
 
         let success = all_violations.is_empty()
-            || all_violations.len() <= campaign_config.ci_integration.max_violations;
+            || all_violations.len() <= campaign_config.ci_integration.max_violations as usize;
 
         let recommendations = self.generate_recommendations(
             &model_checking_result,
@@ -1478,13 +1481,13 @@ impl ITFBasedFuzzer {
                     violations.push(PropertyViolation {
                         property_name: format!("test_case_property_{}", step_idx),
                         violation_trace: test_case.source_trace.clone(),
-                        violation_step: step_idx,
+                        violation_step: step_idx as u64,
                         violation_description: format!(
                             "Precondition violation detected: {}",
                             precondition
                         ),
                         violation_state: ITFState {
-                            meta: ITFStateMeta { index: step_idx },
+                            meta: ITFStateMeta { index: step_idx as u64 },
                             variables: action.state_variables.clone(),
                             action_taken: action.action_name.clone(),
                             nondet_picks: action.nondet_picks.clone(),
@@ -1538,10 +1541,10 @@ impl ITFBasedFuzzer {
         CoverageSummary {
             property_coverage,
             state_coverage,
-            violation_count: violations.len(),
+            violation_count: violations.len() as u32,
             total_test_cases: simulation_result
                 .as_ref()
-                .map(|s| s.test_cases.len())
+                .map(|s| s.test_cases.len() as u64)
                 .unwrap_or(0),
             goals_achieved: property_coverage >= 80.0 && violations.is_empty(),
         }
@@ -2041,15 +2044,15 @@ pub struct TestSuite {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TestCoverageAnalysis {
     /// Total number of test cases
-    pub total_test_cases: usize,
+    pub total_test_cases: u64,
     /// Total execution steps across all tests
-    pub total_steps: usize,
+    pub total_steps: u64,
     /// Number of unique actions covered
-    pub covered_actions: usize,
+    pub covered_actions: u32,
     /// Number of unique variables covered
-    pub covered_variables: usize,
+    pub covered_variables: u32,
     /// Number of unique properties covered
-    pub covered_properties: usize,
+    pub covered_properties: u32,
     /// Names of covered actions
     pub action_names: Vec<String>,
     /// Names of covered variables
@@ -2072,7 +2075,7 @@ pub struct FuzzingCampaignConfig {
     /// Target coverage percentage
     pub target_coverage: f64,
     /// Parallel execution threads
-    pub parallel_threads: usize,
+    pub parallel_threads: u32,
     /// Enable performance benchmarking
     pub enable_benchmarking: bool,
     /// CI/CD integration settings
@@ -2089,7 +2092,7 @@ pub struct CIIntegrationConfig {
     /// Fail CI on property violations
     pub fail_on_violations: bool,
     /// Maximum allowed violations
-    pub max_violations: usize,
+    pub max_violations: u32,
     /// Export test results to file
     pub export_results: Option<PathBuf>,
     /// Export coverage report
@@ -2261,9 +2264,9 @@ pub struct CoverageSummary {
     /// State coverage percentage
     pub state_coverage: f64,
     /// Number of property violations found
-    pub violation_count: usize,
+    pub violation_count: u32,
     /// Total test cases generated
-    pub total_test_cases: usize,
+    pub total_test_cases: u64,
     /// Coverage goals achieved
     pub goals_achieved: bool,
 }
@@ -2274,7 +2277,7 @@ pub struct CoverageSummary {
 struct PropertyCheckResult {
     property_name: String,
     satisfied: bool,
-    bound: usize,
+    bound: u32,
     counterexample_trace: Option<ITFTrace>,
     stdout: String,
     stderr: String,
@@ -2302,7 +2305,7 @@ pub struct ModelCheckingReport {
 pub struct ITFPropertyEvaluationResult {
     pub property_name: String,
     pub satisfied: bool,
-    pub violation_step: Option<usize>,
+    pub violation_step: Option<u64>,
     pub execution_time_ms: u64,
     pub error_message: Option<String>,
 }
@@ -2313,7 +2316,7 @@ pub struct SimulationResult {
     /// Generated ITF traces from simulation
     pub traces: Vec<ITFTrace>,
     /// Number of simulation runs executed
-    pub runs_executed: usize,
+    pub runs_executed: u32,
     /// Total simulation time
     pub simulation_time_ms: u64,
     /// Any errors encountered during simulation
@@ -2339,7 +2342,7 @@ pub struct GeneratedTestCase {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TestAction {
     /// Step number in the trace
-    pub step: usize,
+    pub step: u64,
     /// Action name from MBT metadata
     pub action_name: Option<String>,
     /// State variables at this step
@@ -2369,7 +2372,7 @@ pub struct TestCaseMetadata {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TestGenerationMethod {
     /// Generated from Quint simulation
-    Simulation { runs: usize, max_steps: usize },
+    Simulation { runs: u32, max_steps: u32 },
     /// Generated from counterexample
     Counterexample { property: String },
     /// Generated from mutation of existing test
@@ -2380,9 +2383,9 @@ pub enum TestGenerationMethod {
 #[derive(Debug, Clone)]
 pub struct SimulationConfig {
     /// Number of simulation runs to execute
-    pub num_runs: usize,
+    pub num_runs: u32,
     /// Maximum steps per simulation run
-    pub max_steps: usize,
+    pub max_steps: u32,
     /// Seed for deterministic simulation
     pub seed: Option<u64>,
     /// Enable Model-Based Testing metadata

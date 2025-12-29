@@ -277,10 +277,10 @@ pub struct QueryStats {
     pub execution_time: Duration,
 
     /// Number of facts scanned during execution
-    pub facts_scanned: usize,
+    pub facts_scanned: u32,
 
     /// Number of facts that matched the query
-    pub facts_matched: usize,
+    pub facts_matched: u32,
 
     /// Whether the result was served from cache
     pub cache_hit: bool,
@@ -315,30 +315,35 @@ impl QueryStats {
     }
 
     /// Mark as a cache hit
+    #[must_use]
     pub fn with_cache_hit(mut self) -> Self {
         self.cache_hit = true;
         self
     }
 
     /// Set facts scanned
-    pub fn with_facts_scanned(mut self, count: usize) -> Self {
+    #[must_use]
+    pub fn with_facts_scanned(mut self, count: u32) -> Self {
         self.facts_scanned = count;
         self
     }
 
     /// Set facts matched
-    pub fn with_facts_matched(mut self, count: usize) -> Self {
+    #[must_use]
+    pub fn with_facts_matched(mut self, count: u32) -> Self {
         self.facts_matched = count;
         self
     }
 
     /// Set isolation level used
+    #[must_use]
     pub fn with_isolation(mut self, isolation: QueryIsolation) -> Self {
         self.isolation_used = isolation;
         self
     }
 
     /// Set consensus wait time
+    #[must_use]
     pub fn with_consensus_wait(mut self, duration: Duration) -> Self {
         self.consensus_wait_time = Some(duration);
         self
@@ -388,18 +393,21 @@ impl DatalogProgram {
     }
 
     /// Add a rule to the program
+    #[must_use]
     pub fn with_rule(mut self, rule: DatalogRule) -> Self {
         self.rules.push(rule);
         self
     }
 
     /// Add a fact to the program
+    #[must_use]
     pub fn with_fact(mut self, fact: DatalogFact) -> Self {
         self.facts.push(fact);
         self
     }
 
     /// Set the goal query
+    #[must_use]
     pub fn with_goal(mut self, goal: impl Into<String>) -> Self {
         self.goal = Some(goal.into());
         self
@@ -456,6 +464,7 @@ impl DatalogRule {
     }
 
     /// Create a rule with head and body
+    #[must_use]
     pub fn with_body(head: DatalogFact, body: Vec<DatalogFact>) -> Self {
         Self { head, body }
     }
@@ -579,6 +588,7 @@ impl DatalogBindings {
     }
 
     /// Add a row
+    #[must_use]
     pub fn with_row(mut self, row: DatalogRow) -> Self {
         self.rows.push(row);
         self
@@ -609,6 +619,7 @@ impl DatalogRow {
     }
 
     /// Add a binding
+    #[must_use]
     pub fn with_binding(mut self, name: impl Into<String>, value: DatalogValue) -> Self {
         self.bindings.push((name.into(), value));
         self
@@ -677,6 +688,7 @@ impl FactPredicate {
     }
 
     /// Create a predicate with specific argument constraints
+    #[must_use]
     pub fn with_args(name: impl Into<String>, args: Vec<(&str, &str)>) -> Self {
         let mut predicate = Self::named(name);
         // Convert (name, value) pairs to positional arg patterns
@@ -691,6 +703,7 @@ impl FactPredicate {
     }
 
     /// Add an argument pattern (Some = must match, None = wildcard)
+    #[must_use]
     pub fn with_arg(mut self, pattern: Option<String>) -> Self {
         self.arg_patterns.push(pattern);
         self
@@ -792,6 +805,7 @@ impl QueryCapability {
     }
 
     /// Add a constraint
+    #[must_use]
     pub fn with_constraint(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.constraints.push((key.into(), value.into()));
         self

@@ -148,7 +148,7 @@ pub struct SearchResults {
     /// Result items
     pub items: Vec<SearchResultItem>,
     /// Total number of results (before filtering/limiting)
-    pub total_count: usize,
+    pub total_count: u32,
     /// Search execution time in milliseconds
     pub execution_time_ms: u64,
     /// Search metadata
@@ -157,7 +157,8 @@ pub struct SearchResults {
 
 impl SearchResults {
     /// Create new search results
-    pub fn new(query: SearchQuery, items: Vec<SearchResultItem>, total_count: usize) -> Self {
+    #[must_use]
+    pub fn new(query: SearchQuery, items: Vec<SearchResultItem>, total_count: u32) -> Self {
         Self {
             query,
             items,
@@ -168,12 +169,14 @@ impl SearchResults {
     }
 
     /// Set execution time
+    #[must_use]
     pub fn with_execution_time(mut self, execution_time_ms: u64) -> Self {
         self.execution_time_ms = execution_time_ms;
         self
     }
 
     /// Add metadata
+    #[must_use]
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value);
         self
@@ -186,7 +189,7 @@ impl SearchResults {
 
     /// Check if more results are available
     pub fn has_more_results(&self) -> bool {
-        self.total_count > self.items.len()
+        self.total_count as usize > self.items.len()
     }
 }
 

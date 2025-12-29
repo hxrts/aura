@@ -16,6 +16,15 @@ use crate::semilattice::{Bottom, JoinSemilattice, MeetSemiLattice, Top};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Maximum number of entries in the LWW map per journal.
+pub const MAX_LWW_MAP_ENTRIES_COUNT: u32 = 65_536;
+
+/// Maximum number of operations in the operation set per journal.
+pub const MAX_FACT_OPERATIONS: usize = 131072;
+
+/// Maximum size in bytes for a FactValue::Bytes payload.
+pub const MAX_FACT_BYTES_SIZE: usize = 1048576; // 1 MiB
+
 /// Fact type for the journal - represents "what we know" (⊔-monotone)
 ///
 /// Facts are join-semilattice elements that can only grow through accumulation.
@@ -100,6 +109,12 @@ impl Ord for FactOperation {
                     ..
                 },
             ) => t1.cmp(t2).then_with(|| id1.cmp(id2)),
+            // WHY: Add < Remove ensures that when operations are processed in sorted order,
+            // all Add operations precede all Remove operations at the same timestamp.
+            // This prevents a Remove from being processed before its corresponding Add
+            // exists in the operation set, which would leave the Remove orphaned.
+            // The OR-Set semantics require each Remove to reference a specific Add's op_id,
+            // so processing Adds first guarantees Removes can find their targets.
             (FactOperation::Add { .. }, FactOperation::Remove { .. }) => std::cmp::Ordering::Less,
             (FactOperation::Remove { .. }, FactOperation::Add { .. }) => {
                 std::cmp::Ordering::Greater
@@ -135,6 +150,7 @@ impl Fact {
     }
 
     /// Create a fact with a single key-value pair
+    #[must_use]
     pub fn with_value(key: impl Into<String>, value: FactValue) -> Self {
         let mut fact = Self::new();
         fact.insert(key, value);
@@ -886,6 +902,7 @@ impl Journal {
     }
 
     /// Create a journal with initial capabilities
+    #[must_use]
     pub fn with_caps(caps: Cap) -> Self {
         Self {
             facts: Fact::new(),
@@ -894,6 +911,7 @@ impl Journal {
     }
 
     /// Create a journal with initial facts
+    #[must_use]
     pub fn with_facts(facts: Fact) -> Self {
         Self {
             facts,

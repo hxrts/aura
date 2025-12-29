@@ -33,11 +33,11 @@ pub struct SessionHandle {
 #[allow(dead_code)] // Part of future session management API
 pub struct SessionStats {
     /// Total active sessions
-    pub active_sessions: usize,
+    pub active_sessions: u32,
     /// Sessions by type
-    pub sessions_by_type: HashMap<String, usize>,
+    pub sessions_by_type: HashMap<String, u32>,
     /// Total participants across all sessions
-    pub total_participants: usize,
+    pub total_participants: u32,
     /// Average session duration
     pub average_duration: f64,
     /// Last cleanup time

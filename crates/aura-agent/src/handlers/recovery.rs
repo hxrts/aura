@@ -25,18 +25,18 @@ pub enum RecoveryState {
         /// Unique recovery ceremony ID
         recovery_id: String,
         /// Number of approvals required
-        threshold: usize,
+        threshold: u32,
         /// Approvals collected so far
-        collected: usize,
+        collected: u32,
     },
     /// Collecting guardian shares
     CollectingShares {
         /// Recovery ceremony ID
         recovery_id: String,
         /// Shares collected
-        collected: usize,
+        collected: u32,
         /// Shares required
-        required: usize,
+        required: u32,
     },
     /// Reconstructing the key
     Reconstructing {
@@ -82,7 +82,7 @@ pub enum RecoveryOperation {
         /// New guardian authorities
         new_guardians: Vec<AuthorityId>,
         /// New threshold
-        new_threshold: usize,
+        new_threshold: u32,
     },
 }
 
@@ -100,7 +100,7 @@ pub struct RecoveryRequest {
     /// Guardian authorities to request approval from
     pub guardians: Vec<AuthorityId>,
     /// Required threshold of approvals
-    pub threshold: usize,
+    pub threshold: u32,
     /// Request timestamp
     pub requested_at: u64,
     /// Optional expiration
@@ -181,14 +181,14 @@ impl RecoveryHandler {
         effects: &AuraEffectSystem,
         operation: RecoveryOperation,
         guardians: Vec<AuthorityId>,
-        threshold: usize,
+        threshold: u32,
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Validate threshold
-        if threshold == 0 || threshold > guardians.len() {
+        if threshold == 0 || threshold > guardians.len() as u32 {
             return Err(AgentError::config(format!(
                 "Invalid threshold: {} of {} guardians",
                 threshold,
@@ -342,7 +342,7 @@ impl RecoveryHandler {
 
         // Add approval
         recovery.approvals.push(approval.clone());
-        let collected = recovery.approvals.len();
+        let collected = recovery.approvals.len() as u32;
         let threshold = recovery.request.threshold;
 
         // Update state
@@ -410,7 +410,7 @@ impl RecoveryHandler {
         })?;
 
         // Check threshold is met
-        let collected = recovery.approvals.len();
+        let collected = recovery.approvals.len() as u32;
         if collected < recovery.request.threshold {
             return Err(AgentError::effects(format!(
                 "Threshold not met: {} of {} required",

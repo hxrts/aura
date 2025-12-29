@@ -395,6 +395,7 @@ impl Cell {
     }
 
     /// Create a cell with character and foreground color
+    #[must_use]
     pub fn with_fg(c: char, fg: Color) -> Self {
         Self {
             char: c,

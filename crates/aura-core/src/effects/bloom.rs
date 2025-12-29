@@ -23,6 +23,8 @@
 use crate::AuraError;
 use serde::{Deserialize, Serialize};
 
+pub const MAX_BLOOM_BITS_BYTES: usize = 1_048_576;
+
 /// Bloom filter operation error
 pub type BloomError = AuraError;
 

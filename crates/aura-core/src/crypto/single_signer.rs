@@ -29,6 +29,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const MAX_SINGLE_SIGNER_VERIFYING_KEY_BYTES: usize = 32;
+
 /// Indicates whether keys are single-signer Ed25519 or FROST threshold.
 ///
 /// This enum is stored alongside key material to ensure the correct

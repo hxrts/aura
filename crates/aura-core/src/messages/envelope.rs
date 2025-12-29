@@ -26,6 +26,7 @@ pub struct WireEnvelope<T> {
 
 impl<T> WireEnvelope<T> {
     /// Create a new message envelope
+    #[must_use]
     pub fn new(
         session_id: Option<SessionId>,
         sender_id: DeviceId,
@@ -47,4 +48,33 @@ impl<T> WireEnvelope<T> {
     pub fn is_version_compatible(&self, max_supported: u16) -> bool {
         self.version <= max_supported
     }
+
+    /// Validate envelope invariants after deserialization.
+    ///
+    /// Returns `Ok(())` if the envelope is well-formed, or an error describing
+    /// which invariant was violated. Call this after deserializing an envelope
+    /// to ensure it meets structural requirements.
+    pub fn validate(&self) -> std::result::Result<(), EnvelopeValidationError> {
+        // Check version is within supported range
+        if self.version == 0 {
+            return Err(EnvelopeValidationError::InvalidVersion(self.version));
+        }
+        if self.version > WIRE_FORMAT_VERSION {
+            return Err(EnvelopeValidationError::UnsupportedVersion {
+                received: self.version,
+                max_supported: WIRE_FORMAT_VERSION,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Errors that can occur during envelope validation.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum EnvelopeValidationError {
+    #[error("Invalid version: {0}")]
+    InvalidVersion(u16),
+
+    #[error("Unsupported version {received}, max supported is {max_supported}")]
+    UnsupportedVersion { received: u16, max_supported: u16 },
 }

@@ -59,7 +59,7 @@ pub enum AvailabilityError {
     /// could be contacted.
     NoReachablePeers {
         /// Number of peers that were tried
-        peers_tried: usize,
+        peers_tried: u32,
     },
 
     /// Network error during peer retrieval.

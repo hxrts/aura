@@ -24,11 +24,20 @@ use crate::types::{epochs::Epoch, flow::FlowBudget, identifiers::AuthorityId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-/// Fixed size for rendezvous packets.
+/// Fixed size for rendezvous packets in bytes.
 ///
 /// All packets are padded to this size to prevent size-based fingerprinting.
 /// The size should accommodate typical rendezvous payloads with padding.
-pub const RENDEZVOUS_PACKET_SIZE: usize = 512;
+pub const RENDEZVOUS_PACKET_SIZE_BYTES: usize = 512;
+
+/// Maximum size of a decrypted rendezvous payload in bytes.
+pub const MAX_RENDEZVOUS_PAYLOAD_BYTES: usize = 4096;
+
+/// Size of ephemeral public key in bytes (X25519).
+pub const EPHEMERAL_KEY_SIZE_BYTES: usize = 32;
+
+/// Size of nonce for packet deduplication in bytes.
+pub const NONCE_SIZE_BYTES: usize = 16;
 
 /// Default TTL for flood propagation.
 ///
@@ -45,7 +54,7 @@ pub struct RendezvousPacket {
     /// Encrypted payload (fixed size, padded).
     ///
     /// Contains the actual rendezvous data encrypted to the recipient's
-    /// public key. Padded to RENDEZVOUS_PACKET_SIZE bytes.
+    /// public key. Padded to RENDEZVOUS_PACKET_SIZE_BYTES bytes.
     pub ciphertext: Vec<u8>,
 
     /// Ephemeral public key for decryption.
@@ -69,7 +78,8 @@ pub struct RendezvousPacket {
 impl RendezvousPacket {
     /// Create a new rendezvous packet.
     ///
-    /// Note: The ciphertext should already be padded to RENDEZVOUS_PACKET_SIZE.
+    /// Note: The ciphertext should already be padded to RENDEZVOUS_PACKET_SIZE_BYTES.
+    #[must_use]
     pub fn new(ciphertext: Vec<u8>, ephemeral_key: [u8; 32], ttl: u8, nonce: [u8; 16]) -> Self {
         Self {
             ciphertext,
@@ -87,6 +97,7 @@ impl RendezvousPacket {
     /// Decrement TTL for forwarding.
     ///
     /// Returns a new packet with decremented TTL, or None if TTL was 0.
+    #[must_use]
     pub fn decrement_ttl(&self) -> Option<Self> {
         if self.ttl == 0 {
             None
@@ -103,6 +114,21 @@ impl RendezvousPacket {
     /// Get the packet size in bytes.
     pub fn size(&self) -> usize {
         self.ciphertext.len() + 32 + 1 + 16 // ciphertext + ephemeral_key + ttl + nonce
+    }
+
+    /// Validate packet invariants after deserialization.
+    ///
+    /// Returns `Ok(())` if the packet is well-formed, or an error describing
+    /// which invariant was violated. Call this after deserializing a packet
+    /// to ensure it meets structural requirements.
+    pub fn validate(&self) -> std::result::Result<(), FloodError> {
+        if self.ciphertext.len() != RENDEZVOUS_PACKET_SIZE_BYTES {
+            return Err(FloodError::PacketTooLarge {
+                size: self.ciphertext.len() as u32,
+                max_size: RENDEZVOUS_PACKET_SIZE_BYTES as u32,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -179,9 +205,9 @@ pub enum FloodError {
     /// Packet too large.
     PacketTooLarge {
         /// Actual size in bytes
-        size: usize,
+        size: u32,
         /// Maximum allowed size
-        max_size: usize,
+        max_size: u32,
     },
 
     /// Encryption failed.
@@ -247,6 +273,7 @@ impl FloodBudget {
     }
 
     /// Create a flood budget with custom limits.
+    #[must_use]
     pub fn with_limits(originate_limit: u32, forward_limit: u32, epoch: Epoch) -> Self {
         Self {
             originate_limit,
@@ -279,25 +306,27 @@ impl FloodBudget {
 
     /// Record an originate operation.
     ///
-    /// Returns true if successful, false if budget exhausted.
-    pub fn record_originate(&mut self) -> bool {
+    /// Returns `Ok(())` if successful, or `Err(FloodError::OriginateBudgetExhausted)`
+    /// if the budget is exhausted.
+    pub fn record_originate(&mut self) -> std::result::Result<(), FloodError> {
         if self.can_originate() {
             self.originate_spent += 1;
-            true
+            Ok(())
         } else {
-            false
+            Err(FloodError::OriginateBudgetExhausted)
         }
     }
 
     /// Record a forward operation.
     ///
-    /// Returns true if successful, false if budget exhausted.
-    pub fn record_forward(&mut self) -> bool {
+    /// Returns `Ok(())` if successful, or `Err(FloodError::ForwardBudgetExhausted)`
+    /// if the budget is exhausted.
+    pub fn record_forward(&mut self) -> std::result::Result<(), FloodError> {
         if self.can_forward() {
             self.forward_spent += 1;
-            true
+            Ok(())
         } else {
-            false
+            Err(FloodError::ForwardBudgetExhausted)
         }
     }
 
@@ -527,13 +556,13 @@ mod tests {
         assert_eq!(budget.originate_remaining(), 2);
         assert_eq!(budget.forward_remaining(), 3);
 
-        assert!(budget.record_originate());
+        assert!(budget.record_originate().is_ok());
         assert_eq!(budget.originate_remaining(), 1);
 
-        assert!(budget.record_originate());
+        assert!(budget.record_originate().is_ok());
         assert_eq!(budget.originate_remaining(), 0);
 
-        assert!(!budget.record_originate()); // Exhausted
+        assert!(budget.record_originate().is_err()); // Exhausted
         assert!(!budget.can_originate());
     }
 
@@ -543,8 +572,8 @@ mod tests {
         let epoch2 = Epoch::new(epoch1.value() + 1);
 
         let mut budget = FloodBudget::with_limits(2, 3, epoch1);
-        budget.record_originate();
-        budget.record_forward();
+        budget.record_originate().unwrap();
+        budget.record_forward().unwrap();
 
         assert_eq!(budget.originate_spent, 1);
         assert_eq!(budget.forward_spent, 1);
@@ -562,12 +591,12 @@ mod tests {
         let mut b1 = FloodBudget::with_limits(10, 100, epoch);
         let mut b2 = FloodBudget::with_limits(8, 120, epoch);
 
-        b1.record_originate();
-        b1.record_originate();
-        b2.record_originate();
-        b2.record_forward();
-        b2.record_forward();
-        b2.record_forward();
+        b1.record_originate().unwrap();
+        b1.record_originate().unwrap();
+        b2.record_originate().unwrap();
+        b2.record_forward().unwrap();
+        b2.record_forward().unwrap();
+        b2.record_forward().unwrap();
 
         let merged = b1.merge(&b2);
 

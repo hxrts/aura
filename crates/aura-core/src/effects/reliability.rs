@@ -196,7 +196,11 @@ impl BackoffStrategy {
             }
             BackoffStrategy::ExponentialWithJitter => {
                 let base_delay = initial_delay * 2u32.saturating_pow(attempt);
-                // Use a deterministic jitter based on attempt count to avoid ambient RNG
+                // Deterministic jitter using attempt count as pseudo-entropy source.
+                // Formula: 10% of base_delay × (attempt × 0.1 mod 1.0)
+                // WHY: Avoids ambient RNG (pure function), provides ~0-10% variance,
+                // and the modulo ensures bounded output regardless of attempt count.
+                // This decorrelates retry bursts without external randomness.
                 let jitter =
                     (base_delay.as_millis() as f64 * 0.1 * (attempt as f64 * 0.1 % 1.0)) as u64;
                 base_delay + Duration::from_millis(jitter)
@@ -205,6 +209,19 @@ impl BackoffStrategy {
 
         delay.min(max_delay)
     }
+}
+
+/// Jitter mode for retry delays
+///
+/// Controls whether and how jitter is applied to retry delays
+/// to prevent thundering herd effects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum JitterMode {
+    /// No jitter applied to delays
+    #[default]
+    None,
+    /// Apply deterministic jitter based on attempt number
+    Deterministic,
 }
 
 /// Retry policy configuration
@@ -221,77 +238,85 @@ pub struct RetryPolicy {
     pub max_delay: Duration,
     /// Backoff strategy to use
     pub strategy: BackoffStrategy,
-    /// Whether to add jitter to delays
-    pub jitter: bool,
+    /// Jitter mode for delays
+    pub jitter: JitterMode,
     /// Timeout for individual retry attempts
     pub timeout: Option<Duration>,
 }
 
 impl RetryPolicy {
     /// Create a new retry policy with exponential backoff
+    #[must_use]
     pub fn exponential() -> Self {
         Self {
             max_attempts: 3,
             initial_delay: Duration::from_millis(100),
             max_delay: Duration::from_secs(30),
             strategy: BackoffStrategy::Exponential,
-            jitter: false,
+            jitter: JitterMode::None,
             timeout: None,
         }
     }
 
     /// Create a retry policy with fixed delay
+    #[must_use]
     pub fn fixed(delay: Duration) -> Self {
         Self {
             max_attempts: 3,
             initial_delay: delay,
             max_delay: delay,
             strategy: BackoffStrategy::Fixed,
-            jitter: false,
+            jitter: JitterMode::None,
             timeout: None,
         }
     }
 
     /// Create a retry policy with linear backoff
+    #[must_use]
     pub fn linear() -> Self {
         Self {
             max_attempts: 3,
             initial_delay: Duration::from_millis(100),
             max_delay: Duration::from_secs(30),
             strategy: BackoffStrategy::Linear,
-            jitter: false,
+            jitter: JitterMode::None,
             timeout: None,
         }
     }
 
     /// Set maximum retry attempts
+    #[must_use]
     pub fn with_max_attempts(mut self, attempts: u32) -> Self {
         self.max_attempts = attempts;
         self
     }
 
     /// Set initial delay
+    #[must_use]
     pub fn with_initial_delay(mut self, delay: Duration) -> Self {
         self.initial_delay = delay;
         self
     }
 
     /// Set maximum delay
+    #[must_use]
     pub fn with_max_delay(mut self, delay: Duration) -> Self {
         self.max_delay = delay;
         self
     }
 
-    /// Enable or disable jitter
-    pub fn with_jitter(mut self, enable: bool) -> Self {
-        self.jitter = enable;
-        if enable {
+    /// Set jitter mode for delay calculations
+    #[must_use]
+    pub fn with_jitter(mut self, mode: JitterMode) -> Self {
+        self.jitter = mode;
+        if matches!(mode, JitterMode::Deterministic) {
             self.strategy = BackoffStrategy::ExponentialWithJitter;
         }
         self
     }
 
     /// Set timeout for individual attempts
+    #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
@@ -299,10 +324,9 @@ impl RetryPolicy {
 
     /// Calculate delay for a specific attempt
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
-        let strategy = if self.jitter {
-            BackoffStrategy::ExponentialWithJitter
-        } else {
-            self.strategy
+        let strategy = match self.jitter {
+            JitterMode::Deterministic => BackoffStrategy::ExponentialWithJitter,
+            JitterMode::None => self.strategy,
         };
 
         strategy.calculate_delay(attempt, self.initial_delay, self.max_delay)
@@ -499,6 +523,18 @@ impl RetryContext {
 // Unified Rate Limiting Implementation
 // =============================================================================
 
+/// Adaptive rate limiting mode
+///
+/// Controls whether rate limits adjust dynamically based on system load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AdaptiveMode {
+    /// Fixed rate limits, no adaptation
+    Fixed,
+    /// Rate limits adapt based on current load
+    #[default]
+    Adaptive,
+}
+
 /// Rate limiter configuration
 ///
 /// This struct replaces duplicate rate limiting configuration in
@@ -520,8 +556,8 @@ pub struct RateLimitConfig {
     /// Window size for sliding window algorithm
     pub window_size: Duration,
 
-    /// Enable adaptive rate limiting based on load
-    pub adaptive: bool,
+    /// Adaptive rate limiting mode
+    pub adaptive: AdaptiveMode,
 }
 
 impl Default for RateLimitConfig {
@@ -532,7 +568,7 @@ impl Default for RateLimitConfig {
             bucket_capacity: 200,
             refill_rate: 100,
             window_size: Duration::from_secs(60),
-            adaptive: true,
+            adaptive: AdaptiveMode::Adaptive,
         }
     }
 }

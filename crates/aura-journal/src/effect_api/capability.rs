@@ -461,7 +461,7 @@ pub struct RecoveryCapability {
     pub issuing_guardians: Vec<DeviceId>,
 
     /// Threshold of guardians required
-    pub guardian_threshold: usize,
+    pub guardian_threshold: u32,
 
     /// Purpose of recovery (for audit trail)
     pub recovery_reason: String,
@@ -487,15 +487,15 @@ impl RecoveryCapability {
         capability_id: CapabilityId,
         target_device: DeviceId,
         issuing_guardians: Vec<DeviceId>,
-        guardian_threshold: usize,
+        guardian_threshold: u32,
         expires_at: TimeStamp,
-        leaf_index: usize,
+        leaf_index: u32,
         epoch: u64,
         signature: CapabilitySignature,
     ) -> Self {
         let capability = CapabilityRef::new(
             capability_id,
-            ResourceRef::recovery(leaf_index, epoch),
+            ResourceRef::recovery(leaf_index as usize, epoch),
             expires_at,
             signature,
         );
@@ -523,7 +523,7 @@ impl RecoveryCapability {
         }
 
         // Check guardian threshold
-        if self.issuing_guardians.len() < self.guardian_threshold {
+        if self.issuing_guardians.len() < self.guardian_threshold as usize {
             return false;
         }
 
@@ -532,7 +532,7 @@ impl RecoveryCapability {
 
     /// Check if this capability has sufficient guardian consent
     pub fn has_guardian_quorum(&self) -> bool {
-        self.issuing_guardians.len() >= self.guardian_threshold
+        self.issuing_guardians.len() >= self.guardian_threshold as usize
     }
 }
 

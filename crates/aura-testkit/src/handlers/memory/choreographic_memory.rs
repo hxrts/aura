@@ -1,4 +1,13 @@
 //! Memory-based choreographic handler for testing
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `std::sync::Mutex` because this is Layer 8 test infrastructure where:
+//! 1. Tests run in controlled single-threaded contexts
+//! 2. Lock contention is not a concern in test scenarios
+//! 3. Simpler synchronous API is preferred for test clarity
+
+#![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
 use aura_core::effects::{
@@ -12,7 +21,7 @@ use uuid::Uuid;
 /// Memory-based choreographic handler for testing
 pub struct MemoryChoreographicHandler {
     device_id: Uuid,
-    role_index: usize,
+    role_index: u16,
     active_roles: Arc<Mutex<Vec<ChoreographicRole>>>,
     message_queue: Arc<Mutex<HashMap<ChoreographicRole, Vec<Vec<u8>>>>>,
     metrics: Arc<Mutex<ChoreographyMetrics>>,

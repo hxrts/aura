@@ -2,6 +2,7 @@
 
 use super::transcript::compute_transcript_hash_from_transcript;
 use super::types::DkgTranscript;
+use async_lock::Mutex;
 use async_trait::async_trait;
 use aura_core::{
     effects::StorageEffects,
@@ -9,7 +10,7 @@ use aura_core::{
     AuraError, Hash32, Result,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Storage interface for DKG transcripts (blob or journal reference).
 #[async_trait]
@@ -21,28 +22,29 @@ pub trait DkgTranscriptStore: Send + Sync {
 }
 
 /// Default in-memory store (intended for tests).
-#[derive(Default)]
 pub struct MemoryTranscriptStore {
     transcripts: Mutex<HashMap<Hash32, DkgTranscript>>,
+}
+
+impl Default for MemoryTranscriptStore {
+    fn default() -> Self {
+        Self {
+            transcripts: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 #[async_trait]
 impl DkgTranscriptStore for MemoryTranscriptStore {
     async fn put(&self, transcript: &DkgTranscript) -> Result<Option<Hash32>> {
         let reference = transcript.transcript_hash;
-        let mut guard = self
-            .transcripts
-            .lock()
-            .map_err(|_| aura_core::AuraError::invalid("transcript store lock poisoned"))?;
+        let mut guard = self.transcripts.lock().await;
         guard.insert(reference, transcript.clone());
         Ok(Some(reference))
     }
 
     async fn get(&self, reference: &Hash32) -> Result<DkgTranscript> {
-        let guard = self
-            .transcripts
-            .lock()
-            .map_err(|_| aura_core::AuraError::invalid("transcript store lock poisoned"))?;
+        let guard = self.transcripts.lock().await;
         let transcript = guard
             .get(reference)
             .cloned()

@@ -5,12 +5,20 @@
 //!
 //! IMPORTANT: This is not a transport *implementation* by itself; it is the
 //! shared state used by the runtime's `TransportEffects` implementation.
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `parking_lot::RwLock` because:
+//! 1. This is Layer 6 runtime code explicitly allowed per clippy.toml
+//! 2. Locks protect in-memory simulation state with brief, sync-only access
+//! 3. No lock is held across .await points
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::AuthorityId;
+#[allow(clippy::disallowed_types)]
 use parking_lot::RwLock;
 
 /// Shared transport state for multi-agent simulations.

@@ -198,7 +198,7 @@ pub enum GuardOperationId {
     },
     SyncRequestOps {
         peer: uuid::Uuid,
-        count: usize,
+        count: u32,
     },
     SyncAnnounceOp {
         peer: uuid::Uuid,

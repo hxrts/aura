@@ -260,8 +260,8 @@ where
                 guard_eval_time_us: 0,
                 delta_apply_time_us: 0,
                 total_execution_time_us: 0,
-                authorization_checks: guard.required_tokens.len(),
-                facts_applied: applied_deltas.len(),
+                authorization_checks: guard.required_tokens.len() as u32,
+                facts_applied: applied_deltas.len() as u32,
             };
 
             info!(
@@ -289,7 +289,7 @@ where
                 guard_eval_time_us: 0,
                 delta_apply_time_us: 0,
                 total_execution_time_us: 0,
-                authorization_checks: guard.required_tokens.len(),
+                authorization_checks: guard.required_tokens.len() as u32,
                 facts_applied: 0,
             };
 
@@ -389,8 +389,8 @@ where
                         guard_eval_time_us: 0,
                         delta_apply_time_us: 0,
                         total_execution_time_us: 0,
-                        authorization_checks: guard.required_tokens.len(),
-                        facts_applied: guard.delta_facts.len(),
+                        authorization_checks: guard.required_tokens.len() as u32,
+                        facts_applied: guard.delta_facts.len() as u32,
                     },
                 });
             }

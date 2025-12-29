@@ -93,7 +93,7 @@ pub struct GenerationMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosGenerationConfig {
     /// Maximum number of scenarios to generate per property
-    pub max_scenarios_per_property: usize,
+    pub max_scenarios_per_property: u32,
     /// Types of chaos to include in generation
     pub enabled_chaos_types: Vec<ChaosType>,
     /// Priority threshold for property selection
@@ -101,7 +101,7 @@ pub struct ChaosGenerationConfig {
     /// Whether to generate scenarios for satisfied properties
     pub include_satisfied_properties: bool,
     /// Network sizes to test
-    pub test_network_sizes: Vec<usize>,
+    pub test_network_sizes: Vec<u32>,
     /// Byzantine ratios to test (fraction of malicious nodes)
     pub byzantine_ratios: Vec<f64>,
 }
@@ -246,8 +246,8 @@ impl ChaosGenerator {
             scenarios.extend(generated);
 
             // Limit scenarios per property
-            if scenarios.len() >= self.config.max_scenarios_per_property {
-                scenarios.truncate(self.config.max_scenarios_per_property);
+            if scenarios.len() >= self.config.max_scenarios_per_property as usize {
+                scenarios.truncate(self.config.max_scenarios_per_property as usize);
                 break;
             }
         }
@@ -338,10 +338,10 @@ impl ChaosGenerator {
         property: &VerifiableProperty,
         chaos_type: ChaosType,
         template: &ScenarioTemplate,
-        network_size: usize,
+        network_size: u32,
         byzantine_ratio: f64,
     ) -> Result<ChaosScenario, ChaosGeneratorError> {
-        let byzantine_count = (network_size as f64 * byzantine_ratio).floor() as usize;
+        let byzantine_count = (network_size as f64 * byzantine_ratio).floor() as u32;
 
         let scenario_id = format!(
             "chaos_{}_{}_n{}_b{}",

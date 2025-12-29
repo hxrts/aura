@@ -46,6 +46,8 @@ use crate::query::FactId;
 use crate::time::PhysicalTime;
 use crate::Hash32;
 
+pub const MAX_TEMPORAL_FACT_CONTENT_BYTES: usize = 65_536;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Error Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,7 +342,7 @@ pub struct CheckpointInfo {
     /// The epoch at this checkpoint
     pub epoch: crate::types::Epoch,
     /// Number of facts covered by this checkpoint
-    pub fact_count: usize,
+    pub fact_count: u32,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

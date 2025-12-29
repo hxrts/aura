@@ -4,6 +4,10 @@
 //! in the theoretical model (`docs/001_theoretical_foundations.md`) and info
 //! flow specifications (`docs/103_info_flow_budget.md`).
 
+/// Maximum size for receipt signatures in bytes.
+/// Supports Ed25519 (64 bytes) with room for future signature schemes.
+pub const MAX_SIGNATURE_BYTES: usize = 256;
+
 use crate::{
     domain::content::Hash32,
     semilattice::{Bottom, CvState, JoinSemilattice},
@@ -11,6 +15,19 @@ use crate::{
     types::identifiers::{AuthorityId, ContextId},
 };
 use serde::{Deserialize, Serialize};
+
+/// Errors that can occur during budget operations.
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+pub enum BudgetError {
+    /// Budget exhausted - cannot charge the requested cost
+    #[error("Budget exhausted: requested {cost}, remaining {remaining}")]
+    Exhausted {
+        /// The cost that was requested
+        cost: u64,
+        /// The remaining budget
+        remaining: u64,
+    },
+}
 
 /// Effect API-backed flow budget for a `(context, peer)` pair.
 ///
@@ -28,6 +45,7 @@ pub struct FlowBudget {
 
 impl FlowBudget {
     /// Create a new budget with zero spend.
+    #[must_use]
     pub fn new(limit: u64, epoch: Epoch) -> Self {
         Self {
             limit,
@@ -37,11 +55,13 @@ impl FlowBudget {
     }
 
     /// Remaining headroom before the guard should block.
+    #[must_use]
     pub fn headroom(&self) -> u64 {
         self.limit.saturating_sub(self.spent)
     }
 
     /// Alias for headroom() - returns remaining budget
+    #[must_use]
     pub fn remaining(&self) -> u64 {
         self.headroom()
     }
@@ -51,13 +71,19 @@ impl FlowBudget {
         self.spent.saturating_add(cost) <= self.limit
     }
 
-    /// Record a spend if possible, returning whether the charge succeeded.
-    pub fn record_charge(&mut self, cost: u64) -> bool {
+    /// Record a spend if possible.
+    ///
+    /// Returns `Ok(())` if the charge succeeded, or `Err(BudgetError::Exhausted)`
+    /// if the budget would be exceeded.
+    pub fn record_charge(&mut self, cost: u64) -> std::result::Result<(), BudgetError> {
         if self.can_charge(cost) {
             self.spent = self.spent.saturating_add(cost);
-            true
+            Ok(())
         } else {
-            false
+            Err(BudgetError::Exhausted {
+                cost,
+                remaining: self.headroom(),
+            })
         }
     }
 
@@ -66,6 +92,7 @@ impl FlowBudget {
     /// - `limit` takes the meet (minimum)
     /// - `spent` takes the join (maximum)
     /// - `epoch` advances monotonically (maximum)
+    #[must_use]
     pub fn merge(&self, other: &Self) -> Self {
         Self {
             limit: self.limit.min(other.limit),
@@ -132,6 +159,7 @@ pub struct FlowBudgetKey {
 
 impl FlowBudgetKey {
     /// Create a new FlowBudgetKey from context and peer
+    #[must_use]
     pub fn new(context: ContextId, peer: AuthorityId) -> Self {
         Self { context, peer }
     }
@@ -160,6 +188,7 @@ pub struct Receipt {
 
 impl Receipt {
     /// Create a new receipt.
+    #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ContextId,
@@ -238,11 +267,11 @@ mod tests {
     #[test]
     fn record_charge_enforces_limit() {
         let mut budget = FlowBudget::new(10, Epoch::initial());
-        assert!(budget.record_charge(4));
+        assert!(budget.record_charge(4).is_ok());
         assert_eq!(budget.spent, 4);
-        assert!(budget.record_charge(6));
+        assert!(budget.record_charge(6).is_ok());
         assert_eq!(budget.spent, 10);
-        assert!(!budget.record_charge(1));
+        assert!(budget.record_charge(1).is_err());
         assert_eq!(budget.spent, 10);
     }
 

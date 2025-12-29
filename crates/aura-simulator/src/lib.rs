@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 #![allow(dead_code)]
 #![allow(clippy::disallowed_methods)]
+#![allow(clippy::disallowed_types)] // Layer 6 runtime can use blocking locks for simulation
 #![allow(clippy::expect_used)] // Simulator uses expect() for internal invariants
 #![allow(clippy::unwrap_used)] // Simulator uses unwrap() for test code
 #![allow(deprecated)] // Simulator intentionally uses deprecated time functions for testing purposes

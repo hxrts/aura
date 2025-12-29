@@ -62,15 +62,15 @@ pub enum JournalError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalStats {
     /// Number of tree operations
-    pub num_ops: usize,
+    pub num_ops: u64,
     /// Number of pending intents
-    pub num_intents: usize,
+    pub num_intents: u32,
     /// Number of retracted intents
-    pub num_retractions: usize,
+    pub num_retractions: u32,
     /// Latest epoch
     pub latest_epoch: Option<Epoch>,
     /// Number of devices in tree
-    pub num_devices: usize,
+    pub num_devices: u32,
     /// Number of guardians in tree
-    pub num_guardians: usize,
+    pub num_guardians: u32,
 }

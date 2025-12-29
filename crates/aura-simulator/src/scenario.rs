@@ -117,8 +117,8 @@ pub mod types {
     /// Scenario setup with extended capabilities
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ScenarioSetup {
-        pub participants: usize,
-        pub threshold: usize,
+        pub participants: u32,
+        pub threshold: u32,
         pub chat_config: Option<ChatGroupConfig>,
         pub data_loss_config: Option<DataLossSimulation>,
         pub demo_config: Option<DemoConfig>,

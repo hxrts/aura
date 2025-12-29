@@ -3,6 +3,15 @@
 //! Fundamental data structures for the commitment tree, following the specification
 //! in `docs/123_commitment_tree.md`.
 
+/// Maximum size for leaf public keys in bytes (Ed25519 FROST keys).
+pub const MAX_LEAF_PUBLIC_KEY_BYTES: usize = 64;
+
+/// Maximum size for leaf metadata in bytes.
+pub const MAX_LEAF_META_BYTES: usize = 256;
+
+/// Maximum size for aggregate signatures in bytes (FROST aggregate).
+pub const MAX_AGG_SIG_BYTES: usize = 128;
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -83,6 +92,7 @@ pub struct LeafNode {
 
 impl LeafNode {
     /// Create a new device leaf node
+    #[must_use]
     pub fn new_device(
         leaf_id: LeafId,
         device_id: crate::types::identifiers::DeviceId,
@@ -98,6 +108,7 @@ impl LeafNode {
     }
 
     /// Create a new guardian leaf node
+    #[must_use]
     pub fn new_guardian(
         leaf_id: LeafId,
         device_id: crate::types::identifiers::DeviceId,
@@ -113,6 +124,7 @@ impl LeafNode {
     }
 
     /// Create a leaf node with metadata
+    #[must_use]
     pub fn with_meta(mut self, meta: Vec<u8>) -> Self {
         self.meta = meta;
         self
@@ -155,6 +167,7 @@ pub struct TreeCommitment(pub TreeHash32);
 
 impl TreeCommitment {
     /// Create a tree commitment from a hash
+    #[must_use]
     pub fn from_hash(hash: TreeHash32) -> Self {
         Self(hash)
     }
@@ -245,6 +258,7 @@ pub struct BranchSigningKey {
 
 impl BranchSigningKey {
     /// Create a new branch signing key
+    #[must_use]
     pub fn new(group_public_key: [u8; 32], key_epoch: Epoch) -> Self {
         Self {
             group_public_key,

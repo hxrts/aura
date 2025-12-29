@@ -945,7 +945,7 @@ impl QueryEffects for QueryHandler {
 
         // Build stats
         let stats = QueryStats::new(start.elapsed())
-            .with_facts_scanned(self.facts.read().await.len())
+            .with_facts_scanned(self.facts.read().await.len() as u32)
             .with_isolation(QueryIsolation::ReadUncommitted);
 
         Ok((result, stats))
@@ -964,7 +964,7 @@ impl QueryEffects for QueryHandler {
 
         // Build stats
         let stats = QueryStats::new(start.elapsed())
-            .with_facts_scanned(self.facts.read().await.len())
+            .with_facts_scanned(self.facts.read().await.len() as u32)
             .with_isolation(isolation);
 
         Ok((result, stats))

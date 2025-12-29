@@ -24,9 +24,9 @@ pub enum ContextDerivationError {
     #[error("Insufficient participants: need at least {required}, got {actual}")]
     InsufficientParticipants {
         /// Minimum number of participants required
-        required: usize,
+        required: u32,
         /// Number of participants actually provided
-        actual: usize,
+        actual: u32,
     },
 
     /// Cryptographic operation failed
@@ -169,8 +169,8 @@ impl GroupContextDerivation {
 
         if threshold > members.len() as u16 {
             return Err(ContextDerivationError::InsufficientParticipants {
-                required: threshold as usize,
-                actual: members.len(),
+                required: threshold as u32,
+                actual: members.len() as u32,
             });
         }
 

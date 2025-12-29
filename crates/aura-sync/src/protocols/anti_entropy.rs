@@ -68,7 +68,7 @@ pub type OperationFingerprint = [u8; 32];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JournalDigest {
     /// Number of attested operations known locally
-    pub operation_count: usize,
+    pub operation_count: u64,
 
     /// Maximum parent epoch observed in the operation log (if any)
     pub last_epoch: Option<u64>,
@@ -113,10 +113,10 @@ pub enum DigestStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AntiEntropyRequest {
     /// Operation index to start streaming from
-    pub from_index: usize,
+    pub from_index: u64,
 
     /// Maximum operations to send in this batch
-    pub max_ops: usize,
+    pub max_ops: u32,
 
     /// Specific operation fingerprints that are missing (for targeted requests)
     pub missing_operations: Vec<OperationFingerprint>,
@@ -126,11 +126,11 @@ pub struct AntiEntropyRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MergeResult {
     /// Number of operations that were successfully merged
-    pub merged_operations: usize,
+    pub merged_operations: u64,
     /// Number of operations that were duplicates
-    pub duplicate_operations: usize,
+    pub duplicate_operations: u64,
     /// Number of operations that failed to merge
-    pub failed_operations: usize,
+    pub failed_operations: u64,
     /// Updated journal after merge
     pub updated_journal: Journal,
 }
@@ -139,10 +139,10 @@ pub struct MergeResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct AntiEntropyResult {
     /// Number of operations that were newly applied
-    pub applied: usize,
+    pub applied: u64,
 
     /// Number of duplicates that were ignored
-    pub duplicates: usize,
+    pub duplicates: u64,
 
     /// Operations that were newly applied (for journal conversion/persistence)
     pub applied_ops: Vec<AttestedOp>,
@@ -151,7 +151,7 @@ pub struct AntiEntropyResult {
     pub final_status: Option<DigestStatus>,
 
     /// Number of synchronization rounds performed
-    pub rounds: usize,
+    pub rounds: u32,
 }
 
 // =============================================================================
@@ -168,7 +168,7 @@ pub enum SyncProgressEvent {
         /// Peer being synchronized with
         peer_id: uuid::Uuid,
         /// Total peers to sync with in this batch
-        total_peers: usize,
+        total_peers: u32,
     },
 
     /// Digest exchange completed
@@ -178,9 +178,9 @@ pub enum SyncProgressEvent {
         /// Result of digest comparison
         status: DigestStatus,
         /// Operations we have locally
-        local_ops: usize,
+        local_ops: u64,
         /// Operations peer has
-        remote_ops: usize,
+        remote_ops: u64,
     },
 
     /// Operations being pulled from peer
@@ -188,9 +188,9 @@ pub enum SyncProgressEvent {
         /// Peer
         peer_id: uuid::Uuid,
         /// Operations pulled so far
-        pulled: usize,
+        pulled: u64,
         /// Total operations to pull
-        total: usize,
+        total: u64,
     },
 
     /// Operations being pushed to peer
@@ -198,9 +198,9 @@ pub enum SyncProgressEvent {
         /// Peer
         peer_id: uuid::Uuid,
         /// Operations pushed so far
-        pushed: usize,
+        pushed: u64,
         /// Total operations to push
-        total: usize,
+        total: u64,
     },
 
     /// Single peer sync completed
@@ -208,23 +208,23 @@ pub enum SyncProgressEvent {
         /// Peer that was synced
         peer_id: uuid::Uuid,
         /// Operations applied from this peer
-        applied: usize,
+        applied: u64,
         /// Whether sync was successful
         success: bool,
         /// Peers remaining
-        peers_remaining: usize,
+        peers_remaining: u32,
     },
 
     /// All peers synced
     AllCompleted {
         /// Total operations applied across all peers
-        total_applied: usize,
+        total_applied: u64,
         /// Total duplicates across all peers
-        total_duplicates: usize,
+        total_duplicates: u64,
         /// Peers that synced successfully
-        successful_peers: usize,
+        successful_peers: u32,
         /// Peers that failed
-        failed_peers: usize,
+        failed_peers: u32,
     },
 
     /// Sync failed for a peer
@@ -236,7 +236,7 @@ pub enum SyncProgressEvent {
         /// Will retry
         will_retry: bool,
         /// Retry attempt number
-        retry_attempt: usize,
+        retry_attempt: u32,
     },
 }
 
@@ -351,10 +351,10 @@ impl SyncProgressCallback for LoggingProgressCallback {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AntiEntropyConfig {
     /// Batch size for operation transfer
-    pub batch_size: usize,
+    pub batch_size: u32,
 
     /// Maximum synchronization rounds before giving up
-    pub max_rounds: usize,
+    pub max_rounds: u32,
 
     /// Enable retry on transient failures
     pub retry_enabled: bool,
@@ -933,9 +933,9 @@ impl AntiEntropyProtocol {
             .operation_count
             .saturating_sub(remote_digest.operation_count);
         let ops_to_send = if missing_count > 0 {
-            let start_index = remote_digest.operation_count;
-            let end_index =
-                (start_index + self.config.batch_size.min(missing_count)).min(local_ops.len());
+            let start_index = remote_digest.operation_count as usize;
+            let batch = (self.config.batch_size as u64).min(missing_count) as usize;
+            let end_index = (start_index + batch).min(local_ops.len());
             &local_ops[start_index..end_index]
         } else {
             &[]
@@ -1036,7 +1036,7 @@ impl AntiEntropyProtocol {
         let operation_hash = h.finalize();
 
         Ok(JournalDigest {
-            operation_count: operations.len(),
+            operation_count: operations.len() as u64,
             last_epoch,
             operation_hash,
             fact_hash,
@@ -1068,7 +1068,7 @@ impl AntiEntropyProtocol {
                 let remaining = remote.operation_count.saturating_sub(local.operation_count);
                 Some(AntiEntropyRequest {
                     from_index: local.operation_count,
-                    max_ops: remaining.min(self.config.batch_size),
+                    max_ops: remaining.min(self.config.batch_size as u64) as u32,
                     missing_operations: Vec::new(),
                 })
             }

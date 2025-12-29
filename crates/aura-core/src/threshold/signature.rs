@@ -4,6 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const MAX_THRESHOLD_SIGNATURE_BYTES: usize = 512;
+pub const MAX_THRESHOLD_PUBLIC_KEY_PACKAGE_BYTES: usize = 65_536;
+
 /// Result of a threshold signing operation.
 ///
 /// This is the unified signature type returned by `ThresholdSigningService.sign()`.

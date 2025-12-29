@@ -79,7 +79,7 @@ pub struct ContextTransportConfig {
     /// Default session timeout
     pub session_timeout: std::time::Duration,
     /// Maximum concurrent sessions per context
-    pub max_sessions_per_context: usize,
+    pub max_sessions_per_context: u32,
     /// Flow budget per session
     pub default_flow_budget: i64,
     /// Supported protocols

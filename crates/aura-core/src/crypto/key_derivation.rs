@@ -103,6 +103,7 @@ impl KeyDerivationSpec {
     }
 
     /// Add storage access permissions to the key derivation spec
+    #[must_use]
     pub fn with_storage_access(mut self, operation: String, resource: String) -> Self {
         self.permission_context = Some(PermissionKeyContext::StorageAccess {
             operation,
@@ -112,6 +113,7 @@ impl KeyDerivationSpec {
     }
 
     /// Add communication permissions to the key derivation spec
+    #[must_use]
     pub fn with_communication(mut self, capability_id: Vec<u8>) -> Self {
         self.permission_context = Some(PermissionKeyContext::Communication { capability_id });
         self

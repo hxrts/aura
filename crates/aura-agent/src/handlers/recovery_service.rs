@@ -46,7 +46,7 @@ impl RecoveryService {
         &self,
         device_public_key: Vec<u8>,
         guardians: Vec<AuthorityId>,
-        threshold: usize,
+        threshold: u32,
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
@@ -77,7 +77,7 @@ impl RecoveryService {
         &self,
         leaf_index: u32,
         guardians: Vec<AuthorityId>,
-        threshold: usize,
+        threshold: u32,
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
@@ -108,7 +108,7 @@ impl RecoveryService {
         &self,
         new_public_key: Vec<u8>,
         guardians: Vec<AuthorityId>,
-        threshold: usize,
+        threshold: u32,
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
@@ -139,9 +139,9 @@ impl RecoveryService {
     pub async fn update_guardians(
         &self,
         new_guardians: Vec<AuthorityId>,
-        new_threshold: usize,
+        new_threshold: u32,
         guardians: Vec<AuthorityId>,
-        threshold: usize,
+        threshold: u32,
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {

@@ -129,11 +129,10 @@ impl FlowBudgetHandler {
             .entry(key)
             .or_insert_with(|| FlowBudget::new(self.default_limit, Epoch::initial()));
 
-        if !budget.record_charge(cost as u64) {
+        if let Err(e) = budget.record_charge(cost as u64) {
             return Err(AuraError::budget_exceeded(format!(
-                "insufficient flow budget: remaining={}, cost={}",
-                budget.remaining(),
-                cost
+                "insufficient flow budget: {}",
+                e
             )));
         }
 

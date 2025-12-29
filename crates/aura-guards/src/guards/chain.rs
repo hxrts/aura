@@ -96,7 +96,7 @@ pub struct SendGuardMetrics {
     /// Total guard chain time (microseconds)
     pub total_time_us: u64,
     /// Number of authorization checks performed
-    pub authorization_checks: usize,
+    pub authorization_checks: u32,
 }
 
 impl SendGuardChain {

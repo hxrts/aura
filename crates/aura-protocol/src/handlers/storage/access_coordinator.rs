@@ -39,7 +39,7 @@ pub enum StorageOperation {
         /// Search query terms
         terms: Vec<String>,
         /// Maximum results
-        limit: usize,
+        limit: u32,
     },
     /// Garbage collection proposal
     GarbageCollect {

@@ -117,6 +117,7 @@ impl TreeStateSummary {
     }
 
     /// Create with specific values
+    #[must_use]
     pub fn with_values(
         epoch: Epoch,
         commitment: Hash32,

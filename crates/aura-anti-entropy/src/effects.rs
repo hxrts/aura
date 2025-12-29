@@ -219,10 +219,10 @@ pub struct AntiEntropyConfig {
     pub min_sync_interval_ms: u64,
 
     /// Maximum number of operations to send in one batch
-    pub max_ops_per_batch: usize,
+    pub max_ops_per_batch: u32,
 
     /// Maximum number of peers to sync with concurrently
-    pub max_concurrent_syncs: usize,
+    pub max_concurrent_syncs: u32,
 
     /// Timeout for sync operations (milliseconds)
     pub sync_timeout_ms: u64,

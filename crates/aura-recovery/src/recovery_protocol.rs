@@ -33,7 +33,7 @@ pub struct RecoveryProtocol {
     /// Guardian authorities participating
     pub guardian_authorities: Vec<AuthorityId>,
     /// Recovery threshold
-    pub threshold: usize,
+    pub threshold: u32,
     /// Collected guardian approvals
     approvals: Vec<GuardianApproval>,
 }
@@ -76,7 +76,7 @@ pub enum RecoveryOperation {
         /// New guardian authorities
         new_guardians: Vec<AuthorityId>,
         /// New threshold
-        new_threshold: usize,
+        new_threshold: u32,
     },
 }
 
@@ -112,7 +112,7 @@ impl RecoveryProtocol {
         recovery_context: Arc<RelationalContext>,
         account_authority: AuthorityId,
         guardian_authorities: Vec<AuthorityId>,
-        threshold: usize,
+        threshold: u32,
     ) -> Self {
         Self {
             recovery_context,
@@ -255,7 +255,7 @@ impl RecoveryProtocol {
         let unique_guardians: std::collections::HashSet<_> =
             approvals.iter().map(|a| a.guardian_id).collect();
 
-        unique_guardians.len() >= self.threshold
+        (unique_guardians.len() as u32) >= self.threshold
     }
 }
 

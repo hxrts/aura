@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 /// Message framing handler
 #[derive(Debug, Clone)]
 pub struct FramingHandler {
-    max_frame_size: usize,
+    max_frame_size: u32,
 }
 
 /// Frame header with metadata
@@ -51,19 +51,19 @@ const FRAME_HEADER_SIZE: usize = 17; // 1 + 4 + 1 + 8 + 3 padding
 
 impl FramingHandler {
     /// Create new framing handler
-    pub fn new(max_frame_size: usize) -> Self {
+    pub fn new(max_frame_size: u32) -> Self {
         Self { max_frame_size }
     }
 
     /// Create with default configuration (1MB max frame)
     #[allow(clippy::should_implement_trait)] // Method provides default config, not implementing Default trait
     pub fn default() -> Self {
-        Self::new(1024 * 1024)
+        Self::new(1_048_576)
     }
 
     /// Serialize frame to bytes
     pub fn serialize_frame(&self, frame: &Frame) -> TransportResult<Vec<u8>> {
-        if frame.payload.len() > self.max_frame_size {
+        if (frame.payload.len() as u32) > self.max_frame_size {
             return Err(TransportError::Protocol(format!(
                 "Frame too large: {} > {}",
                 frame.payload.len(),
@@ -140,7 +140,7 @@ impl FramingHandler {
         };
 
         // Validate payload length
-        if payload_length as usize > self.max_frame_size {
+        if payload_length > self.max_frame_size {
             return Err(TransportError::Protocol(format!(
                 "Payload too large: {} > {}",
                 payload_length, self.max_frame_size
@@ -189,7 +189,7 @@ impl FramingHandler {
             header_bytes[2],
             header_bytes[3],
             header_bytes[4],
-        ]) as usize;
+        ]);
 
         if payload_length > self.max_frame_size {
             return Err(TransportError::Protocol(format!(
@@ -199,14 +199,15 @@ impl FramingHandler {
         }
 
         // Read payload
-        let mut payload_bytes = vec![0u8; payload_length];
+        let payload_length_usize = payload_length as usize;
+        let mut payload_bytes = vec![0u8; payload_length_usize];
         reader
             .read_exact(&mut payload_bytes)
             .await
             .map_err(TransportError::Io)?;
 
         // Combine and deserialize
-        let mut frame_data = Vec::with_capacity(FRAME_HEADER_SIZE + payload_length);
+        let mut frame_data = Vec::with_capacity(FRAME_HEADER_SIZE + payload_length_usize);
         frame_data.extend_from_slice(&header_bytes);
         frame_data.extend_from_slice(&payload_bytes);
 

@@ -198,7 +198,7 @@ pub enum EffectCommand {
     /// Generate cryptographic nonce
     GenerateNonce {
         /// Number of random bytes needed
-        bytes: usize,
+        bytes: u32,
     },
 }
 

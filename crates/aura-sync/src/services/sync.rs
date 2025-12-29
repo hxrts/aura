@@ -68,7 +68,7 @@ pub struct SyncServiceConfig {
     pub journal_sync: JournalSyncConfig,
 
     /// Maximum concurrent sync sessions
-    pub max_concurrent_syncs: usize,
+    pub max_concurrent_syncs: u32,
 }
 
 impl Default for SyncServiceConfig {
@@ -95,13 +95,13 @@ pub struct SyncServiceHealth {
     pub status: HealthStatus,
 
     /// Number of active sync sessions
-    pub active_sessions: usize,
+    pub active_sessions: u32,
 
     /// Number of tracked peers
-    pub tracked_peers: usize,
+    pub tracked_peers: u32,
 
     /// Number of available peers
-    pub available_peers: usize,
+    pub available_peers: u32,
 
     /// Last sync timestamp
     pub last_sync: Option<u64>,
@@ -113,8 +113,8 @@ pub struct SyncServiceHealth {
 /// Maintenance cleanup statistics.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SyncMaintenanceStats {
-    pub sessions_removed: usize,
-    pub peer_states_pruned: usize,
+    pub sessions_removed: u32,
+    pub peer_states_pruned: u32,
 }
 
 // =============================================================================
@@ -267,7 +267,7 @@ impl SyncService {
         &self,
         now_ms: u64,
         peer_state_ttl_ms: u64,
-        max_peer_states: usize,
+        max_peer_states: usize, // usize ok: function parameter for collection sizing
     ) -> SyncResult<SyncMaintenanceStats> {
         let now = PhysicalTime {
             ts_ms: now_ms,
@@ -282,8 +282,8 @@ impl SyncService {
             journal_sync.prune_peer_states(now_ms, peer_state_ttl_ms, max_peer_states);
 
         Ok(SyncMaintenanceStats {
-            sessions_removed,
-            peer_states_pruned,
+            sessions_removed: sessions_removed as u32,
+            peer_states_pruned: peer_states_pruned as u32,
         })
     }
 
@@ -314,7 +314,7 @@ impl SyncService {
         let selected_peers = Self::select_best_auto_sync_peers(
             &self.peer_manager,
             &available_peers,
-            self.config.max_concurrent_syncs,
+            self.config.max_concurrent_syncs as usize,
         )
         .await?;
 
@@ -363,9 +363,9 @@ impl SyncService {
 
         SyncServiceHealth {
             status,
-            active_sessions: session_stats.active_sessions,
-            tracked_peers: peer_stats.total_tracked,
-            available_peers: peer_stats.available_peers,
+            active_sessions: session_stats.active_sessions as u32,
+            tracked_peers: peer_stats.total_tracked as u32,
+            available_peers: peer_stats.available_peers as u32,
             last_sync,
             uptime,
         }
@@ -398,7 +398,7 @@ impl SyncService {
         session_manager: &Arc<RwLock<SessionManager<serde_json::Value>>>,
         journal_sync: &Arc<RwLock<JournalSyncProtocol>>,
         rate_limiter: &Arc<RwLock<RateLimiter>>,
-        max_concurrent: usize,
+        max_concurrent: usize, // usize ok: function parameter for collection sizing
         time_effects: &T,
         now_instant: std::time::Instant,
     ) -> SyncResult<()> {
@@ -715,7 +715,7 @@ impl SyncService {
     async fn select_best_auto_sync_peers(
         peer_manager: &Arc<RwLock<PeerManager>>,
         peers: &[DeviceId],
-        max_peers: usize,
+        max_peers: usize, // usize ok: function parameter for collection sizing
     ) -> SyncResult<Vec<DeviceId>> {
         let manager = peer_manager.read();
         let mut peer_scores = Vec::new();

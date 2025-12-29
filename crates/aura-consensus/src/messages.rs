@@ -151,7 +151,7 @@ pub enum ConsensusError {
     Conflict(String),
 
     #[error("Insufficient witnesses: have {have}, need {need}")]
-    InsufficientWitnesses { have: usize, need: usize },
+    InsufficientWitnesses { have: u32, need: u32 },
 
     #[error("Invalid prestate: {0}")]
     InvalidPrestate(String),

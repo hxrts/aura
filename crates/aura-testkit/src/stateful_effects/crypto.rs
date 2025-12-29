@@ -3,6 +3,15 @@
 //! This module contains the stateful MockCryptoHandler that was moved from aura-effects
 //! to fix architectural violations. The handler uses Arc<Mutex<>> for deterministic
 //! behavior in tests.
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `std::sync::Mutex` because this is Layer 8 test infrastructure where:
+//! 1. Tests run in controlled single-threaded contexts
+//! 2. Lock contention is not a concern in test scenarios
+//! 3. Simpler synchronous API is preferred for test clarity
+
+#![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
 // Unused legacy imports - keeping for potential future use
@@ -84,7 +93,7 @@ impl CryptoCoreEffects for MockCryptoHandler {
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
-        output_len: usize,
+        output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
         // Mock implementation - deterministic output based on seed and inputs
         // Incorporates all inputs to ensure different keys produce different outputs
@@ -99,7 +108,7 @@ impl CryptoCoreEffects for MockCryptoHandler {
             state = state.wrapping_mul(41).wrapping_add(*byte as u64);
         }
 
-        let mut result = vec![0u8; output_len];
+        let mut result = vec![0u8; output_len as usize];
         for byte in result.iter_mut() {
             state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
             *byte = (state >> 32) as u8;

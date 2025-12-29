@@ -19,9 +19,9 @@ pub struct ExecutionTrace {
 }
 
 impl ExecutionTrace {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: u32) -> Self {
         Self {
-            steps: Vec::with_capacity(capacity),
+            steps: Vec::with_capacity(capacity as usize),
         }
     }
 
@@ -110,9 +110,9 @@ pub struct PropertyViolation {
 pub struct SimulationStateSnapshot {
     pub time: u64,
     pub tick: u64,
-    pub participant_count: usize,
-    pub active_sessions: usize,
-    pub completed_sessions: usize,
+    pub participant_count: u32,
+    pub active_sessions: u32,
+    pub completed_sessions: u32,
     pub state_hash: String,
 }
 
@@ -306,7 +306,7 @@ pub struct TraceConverter {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceConversionConfig {
     /// Maximum trace length to convert
-    pub max_trace_length: usize,
+    pub max_trace_length: u64,
     /// Whether to include detailed state information
     pub include_detailed_state: bool,
     /// Whether to include protocol-level events
@@ -407,9 +407,9 @@ pub struct QuintTraceMetadata {
     /// Duration of the trace (in simulation time)
     pub duration: u64,
     /// Number of states in the trace
-    pub state_count: usize,
+    pub state_count: u64,
     /// Number of events in the trace
-    pub event_count: usize,
+    pub event_count: u64,
     /// Quality metrics for the trace
     pub quality_metrics: TraceQualityMetrics,
     /// Source of the trace (simulation run ID, etc.)
@@ -463,13 +463,13 @@ pub struct ConversionPerformanceMetrics {
     /// Time taken to convert this trace (milliseconds)
     pub conversion_time_ms: u64,
     /// Memory usage during conversion (bytes)
-    pub memory_usage_bytes: usize,
+    pub memory_usage_bytes: u64,
     /// Compression ratio achieved
     pub compression_ratio: f64,
     /// Number of states processed
-    pub states_processed: usize,
+    pub states_processed: u64,
     /// Number of events processed
-    pub events_processed: usize,
+    pub events_processed: u64,
 }
 
 /// Fragment of a trace for focused analysis
@@ -478,9 +478,9 @@ pub struct TraceFragment {
     /// Fragment identifier
     pub fragment_id: String,
     /// Starting position in the original trace
-    pub start_position: usize,
+    pub start_position: u64,
     /// Ending position in the original trace
-    pub end_position: usize,
+    pub end_position: u64,
     /// States in this fragment
     pub states: Vec<QuintTraceState>,
     /// Events in this fragment
@@ -531,8 +531,8 @@ impl TraceConverter {
                     conversion_time_ms: 0, // Cache hit
                     memory_usage_bytes: 0,
                     compression_ratio: 1.0,
-                    states_processed: cached_trace.states.len(),
-                    events_processed: cached_trace.events.len(),
+                    states_processed: cached_trace.states.len() as u64,
+                    events_processed: cached_trace.events.len() as u64,
                 },
                 warnings: Vec::new(),
             });
@@ -543,7 +543,7 @@ impl TraceConverter {
         let mut quint_events = Vec::new();
 
         // Apply sampling if needed
-        let states_to_process = if execution_trace.len() > self.config.max_trace_length {
+        let states_to_process = if execution_trace.len() as u64 > self.config.max_trace_length {
             warnings.push(format!(
                 "Trace length {} exceeds maximum {}, applying sampling",
                 execution_trace.len(),
@@ -573,7 +573,7 @@ impl TraceConverter {
         // Generate events between states
         for i in 0..quint_states.len().saturating_sub(1) {
             let event =
-                self.generate_transition_event(&quint_states[i], &quint_states[i + 1], i)?;
+                self.generate_transition_event(&quint_states[i], &quint_states[i + 1], i as u32)?;
             quint_events.push(event);
         }
 
@@ -589,8 +589,8 @@ impl TraceConverter {
             } else {
                 0
             },
-            state_count: quint_states.len(),
-            event_count: quint_events.len(),
+            state_count: quint_states.len() as u64,
+            event_count: quint_events.len() as u64,
             quality_metrics,
             source: trace_id.clone(),
         };
@@ -621,10 +621,10 @@ impl TraceConverter {
             quint_trace,
             conversion_metrics: ConversionPerformanceMetrics {
                 conversion_time_ms: conversion_time,
-                memory_usage_bytes: states_to_process.len() * 1000 + quint_events.len() * 500, // Simple estimation
+                memory_usage_bytes: (states_to_process.len() * 1000 + quint_events.len() * 500) as u64, // Simple estimation
                 compression_ratio: 1.0,
-                states_processed: states_to_process.len(),
-                events_processed: quint_events.len(),
+                states_processed: states_to_process.len() as u64,
+                events_processed: quint_events.len() as u64,
             },
             warnings,
         })
@@ -635,7 +635,7 @@ impl TraceConverter {
         &self,
         quint_trace: &QuintTrace,
         violation: &PropertyViolation,
-        context_window: usize,
+        context_window: u32,
     ) -> Result<TraceFragment> {
         // Find the state corresponding to the violation
         let violation_position = quint_trace
@@ -644,9 +644,10 @@ impl TraceConverter {
             .position(|state| state.time == violation.violation_state.time)
             .unwrap_or(quint_trace.states.len() / 2); // Default to middle if not found
 
-        let start_position = violation_position.saturating_sub(context_window);
+        let context_window_usize = context_window as usize;
+        let start_position = violation_position.saturating_sub(context_window_usize);
         let end_position = std::cmp::min(
-            violation_position + context_window,
+            violation_position + context_window_usize,
             quint_trace.states.len(),
         );
 
@@ -670,8 +671,8 @@ impl TraceConverter {
                 "violation_{}_{}",
                 violation.property_name, violation.detected_at
             ),
-            start_position,
-            end_position,
+            start_position: start_position as u64,
+            end_position: end_position as u64,
             states: fragment_states,
             events: fragment_events,
             extraction_reason: format!("Property violation: {}", violation.property_name),
@@ -696,7 +697,7 @@ impl TraceConverter {
             let full_fragment = TraceFragment {
                 fragment_id: format!("full_context_{}", violation_report.violations.len()),
                 start_position: 0,
-                end_position: quint_trace.states.len(),
+                end_position: quint_trace.states.len() as u64,
                 states: quint_trace.states.clone(),
                 events: quint_trace.events.clone(),
                 extraction_reason: "Full context for multiple violations".to_string(),
@@ -805,7 +806,7 @@ impl TraceConverter {
         &self,
         from_state: &QuintTraceState,
         to_state: &QuintTraceState,
-        index: usize,
+        index: u32,
     ) -> Result<QuintTraceEvent> {
         let mut parameters = HashMap::new();
         parameters.insert(
@@ -1057,7 +1058,7 @@ impl TraceConverter {
         quint_trace.events.sort_by_key(|e| e.timestamp);
 
         // Update metadata
-        quint_trace.metadata.event_count = quint_trace.events.len();
+        quint_trace.metadata.event_count = quint_trace.events.len() as u64;
     }
 
     // ===== Bidirectional Conversion: Journal Facts =====

@@ -20,6 +20,11 @@ use crate::{AccountId, AuraError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub const MAX_KEY_PACKAGE_BYTES: usize = 65_536;
+pub const MAX_PUBLIC_KEY_PACKAGE_BYTES: usize = 65_536;
+pub const MAX_SIGNING_MESSAGE_BYTES: usize = 65_536;
+pub const MAX_SIGNING_PACKAGE_BYTES: usize = 65_536;
+
 /// Cryptographic operation error
 pub type CryptoError = AuraError;
 
@@ -127,7 +132,7 @@ pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
-        output_len: usize,
+        output_len: u32,
     ) -> Result<Vec<u8>, CryptoError>;
 
     /// Derive key using context for deterministic derivation
@@ -358,7 +363,7 @@ impl<T: CryptoCoreEffects + ?Sized> CryptoCoreEffects for std::sync::Arc<T> {
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
-        output_len: usize,
+        output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
         (**self).hkdf_derive(ikm, salt, info, output_len).await
     }

@@ -3,11 +3,16 @@
 //! Tracks spawned tasks and supports cooperative shutdown.
 
 use std::future::Future;
-use std::sync::Mutex;
+use std::sync::Arc;
 
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use futures::future::BoxFuture;
-use std::sync::Arc;
+// Layer 6 runtime code: parking_lot::Mutex is acceptable here because:
+// 1. This is runtime assembly code (aura-agent/src/runtime/) explicitly allowed per clippy.toml
+// 2. The lock protects JoinHandle storage and is never held across .await points
+// 3. Lock operations are brief (push/drain) with no async work inside
+#[allow(clippy::disallowed_types)]
+use parking_lot::Mutex;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -32,9 +37,7 @@ impl RuntimeTaskRegistry {
         F: Future<Output = ()> + Send + 'static,
     {
         let handle = tokio::spawn(fut);
-        if let Ok(mut handles) = self.handles.lock() {
-            handles.push(handle);
-        }
+        self.handles.lock().push(handle);
     }
 
     pub fn spawn_cancellable<F>(&self, fut: F)
@@ -48,17 +51,13 @@ impl RuntimeTaskRegistry {
                 _ = fut => {}
             }
         });
-        if let Ok(mut handles) = self.handles.lock() {
-            handles.push(handle);
-        }
+        self.handles.lock().push(handle);
     }
 
     pub fn shutdown(&self) {
         let _ = self.shutdown_tx.send(true);
-        if let Ok(mut handles) = self.handles.lock() {
-            for handle in handles.drain(..) {
-                handle.abort();
-            }
+        for handle in self.handles.lock().drain(..) {
+            handle.abort();
         }
     }
 
@@ -87,9 +86,7 @@ impl RuntimeTaskRegistry {
                 }
             }
         });
-        if let Ok(mut handles) = self.handles.lock() {
-            handles.push(handle);
-        }
+        self.handles.lock().push(handle);
     }
 }
 
@@ -102,10 +99,8 @@ impl Default for RuntimeTaskRegistry {
 impl Drop for RuntimeTaskRegistry {
     fn drop(&mut self) {
         let _ = self.shutdown_tx.send(true);
-        if let Ok(mut handles) = self.handles.lock() {
-            for handle in handles.drain(..) {
-                handle.abort();
-            }
+        for handle in self.handles.lock().drain(..) {
+            handle.abort();
         }
     }
 }
@@ -148,9 +143,7 @@ impl TaskSpawner for RuntimeTaskRegistry {
                 _ = fut => {}
             }
         });
-        if let Ok(mut handles) = self.handles.lock() {
-            handles.push(handle);
-        }
+        self.handles.lock().push(handle);
     }
 
     fn cancellation_token(&self) -> Arc<dyn CancellationToken> {

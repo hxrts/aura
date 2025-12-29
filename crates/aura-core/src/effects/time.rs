@@ -47,7 +47,7 @@ pub enum WakeCondition {
     TimeoutAt(u64),
     TimeoutExpired { timeout_id: TimeoutHandle },
     EventMatching(String),
-    ThresholdEvents { threshold: usize, timeout_ms: u64 },
+    ThresholdEvents { threshold: u32, timeout_ms: u64 },
     Custom(String),
 }
 

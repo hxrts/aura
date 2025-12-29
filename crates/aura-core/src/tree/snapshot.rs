@@ -2,6 +2,9 @@ use super::{Epoch, LeafId, NodeIndex, Policy, TreeHash32};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Maximum size for tree signatures (FROST aggregate signatures) in bytes.
+pub const MAX_TREE_SIGNATURE_BYTES: usize = 128;
+
 /// Compact snapshot of tree state at a specific epoch
 ///
 /// Snapshots allow pruning OpLog history while preserving the ability to merge
@@ -42,6 +45,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Create a new snapshot
+    #[must_use]
     pub fn new(
         epoch: Epoch,
         commitment: TreeHash32,
@@ -61,6 +65,7 @@ impl Snapshot {
     }
 
     /// Create snapshot with optional state blob CID
+    #[must_use]
     pub fn with_state_cid(mut self, state_cid: TreeHash32) -> Self {
         self.state_cid = Some(state_cid);
         self
@@ -126,6 +131,7 @@ pub struct Cut {
 
 impl Cut {
     /// Create a new cut proposal
+    #[must_use]
     pub fn new(
         epoch: Epoch,
         commitment: TreeHash32,
@@ -148,12 +154,14 @@ pub struct ProposalId(pub TreeHash32);
 
 impl ProposalId {
     /// Create proposal ID from cut
+    #[must_use]
     pub fn from_cut(cut: &Cut) -> Self {
         // In real implementation, hash the cut
         Self(cut.commitment)
     }
 
     /// Create a new random proposal ID (for testing)
+    #[must_use]
     pub fn new_random() -> Self {
         Self([0u8; 32])
     }
@@ -179,6 +187,7 @@ pub struct Partial {
 
 impl Partial {
     /// Create a new partial approval
+    #[must_use]
     pub fn new(proposal_id: ProposalId, signer: LeafId, signature: Vec<u8>) -> Self {
         Self {
             proposal_id,
@@ -212,9 +221,9 @@ pub enum SnapshotError {
     #[error("Insufficient approvals: got {got}, need {need}")]
     InsufficientApprovals {
         /// Number of approvals received
-        got: usize,
+        got: u16,
         /// Number of approvals needed
-        need: usize,
+        need: u16,
     },
 
     /// Snapshot verification failed

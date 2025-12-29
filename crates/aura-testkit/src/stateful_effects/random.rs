@@ -3,6 +3,15 @@
 //! This module contains the stateful MockRandomHandler that was moved from aura-effects
 //! to fix architectural violations. The handler uses Arc<Mutex<>> for deterministic
 //! randomness in tests.
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `std::sync::Mutex` because this is Layer 8 test infrastructure where:
+//! 1. Tests run in controlled single-threaded contexts
+//! 2. Lock contention is not a concern in test scenarios
+//! 3. Simpler synchronous API is preferred for test clarity
+
+#![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
 use aura_core::effects::RandomCoreEffects;

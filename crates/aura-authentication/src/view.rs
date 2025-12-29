@@ -89,9 +89,9 @@ pub struct RecoveryInfo {
     /// Recovery operation type
     pub operation_type: RecoveryOperationType,
     /// Required number of guardian approvals
-    pub required_guardians: usize,
+    pub required_guardians: u32,
     /// Current approval count
-    pub approval_count: usize,
+    pub approval_count: u32,
     /// Guardians who have approved
     pub approvers: Vec<AuthorityId>,
     /// Whether this is an emergency operation

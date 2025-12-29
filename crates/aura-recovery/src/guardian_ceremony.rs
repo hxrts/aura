@@ -162,9 +162,9 @@ pub enum CeremonyResponse {
 pub enum CeremonyStatus {
     /// Ceremony is waiting for guardian responses
     AwaitingResponses {
-        accepted: usize,
-        declined: usize,
-        pending: usize,
+        accepted: u32,
+        declined: u32,
+        pending: u32,
     },
     /// Ceremony completed successfully
     Committed { new_epoch: u64 },
@@ -628,7 +628,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
             status: CeremonyStatus::AwaitingResponses {
                 accepted: 0,
                 declined: 0,
-                pending: new_guardian_ids.len(),
+                pending: new_guardian_ids.len() as u32,
             },
             initiated_at: now,
             completed_at: None,
@@ -673,9 +673,9 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         // Update status
         let (accepted, declined, pending) = state.response_counts();
         state.status = CeremonyStatus::AwaitingResponses {
-            accepted,
-            declined,
-            pending,
+            accepted: accepted as u32,
+            declined: declined as u32,
+            pending: pending as u32,
         };
 
         tracing::info!(

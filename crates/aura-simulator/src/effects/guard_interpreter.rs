@@ -376,7 +376,7 @@ impl EffectInterpreter for SimulationEffectInterpreter {
             EffectCommand::GenerateNonce { bytes } => {
                 debug!(bytes, "Simulation: Generating nonce");
 
-                let nonce = state.generate_nonce(bytes);
+                let nonce = state.generate_nonce(bytes as usize);
 
                 let event = SimulationEvent::NonceGenerated {
                     time: state.current_time.clone(),

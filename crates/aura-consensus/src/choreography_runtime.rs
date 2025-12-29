@@ -107,16 +107,24 @@ mod tests {
     use aura_core::effects::{ChoreographyEvent, ChoreographyMetrics};
     use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature};
     use aura_core::time::{PhysicalTime, ProvenancedTime, TimeStamp};
+    use async_lock::Mutex;
     use aura_core::{AuthorityId, Hash32};
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
-    use tokio::task::yield_now;
+    use std::sync::Arc;
     use uuid::Uuid;
 
-    #[derive(Default)]
     struct SharedBus {
         queues: Mutex<HashMap<(ChoreographicRole, ChoreographicRole), Vec<Vec<u8>>>>,
         roles: Mutex<Vec<ChoreographicRole>>,
+    }
+
+    impl Default for SharedBus {
+        fn default() -> Self {
+            Self {
+                queues: Mutex::new(HashMap::new()),
+                roles: Mutex::new(Vec::new()),
+            }
+        }
     }
 
     struct BusHandler {
@@ -137,13 +145,7 @@ mod tests {
             role: ChoreographicRole,
             message: Vec<u8>,
         ) -> Result<(), ChoreographyError> {
-            let mut queues =
-                self.bus
-                    .queues
-                    .lock()
-                    .map_err(|_| ChoreographyError::InternalError {
-                        message: "shared bus lock poisoned".to_string(),
-                    })?;
+            let mut queues = self.bus.queues.lock().await;
             queues.entry((self.role, role)).or_default().push(message);
             Ok(())
         }
@@ -154,20 +156,14 @@ mod tests {
         ) -> Result<Vec<u8>, ChoreographyError> {
             for _ in 0..200 {
                 {
-                    let mut queues = self
-                        .bus
-                        .queues
-                        .lock()
-                        .map_err(|_| ChoreographyError::InternalError {
-                            message: "shared bus lock poisoned".to_string(),
-                        })?;
+                    let mut queues = self.bus.queues.lock().await;
                     if let Some(queue) = queues.get_mut(&(role, self.role)) {
                         if let Some(payload) = queue.pop() {
                             return Ok(payload);
                         }
                     }
                 }
-                yield_now().await;
+                futures::future::yield_now().await;
             }
             Err(ChoreographyError::CommunicationTimeout {
                 role,
@@ -176,14 +172,7 @@ mod tests {
         }
 
         async fn broadcast_bytes(&self, message: Vec<u8>) -> Result<(), ChoreographyError> {
-            let roles = self
-                .bus
-                .roles
-                .lock()
-                .map_err(|_| ChoreographyError::InternalError {
-                    message: "shared bus lock poisoned".to_string(),
-                })?
-                .clone();
+            let roles = self.bus.roles.lock().await.clone();
             for role in roles {
                 if role != self.role {
                     self.send_to_role_bytes(role, message.clone()).await?;
@@ -197,11 +186,13 @@ mod tests {
         }
 
         fn all_roles(&self) -> Vec<ChoreographicRole> {
+            // Note: This is a sync method but needs async lock.
+            // Using try_lock for non-blocking access in sync context.
             self.bus
                 .roles
-                .lock()
-                .expect("shared bus lock should not be poisoned")
-                .clone()
+                .try_lock()
+                .map(|guard| guard.clone())
+                .unwrap_or_default()
         }
 
         async fn is_role_active(&self, role: ChoreographicRole) -> bool {
@@ -213,25 +204,13 @@ mod tests {
             _session_id: Uuid,
             roles: Vec<ChoreographicRole>,
         ) -> Result<(), ChoreographyError> {
-            let mut guard =
-                self.bus
-                    .roles
-                    .lock()
-                    .map_err(|_| ChoreographyError::InternalError {
-                        message: "shared bus lock poisoned".to_string(),
-                    })?;
+            let mut guard = self.bus.roles.lock().await;
             *guard = roles;
             Ok(())
         }
 
         async fn end_session(&self) -> Result<(), ChoreographyError> {
-            self.bus
-                .roles
-                .lock()
-                .map_err(|_| ChoreographyError::InternalError {
-                    message: "shared bus lock poisoned".to_string(),
-                })?
-                .clear();
+            self.bus.roles.lock().await.clear();
             Ok(())
         }
 
@@ -263,7 +242,7 @@ mod tests {
         let bus = Arc::new(SharedBus::default());
 
         {
-            let mut roles = bus.roles.lock().unwrap();
+            let mut roles = bus.roles.lock().await;
             roles.push(coordinator);
             roles.push(witness);
         }

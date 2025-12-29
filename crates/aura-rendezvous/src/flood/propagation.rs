@@ -257,9 +257,7 @@ where
         // Check originate budget
         {
             let mut budget = self.budget.write().await;
-            if !budget.record_originate() {
-                return Err(FloodError::OriginateBudgetExhausted);
-            }
+            budget.record_originate()?;
         }
 
         // Mark our own packet as seen (so we don't re-process it)
@@ -331,7 +329,7 @@ where
         // Not for us, check forward budget
         {
             let mut budget = self.budget.write().await;
-            if !budget.record_forward() {
+            if budget.record_forward().is_err() {
                 trace!("Forward budget exhausted, dropping");
                 return FloodAction::Drop;
             }

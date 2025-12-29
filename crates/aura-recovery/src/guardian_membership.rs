@@ -55,7 +55,7 @@ pub struct MembershipProposal {
     /// The specific membership change being proposed
     pub change: MembershipChange,
     /// New threshold to set after the change (optional)
-    pub new_threshold: Option<usize>,
+    pub new_threshold: Option<u16>,
     /// Timestamp of proposal
     pub timestamp: TimeStamp,
 }
@@ -87,7 +87,7 @@ pub struct ChangeCompletion {
     /// The guardian set after the change
     pub new_guardian_set: GuardianSet,
     /// New threshold after the change
-    pub new_threshold: usize,
+    pub new_threshold: u16,
     /// Serialized evidence of the membership change
     pub change_evidence: Vec<u8>,
 }
@@ -164,7 +164,7 @@ pub struct MembershipChangeRequest {
     /// The change to make
     pub change: MembershipChange,
     /// New threshold after the change (optional)
-    pub new_threshold: Option<usize>,
+    pub new_threshold: Option<u16>,
 }
 
 impl<E: RecoveryEffects> BaseCoordinatorAccess<E> for GuardianMembershipCoordinator<E> {
@@ -292,7 +292,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         let approvals: Vec<_> = votes.into_iter().filter(|v| v.approved).collect();
 
         // Check if we have enough approvals
-        if approvals.len() < request.base.threshold {
+        if approvals.len() < request.base.threshold as usize {
             let rejected_fact =
                 RecoveryFact::MembershipChangeRejected {
                     context_id,
@@ -325,7 +325,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         let final_threshold = request.new_threshold.unwrap_or(request.base.threshold);
 
         // Validate the new configuration
-        if new_guardian_set.len() < final_threshold {
+        if new_guardian_set.len() < final_threshold as usize {
             let rejected_fact =
                 RecoveryFact::MembershipChangeRejected {
                     context_id,

@@ -220,7 +220,7 @@ impl CryptoCoreEffects for CompositeTestHandler {
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
-        output_len: usize,
+        output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
         self.crypto.hkdf_derive(ikm, salt, info, output_len).await
     }

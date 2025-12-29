@@ -41,6 +41,10 @@
 //! - Scope-level defaults (e.g., channels require Checkpointed)
 //! - Operation-specific elevation (e.g., payment requires Consensus)
 
+/// Maximum size for fact content data in bytes.
+/// Prevents unbounded memory allocation from malformed inputs.
+pub const MAX_TEMPORAL_DATA_BYTES: usize = 65536;
+
 use crate::query::{ConsensusId, FactId};
 use crate::time::{OrderTime, PhysicalTime};
 use crate::types::Epoch;
@@ -521,6 +525,7 @@ pub struct FactContent {
 
 impl FactContent {
     /// Create new fact content
+    #[must_use]
     pub fn new(content_type: impl Into<String>, data: Vec<u8>) -> Self {
         Self {
             content_type: content_type.into(),
@@ -530,6 +535,7 @@ impl FactContent {
     }
 
     /// Create fact content with an entity ID
+    #[must_use]
     pub fn with_entity(content_type: impl Into<String>, data: Vec<u8>, entity_id: String) -> Self {
         Self {
             content_type: content_type.into(),
@@ -586,6 +592,7 @@ pub struct FactReceipt {
 
 impl FactReceipt {
     /// Create a new fact receipt
+    #[must_use]
     pub fn new(
         fact_id: FactId,
         timestamp: PhysicalTime,
@@ -604,6 +611,7 @@ impl FactReceipt {
     }
 
     /// Upgrade the finality level
+    #[must_use]
     pub fn with_finality(mut self, finality: Finality) -> Self {
         self.finality = finality;
         self
@@ -666,6 +674,7 @@ pub struct Transaction {
 
 impl Transaction {
     /// Create a new transaction in a scope
+    #[must_use]
     pub fn new(scope: ScopeId) -> Self {
         Self {
             id: TransactionId([0; 32]), // Will be assigned by the system
@@ -677,24 +686,28 @@ impl Transaction {
     }
 
     /// Add an operation to the transaction
+    #[must_use]
     pub fn with_op(mut self, op: FactOp) -> Self {
         self.operations.push(op);
         self
     }
 
     /// Add multiple operations
+    #[must_use]
     pub fn with_ops(mut self, ops: impl IntoIterator<Item = FactOp>) -> Self {
         self.operations.extend(ops);
         self
     }
 
     /// Set required finality level
+    #[must_use]
     pub fn with_finality(mut self, finality: Finality) -> Self {
         self.required_finality = finality;
         self
     }
 
     /// Set transaction metadata
+    #[must_use]
     pub fn with_metadata(mut self, metadata: TransactionMetadata) -> Self {
         self.metadata = Some(metadata);
         self
@@ -877,6 +890,7 @@ pub struct ScopeFinalityConfig {
 
 impl ScopeFinalityConfig {
     /// Create a new scope finality configuration
+    #[must_use]
     pub fn new(scope: ScopeId) -> Self {
         Self {
             scope,
@@ -888,24 +902,28 @@ impl ScopeFinalityConfig {
     }
 
     /// Set the default finality level
+    #[must_use]
     pub fn with_default(mut self, finality: Finality) -> Self {
         self.default_finality = finality;
         self
     }
 
     /// Set the minimum finality level
+    #[must_use]
     pub fn with_minimum(mut self, finality: Finality) -> Self {
         self.minimum_finality = finality;
         self
     }
 
     /// Set whether to cascade to child scopes
+    #[must_use]
     pub fn with_cascade(mut self, cascade: bool) -> Self {
         self.cascade = cascade;
         self
     }
 
     /// Add a content-type override
+    #[must_use]
     pub fn with_override(mut self, override_: ContentFinalityOverride) -> Self {
         self.content_overrides.push(override_);
         self
@@ -947,6 +965,7 @@ pub struct ContentFinalityOverride {
 
 impl ContentFinalityOverride {
     /// Create a new content finality override
+    #[must_use]
     pub fn new(content_type: impl Into<String>, required_finality: Finality) -> Self {
         Self {
             content_type: content_type.into(),

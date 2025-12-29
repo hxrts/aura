@@ -68,10 +68,11 @@ impl BiscuitGuardEvaluator {
             )));
         }
 
-        if !budget.record_charge(flow_cost) {
-            return Err(GuardError::FlowBudget(
-                "Failed to record charge".to_string(),
-            ));
+        if let Err(e) = budget.record_charge(flow_cost) {
+            return Err(GuardError::FlowBudget(format!(
+                "Failed to record charge: {}",
+                e
+            )));
         }
 
         Ok(GuardResult {

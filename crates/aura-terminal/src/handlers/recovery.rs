@@ -133,7 +133,8 @@ async fn start_recovery(
     }
     let guardian_set = GuardianSet::new(guardian_profiles);
 
-    if guardian_set.len() < threshold as usize {
+    let threshold_u16 = threshold as u16;
+    if guardian_set.len() < threshold_u16 as usize {
         return Err(TerminalError::Input(format!(
             "Threshold {} exceeds number of guardians {}",
             threshold,
@@ -159,7 +160,7 @@ async fn start_recovery(
         initiator_id,
         account_id: account_authority,
         context,
-        threshold: threshold as usize,
+        threshold: threshold_u16,
         guardians: guardian_set.clone(),
     };
 
@@ -199,7 +200,7 @@ async fn start_recovery(
         recovery_context,
         account_authority,
         guardian_authorities,
-        threshold as usize,
+        threshold,
     );
 
     let protocol_handler = RecoveryProtocolHandler::new(Arc::new(recovery_protocol));

@@ -247,12 +247,12 @@ impl TreeOperationProcessor {
 
         ProcessingStats {
             current_epoch: self.current_state.current_epoch(),
-            total_operations: self.operation_history.len(),
-            successful_operations: successful,
-            failed_operations: failed,
-            unique_processed: self.processed_ops.len(),
-            num_leaves: self.current_state.num_leaves(),
-            num_branches: self.current_state.num_branches(),
+            total_operations: self.operation_history.len() as u64,
+            successful_operations: successful as u64,
+            failed_operations: failed as u64,
+            unique_processed: self.processed_ops.len() as u64,
+            num_leaves: self.current_state.num_leaves() as u32,
+            num_branches: self.current_state.num_branches() as u32,
         }
     }
 
@@ -339,17 +339,17 @@ pub struct ProcessingStats {
     /// Current epoch of the tree
     pub current_epoch: u64,
     /// Total number of operations processed
-    pub total_operations: usize,
+    pub total_operations: u64,
     /// Number of successfully applied operations
-    pub successful_operations: usize,
+    pub successful_operations: u64,
     /// Number of failed operations
-    pub failed_operations: usize,
+    pub failed_operations: u64,
     /// Number of unique operations in processed set
-    pub unique_processed: usize,
+    pub unique_processed: u64,
     /// Current number of leaves in tree
-    pub num_leaves: usize,
+    pub num_leaves: u32,
     /// Current number of branches in tree
-    pub num_branches: usize,
+    pub num_branches: u32,
 }
 
 /// Batch processor for handling multiple operations efficiently
@@ -358,14 +358,14 @@ pub struct BatchProcessor {
     /// The operation processor
     processor: TreeOperationProcessor,
     /// Batch size for processing
-    batch_size: usize,
+    batch_size: u32,
     /// Whether to validate after each batch
     validate_batches: bool,
 }
 
 impl BatchProcessor {
     /// Create a new batch processor
-    pub fn new(batch_size: usize, validate_batches: bool) -> Self {
+    pub fn new(batch_size: u32, validate_batches: bool) -> Self {
         Self {
             processor: TreeOperationProcessor::new(),
             batch_size,
@@ -380,7 +380,7 @@ impl BatchProcessor {
     ) -> Result<Vec<ProcessedOperation>, OperationProcessorError> {
         let mut results = Vec::new();
 
-        for chunk in operations.chunks(self.batch_size) {
+        for chunk in operations.chunks(self.batch_size as usize) {
             let batch_results = self.processor.process_operations(chunk, false);
 
             // Extract successful operations

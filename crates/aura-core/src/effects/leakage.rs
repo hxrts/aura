@@ -55,6 +55,7 @@ impl LeakageEvent {
     }
 
     /// Create event from milliseconds timestamp (for backward compatibility)
+    #[must_use]
     pub fn with_timestamp_ms(
         source: AuthorityId,
         destination: AuthorityId,

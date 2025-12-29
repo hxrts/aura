@@ -704,7 +704,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             connected_peers: transport_stats.active_channels as usize,
             last_sync_ms,
             pending_facts: 0, // Would need to track this in SyncServiceManager
-            active_sessions,
+            active_sessions: active_sessions as usize,
         }
     }
 

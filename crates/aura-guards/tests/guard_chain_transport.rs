@@ -232,11 +232,9 @@ impl JournalEffects for TestEffects {
         cost: u32,
     ) -> Result<FlowBudget, AuraError> {
         let mut budget = self.flow_budget.lock();
-        if budget.can_charge(cost as u64) {
-            budget.record_charge(cost as u64);
-            Ok(*budget)
-        } else {
-            Err(AuraError::permission_denied("insufficient budget"))
+        match budget.record_charge(cost as u64) {
+            Ok(()) => Ok(*budget),
+            Err(_) => Err(AuraError::permission_denied("insufficient budget")),
         }
     }
 }

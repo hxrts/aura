@@ -114,7 +114,7 @@ impl AuthorityRegistry {
         attested_op: &AttestedOp,
         witness: &aura_core::tree::verification::SigningWitness,
         current_epoch: Epoch,
-        child_count: usize,
+        child_count: u32,
     ) -> IdentityResult<VerificationResult> {
         // Structural validation and policy evaluation are handled by TreeState in aura-journal.
         // This method focuses on signature verification and policy-derived thresholds.

@@ -14,7 +14,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RandomBytesParams {
     /// Number of random bytes to generate
-    pub len: usize,
+    pub len: u32,
 }
 
 /// Parameters for generating 32 random bytes

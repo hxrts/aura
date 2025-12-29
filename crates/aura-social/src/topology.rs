@@ -374,16 +374,16 @@ impl DiscoveryLayer {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeerCounts {
     /// Number of home peers
-    pub home_peers: usize,
+    pub home_peers: u32,
     /// Number of neighborhood peers
-    pub neighborhood_peers: usize,
+    pub neighborhood_peers: u32,
     /// Number of guardians
-    pub guardians: usize,
+    pub guardians: u32,
 }
 
 impl PeerCounts {
     /// Get total peer count.
-    pub fn total(&self) -> usize {
+    pub fn total(&self) -> u32 {
         self.home_peers + self.neighborhood_peers + self.guardians
     }
 }

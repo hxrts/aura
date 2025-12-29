@@ -175,6 +175,8 @@ pub use errors::{AuraError, ProtocolErrorCode, Result as AuraResult};
 
 // Effect interfaces
 pub use effects::{
+    // Rate limiting mode types
+    AdaptiveMode,
     AntiEntropyEffects,
     AuthorizationEffects,
     // Reliability types (unified retry implementation)
@@ -194,6 +196,8 @@ pub use effects::{
     IndexStats,
     IndexedFact,
     IndexedJournalEffects,
+    // Retry jitter mode
+    JitterMode,
     JournalEffects,
     LogicalClockEffects,
     MinimalEffects,

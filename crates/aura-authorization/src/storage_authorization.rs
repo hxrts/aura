@@ -140,10 +140,11 @@ impl BiscuitStorageEvaluator {
 
         if auth_result {
             // Charge budget on successful authorization
-            if !budget.record_charge(flow_cost) {
-                return Err(BiscuitStorageError::FlowBudget(
-                    "Failed to record flow charge".to_string(),
-                ));
+            if let Err(e) = budget.record_charge(flow_cost) {
+                return Err(BiscuitStorageError::FlowBudget(format!(
+                    "Failed to record flow charge: {}",
+                    e
+                )));
             }
             Ok(AccessDecision::allow())
         } else {

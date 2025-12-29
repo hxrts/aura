@@ -15,9 +15,17 @@
 //!
 //! Note: This module may use `rand::random()` and similar functions in effect
 //! handler implementations. This is legitimate as it's in the effect handler layer.
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `std::sync::Mutex` because this is Layer 8 test infrastructure where:
+//! 1. Tests run in controlled single-threaded contexts
+//! 2. Lock contention is not a concern in test scenarios
+//! 3. Simpler synchronous API is preferred for test clarity
 
-// Allow disallowed methods in effect handler implementations
+// Allow disallowed methods and types in effect handler implementations
 #![allow(clippy::disallowed_methods)]
+#![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
 use aura_core::effects::{

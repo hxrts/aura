@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, thiserror::Error)]
 enum InvitationGuardError {
     #[error("Message too long: {length} > {max}")]
-    MessageTooLong { length: usize, max: usize },
+    MessageTooLong { length: u32, max: u32 },
 }
 
 // =============================================================================
@@ -43,7 +43,7 @@ pub struct InvitationConfig {
     pub default_expiration_ms: u64,
 
     /// Maximum message length for invitations
-    pub max_message_length: usize,
+    pub max_message_length: u32,
 
     /// Whether to require explicit capability for guardian invitations
     pub require_guardian_capability: bool,
@@ -71,7 +71,7 @@ impl Default for InvitationConfig {
 struct InvitationPolicy {
     #[allow(dead_code)] // Reserved for future policy enforcement
     context_id: ContextId,
-    max_message_length: usize,
+    max_message_length: u32,
     require_guardian_capability: bool,
     require_channel_capability: bool,
     require_device_capability: bool,
@@ -299,10 +299,10 @@ impl InvitationService {
 
         // Validate message length
         if let Some(ref msg) = message {
-            if msg.len() > policy.max_message_length {
+            if (msg.len() as u32) > policy.max_message_length {
                 return GuardOutcome::denied(
                     InvitationGuardError::MessageTooLong {
-                        length: msg.len(),
+                        length: msg.len() as u32,
                         max: policy.max_message_length,
                     }
                     .to_string(),

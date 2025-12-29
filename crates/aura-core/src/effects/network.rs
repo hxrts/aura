@@ -102,7 +102,7 @@ pub enum NetworkError {
     #[error("Retry limit exceeded after {attempts} attempts. Last error: {last_error}")]
     RetryLimitExceeded {
         /// Number of retry attempts made
-        attempts: usize,
+        attempts: u32,
         /// Error message from the last attempt
         last_error: String,
     },
@@ -134,7 +134,7 @@ pub enum NetworkError {
     #[error("Rate limit exceeded: {limit} requests per {window_ms}ms window")]
     RateLimitExceeded {
         /// Request limit
-        limit: usize,
+        limit: u32,
         /// Time window in milliseconds
         window_ms: u64,
     },

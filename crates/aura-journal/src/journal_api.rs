@@ -227,8 +227,8 @@ impl Journal {
 
         AccountSummary {
             account_id: self.account_state.account_id,
-            device_count,
-            guardian_count: self.account_state.guardian_registry.guardians.len(),
+            device_count: device_count as u32,
+            guardian_count: self.account_state.guardian_registry.guardians.len() as u32,
             last_epoch: self.account_state.epoch_counter.value,
         }
     }
@@ -520,9 +520,9 @@ pub struct AccountSummary {
     /// The account identifier
     pub account_id: AccountId,
     /// Number of devices in the account
-    pub device_count: usize,
+    pub device_count: u32,
     /// Number of guardians configured for the account
-    pub guardian_count: usize,
+    pub guardian_count: u32,
     /// Latest epoch number for this account
     pub last_epoch: u64,
 }

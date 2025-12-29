@@ -23,7 +23,7 @@ pub struct PrivacyAwareSelectionCriteria {
     pub min_reliability: ReliabilityLevel,
 
     /// Maximum number of peers to select
-    pub max_peers: usize,
+    pub max_peers: u32,
 
     /// Prefer peers with privacy features
     pub prefer_privacy_features: bool,
@@ -39,7 +39,7 @@ pub struct SelectionResult {
     pub selected_peers: Vec<SelectedPeer>,
 
     /// Total candidates considered (privacy-preserving count)
-    pub candidates_considered: usize,
+    pub candidates_considered: u32,
 
     /// Privacy level used for selection
     pub privacy_level: PrivacyLevel,
@@ -100,7 +100,7 @@ impl PrivacyAwareSelectionCriteria {
     /// Select peers from available candidates
     pub fn select_peers(&self, candidates: Vec<PeerInfo>) -> SelectionResult {
         let mut scored_peers = Vec::new();
-        let mut candidates_considered = 0;
+        let mut candidates_considered: u32 = 0;
 
         for peer in candidates {
             // Basic filtering
@@ -108,7 +108,7 @@ impl PrivacyAwareSelectionCriteria {
                 continue;
             }
 
-            candidates_considered += 1;
+            candidates_considered = candidates_considered.saturating_add(1);
 
             // Calculate privacy-preserving selection score
             if let Some(score) = self.calculate_selection_score(&peer) {
@@ -127,7 +127,7 @@ impl PrivacyAwareSelectionCriteria {
                 .partial_cmp(&a.selection_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        scored_peers.truncate(self.max_peers);
+        scored_peers.truncate(self.max_peers as usize);
 
         SelectionResult {
             selected_peers: scored_peers,

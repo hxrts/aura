@@ -356,9 +356,9 @@ pub enum ProposalStatus {
     /// Proposal is pending approval
     Pending {
         /// Current approval count
-        approvals: usize,
+        approvals: u16,
         /// Current rejection count
-        rejections: usize,
+        rejections: u16,
         /// Required threshold
         required: ApprovalThreshold,
     },
@@ -428,8 +428,8 @@ impl ProposalState {
                 approvals: HashMap::new(),
                 rejections: HashMap::new(),
                 status: ProposalStatus::Pending {
-                    approvals: 0,
-                    rejections: 0,
+                    approvals: 0u16,
+                    rejections: 0u16,
                     required: approval_requirement.clone(),
                 },
             }),
@@ -497,8 +497,8 @@ impl ProposalState {
             self.status = ProposalStatus::Approved;
         } else {
             self.status = ProposalStatus::Pending {
-                approvals: self.approvals.len(),
-                rejections: self.rejections.len(),
+                approvals: self.approvals.len() as u16,
+                rejections: self.rejections.len() as u16,
                 required: self.approval_requirement.clone(),
             };
         }
@@ -520,12 +520,13 @@ impl ProposalState {
                 // This will be checked at completion time with full context
                 false
             }
-            ApprovalThreshold::Threshold { required } => approval_count >= *required,
+            ApprovalThreshold::Threshold { required } => (approval_count as u32) >= *required,
             ApprovalThreshold::Percentage { percent } => {
                 // Without knowing total eligible, we use approvals as proxy
                 // For strict evaluation, use is_met() at completion time
-                let required = (approval_count as f64 * *percent as f64 / 100.0).ceil() as usize;
-                approval_count >= required
+                let required =
+                    (approval_count as f64 * *percent as f64 / 100.0).ceil() as u32;
+                (approval_count as u32) >= required
             }
         }
     }
@@ -533,7 +534,7 @@ impl ProposalState {
     /// Check if the approval threshold has been met given total eligible voters
     pub fn check_threshold_met_with_total(&self, total_eligible: usize) -> bool {
         self.approval_requirement
-            .is_met(self.approvals.len(), total_eligible)
+            .is_met(self.approvals.len() as u32, total_eligible as u32)
     }
 
     /// Check if the proposal has expired

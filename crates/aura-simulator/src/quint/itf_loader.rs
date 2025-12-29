@@ -247,7 +247,7 @@ impl ITFTraceBuilder {
 
     /// Add a state to the trace
     pub fn add_state(mut self, variables: HashMap<String, Value>) -> Self {
-        let index = self.states.len();
+        let index = self.states.len() as u64;
         self.states.push(ITFState {
             meta: ITFStateMeta { index },
             variables,
@@ -264,7 +264,7 @@ impl ITFTraceBuilder {
         action: impl Into<String>,
         nondet_picks: Option<HashMap<String, Value>>,
     ) -> Self {
-        let index = self.states.len();
+        let index = self.states.len() as u64;
         self.states.push(ITFState {
             meta: ITFStateMeta { index },
             variables,

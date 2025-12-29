@@ -136,7 +136,7 @@ where
         let choreo_roles = roles
             .into_iter()
             .enumerate()
-            .map(|(idx, device_id)| ChoreographicRole::new(device_id.0, idx))
+            .map(|(idx, device_id)| ChoreographicRole::new(device_id.0, idx as u32))
             .collect();
         self.effects.start_session(session_id, choreo_roles).await
     }
@@ -149,7 +149,7 @@ where
         let idx = self.role_index(device_id).ok_or_else(|| {
             ChoreographyError::Transport(format!("Unknown role for device {}", device_id))
         })?;
-        Ok(ChoreographicRole::new(device_id.0, idx))
+        Ok(ChoreographicRole::new(device_id.0, idx as u32))
     }
 }
 

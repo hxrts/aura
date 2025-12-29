@@ -222,6 +222,7 @@ impl Property {
         }
     }
 
+    #[must_use]
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
@@ -237,11 +238,13 @@ impl PropertySpec {
         }
     }
 
+    #[must_use]
     pub fn with_property(mut self, property: Property) -> Self {
         self.properties.push(property);
         self
     }
 
+    #[must_use]
     pub fn with_context(mut self, context: Value) -> Self {
         self.context = context;
         self

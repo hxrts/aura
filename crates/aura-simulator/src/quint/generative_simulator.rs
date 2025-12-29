@@ -40,7 +40,7 @@ use aura_core::effects::ActionResult;
 #[derive(Debug, Clone)]
 pub struct GenerativeSimulatorConfig {
     /// Maximum steps to execute in explore mode
-    pub max_steps: usize,
+    pub max_steps: u32,
     /// Whether to record execution trace
     pub record_trace: bool,
     /// Enable verbose logging
@@ -64,7 +64,7 @@ impl Default for GenerativeSimulatorConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationStep {
     /// Step index
-    pub index: usize,
+    pub index: u64,
     /// Action that was executed
     pub action: String,
     /// Parameters passed to the action
@@ -91,7 +91,7 @@ pub struct SimulationResult {
     /// Whether simulation completed successfully
     pub success: bool,
     /// Total number of steps executed
-    pub step_count: usize,
+    pub step_count: u32,
     /// Properties that were violated (if any)
     pub property_violations: Vec<PropertyViolation>,
 }
@@ -102,7 +102,7 @@ pub struct PropertyViolation {
     /// Property name
     pub property: String,
     /// Step at which violation occurred
-    pub step_index: usize,
+    pub step_index: u64,
     /// State at violation
     pub state: Value,
     /// Description of violation
@@ -316,7 +316,7 @@ impl GenerativeSimulator {
 
                     if self.config.record_trace {
                         steps.push(SimulationStep {
-                            index,
+                            index: index as u64,
                             action: action_name.clone(),
                             params: params.clone(),
                             nondet_picks: nondet_picks.clone(),
@@ -328,7 +328,7 @@ impl GenerativeSimulator {
                     }
 
                     // Check for property violations
-                    if let Some(violation) = self.check_step_properties(index, &post_state) {
+                    if let Some(violation) = self.check_step_properties(index as u32, &post_state) {
                         property_violations.push(violation);
                     }
 
@@ -337,7 +337,7 @@ impl GenerativeSimulator {
                 Err(e) => {
                     if self.config.record_trace {
                         steps.push(SimulationStep {
-                            index,
+                            index: index as u64,
                             action: action_name.clone(),
                             params: params.clone(),
                             nondet_picks: nondet_picks.clone(),
@@ -352,7 +352,7 @@ impl GenerativeSimulator {
                         steps,
                         final_state: current_state,
                         success: false,
-                        step_count: index,
+                        step_count: index as u32,
                         property_violations,
                     });
                 }
@@ -360,7 +360,7 @@ impl GenerativeSimulator {
         }
 
         Ok(SimulationResult {
-            step_count: steps.len(),
+            step_count: steps.len() as u32,
             steps,
             final_state: current_state,
             success: true,
@@ -440,7 +440,7 @@ impl GenerativeSimulator {
 
                     if self.config.record_trace {
                         steps.push(SimulationStep {
-                            index: step_index,
+                            index: step_index as u64,
                             action: action_name.clone(),
                             params: params.clone(),
                             nondet_picks: nondet_picks.clone(),
@@ -452,7 +452,9 @@ impl GenerativeSimulator {
                     }
 
                     // Check for property violations
-                    if let Some(violation) = self.check_step_properties(step_index, &post_state) {
+                    if let Some(violation) =
+                        self.check_step_properties(step_index, &post_state)
+                    {
                         property_violations.push(violation);
                     }
 
@@ -470,7 +472,7 @@ impl GenerativeSimulator {
 
                     if self.config.record_trace {
                         steps.push(SimulationStep {
-                            index: step_index,
+                            index: step_index as u64,
                             action: action_name.clone(),
                             params,
                             nondet_picks,
@@ -486,7 +488,7 @@ impl GenerativeSimulator {
         }
 
         Ok(SimulationResult {
-            step_count: steps.len(),
+            step_count: steps.len() as u32,
             steps,
             final_state: current_state,
             success: property_violations.is_empty(),
@@ -532,7 +534,7 @@ impl GenerativeSimulator {
             let actions: Vec<TestAction> = result
                 .steps
                 .iter()
-                .take(violation.step_index + 1)
+                .take((violation.step_index + 1) as usize)
                 .filter(|s| s.success)
                 .map(|step| TestAction {
                     action: step.action.clone(),
@@ -657,7 +659,7 @@ impl GenerativeSimulator {
     /// Check for property violations after a step
     fn check_step_properties(
         &self,
-        _step_index: usize,
+        _step_index: u32,
         _state: &Value,
     ) -> Option<PropertyViolation> {
         // Placeholder - full implementation would evaluate properties

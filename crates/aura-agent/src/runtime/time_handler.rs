@@ -26,7 +26,7 @@ pub struct EnhancedTimeHandler {
     /// Active timeout operations
     timeouts: Arc<RwLock<HashMap<TimeoutHandle, TimeoutTask>>>,
     /// Event counter for threshold-based waking
-    event_count: Arc<RwLock<usize>>,
+    event_count: Arc<RwLock<u32>>,
     /// Time handler statistics
     stats: Arc<RwLock<TimeHandlerStats>>,
     /// Underlying time provider for deterministic/testing overrides
@@ -271,11 +271,11 @@ impl EnhancedTimeHandler {
     /// Increment the global event count
     async fn increment_event_count(&self) {
         let mut count = self.event_count.write().await;
-        *count += 1;
+        *count = count.saturating_add(1);
     }
 
     /// Get current event count
-    async fn get_event_count(&self) -> usize {
+    async fn get_event_count(&self) -> u32 {
         *self.event_count.read().await
     }
 

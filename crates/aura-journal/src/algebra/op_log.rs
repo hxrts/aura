@@ -29,7 +29,7 @@ pub struct OpLogSummary {
     /// Version counter of the OpLog
     pub version: u64,
     /// Total number of operations in the log
-    pub operation_count: usize,
+    pub operation_count: u64,
     /// Set of all operation CIDs in the log
     pub cids: BTreeSet<Hash32>,
 }
@@ -235,7 +235,7 @@ impl OpLog {
     pub fn create_summary(&self) -> OpLogSummary {
         OpLogSummary {
             version: self.version,
-            operation_count: self.operations.len(),
+            operation_count: self.operations.len() as u64,
             cids: self.get_all_cids(),
         }
     }

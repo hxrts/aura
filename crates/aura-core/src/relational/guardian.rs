@@ -41,6 +41,7 @@ impl GuardianBinding {
     }
 
     /// Create a guardian binding with consensus proof
+    #[must_use]
     pub fn with_consensus_proof(
         account_commitment: Hash32,
         guardian_commitment: Hash32,
@@ -141,6 +142,7 @@ impl GuardianParameters {
     }
 
     /// Set expiration using a physical clock timestamp (milliseconds since UNIX epoch)
+    #[must_use]
     pub fn with_expiration_ms(mut self, expiration_ms: u64) -> Self {
         self.expiration = Some(TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: expiration_ms,

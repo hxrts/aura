@@ -62,7 +62,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FactSyncConfig {
     /// Maximum facts to sync per batch
-    pub max_batch_size: usize,
+    pub max_batch_size: u32,
     /// Enable Merkle verification (should always be true in production)
     pub verify_merkle: bool,
     /// Enable Bloom filter optimization
@@ -117,13 +117,13 @@ impl FactSyncConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FactSyncResult {
     /// Number of facts received from peer
-    pub facts_received: usize,
+    pub facts_received: u64,
     /// Number of facts sent to peer
-    pub facts_sent: usize,
+    pub facts_sent: u64,
     /// Number of facts that passed verification
-    pub facts_verified: usize,
+    pub facts_verified: u64,
     /// Number of facts rejected during verification
-    pub facts_rejected: usize,
+    pub facts_rejected: u64,
     /// Whether journals are now in sync
     pub in_sync: bool,
     /// Local Merkle root after sync
@@ -254,10 +254,10 @@ impl FactSyncProtocol {
         let facts_to_send = self.compute_facts_to_send(peer_bloom).await?;
 
         let result = FactSyncResult {
-            facts_received: verification.verified.len() + verification.rejected.len(),
-            facts_sent: facts_to_send.len(),
-            facts_verified: verification.verified.len(),
-            facts_rejected: verification.rejected.len(),
+            facts_received: (verification.verified.len() + verification.rejected.len()) as u64,
+            facts_sent: facts_to_send.len() as u64,
+            facts_verified: verification.verified.len() as u64,
+            facts_rejected: verification.rejected.len() as u64,
             in_sync: verification.rejected.is_empty(),
             local_root: verification.merkle_root,
             remote_root: peer_root,
@@ -292,7 +292,7 @@ impl FactSyncProtocol {
                     let filtered: Vec<IndexedFact> = all_facts
                         .into_iter()
                         .filter(|fact| !bloom_might_contain(&filter, fact))
-                        .take(self.config.max_batch_size)
+                        .take(self.config.max_batch_size as usize)
                         .collect();
 
                     return Ok(filtered);
@@ -306,7 +306,7 @@ impl FactSyncProtocol {
         // Apply batch size limit
         let facts: Vec<IndexedFact> = all_facts
             .into_iter()
-            .take(self.config.max_batch_size)
+            .take(self.config.max_batch_size as usize)
             .collect();
 
         Ok(facts)

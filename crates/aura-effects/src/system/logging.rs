@@ -58,9 +58,9 @@ pub struct AuditEntry {
 #[derive(Debug, Clone)]
 pub struct LoggingConfig {
     /// Maximum number of log entries to retain in memory
-    pub max_log_entries: usize,
+    pub max_log_entries: u32,
     /// Maximum number of audit entries to retain in memory
-    pub max_audit_entries: usize,
+    pub max_audit_entries: u32,
     /// Log level filter (debug, info, warn, error)
     pub log_level: String,
     /// Whether audit logging is enabled

@@ -30,6 +30,29 @@ use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+// === Size bounds for serialized cryptographic data (Safety §2) ===
+
+/// Maximum size of a FROST signing share (Ed25519 scalar)
+pub const MAX_SHARE_BYTES: usize = 32;
+
+/// Maximum size of a FROST nonce commitment (two compressed points)
+pub const MAX_COMMITMENT_BYTES: usize = 64;
+
+/// Maximum size of serialized FROST nonces
+pub const MAX_NONCE_BYTES: usize = 64;
+
+/// Maximum size of a FROST partial signature (Ed25519 scalar)
+pub const MAX_PARTIAL_SIGNATURE_BYTES: usize = 32;
+
+/// Maximum size of an aggregated Ed25519 signature
+pub const MAX_SIGNATURE_BYTES: usize = 64;
+
+/// Maximum size of a public key (Ed25519 compressed point)
+pub const MAX_PUBLIC_KEY_BYTES: usize = 32;
+
+/// Maximum size of a message to sign
+pub const MAX_MESSAGE_BYTES: usize = 1024;
+
 /// FROST signing share (secret)
 ///
 /// **CRITICAL**: Shares are NEVER stored in the journal. Each device maintains

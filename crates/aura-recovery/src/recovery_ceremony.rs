@@ -166,7 +166,7 @@ pub struct RecoveryCeremonyState {
     /// Guardian authorities participating
     pub guardians: Vec<AuthorityId>,
     /// Required threshold (k-of-n)
-    pub threshold: usize,
+    pub threshold: u16,
     /// Timestamp when ceremony started
     pub started_at_ms: u64,
     /// Timeout for ceremony completion (ms)
@@ -188,7 +188,7 @@ impl RecoveryCeremonyState {
 
     /// Check if quorum threshold is met.
     pub fn threshold_met(&self) -> bool {
-        self.approved_count() >= self.threshold
+        self.approved_count() >= self.threshold as usize
     }
 
     /// Check if any guardian has rejected.
@@ -219,7 +219,7 @@ pub enum RecoveryCeremonyFact {
         operation_type: String,
         justification: String,
         guardians: Vec<String>,
-        threshold: usize,
+        threshold: u16,
         timestamp_ms: u64,
     },
     /// Guardian approval received
@@ -233,7 +233,7 @@ pub enum RecoveryCeremonyFact {
     /// Quorum threshold reached
     QuorumReached {
         ceremony_id: String,
-        approved_count: usize,
+        approved_count: u16,
         approved_guardians: Vec<String>,
         timestamp_ms: u64,
     },
@@ -365,10 +365,10 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         &mut self,
         request: CeremonyRecoveryRequest,
         guardians: Vec<AuthorityId>,
-        threshold: usize,
+        threshold: u16,
     ) -> AuraResult<RecoveryCeremonyId> {
         // Validate inputs
-        if threshold > guardians.len() {
+        if threshold as usize > guardians.len() {
             return Err(AuraError::invalid(format!(
                 "Threshold {} cannot exceed guardian count {}",
                 threshold,
@@ -660,7 +660,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         ceremony_id: RecoveryCeremonyId,
         request: &CeremonyRecoveryRequest,
         guardians: &[AuthorityId],
-        threshold: usize,
+        threshold: u16,
     ) -> AuraResult<()> {
         let timestamp_ms = self
             .effects
@@ -740,7 +740,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
                 .get(&ceremony_id)
                 .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
             (
-                ceremony.approved_count(),
+                ceremony.approved_count() as u16,
                 ceremony
                     .approved_guardians()
                     .into_iter()

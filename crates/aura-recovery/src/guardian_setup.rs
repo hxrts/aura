@@ -103,7 +103,7 @@ pub struct GuardianInvitation {
     /// Target guardian authorities
     pub target_guardians: Vec<AuthorityId>,
     /// Required threshold
-    pub threshold: usize,
+    pub threshold: u16,
     /// Timestamp of invitation
     pub timestamp: TimeStamp,
 }
@@ -133,7 +133,7 @@ pub struct SetupCompletion {
     /// Final guardian set
     pub guardian_set: GuardianSet,
     /// Final threshold
-    pub threshold: usize,
+    pub threshold: u16,
     /// Encrypted key shares for each guardian
     pub encrypted_shares: Vec<EncryptedKeyShare>,
     /// Public key package for the recovery authority
@@ -311,7 +311,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             setup_id: setup_id.clone(),
             account_id: request.account_id,
             target_guardians: guardian_ids.clone(),
-            threshold: request.threshold,
+            threshold: request.threshold as u16,
             timestamp: TimeStamp::PhysicalClock(PhysicalTime {
                 ts_ms: now_ms,
                 uncertainty: None,
@@ -322,7 +322,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         let acceptances = self.execute_choreographic_setup(invitation).await?;
 
         // Check if we have enough acceptances
-        if acceptances.len() < request.threshold {
+        if acceptances.len() < request.threshold as usize {
             let failed_fact = RecoveryFact::GuardianSetupFailed {
                 context_id,
                 reason: format!(

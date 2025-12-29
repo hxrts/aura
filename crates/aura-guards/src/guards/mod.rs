@@ -226,9 +226,9 @@ pub struct ExecutionMetrics {
     /// Total execution time (microseconds)
     pub total_execution_time_us: u64,
     /// Number of authorization checks performed
-    pub authorization_checks: usize,
+    pub authorization_checks: u32,
     /// Number of facts applied
-    pub facts_applied: usize,
+    pub facts_applied: u32,
 }
 
 impl ProtocolGuard {

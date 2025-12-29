@@ -174,7 +174,9 @@ pub use reactive::{
 pub use relay::{RelayCandidate, RelayContext, RelayError, RelayRelationship, RelaySelector};
 pub use reliability::{
     // Unified retry types
+    AdaptiveMode,
     BackoffStrategy,
+    JitterMode,
     RateLimit,
     // Unified rate limiting types
     RateLimitConfig,

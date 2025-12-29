@@ -60,7 +60,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
         match operation {
             "hkdf_derive" => {
                 // Parameters would be (ikm, salt, info, length)
-                let params: (Vec<u8>, Option<Vec<u8>>, Vec<u8>, usize) =
+                let params: (Vec<u8>, Option<Vec<u8>>, Vec<u8>, u32) =
                     aura_core::util::serialization::from_slice(parameters).map_err(|e| {
                         HandlerError::EffectDeserialization {
                             effect_type,

@@ -367,7 +367,7 @@ pub enum ApprovalThreshold {
     /// K-of-N threshold approval
     Threshold {
         /// Minimum approvals required
-        required: usize,
+        required: u32,
     },
     /// Percentage of holders must approve
     Percentage {
@@ -378,13 +378,13 @@ pub enum ApprovalThreshold {
 
 impl ApprovalThreshold {
     /// Check if this threshold is met given approvals and total eligible
-    pub fn is_met(&self, approvals: usize, total_eligible: usize) -> bool {
+    pub fn is_met(&self, approvals: u32, total_eligible: u32) -> bool {
         match self {
             ApprovalThreshold::Any => approvals >= 1,
             ApprovalThreshold::Unanimous => approvals >= total_eligible,
             ApprovalThreshold::Threshold { required } => approvals >= *required,
             ApprovalThreshold::Percentage { percent } => {
-                let required = (total_eligible * (*percent as usize)).div_ceil(100);
+                let required = (total_eligible * (*percent as u32)).div_ceil(100);
                 approvals >= required
             }
         }

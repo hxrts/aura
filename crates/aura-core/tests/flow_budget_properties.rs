@@ -192,10 +192,13 @@ fn charge_flow_respects_limits() {
         budget.spent = *initial_spent;
 
         let initial_spent_value = budget.spent;
-        let charge_success = budget.record_charge(*cost);
+        let charge_result = budget.record_charge(*cost);
 
         if *should_succeed {
-            assert!(charge_success, "Charge should succeed when within headroom");
+            assert!(
+                charge_result.is_ok(),
+                "Charge should succeed when within headroom"
+            );
             assert_eq!(
                 budget.spent,
                 initial_spent_value + cost,
@@ -203,7 +206,7 @@ fn charge_flow_respects_limits() {
             );
         } else {
             assert!(
-                !charge_success,
+                charge_result.is_err(),
                 "Charge should fail when exceeding headroom"
             );
             assert_eq!(
@@ -257,7 +260,7 @@ fn can_charge_predicate_matches_record_charge() {
 
         let can_charge_result = budget.can_charge(*cost);
         let mut budget_copy = budget;
-        let record_charge_result = budget_copy.record_charge(*cost);
+        let record_charge_result = budget_copy.record_charge(*cost).is_ok();
 
         assert_eq!(
             can_charge_result, record_charge_result,
@@ -362,12 +365,12 @@ mod convergence_tests {
 
         // Successful charge within budget
         let success = budget.record_charge(30);
-        assert!(success, "Charge within budget should succeed");
+        assert!(success.is_ok(), "Charge within budget should succeed");
         assert_eq!(budget.spent, 30);
 
         // Failed charge exceeding budget
         let failure = budget.record_charge(30); // 30 + 30 > 50
-        assert!(!failure, "Charge exceeding budget should fail");
+        assert!(failure.is_err(), "Charge exceeding budget should fail");
         assert_eq!(budget.spent, 30); // Spent should remain unchanged
 
         // Only successful charges should result in observable state changes

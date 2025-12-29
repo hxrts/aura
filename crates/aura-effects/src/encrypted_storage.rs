@@ -683,11 +683,12 @@ mod tests {
             ikm: &[u8],
             salt: &[u8],
             info: &[u8],
-            len: usize,
+            len: u32,
         ) -> Result<Vec<u8>, aura_core::AuraError> {
-            let mut result = vec![0u8; len];
+            let mut result = vec![0u8; len as usize];
             for (i, byte) in ikm.iter().chain(salt.iter()).chain(info.iter()).enumerate() {
-                result[i % len] ^= byte;
+                let idx = i % (len as usize);
+                result[idx] ^= byte;
             }
             Ok(result)
         }

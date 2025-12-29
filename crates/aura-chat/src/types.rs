@@ -34,9 +34,9 @@ pub enum SyncStatus {
     /// Fact is being synced to peers
     Syncing {
         /// Number of peers that have received this fact
-        peers_synced: usize,
+        peers_synced: u16,
         /// Total number of peers to sync with
-        peers_total: usize,
+        peers_total: u16,
     },
 
     /// Fact has been synced to all known peers
@@ -90,7 +90,7 @@ impl SyncStatus {
                 if *peers_total == 0 {
                     100
                 } else {
-                    ((peers_synced * 100) / peers_total).min(100) as u8
+                    (((*peers_synced as u32) * 100) / (*peers_total as u32)).min(100) as u8
                 }
             }
             SyncStatus::Synced => 100,
@@ -109,7 +109,7 @@ impl SyncStatus {
                 peers_synced,
                 peers_total,
             } => {
-                let new_synced = peers_synced + 1;
+                let new_synced = peers_synced.saturating_add(1);
                 if new_synced >= peers_total {
                     SyncStatus::Synced
                 } else {
@@ -296,9 +296,9 @@ pub enum ConfirmationStatus {
     /// Background confirmation ceremony in progress
     Confirming {
         /// Number of parties that have confirmed
-        confirmed_count: usize,
+        confirmed_count: u16,
         /// Total number of parties that need to confirm
-        total_parties: usize,
+        total_parties: u16,
         /// Timestamp when confirmation started
         started_at_ms: u64,
     },
@@ -312,11 +312,11 @@ pub enum ConfirmationStatus {
     /// Some parties confirmed, some declined or unavailable
     PartiallyConfirmed {
         /// Number of parties that confirmed
-        confirmed_count: usize,
+        confirmed_count: u16,
         /// Number of parties that declined
-        declined_count: usize,
+        declined_count: u16,
         /// Number of parties that are unavailable
-        unavailable_count: usize,
+        unavailable_count: u16,
     },
 
     /// Confirmation failed or was rejected

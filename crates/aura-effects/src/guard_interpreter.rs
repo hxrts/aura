@@ -336,7 +336,7 @@ where
                 debug!(bytes, "Generating cryptographic nonce");
 
                 // Generate random bytes
-                let nonce = self.random.random_bytes(bytes).await;
+                let nonce = self.random.random_bytes(bytes as usize).await;
 
                 info!(
                     bytes,

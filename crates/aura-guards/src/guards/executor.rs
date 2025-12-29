@@ -454,7 +454,7 @@ where
                 "SendEnvelope not supported via interpreter".to_string(),
             )),
             EffectCommand::GenerateNonce { bytes } => {
-                let nonce = self.effects.random_bytes(bytes).await;
+                let nonce = self.effects.random_bytes(bytes as usize).await;
                 Ok(EffectResult::Nonce(nonce))
             }
         }
@@ -533,7 +533,7 @@ where
                 "SendEnvelope not supported via interpreter".to_string(),
             )),
             EffectCommand::GenerateNonce { bytes } => {
-                let nonce = self.effects.random_bytes(bytes).await;
+                let nonce = self.effects.random_bytes(bytes as usize).await;
                 Ok(EffectResult::Nonce(nonce))
             }
         }

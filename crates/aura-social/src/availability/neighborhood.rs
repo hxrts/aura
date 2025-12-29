@@ -201,7 +201,9 @@ where
         }
 
         if peers_tried > 0 {
-            Err(AvailabilityError::NoReachablePeers { peers_tried })
+            Err(AvailabilityError::NoReachablePeers {
+                peers_tried: peers_tried as u32,
+            })
         } else {
             Err(AvailabilityError::NotFound { hash: *hash })
         }

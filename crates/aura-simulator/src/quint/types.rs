@@ -414,9 +414,9 @@ pub struct QuintEnhancedSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpecAnalysisMetadata {
     /// Total number of properties analyzed
-    pub total_properties: usize,
+    pub total_properties: u32,
     /// Number of high-priority properties
-    pub high_priority_count: usize,
+    pub high_priority_count: u32,
     /// Detected violation patterns
     pub detected_patterns: Vec<ViolationPattern>,
     /// Complexity score for chaos generation
@@ -450,7 +450,7 @@ pub struct ChaosScenario {
     /// Type of chaos this scenario introduces
     pub chaos_type: ChaosType,
     /// Number of byzantine participants
-    pub byzantine_participants: usize,
+    pub byzantine_participants: u32,
     /// Byzantine strategies to employ
     pub byzantine_strategies: Vec<String>,
     /// Network conditions for this scenario
@@ -500,7 +500,7 @@ pub enum ChaosType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosGenerationResult {
     /// Number of scenarios generated
-    pub scenarios_generated: usize,
+    pub scenarios_generated: u32,
     /// Generated chaos scenarios
     pub scenarios: Vec<ChaosScenario>,
     /// Properties that scenarios target
@@ -517,11 +517,11 @@ pub struct ChaosGenerationStats {
     /// Time spent generating scenarios (ms)
     pub generation_time_ms: u64,
     /// Number of violation patterns detected
-    pub patterns_detected: usize,
+    pub patterns_detected: u32,
     /// Number of high-priority scenarios generated
-    pub high_priority_scenarios: usize,
+    pub high_priority_scenarios: u32,
     /// Coverage of property types
-    pub property_type_coverage: HashMap<String, usize>,
+    pub property_type_coverage: HashMap<String, u32>,
 }
 
 // Legacy simulation-specific evaluation types (different from aura-core types)
@@ -547,11 +547,11 @@ pub struct PropertyEvaluationResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationResult {
     /// Total number of properties evaluated
-    pub total_properties: usize,
+    pub total_properties: u32,
     /// Number of properties that hold
-    pub satisfied_properties: usize,
+    pub satisfied_properties: u32,
     /// Number of properties that were violated
-    pub violated_properties: usize,
+    pub violated_properties: u32,
     /// Individual results for each property
     pub individual_results: Vec<PropertyEvaluationResult>,
     /// Total validation time in milliseconds

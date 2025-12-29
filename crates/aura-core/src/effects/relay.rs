@@ -189,7 +189,7 @@ pub enum RelayError {
     /// All relays failed.
     AllRelaysFailed {
         /// Number of relays that were tried
-        relays_tried: usize,
+        relays_tried: u32,
     },
 
     /// Relay rejected the request.

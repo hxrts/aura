@@ -20,6 +20,14 @@
 //! the agent runtime in `aura-agent` by composing infrastructure effects with
 //! domain-specific logic.
 
+/// Maximum size for encrypted credential data in bytes.
+/// Supports typical encrypted key material with padding.
+pub const MAX_ENCRYPTED_CREDENTIALS_BYTES: usize = 4096;
+
+/// Maximum size for agent message/session payloads in bytes.
+/// Prevents unbounded memory allocation from malformed inputs.
+pub const MAX_AGENT_PAYLOAD_BYTES: usize = 65536;
+
 use crate::{
     types::identifiers::{AccountId, DeviceId, SessionId},
     AuraResult as Result,
@@ -339,6 +347,7 @@ pub struct ChoreographicRole {
 }
 
 impl ChoreographicRole {
+    #[must_use]
     pub fn new(device_id: uuid::Uuid, role_index: u32) -> Self {
         Self {
             device_id,

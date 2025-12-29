@@ -447,18 +447,21 @@ impl CapabilityTokenRequest {
     }
 
     /// Add a custom claim to the token request
+    #[must_use]
     pub fn with_claim(mut self, key: &str, value: &str) -> Self {
         self.claims.insert(key.to_string(), value.to_string());
         self
     }
 
     /// Set the expiration time for the token
+    #[must_use]
     pub fn with_expiry(mut self, expires_at: u64) -> Self {
         self.expires_at = Some(expires_at);
         self
     }
 
     /// Set the context for the token
+    #[must_use]
     pub fn with_context(mut self, context: &str) -> Self {
         self.context = Some(context.to_string());
         self

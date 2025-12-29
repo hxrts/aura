@@ -289,6 +289,7 @@ impl<P> TypedMessage<P> {
     }
 
     /// Create a message with current protocol version
+    #[must_use]
     pub fn with_current_version(context: MessageContext, payload: P, auth: AuthTag) -> Self {
         Self::new(context, payload, SemanticVersion::CURRENT, auth)
     }

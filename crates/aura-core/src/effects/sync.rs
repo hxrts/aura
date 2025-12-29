@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SyncMetrics {
     /// Number of operations applied during sync
-    pub applied: usize,
+    pub applied: u32,
     /// Number of duplicate operations skipped
-    pub duplicates: usize,
+    pub duplicates: u32,
     /// Number of sync rounds performed
-    pub rounds: usize,
+    pub rounds: u32,
 }
 
 impl SyncMetrics {
@@ -23,7 +23,8 @@ impl SyncMetrics {
     }
 
     /// Create metrics with just an applied count
-    pub fn with_applied(applied: usize) -> Self {
+    #[must_use]
+    pub fn with_applied(applied: u32) -> Self {
         Self {
             applied,
             duplicates: 0,

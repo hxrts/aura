@@ -114,7 +114,7 @@ pub enum GossipStrategy {
     /// Random peer selection
     Random {
         /// Number of peers to select per round
-        fanout: usize,
+        fanout: u32,
     },
 
     /// Round-robin peer selection
@@ -157,7 +157,7 @@ pub struct DeliveryConfig {
     /// Maximum message retention time
     pub max_retention: Duration,
     /// Buffer size for out-of-order messages
-    pub buffer_size: usize,
+    pub buffer_size: u32,
     /// Enable compression for large messages
     pub enable_compression: bool,
 }

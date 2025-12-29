@@ -5,15 +5,18 @@
 use crate::crypto::hash::hash;
 use crate::Result;
 
+/// Maximum depth of a merkle tree (supports up to 2^32 leaves)
+pub const MAX_MERKLE_DEPTH: u32 = 32;
+
 /// Merkle proof structure containing sibling path and directions
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SimpleMerkleProof {
     /// Path of sibling hashes from leaf to root
     pub sibling_path: Vec<[u8; 32]>,
     /// Index of the leaf in the original tree (used to determine path directions)
-    pub leaf_index: usize,
+    pub leaf_index: u32,
     /// Total number of leaves in the tree (needed for reconstruction)
-    pub tree_size: usize,
+    pub tree_size: u32,
 }
 
 impl SimpleMerkleProof {
@@ -27,7 +30,17 @@ impl SimpleMerkleProof {
     }
 
     /// Create a new Merkle proof with the specified parameters
-    pub fn with_params(sibling_path: Vec<[u8; 32]>, leaf_index: usize, tree_size: usize) -> Self {
+    ///
+    /// # Panics
+    /// Panics if `sibling_path.len()` exceeds `MAX_MERKLE_DEPTH`.
+    #[must_use]
+    pub fn with_params(sibling_path: Vec<[u8; 32]>, leaf_index: u32, tree_size: u32) -> Self {
+        assert!(
+            sibling_path.len() <= MAX_MERKLE_DEPTH as usize,
+            "sibling_path length {} exceeds MAX_MERKLE_DEPTH {}",
+            sibling_path.len(),
+            MAX_MERKLE_DEPTH
+        );
         Self {
             sibling_path,
             leaf_index,
@@ -39,6 +52,51 @@ impl SimpleMerkleProof {
 impl Default for SimpleMerkleProof {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Errors that can occur during Merkle proof validation.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum MerkleValidationError {
+    #[error("Sibling path length {actual} exceeds maximum depth {max}")]
+    PathTooLong { actual: u32, max: u32 },
+
+    #[error("Leaf index {index} is out of bounds for tree size {size}")]
+    LeafIndexOutOfBounds { index: u32, size: u32 },
+
+    #[error("Invalid tree size: {0}")]
+    InvalidTreeSize(u32),
+}
+
+impl SimpleMerkleProof {
+    /// Validate proof invariants after deserialization.
+    ///
+    /// Returns `Ok(())` if the proof is well-formed, or an error describing
+    /// which invariant was violated. Call this after deserializing a proof
+    /// to ensure it meets structural requirements before verification.
+    pub fn validate(&self) -> std::result::Result<(), MerkleValidationError> {
+        // Check path length doesn't exceed maximum depth
+        if self.sibling_path.len() > MAX_MERKLE_DEPTH as usize {
+            return Err(MerkleValidationError::PathTooLong {
+                actual: self.sibling_path.len() as u32,
+                max: MAX_MERKLE_DEPTH,
+            });
+        }
+
+        // For non-empty proofs, validate index and size consistency
+        if self.tree_size > 0 {
+            if self.leaf_index >= self.tree_size {
+                return Err(MerkleValidationError::LeafIndexOutOfBounds {
+                    index: self.leaf_index,
+                    size: self.tree_size,
+                });
+            }
+        } else if !self.sibling_path.is_empty() || self.leaf_index != 0 {
+            // Empty tree should have no path and zero index
+            return Err(MerkleValidationError::InvalidTreeSize(0));
+        }
+
+        Ok(())
     }
 }
 
@@ -55,14 +113,17 @@ pub fn generate_merkle_proof(leaves: &[Vec<u8>], leaf_index: usize) -> Result<Si
         return Ok(SimpleMerkleProof::new());
     }
 
-    let mut current_level: Vec<[u8; 32]> = Vec::new();
+    // Pre-size for number of leaves
+    let mut current_level: Vec<[u8; 32]> = Vec::with_capacity(leaves.len());
 
     // Hash all leaves to create the bottom level
     for leaf in leaves {
         current_level.push(hash(leaf));
     }
 
-    let mut sibling_path = Vec::new();
+    // Sibling path depth is ceil(log2(leaves.len()))
+    let estimated_depth = (leaves.len() as f64).log2().ceil() as usize;
+    let mut sibling_path = Vec::with_capacity(estimated_depth);
     let mut index = leaf_index;
 
     // Build path up to root, collecting sibling hashes
@@ -90,7 +151,12 @@ pub fn generate_merkle_proof(leaves: &[Vec<u8>], leaf_index: usize) -> Result<Si
                 combined.extend_from_slice(right);
                 next_level.push(hash(&combined));
             } else {
-                // Odd node - promote to next level
+                // Odd node - promote unchanged to next level.
+                // WHY: When tree level has odd count, the unpaired node moves up
+                // without hashing. This is the standard "promotion" strategy used
+                // in Bitcoin's merkle trees. Alternative would be self-hashing
+                // (H(x,x)), but promotion is simpler and equally secure since
+                // the tree structure is already encoded in the proof.
                 next_level.push(current_level[i]);
             }
         }
@@ -101,8 +167,8 @@ pub fn generate_merkle_proof(leaves: &[Vec<u8>], leaf_index: usize) -> Result<Si
 
     Ok(SimpleMerkleProof::with_params(
         sibling_path,
-        leaf_index,
-        leaves.len(),
+        leaf_index as u32,
+        leaves.len() as u32,
     ))
 }
 
@@ -118,7 +184,8 @@ pub fn build_merkle_root(leaves: &[Vec<u8>]) -> [u8; 32] {
         return [0u8; 32];
     }
 
-    let mut current_level: Vec<[u8; 32]> = Vec::new();
+    // Pre-size for number of leaves
+    let mut current_level: Vec<[u8; 32]> = Vec::with_capacity(leaves.len());
 
     // Hash all leaves to create the bottom level
     for leaf in leaves {
@@ -162,6 +229,11 @@ pub fn build_merkle_root(leaves: &[Vec<u8>]) -> [u8; 32] {
 /// # Returns
 /// `true` if the proof is valid, `false` otherwise
 pub fn verify_merkle_proof(proof: &SimpleMerkleProof, root: &[u8; 32], leaf_value: &[u8]) -> bool {
+    // Validate proof structure before verification
+    if proof.validate().is_err() {
+        return false;
+    }
+
     // Start with the leaf hash
     let mut current_hash = hash(leaf_value);
 
@@ -170,11 +242,12 @@ pub fn verify_merkle_proof(proof: &SimpleMerkleProof, root: &[u8; 32], leaf_valu
         return &current_hash == root;
     }
 
-    let mut index = proof.leaf_index;
+    let mut index = proof.leaf_index as usize;
 
     // Walk up the tree using sibling path
     for sibling_hash in &proof.sibling_path {
-        let mut combined = Vec::new();
+        // Pre-size for two 32-byte hashes concatenated
+        let mut combined = Vec::with_capacity(64);
 
         // Determine if we're the left or right child based on index
         if index % 2 == 0 {

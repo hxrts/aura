@@ -415,7 +415,7 @@ impl JournalSyncProtocol {
                     );
                 }
 
-                Ok(result.applied)
+                Ok(result.applied as usize)
             };
 
         // Execute without runtime-specific timeout; external callers should enforce via PhysicalTimeEffects.

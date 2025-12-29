@@ -71,7 +71,7 @@ pub struct Alert {
 #[derive(Debug, Clone)]
 pub struct MonitoringConfig {
     /// Maximum number of alerts to keep in buffer
-    pub max_alerts: usize,
+    pub max_alerts: u32,
 }
 
 impl Default for MonitoringConfig {

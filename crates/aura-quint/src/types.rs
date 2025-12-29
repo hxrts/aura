@@ -49,7 +49,7 @@ pub struct ExecutionTrace {
     /// Sequence of steps in the trace.
     pub steps: Vec<TraceStep>,
     /// Total length of the trace.
-    pub length: usize,
+    pub length: u64,
     /// Whether this is a complete trace.
     pub is_complete: bool,
 }
@@ -58,7 +58,7 @@ pub struct ExecutionTrace {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceStep {
     /// Step number (0-indexed).
-    pub step_number: usize,
+    pub step_number: u64,
     /// Action taken in this step.
     pub action: String,
     /// State before the action.

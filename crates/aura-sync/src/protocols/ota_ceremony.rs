@@ -1410,56 +1410,59 @@ mod tests {
         assert_ne!(proposal1.compute_hash(), proposal3.compute_hash());
     }
 
-    #[tokio::test]
-    async fn test_ota_ceremony_commit_emits_fact() {
-        let effects = TestEffects::new();
-        let config = OTACeremonyConfig {
-            threshold: 1,
-            quorum_size: 1,
-            timeout_ms: 1_000,
-            min_activation_notice_epochs: 0,
-        };
-        let mut executor = OTACeremonyExecutor::new(effects.clone(), config);
+    #[test]
+    fn test_ota_ceremony_commit_emits_fact() {
+        let mut pool = futures::executor::LocalPool::new();
+        pool.run_until(async {
+            let effects = TestEffects::new();
+            let config = OTACeremonyConfig {
+                threshold: 1,
+                quorum_size: 1,
+                timeout_ms: 1_000,
+                min_activation_notice_epochs: 0,
+            };
+            let mut executor = OTACeremonyExecutor::new(effects.clone(), config);
 
-        let proposal = UpgradeProposal {
-            proposal_id: Uuid::from_bytes(1u128.to_be_bytes()),
-            package_id: Uuid::from_bytes(2u128.to_be_bytes()),
-            version: SemanticVersion::new(2, 0, 0),
-            kind: UpgradeKind::HardFork,
-            package_hash: Hash32([9u8; 32]),
-            activation_epoch: Epoch::new(10),
-            coordinator: DeviceId::from_bytes([8u8; 32]),
-        };
+            let proposal = UpgradeProposal {
+                proposal_id: Uuid::from_bytes(1u128.to_be_bytes()),
+                package_id: Uuid::from_bytes(2u128.to_be_bytes()),
+                version: SemanticVersion::new(2, 0, 0),
+                kind: UpgradeKind::HardFork,
+                package_hash: Hash32([9u8; 32]),
+                activation_epoch: Epoch::new(10),
+                coordinator: DeviceId::from_bytes([8u8; 32]),
+            };
 
-        let ceremony_id = executor
-            .initiate_ceremony(proposal, Epoch::new(0))
-            .await
-            .unwrap();
+            let ceremony_id = executor
+                .initiate_ceremony(proposal, Epoch::new(0))
+                .await
+                .unwrap();
 
-        let commitment = executor
-            .create_readiness_commitment(
-                ceremony_id,
-                DeviceId::from_bytes([1u8; 32]),
-                test_authority(9),
-                true,
-                None,
-            )
-            .await
-            .unwrap();
+            let commitment = executor
+                .create_readiness_commitment(
+                    ceremony_id,
+                    DeviceId::from_bytes([1u8; 32]),
+                    test_authority(9),
+                    true,
+                    None,
+                )
+                .await
+                .unwrap();
 
-        let threshold_reached = executor
-            .process_commitment(ceremony_id, commitment)
-            .await
-            .unwrap();
-        assert!(threshold_reached);
+            let threshold_reached = executor
+                .process_commitment(ceremony_id, commitment)
+                .await
+                .unwrap();
+            assert!(threshold_reached);
 
-        executor.commit_ceremony(ceremony_id).await.unwrap();
+            executor.commit_ceremony(ceremony_id).await.unwrap();
 
-        let journal = effects.snapshot_journal();
-        let key = format!("ota:committed:{}", hex::encode(ceremony_id.0.as_bytes()));
-        assert!(
-            journal.facts.contains_key(&key),
-            "Expected committed fact in journal"
-        );
+            let journal = effects.snapshot_journal();
+            let key = format!("ota:committed:{}", hex::encode(ceremony_id.0.as_bytes()));
+            assert!(
+                journal.facts.contains_key(&key),
+                "Expected committed fact in journal"
+            );
+        });
     }
 }

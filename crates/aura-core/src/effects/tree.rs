@@ -29,6 +29,10 @@ use crate::{AttestedOp, AuraError, Hash32, LeafId, LeafNode, NodeIndex, Policy};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub const MAX_TREE_SIGNATURE_SHARE_BYTES: usize = 1024;
+pub const MAX_TREE_STATE_BYTES: usize = 262_144;
+pub const MAX_TREE_AGGREGATE_SIGNATURE_BYTES: usize = 2048;
+
 // Snapshot-related types for Phase 5.4
 /// Defines a cut point for snapshotting
 #[derive(Debug, Clone, Serialize, Deserialize)]

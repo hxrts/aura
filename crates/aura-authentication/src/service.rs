@@ -304,7 +304,7 @@ impl AuthService {
         snapshot: &GuardSnapshot,
         account_id: AuthorityId,
         context: RecoveryContext,
-        required_guardians: usize,
+        required_guardians: u32,
     ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         // Check capability
@@ -555,9 +555,9 @@ pub struct GuardianApprovalResult {
     /// Request ID
     pub request_id: String,
     /// Number of approvals received
-    pub approval_count: usize,
+    pub approval_count: u32,
     /// Required approvals
-    pub required_count: usize,
+    pub required_count: u32,
     /// Whether threshold was met
     pub threshold_met: bool,
     /// Whether the operation succeeded

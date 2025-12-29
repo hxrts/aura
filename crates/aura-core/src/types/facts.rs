@@ -2,6 +2,8 @@
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+pub const MAX_FACT_PAYLOAD_BYTES: usize = 65_536;
+
 /// Encoding used inside a fact envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FactEncoding {

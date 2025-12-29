@@ -165,7 +165,7 @@ pub enum AuthFact {
         /// Type of recovery operation
         operation_type: RecoveryOperationType,
         /// Number of guardian approvals required
-        required_guardians: usize,
+        required_guardians: u32,
         /// Whether this is an emergency request
         is_emergency: bool,
         /// Justification for the request
@@ -217,7 +217,7 @@ pub enum AuthFact {
         /// Type of recovery operation
         operation_type: RecoveryOperationType,
         /// Number of guardian approvals received
-        approval_count: usize,
+        approval_count: u32,
         /// Guardians who approved
         approvers: Vec<AuthorityId>,
         /// Timestamp of completion (ms)
@@ -237,9 +237,9 @@ pub enum AuthFact {
         /// Reason for failure
         reason: String,
         /// Number of approvals received (if insufficient)
-        approval_count: usize,
+        approval_count: u32,
         /// Required approvals
-        required_count: usize,
+        required_count: u32,
         /// Timestamp of failure (ms)
         failed_at_ms: u64,
     },
@@ -558,8 +558,8 @@ pub enum AuthFactDelta {
     PendingRecovery {
         request_id: String,
         account_id: AuthorityId,
-        required_guardians: usize,
-        approval_count: usize,
+        required_guardians: u32,
+        approval_count: u32,
         expires_at_ms: u64,
     },
 

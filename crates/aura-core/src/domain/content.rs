@@ -113,6 +113,7 @@ impl ContentId {
     }
 
     /// Create with size metadata
+    #[must_use]
     pub fn with_size(hash: Hash32, size: u64) -> Self {
         Self {
             hash,
@@ -208,6 +209,7 @@ impl ChunkId {
     }
 
     /// Create with sequence number
+    #[must_use]
     pub fn with_sequence(hash: Hash32, sequence: u32) -> Self {
         Self {
             hash,

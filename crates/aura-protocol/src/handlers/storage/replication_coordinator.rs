@@ -26,7 +26,7 @@ pub enum ReplicationStrategy {
     /// Simple replication to N nodes
     SimpleReplication {
         /// Number of replicas
-        replica_count: usize,
+        replica_count: u32,
     },
     /// Erasure coding with data and parity chunks
     ErasureCoding {
@@ -36,7 +36,7 @@ pub enum ReplicationStrategy {
     /// Hybrid strategy with both replication and erasure coding
     Hybrid {
         /// Critical data replication count
-        critical_replicas: usize,
+        critical_replicas: u32,
         /// Non-critical data erasure config
         erasure_config: ErasureConfig,
     },
@@ -133,11 +133,11 @@ impl ReplicationCoordinator {
         }
 
         let target_count = match &self.strategy {
-            ReplicationStrategy::SimpleReplication { replica_count } => *replica_count,
+            ReplicationStrategy::SimpleReplication { replica_count } => *replica_count as usize,
             ReplicationStrategy::ErasureCoding { config } => config.total_chunks() as usize,
             ReplicationStrategy::Hybrid {
                 critical_replicas, ..
-            } => *critical_replicas,
+            } => *critical_replicas as usize,
         };
 
         if healthy_nodes.len() < target_count {
@@ -210,11 +210,11 @@ impl ReplicationCoordinator {
         };
 
         let required_replicas = match &self.strategy {
-            ReplicationStrategy::SimpleReplication { replica_count } => *replica_count,
+            ReplicationStrategy::SimpleReplication { replica_count } => *replica_count as usize,
             ReplicationStrategy::ErasureCoding { config } => config.min_chunks() as usize,
             ReplicationStrategy::Hybrid {
                 critical_replicas, ..
-            } => *critical_replicas,
+            } => *critical_replicas as usize,
         };
 
         current_replicas >= required_replicas
@@ -237,11 +237,11 @@ impl ReplicationCoordinator {
                     .collect();
 
                 let required_replicas = match &self.strategy {
-                    ReplicationStrategy::SimpleReplication { replica_count } => *replica_count,
+                    ReplicationStrategy::SimpleReplication { replica_count } => *replica_count as usize,
                     ReplicationStrategy::ErasureCoding { config } => config.min_chunks() as usize,
                     ReplicationStrategy::Hybrid {
                         critical_replicas, ..
-                    } => *critical_replicas,
+                    } => *critical_replicas as usize,
                 };
 
                 if healthy_nodes.len() < required_replicas {
@@ -265,15 +265,15 @@ impl ReplicationCoordinator {
         let under_replicated = total_chunks - adequately_replicated;
 
         ReplicationStats {
-            total_chunks,
-            adequately_replicated,
-            under_replicated,
+            total_chunks: total_chunks as u64,
+            adequately_replicated: adequately_replicated as u64,
+            under_replicated: under_replicated as u64,
             healthy_nodes: self
                 .storage_nodes
                 .values()
                 .filter(|n| n.is_healthy())
-                .count(),
-            total_nodes: self.storage_nodes.len(),
+                .count() as u32,
+            total_nodes: self.storage_nodes.len() as u32,
         }
     }
 
@@ -346,15 +346,15 @@ impl ReplicationCoordinator {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplicationStats {
     /// Total number of chunks
-    pub total_chunks: usize,
+    pub total_chunks: u64,
     /// Chunks with adequate replication
-    pub adequately_replicated: usize,
+    pub adequately_replicated: u64,
     /// Chunks needing more replicas
-    pub under_replicated: usize,
+    pub under_replicated: u64,
     /// Number of healthy storage nodes
-    pub healthy_nodes: usize,
+    pub healthy_nodes: u32,
     /// Total number of registered nodes
-    pub total_nodes: usize,
+    pub total_nodes: u32,
 }
 
 #[cfg(test)]

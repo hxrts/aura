@@ -6,7 +6,7 @@
 //!
 //! # Design Principles
 //!
-//! **Fixed-size packets**: All packets are padded to RENDEZVOUS_PACKET_SIZE
+//! **Fixed-size packets**: All packets are padded to RENDEZVOUS_PACKET_SIZE_BYTES
 //! to prevent size-based fingerprinting.
 //!
 //! **Ephemeral keys**: Each packet uses a fresh ephemeral key, ensuring
@@ -17,7 +17,7 @@
 
 use aura_core::{
     effects::{
-        flood::{DecryptedRendezvous, FloodError, RendezvousPacket, RENDEZVOUS_PACKET_SIZE},
+        flood::{DecryptedRendezvous, FloodError, RendezvousPacket, RENDEZVOUS_PACKET_SIZE_BYTES},
         CryptoEffects,
     },
     identifiers::AuthorityId,
@@ -206,11 +206,11 @@ impl PacketCrypto {
         nonce.copy_from_slice(&nonce_bytes);
 
         // Pad plaintext to fixed size (accounting for auth tag)
-        let max_plaintext_size = RENDEZVOUS_PACKET_SIZE - AUTH_TAG_SIZE;
+        let max_plaintext_size = RENDEZVOUS_PACKET_SIZE_BYTES - AUTH_TAG_SIZE;
         if plaintext.len() > max_plaintext_size {
             return Err(FloodError::PacketTooLarge {
-                size: plaintext.len(),
-                max_size: max_plaintext_size,
+                size: plaintext.len() as u32,
+                max_size: max_plaintext_size as u32,
             });
         }
 
@@ -387,10 +387,10 @@ mod tests {
             ikm: &[u8],
             salt: &[u8],
             info: &[u8],
-            output_len: usize,
+            output_len: u32,
         ) -> Result<Vec<u8>, aura_core::AuraError> {
             let hkdf = Hkdf::<Sha256>::new(Some(salt), ikm);
-            let mut output = vec![0u8; output_len];
+            let mut output = vec![0u8; output_len as usize];
             hkdf.expand(info, &mut output)
                 .map_err(|_| aura_core::AuraError::crypto("HKDF failed"))?;
             Ok(output)
@@ -640,7 +640,7 @@ mod tests {
         let recipient_key = [2u8; 32];
 
         // Create payload that exceeds max size
-        let large_payload = vec![0u8; RENDEZVOUS_PACKET_SIZE];
+        let large_payload = vec![0u8; RENDEZVOUS_PACKET_SIZE_BYTES];
 
         let result = PacketBuilder::new()
             .with_sender(sender)

@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const MAX_RELATIONAL_BINDING_DATA_BYTES: usize = 65_536;
+
 /// Facts that can be stored in relational contexts
 ///
 /// These facts represent cross-authority relationships and operations
@@ -45,6 +47,7 @@ impl GenericBinding {
     }
 
     /// Create a generic binding with consensus proof
+    #[must_use]
     pub fn with_consensus_proof(
         binding_type: String,
         binding_data: Vec<u8>,

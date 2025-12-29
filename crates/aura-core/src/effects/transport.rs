@@ -17,6 +17,9 @@ use crate::{AuraError, AuthorityId, ContextId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub const MAX_TRANSPORT_SIGNATURE_BYTES: usize = 512;
+pub const MAX_TRANSPORT_PAYLOAD_BYTES: usize = 65_536;
+
 /// Receipt produced by successful guard chain execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransportReceipt {

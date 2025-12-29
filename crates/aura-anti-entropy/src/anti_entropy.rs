@@ -236,7 +236,7 @@ impl AntiEntropyHandler {
         )
         .with_operation_id(GuardOperationId::SyncRequestOps {
             peer: peer_id,
-            count: cids.len(),
+            count: cids.len() as u32,
         });
 
         // Evaluate guard chain

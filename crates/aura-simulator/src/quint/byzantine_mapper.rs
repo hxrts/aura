@@ -178,11 +178,11 @@ pub struct NetworkConditions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParticipantConfigurations {
     /// Optimal number of Byzantine participants
-    pub optimal_byzantine_count: usize,
+    pub optimal_byzantine_count: u32,
     /// Minimum threshold for effective attacks
-    pub minimum_threshold: usize,
+    pub minimum_threshold: u32,
     /// Preferred positions in participant ordering
-    pub preferred_positions: Vec<usize>,
+    pub preferred_positions: Vec<u32>,
 }
 
 /// Expected impact on different property types
@@ -625,7 +625,7 @@ impl ByzantineMapper {
         }
 
         // Limit to scenario's Byzantine participant count
-        selected_strategies.truncate(chaos_scenario.byzantine_participants);
+        selected_strategies.truncate(chaos_scenario.byzantine_participants as usize);
 
         Ok(selected_strategies)
     }
@@ -1131,7 +1131,7 @@ mod tests {
 
         let strategies = mapper.select_strategies_for_scenario(&scenario).unwrap();
         assert!(!strategies.is_empty());
-        assert!(strategies.len() <= scenario.byzantine_participants);
+        assert!(strategies.len() <= scenario.byzantine_participants as usize);
 
         // Should select key-related strategies
         assert!(strategies.iter().any(|s| s.enhanced_name.contains("key")));

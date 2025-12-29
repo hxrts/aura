@@ -61,12 +61,12 @@ pub struct ChoreographicRole {
     /// Device ID for this role
     pub device_id: Uuid,
     /// Role index in the protocol (0-based)
-    pub role_index: usize,
+    pub role_index: u32,
 }
 
 impl ChoreographicRole {
     /// Create a new choreographic role
-    pub fn new(device_id: Uuid, role_index: usize) -> Self {
+    pub fn new(device_id: Uuid, role_index: u32) -> Self {
         Self {
             device_id,
             role_index,
@@ -129,9 +129,9 @@ pub enum ChoreographyError {
     #[error("Insufficient participants: got {actual}, need {required}")]
     InsufficientParticipants {
         /// Actual number of participants
-        actual: usize,
+        actual: u32,
         /// Required number of participants
-        required: usize,
+        required: u32,
     },
 
     /// Byzantine behavior detected

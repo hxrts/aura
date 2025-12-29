@@ -56,16 +56,16 @@ impl std::error::Error for InvalidThresholdError {}
 
 impl FrostThreshold {
     /// Minimum threshold value required by FROST.
-    pub const MINIMUM: u16 = 2;
+    pub const MINIMUM_THRESHOLD_COUNT: u16 = 2;
 
     /// Create a new FROST threshold, validating the minimum.
     ///
     /// Returns `Err` if `value < 2` since FROST requires at least 2 signers.
     pub fn new(value: u16) -> Result<Self, InvalidThresholdError> {
-        if value < Self::MINIMUM {
+        if value < Self::MINIMUM_THRESHOLD_COUNT {
             Err(InvalidThresholdError {
                 value,
-                minimum: Self::MINIMUM,
+                minimum: Self::MINIMUM_THRESHOLD_COUNT,
             })
         } else {
             Ok(Self(value))
@@ -91,7 +91,7 @@ impl FrostThreshold {
 
     /// Create the minimum valid threshold (2).
     pub const fn minimum() -> Self {
-        Self(Self::MINIMUM)
+        Self(Self::MINIMUM_THRESHOLD_COUNT)
     }
 }
 

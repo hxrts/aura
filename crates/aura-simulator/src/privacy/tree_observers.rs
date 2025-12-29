@@ -36,7 +36,7 @@ pub struct PrivacyBudget {
     pub author_identity_hidden: bool,
 
     /// Maximum message size variation (bytes)
-    pub message_size_variance_max: usize,
+    pub message_size_variance_max: u64,
 }
 
 impl Default for PrivacyBudget {
@@ -61,7 +61,7 @@ pub enum ObservationEvent {
     /// Network traffic observed (timestamp, size in bytes)
     NetworkTraffic {
         timestamp_ms: u64,
-        size: usize,
+        size: u64,
         encrypted: bool,
     },
 
@@ -71,7 +71,7 @@ pub enum ObservationEvent {
         sender: Option<LeafId>,
         receiver: Option<LeafId>,
         message_type: String,
-        size: usize,
+        size: u64,
     },
 
     /// Operation committed to journal (only content, not participants)
@@ -86,7 +86,7 @@ pub enum ObservationEvent {
     CeremonyExecution {
         timestamp_ms: u64,
         phase: String,
-        participant_count: usize,
+        participant_count: u32,
     },
 }
 
@@ -104,10 +104,10 @@ pub struct PrivacyLeakage {
     pub participation_inference: f64,
 
     /// Number of signer identities revealed - should be 0
-    pub signer_identities_revealed: usize,
+    pub signer_identities_revealed: u32,
 
     /// Number of author identities revealed - should be 0
-    pub author_identities_revealed: usize,
+    pub author_identities_revealed: u32,
 
     /// Message size variance (bytes) - lower is better
     pub message_size_variance: f64,
@@ -116,7 +116,7 @@ pub struct PrivacyLeakage {
     pub timing_observations: Vec<Duration>,
 
     /// Detailed size observations
-    pub size_observations: Vec<usize>,
+    pub size_observations: Vec<u64>,
 }
 
 impl Default for PrivacyLeakage {
@@ -183,7 +183,7 @@ impl PrivacyLeakage {
             return;
         }
 
-        let mean: f64 = self.size_observations.iter().sum::<usize>() as f64
+        let mean: f64 = self.size_observations.iter().sum::<u64>() as f64
             / self.size_observations.len() as f64;
 
         let variance: f64 = self
@@ -235,7 +235,7 @@ impl ExternalObserver {
     }
 
     /// Observes network traffic.
-    pub fn observe_traffic(&mut self, timestamp_ms: u64, size: usize) {
+    pub fn observe_traffic(&mut self, timestamp_ms: u64, size: u64) {
         let event = ObservationEvent::NetworkTraffic {
             timestamp_ms,
             size,
@@ -320,7 +320,7 @@ impl NeighborObserver {
         sender: Option<LeafId>,
         receiver: Option<LeafId>,
         message_type: String,
-        size: usize,
+        size: u64,
     ) {
         let event = ObservationEvent::EnvelopeMetadata {
             timestamp_ms,
@@ -462,7 +462,7 @@ impl InGroupObserver {
     }
 
     /// Observes ceremony execution phase.
-    pub fn observe_ceremony(&mut self, timestamp_ms: u64, phase: String, participant_count: usize) {
+    pub fn observe_ceremony(&mut self, timestamp_ms: u64, phase: String, participant_count: u32) {
         let event = ObservationEvent::CeremonyExecution {
             timestamp_ms,
             phase: phase.clone(),
@@ -470,7 +470,7 @@ impl InGroupObserver {
         };
 
         // Record participant count per phase
-        self.ceremony_participants.insert(phase, participant_count);
+        self.ceremony_participants.insert(phase, participant_count as usize);
 
         self.observations.push(event);
     }

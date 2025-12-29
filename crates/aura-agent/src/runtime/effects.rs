@@ -1,6 +1,16 @@
 //! Effect System Components
 //!
 //! Core effect system components per Layer-6 spec.
+//!
+//! # Blocking Lock Usage
+//!
+//! This module uses `parking_lot::Mutex` and `parking_lot::RwLock` for several fields.
+//! This is acceptable because:
+//! 1. This is Layer 6 runtime assembly code (aura-agent/src/runtime/) explicitly allowed per clippy.toml
+//! 2. Locks protect synchronous state (RNG, channel senders) never held across .await points
+//! 3. Lock operations are brief with no async work inside the critical sections
+
+#![allow(clippy::disallowed_types)]
 
 use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
@@ -1112,7 +1122,7 @@ impl CryptoCoreEffects for AuraEffectSystem {
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
-        output_len: usize,
+        output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
         self.crypto_handler
             .hkdf_derive(ikm, salt, info, output_len)

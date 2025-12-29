@@ -22,7 +22,7 @@ pub struct TransportConfig {
     pub connection_timeout: Duration,
 
     /// Maximum message size in bytes
-    pub max_message_size: usize,
+    pub max_message_size: u64,
 
     /// Enable context-scoped routing
     pub enable_context_scoping: bool,
@@ -31,7 +31,7 @@ pub struct TransportConfig {
     pub enable_capability_filtering: bool,
 
     /// Maximum concurrent connections
-    pub max_connections: usize,
+    pub max_connections: u32,
 
     /// Enable message blinding by default
     pub default_blinding: bool,

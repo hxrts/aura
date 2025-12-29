@@ -167,7 +167,7 @@ impl CryptoCoreEffects for SimulationEffectSystem {
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
-        output_len: usize,
+        output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
         if let Some(FaultType::CryptoFailure) = self.should_trigger_fault("hkdf_derive") {
             return Err(AuraError::crypto("Simulated crypto failure".to_string()));

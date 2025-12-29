@@ -60,6 +60,7 @@ impl SecureStorageLocation {
     }
 
     /// Create with a sub-key for hierarchical organization
+    #[must_use]
     pub fn with_sub_key(
         namespace: impl Into<String>,
         key: impl Into<String>,

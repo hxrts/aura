@@ -9,6 +9,9 @@ use crate::domain::content::Hash32;
 use crate::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
+/// Maximum number of authorities that can participate in a single prestate.
+pub const MAX_AUTHORITIES_PER_PRESTATE_COUNT: u32 = 256;
+
 /// Prestate representing the combined state of authorities
 ///
 /// The prestate captures the current state commitments of all
@@ -44,8 +47,9 @@ impl Prestate {
         let mut h = hash::hasher();
         h.update(b"AURA_PRESTATE_V1");
 
-        // Sort for determinism
-        let mut sorted = self.authority_commitments.clone();
+        // Sort for determinism (pre-allocate to match source capacity)
+        let mut sorted = Vec::with_capacity(self.authority_commitments.len());
+        sorted.extend(self.authority_commitments.iter().cloned());
         sorted.sort_by_key(|(id, _)| *id);
 
         // Hash number of authorities
@@ -76,6 +80,24 @@ impl Prestate {
             .iter()
             .find(|(id, _)| id == authority_id)
             .map(|(_, commitment)| *commitment)
+    }
+
+    /// Validate prestate invariants after deserialization.
+    ///
+    /// Returns `Ok(())` if the prestate is well-formed, or an error describing
+    /// which invariant was violated. Call this after deserializing a prestate
+    /// to ensure it meets structural requirements.
+    pub fn validate(&self) -> std::result::Result<(), PrestateValidationError> {
+        if self.authority_commitments.is_empty() {
+            return Err(PrestateValidationError::NoAuthorities);
+        }
+        if (self.authority_commitments.len() as u32) > MAX_AUTHORITIES_PER_PRESTATE_COUNT {
+            return Err(PrestateValidationError::TooManyAuthorities {
+                count: self.authority_commitments.len() as u32,
+                max: MAX_AUTHORITIES_PER_PRESTATE_COUNT,
+            });
+        }
+        Ok(())
     }
 
     /// Create a binding for an operation
@@ -114,8 +136,18 @@ pub enum PrestateBuilderError {
     MissingAuthorities,
 }
 
+/// Errors that can occur during prestate validation.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum PrestateValidationError {
+    #[error("Prestate must have at least one authority")]
+    NoAuthorities,
+    #[error("Too many authorities: {count} exceeds maximum {max}")]
+    TooManyAuthorities { count: u32, max: u32 },
+}
+
 impl PrestateBuilder {
     /// Create a new builder
+    #[must_use]
     pub fn new() -> Self {
         Self {
             authority_commitments: Vec::new(),
@@ -124,12 +156,14 @@ impl PrestateBuilder {
     }
 
     /// Add an authority commitment
+    #[must_use]
     pub fn add_authority(mut self, id: AuthorityId, commitment: Hash32) -> Self {
         self.authority_commitments.push((id, commitment));
         self
     }
 
     /// Set the context commitment
+    #[must_use]
     pub fn context(mut self, commitment: Hash32) -> Self {
         self.context_commitment = Some(commitment);
         self

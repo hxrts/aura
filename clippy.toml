@@ -42,9 +42,36 @@ disallowed-types = [
     "rand::rngs::ThreadRng",
     "getrandom::Error",
 
-    # Avoid blocking locks in async code; prefer async_lock or tokio::sync
+    # =========================================================================
+    # BLOCKING LOCKS - Use async-safe alternatives
+    # =========================================================================
+    #
+    # PROBLEM: Blocking locks in async code can starve the async runtime.
+    # Holding a std::sync::Mutex or parking_lot::Mutex across an .await point
+    # blocks the entire executor thread.
+    #
+    # SOLUTION: Use async-aware locks from async_lock or tokio::sync:
+    #   - async_lock::Mutex / async_lock::RwLock (runtime-agnostic)
+    #   - tokio::sync::Mutex / tokio::sync::RwLock (tokio-specific)
+    #
+    # WHERE BLOCKING LOCKS ARE ALLOWED (add #[allow(clippy::disallowed_types)]):
+    #   1. aura-effects: Effect handler implementations (OS integration layer)
+    #   2. aura-agent/src/runtime/: Runtime assembly and bootstrap code
+    #   3. Truly synchronous code paths that NEVER cross .await boundaries
+    #
+    # WHERE BLOCKING LOCKS ARE FORBIDDEN:
+    #   - All async trait implementations
+    #   - All code in Layer 1-5 crates (aura-core through feature crates)
+    #   - Any code that may be called from async context
+    #
+    # See docs/999_project_structure.md "Effect System and Impure Function Guidelines"
+    # =========================================================================
     "std::sync::Mutex",
     "std::sync::RwLock",
+    "parking_lot::Mutex",
+    "parking_lot::RwLock",
+    "parking_lot::FairMutex",
+    "parking_lot::ReentrantMutex",
 
     # Hashing types - CENTRALIZED TRAIT STRATEGY
     # Direct hasher instantiation MUST go through aura_core::hash::hasher()
@@ -98,4 +125,39 @@ pass-by-value-size-limit = 256
 # Exceptions:
 # - aura-core/src/hash.rs: This module implements the trait, not subject to ban
 # - aura-core/src/hash.rs tests: Test against algorithm implementations directly
+# ============================================================================
+
+# ============================================================================
+# RUNTIME COUPLING RULES (8-Layer Architecture)
+# ============================================================================
+#
+# Aura's 8-layer architecture enforces strict runtime abstraction boundaries.
+# Concrete async runtimes (tokio, async-std) should only appear in specific layers.
+#
+# RUNTIME-AGNOSTIC LAYERS (must use effect traits, no direct tokio/async-std):
+#   Layer 1: aura-core         - Effect trait definitions only
+#   Layer 2: aura-journal, aura-authorization, aura-signature, aura-store,
+#            aura-transport, aura-mpst, aura-macros - Domain specifications
+#   Layer 3: aura-effects      - Effect implementations (may use runtime internally)
+#   Layer 4: aura-protocol, aura-guards, aura-consensus, aura-amp, aura-anti-entropy
+#   Layer 5: Feature crates (aura-authentication, aura-chat, aura-recovery, etc.)
+#
+# RUNTIME-AWARE LAYERS (may use tokio directly):
+#   Layer 6: aura-agent, aura-simulator, aura-app - Runtime composition
+#   Layer 7: aura-terminal - User interface with main() entry point
+#   Layer 8: aura-testkit, aura-quint - Testing infrastructure
+#
+# EXCEPTIONS (require documented justification):
+#   - Effect handler implementations in aura-effects (wrapping OS/runtime services)
+#   - Runtime bootstrap code in aura-agent/src/runtime/
+#   - Test harnesses that need deterministic control
+#
+# FORBIDDEN PATTERNS:
+#   - tokio::spawn in Layer 1-5 (use TaskSpawner effect trait)
+#   - tokio::time::sleep in Layer 1-5 (use TimeEffects::sleep_ms)
+#   - tokio::sync::* in Layer 1-5 (use async_lock for runtime-agnostic code)
+#   - Direct channel creation (use effect-injected channels)
+#
+# See docs/999_project_structure.md for the complete architectural specification.
+# See docs/106_effect_system_and_runtime.md for effect system patterns.
 # ============================================================================

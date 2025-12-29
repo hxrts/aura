@@ -43,13 +43,13 @@ pub fn derive_encryption_key(
 pub fn derive_key_material(
     root_key: &[u8],
     spec: &KeyDerivationSpec,
-    output_length: usize,
+    output_length: u32,
 ) -> Result<Vec<u8>, CryptoError> {
     if output_length == 0 {
         return Err(CryptoError::invalid("Output length must be greater than 0"));
     }
 
-    if output_length > 255 * 32 {
+    if output_length > 255u32 * 32 {
         return Err(CryptoError::invalid(
             "Output length too large for HKDF expansion",
         ));
@@ -114,8 +114,9 @@ pub fn derive_key_material(
     let prk = hash::hash(&extract_input);
 
     // Expand: Generate output material using HKDF-like expansion
-    let mut output = Vec::with_capacity(output_length);
-    let num_blocks = output_length.div_ceil(32);
+    let output_length_usize = output_length as usize;
+    let mut output = Vec::with_capacity(output_length_usize);
+    let num_blocks = output_length_usize.div_ceil(32);
 
     for i in 0..num_blocks {
         let mut expand_input = Vec::new();
@@ -128,7 +129,7 @@ pub fn derive_key_material(
     }
 
     // Truncate to requested length
-    output.truncate(output_length);
+    output.truncate(output_length_usize);
     Ok(output)
 }
 
@@ -246,7 +247,7 @@ impl CryptoCoreEffects for RealCryptoHandler {
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
-        output_len: usize,
+        output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
         use hkdf::Hkdf;
         use sha2::Sha256;
@@ -256,7 +257,7 @@ impl CryptoCoreEffects for RealCryptoHandler {
         }
 
         let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
-        let mut okm = vec![0u8; output_len];
+        let mut okm = vec![0u8; output_len as usize];
         hk.expand(info, &mut okm)
             .map_err(|e| CryptoError::invalid(format!("HKDF expand failed: {}", e)))?;
 

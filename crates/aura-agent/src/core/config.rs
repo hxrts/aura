@@ -92,7 +92,7 @@ pub struct StorageConfig {
     pub opaque_names: bool,
 
     /// Maximum cache size in bytes
-    pub cache_size: usize,
+    pub cache_size: u64,
 
     /// Enable storage compression
     pub enable_compression: bool,
@@ -117,7 +117,7 @@ pub struct NetworkConfig {
     pub bind_address: String,
 
     /// Maximum connections
-    pub max_connections: usize,
+    pub max_connections: u32,
 
     /// Connection timeout in seconds
     pub connection_timeout: u64,
@@ -137,7 +137,7 @@ impl Default for NetworkConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReliabilityConfig {
     /// Maximum retry attempts
-    pub max_retries: usize,
+    pub max_retries: u32,
 
     /// Base backoff delay in milliseconds
     pub base_backoff_ms: u64,
@@ -166,7 +166,7 @@ pub struct ChoreographyConfig {
     pub timeout_secs: u64,
 
     /// Maximum concurrent choreographies
-    pub max_concurrent: usize,
+    pub max_concurrent: u32,
 }
 
 impl Default for ChoreographyConfig {

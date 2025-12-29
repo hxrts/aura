@@ -75,6 +75,7 @@ impl EffectContext {
     ///
     /// This derives a deterministic `ContextId` from the authority for callers that need a
     /// stable default context. Prefer `new(...)` with an explicit `ContextId` when possible.
+    #[must_use]
     pub fn with_authority(authority_id: AuthorityId) -> Self {
         let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
         Self::new(authority_id, context_id, ExecutionMode::Production)

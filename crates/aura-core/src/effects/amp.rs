@@ -8,6 +8,9 @@ use crate::identifiers::{AuthorityId, ChannelId, ContextId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub const MAX_AMP_CIPHERTEXT_BYTES: usize = 65_536;
+pub const MAX_AMP_PLAINTEXT_BYTES: usize = 65_536;
+
 /// AMP channel error
 #[derive(Debug, thiserror::Error, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum AmpChannelError {

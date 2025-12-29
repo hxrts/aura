@@ -27,7 +27,9 @@ use aura_core::effects::{
 use aura_core::hash::hash;
 #[cfg(feature = "simulation")]
 use aura_core::identifiers::AuthorityId;
+// Layer 6 runtime code: parking_lot::RwLock allowed per clippy.toml
 #[cfg(feature = "simulation")]
+#[allow(clippy::disallowed_types)]
 use parking_lot::RwLock;
 #[cfg(feature = "simulation")]
 use std::sync::Arc;

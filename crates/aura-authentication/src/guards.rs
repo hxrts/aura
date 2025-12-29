@@ -204,7 +204,7 @@ pub enum GuardRequest {
         /// Type of recovery operation
         operation_type: RecoveryOperationType,
         /// Required number of guardian approvals
-        required_guardians: usize,
+        required_guardians: u32,
     },
 
     /// Submit guardian approval decision
@@ -377,7 +377,7 @@ pub enum EffectCommand {
         /// Request ID
         request_id: String,
         /// Required threshold
-        threshold: usize,
+        threshold: u32,
     },
 }
 

@@ -57,7 +57,7 @@ pub struct DkdConfig {
     /// Enable replay protection
     pub replay_protection: bool,
     /// Maximum concurrent derivations
-    pub max_concurrent_derivations: usize,
+    pub max_concurrent_derivations: u32,
 }
 
 impl Default for DkdConfig {
@@ -246,7 +246,7 @@ impl DkdProtocol {
             });
         }
 
-        if self.active_sessions.len() >= self.config.max_concurrent_derivations {
+        if self.active_sessions.len() >= self.config.max_concurrent_derivations as usize {
             return Err(DkdError::SessionNotFound {
                 session_id: DkdSessionId("max_sessions_exceeded".to_string()),
             });

@@ -166,7 +166,7 @@ pub struct RecoveryRequest {
     /// Recovery context and justification
     pub context: aura_authentication::RecoveryContext,
     /// Required threshold of guardian approvals
-    pub threshold: usize,
+    pub threshold: u16,
     /// Available guardians for the operation
     pub guardians: GuardianSet,
 }
